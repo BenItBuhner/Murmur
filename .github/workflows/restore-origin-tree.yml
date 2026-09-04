@@ -1,0 +1,47 @@
+name: Restore Origin tree
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/restore/**']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-origin-tree
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync tree from payload
+        run: |
+          set -euo pipefail
+          if [ ! -f .github/restore/GO ]; then
+            echo 'Payload incomplete; waiting for GO marker.'
+            exit 0
+          fi
+          EXPECTED_SHA='bca3cdf23800a12c221acb195e07d32759eee7bd476674e10856388e45a13b29'
+          cat .github/restore/part-* | tr -d '\n' | base64 -d > /tmp/tree.tar.gz
+          echo "${EXPECTED_SHA}  /tmp/tree.tar.gz" | sha256sum -c -
+          cp .github/workflows/restore-origin-tree.yml /tmp/restore-origin-tree.yml
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          tar xzf /tmp/tree.tar.gz
+          mkdir -p apps/android/app/src/main/assets/fixtures
+          cp apps/desktop/resources/fixtures/jfk.wav apps/android/app/src/main/assets/fixtures/jfk.wav
+          mkdir -p .github/workflows
+          cp /tmp/restore-origin-tree.yml .github/workflows/restore-origin-tree.yml
+          git config user.name 'Bennett Buhner'
+          git config user.email '136861830+BenItBuhner@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Tree already in sync.'
+            exit 0
+          fi
+          git commit -m 'Sync exact tree from Cursor Origin b14a08c: restore binaries and lockfile, prune stale pre-monorepo files'
+          git push origin HEAD:main
+          echo 'Tree synced.'

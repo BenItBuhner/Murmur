@@ -84,7 +84,8 @@ export function parseErrorBody(body: string): { message: string; suggestedModels
     // not JSON
   }
   const suggested: string[] = []
-  const m = message.match(/available (?:audio )?models?:\s*([^.\n]+)/i)
+  const m = message.match(/available (?:audio )?models?:\s*([^.
+]+)/i)
   if (m) {
     for (const part of m[1].split(/[,;]/)) {
       const id = part.trim().replace(/^['"`]|['"`]$/g, '')

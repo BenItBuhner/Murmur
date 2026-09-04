@@ -1,13 +1,20 @@
 # Murmur
 
-Hold a key, speak, and clean text lands wherever your cursor is. Murmur is a Wispr Flow–style
-voice dictation app for **Windows** (top priority) and **Linux**, built with Electron. It brings
-your own speech model — OpenAI Whisper, Groq, Deepgram, ElevenLabs, or a local whisper server — and
-turns raw speech into polished, punctuated, formatted text that types itself into any application.
+Hold a key (or tap a pill), speak, and clean text lands wherever your cursor is. Murmur is a
+Wispr Flow–style voice dictation tool. It brings your own speech model — OpenAI Whisper, Groq,
+Deepgram, ElevenLabs, or a local whisper server — and turns raw speech into polished, punctuated,
+formatted text that types itself into any application.
+
+This is a monorepo:
+
+| App | Path | Platforms |
+| --- | --- | --- |
+| Desktop (Electron) | [`apps/desktop`](apps/desktop) | **Windows**, **Linux**, macOS (experimental) |
+| Android | [`apps/android`](apps/android) | Android 8.0+ |
 
 ![Murmur home](docs/home.png)
 
-## What it does
+## Desktop (`apps/desktop`)
 
 - **One key, two behaviours, at the same time**
   - **Hold to talk** — hold the shortcut, speak, release. The transcript is cleaned and inserted.
@@ -15,36 +22,25 @@ turns raw speech into polished, punctuated, formatted text that types itself int
     session so you can keep your hands off the keyboard; tap again to stop and insert.
 - **Bring your own models.** Any OpenAI-compatible `/v1/audio/transcriptions` endpoint works, plus
   native Deepgram and ElevenLabs. One-click **model discovery**, a **fallback model**, and a
-  built-in **latency test** that transcribes a sample clip so you see real numbers before relying
-  on it.
-- **Wispr Flow–style cleanup.** Filler removal (um, uh, like…), stutter collapsing, self-corrections
+  built-in **latency test**.
+- **Wispr Flow–style cleanup.** Filler removal, stutter collapsing, self-corrections
   (“Tuesday, no, Wednesday” → “Wednesday”), spoken commands (“new line”, “new paragraph”,
-  “scratch that”, “question mark”, “press enter”), a personal **dictionary** (used both as a
-  recognition hint and as deterministic spelling correction), and voice **snippets**.
+  “scratch that”, “question mark”, “press enter”), a personal **dictionary**, and voice **snippets**.
 - **Optional smart formatting.** A small, fast LLM pass fixes punctuation, lists, numbers, and tone
-  per app (casual in chat, professional in email). It always falls back to the instant rule-based
-  result if the model is slow or misbehaves — a guard rejects answers/commentary so the model can
-  never “reply” to your dictation.
-- **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”,
-  “translate to Spanish”, “turn this into bullet points”; the selection is rewritten in place.
-- **A clean, minimal overlay.** A floating pill shows listening (live waveform), processing,
-  success, and errors, plus a tray icon and a full settings/history UI.
-- **Engineered for low latency.** Warm microphone, a rolling pre-roll buffer so the first word is
-  never clipped, silence trimming, a no-speech skip that avoids a pointless network round-trip, and
-  a per-stage latency breakdown for every dictation.
-- **Local-first.** History, dictionary, and snippets live only on your device. API keys are stored
-  with the OS keychain via Electron `safeStorage`.
+  per app. It always falls back to the instant rule-based result — a guard rejects
+  answers/commentary so the model can never “reply” to your dictation.
+- **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”; the
+  selection is rewritten in place.
 
-## Quick start
+### Quick start
 
 ```bash
+cd apps/desktop
 npm install
 npm run dev
 ```
 
-On first launch an onboarding flow walks you through connecting a speech model, checking your
-microphone, and choosing a shortcut. To try it immediately against a test endpoint you can seed the
-provider from the environment:
+To try it immediately against a test endpoint you can seed the provider from the environment:
 
 ```bash
 MURMUR_BASE_URL=https://your-host/v1 \
@@ -54,16 +50,81 @@ MURMUR_LLM_MODEL=llama-3.1-8b-instant \
 npm run dev
 ```
 
-Default shortcuts:
+Default shortcuts (re-recordable in **Settings → Shortcuts**):
 
-| Action | Windows | Linux |
+| Action | Windows | Linux / macOS |
 | --- | --- | --- |
-| Hold / tap to dictate | `Ctrl + Win` | `Ctrl + Super` |
+| Hold / tap to dictate | `Ctrl + Win` | `Ctrl + Super` / `Ctrl + Cmd` |
 | Dedicated hands-free | `Ctrl + Win + Space` | `Ctrl + Super + Space` |
 | Command mode (edit selection) | `Alt + Win` | `Alt + Super` |
 | Cancel while listening | `Esc` | `Esc` |
 
-All shortcuts are re-recordable in **Settings → Shortcuts**.
+### Text injection
+
+| Platform | Primary | Notes |
+| --- | --- | --- |
+| Windows | Win32 `SendInput` via [koffi](https://koffi.dev) | Unicode paste-through-clipboard or direct typing; no compiler needed. |
+| Linux (X11) | `xdotool` | Paste + clipboard restore, or direct type. |
+| Linux (Wayland) | `wtype` / `ydotool` | Install one of them; XWayland apps also work via `xdotool`. |
+| macOS | AppleScript / System Events | Requires the Accessibility permission. **Experimental: implemented but not yet tested on real hardware.** |
+
+### Test & build
+
+```bash
+cd apps/desktop
+npm test              # unit tests for the whole core
+npm run test:live     # opt-in live test against a real endpoint (MURMUR_LIVE=1 + env above)
+npm run build:win     # NSIS installer + portable .exe (x64, arm64)
+npm run build:linux   # AppImage + .deb (x64, arm64)
+npm run build:mac     # dmg + zip (x64, arm64) — experimental
+```
+
+## Android (`apps/android`)
+
+The exact same Wispr Flow pattern on your phone: whenever the keyboard opens, a floating
+**dictation pill** pops up right above it. Tap the pill, speak, tap the check — the transcript
+runs through the same providers and the same cleanup pipeline (fillers, spoken commands,
+self-corrections, LLM smart formatting with the same prompt and guard rails), and the text is
+inserted into the focused field of *any* app.
+
+- **Overlay pill** — hosted by an accessibility service (`TYPE_ACCESSIBILITY_OVERLAY`), shown
+  when the on-screen keyboard is visible, positioned just above it. X cancels, ✓ stops and inserts.
+- **Text injection** — accessibility `ACTION_SET_TEXT` at the cursor position (with selection
+  handling), falling back to clipboard + `ACTION_PASTE` for fields that block direct writes.
+  “Press enter” dictation triggers `ACTION_IME_ENTER`.
+- **Same models** — the OpenAI-compatible, Deepgram, and ElevenLabs clients are Kotlin ports of
+  the desktop core, including model discovery, the fallback-model retry, and the
+  `verbose_json` → `json` downgrade.
+- **Recording** — 16 kHz mono PCM via `AudioRecord` inside a microphone foreground service.
+- **App-aware tone** — chat apps get casual, email gets professional, terminals get no trailing
+  punctuation, keyed off the focused app’s package name.
+
+### Build & run
+
+```bash
+cd apps/android
+./gradlew :app:assembleDebug          # requires ANDROID_HOME + JDK 17+
+./gradlew :app:testDebugUnitTest      # JVM unit tests (pipeline, prompt guard)
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+Provider defaults can be baked into a build from the environment (same variables as desktop):
+`MURMUR_BASE_URL`, `MURMUR_API_KEY`, `MURMUR_STT_MODEL`, `MURMUR_LLM_MODEL`. Everything is also
+configurable at runtime in the app.
+
+In-app setup: grant **Microphone**, **Display over other apps**, and enable the **Murmur
+dictation accessibility service**. The Settings screen has model discovery, a live sample-clip
+test against your endpoint, and a test pad. For emulators without a microphone there is a
+“use sample clip” mode that dictates a bundled fixture through the real provider pipeline.
+
+The live endpoint test mirrors the desktop one:
+
+```bash
+cd apps/android
+MURMUR_LIVE=1 MURMUR_BASE_URL=https://your-host/v1 MURMUR_API_KEY=sk-... \
+MURMUR_STT_MODEL=whisper-large-v3-turbo MURMUR_LLM_MODEL=llama-3.1-8b-instant \
+./gradlew :app:testDebugUnitTest --tests '*LiveEndpointTest*'
+```
 
 ## Providers
 
@@ -79,69 +140,27 @@ other OpenAI-compatible proxy works via the **Custom** preset — set the base U
 ## How it works
 
 ```
-key press ─▶ warm mic + pre-roll ─▶ VAD trim / no-speech skip ─▶ STT provider
-   ▲                                                                   │
-   └───────────────  overlay pill (listening / processing)            ▼
-                                            rule-based cleanup ─▶ optional LLM formatting ─▶ guard
-                                                                                              │
-   focused app  ◀── paste (clipboard, restored) / type / clipboard-only ◀── final text ◀─────┘
+trigger (hotkey / pill tap) ─▶ mic capture ─▶ no-speech skip ─▶ STT provider
+   ▲                                                                 │
+   └──────────── overlay pill (listening / processing)              ▼
+                                        rule-based cleanup ─▶ optional LLM formatting ─▶ guard
+                                                                                          │
+   focused app/field  ◀── paste / type / set-text ◀── final text ◀─────────────────────────┘
 ```
 
-- `src/core` — platform-agnostic, fully unit-tested logic: the hotkey state machine, audio
-  (WAV/VAD/resample), the text pipeline (dictionary, fillers, commands, corrections, snippets,
-  formatting), and the STT/LLM clients. No Electron imports, so it runs under Vitest directly.
-- `src/main` — Electron main process: global key hook, text injection, windows, tray, stores,
-  and the dictation orchestrator.
-- `src/renderer` — the overlay (which also owns microphone capture via an `AudioWorklet`) and the
-  React settings/history UI (Tailwind v4 + Radix primitives).
-- `src/preload` — the typed, context-isolated bridges.
-
-### Text injection
-
-| Platform | Primary | Notes |
-| --- | --- | --- |
-| Windows | Win32 `SendInput` via [koffi](https://koffi.dev) | Unicode paste-through-clipboard or direct typing; no compiler needed. |
-| Linux (X11) | `xdotool` | Paste + clipboard restore, or direct type. |
-| Linux (Wayland) | `wtype` / `ydotool` | Install one of them; XWayland apps also work via `xdotool`. |
-
-The default strategy pastes through the clipboard and restores your previous clipboard afterwards.
-If the low-level keyboard hook can't start (e.g. a locked-down Wayland session), Murmur falls back
-to Electron's `globalShortcut`, where the shortcut toggles hands-free instead of holding.
-
-## Testing
-
-```bash
-npm test          # unit tests for the whole core (hotkey, audio, text, providers, settings)
-npm run test:live # live integration test against a real endpoint (see below)
-```
-
-The live suite is opt-in and hits a real provider using a bundled speech fixture
-(`resources/fixtures/jfk.wav`):
-
-```bash
-MURMUR_LIVE=1 \
-MURMUR_BASE_URL=https://your-host/v1 \
-MURMUR_API_KEY=sk-... \
-MURMUR_STT_MODEL=whisper-large-v3-turbo \
-MURMUR_LLM_MODEL=llama-3.1-8b-instant \
-npm run test:live
-```
-
-## Building installers
-
-```bash
-npm run build:win     # NSIS installer + portable .exe (x64, arm64)
-npm run build:linux   # AppImage + .deb (x64, arm64)
-```
-
-Native modules (`uiohook-napi`, `koffi`) ship as prebuilt binaries and are unpacked from the asar
-automatically, so there is no native compile step.
+- `apps/desktop/src/core` — platform-agnostic, fully unit-tested logic: the hotkey state machine,
+  audio (WAV/VAD/resample), the text pipeline, and the STT/LLM clients.
+- `apps/desktop/src/main` — Electron main process: global key hook, text injection, windows, tray.
+- `apps/desktop/src/renderer` — the overlay and the React settings/history UI.
+- `apps/android/app/src/main/java/app/murmur/android` — Kotlin ports of the same core
+  (`text/`, `stt/`, `llm/`), plus the accessibility service, overlay pill, and Compose settings UI.
 
 ## Requirements
 
-- Node.js 22+
-- Windows 10/11, or Linux with X11 (`xdotool`) or Wayland (`wtype`/`ydotool`)
-- macOS is not a priority yet; the code paths exist but are untested.
+- **Desktop:** Node.js 22+; Windows 10/11, Linux with X11 (`xdotool`) or Wayland (`wtype`/`ydotool`),
+  or macOS 12+ (experimental).
+- **Android:** Android Studio or plain Gradle with JDK 17+, `ANDROID_HOME` pointing at an SDK with
+  platform 35. Runs on Android 8.0 (API 26) and later.
 
 ## License
 

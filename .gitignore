@@ -7,3 +7,12 @@ out
 agent-tools
 .env
 .env.*
+
+# Android
+apps/android/.gradle
+apps/android/build
+apps/android/**/build
+apps/android/local.properties
+apps/android/.kotlin
+*.apk
+*.keystore

@@ -59,6 +59,7 @@ export function registerIpc(deps: IpcDeps): void {
     const entry = history.get(id)
     if (!entry) return { ok: false, error: 'Entry not found' }
     const s = settings.get()
+    // Give the user a moment to focus the target window after clicking.
     await new Promise((r) => setTimeout(r, 900))
     return injectText(entry.finalText + (s.formatting.trailingSpace ? ' ' : ''), {
       method: s.injection.method,
@@ -70,62 +71,177 @@ export function registerIpc(deps: IpcDeps): void {
     })
   })
 
-  ipcMain.handle(IPC.sttListModels, async (_e, override?: { kind?: Settings['stt']['kind']; baseUrl?: string; apiKey?: string }) => {
-    const s = settings.get()
-    const cfg: SttConfig = { kind: override?.kind ?? s.stt.kind, baseUrl: override?.baseUrl ?? s.stt.baseUrl, apiKey: override?.apiKey ?? settings.getSecret('stt'), model: s.stt.model, language: s.stt.language, timeoutMs: 15000 }
-    try { return { ok: true, models: await getSttProvider(cfg.kind).listModels(cfg) } }
-    catch (err) { return { ok: false, models: [], error: friendlyError(err) } }
-  })
-
-  ipcMain.handle(IPC.sttTest, async (_e, override?: { kind?: Settings['stt']['kind']; baseUrl?: string; apiKey?: string; model?: string }): Promise<ProviderTestResult> => {
-    const s = settings.get()
-    const cfg: SttConfig = { kind: override?.kind ?? s.stt.kind, baseUrl: override?.baseUrl ?? s.stt.baseUrl, apiKey: override?.apiKey ?? settings.getSecret('stt'), model: override?.model ?? s.stt.model, language: 'en', timeoutMs: 45000 }
-    try {
-      const wav = new Uint8Array(readFileSync(fixtureWav))
-      const res = await getSttProvider(cfg.kind).transcribe({ wav, prompt: buildSttPrompt([]) }, cfg)
-      const ok = /country/i.test(res.text)
-      return { ok, latencyMs: res.latencyMs, text: res.text, message: ok ? `Transcribed the test clip in ${res.latencyMs} ms` : `Connected, but the transcript looks wrong: "${res.text.slice(0, 80)}"` }
-    } catch (err) {
-      const e = err as { suggestedModels?: string[] }
-      return { ok: false, message: friendlyError(err), suggestedModels: e.suggestedModels ?? [] }
+  ipcMain.handle(
+    IPC.sttListModels,
+    async (
+      _e,
+      override?: { kind?: Settings['stt']['kind']; baseUrl?: string; apiKey?: string }
+    ) => {
+      const s = settings.get()
+      const cfg: SttConfig = {
+        kind: override?.kind ?? s.stt.kind,
+        baseUrl: override?.baseUrl ?? s.stt.baseUrl,
+        apiKey: override?.apiKey ?? settings.getSecret('stt'),
+        model: s.stt.model,
+        language: s.stt.language,
+        timeoutMs: 15000
+      }
+      try {
+        return { ok: true, models: await getSttProvider(cfg.kind).listModels(cfg) }
+      } catch (err) {
+        return { ok: false, models: [], error: friendlyError(err) }
+      }
     }
-  })
+  )
 
-  ipcMain.handle(IPC.llmListModels, async (_e, override?: { baseUrl?: string; apiKey?: string }) => {
-    const conn = settings.llmConnection()
-    try { return { ok: true, models: await listChatModels({ baseUrl: override?.baseUrl ?? conn.baseUrl, apiKey: override?.apiKey ?? conn.apiKey }) } }
-    catch (err) { return { ok: false, models: [], error: friendlyError(err) } }
-  })
-
-  ipcMain.handle(IPC.llmTest, async (_e, override?: { baseUrl?: string; apiKey?: string; model?: string }): Promise<ProviderTestResult> => {
-    const conn = settings.llmConnection()
-    const cfg = { baseUrl: override?.baseUrl ?? conn.baseUrl, apiKey: override?.apiKey ?? conn.apiKey, model: override?.model ?? conn.model, timeoutMs: 20000 }
-    try {
-      const res = await chatComplete(cfg, [{ role: 'system', content: "Rewrite the user's dictated text with correct punctuation and capitalization and without filler words. Output only the text." }, { role: 'user', content: 'um so this is a quick test of the uh formatting model' }], { maxTokens: 768 })
-      const ok = res.text.trim().length > 0 && !/\bum\b|\buh\b/i.test(res.text)
-      return { ok, latencyMs: res.latencyMs, text: res.text.trim(), message: ok ? `Formatted in ${res.latencyMs} ms` : `Model answered but did not clean the text: "${res.text.trim().slice(0, 80)}"` }
-    } catch (err) {
-      const e = err as { suggestedModels?: string[] }
-      return { ok: false, message: friendlyError(err), suggestedModels: e.suggestedModels ?? [] }
+  ipcMain.handle(
+    IPC.sttTest,
+    async (
+      _e,
+      override?: {
+        kind?: Settings['stt']['kind']
+        baseUrl?: string
+        apiKey?: string
+        model?: string
+      }
+    ): Promise<ProviderTestResult> => {
+      const s = settings.get()
+      const cfg: SttConfig = {
+        kind: override?.kind ?? s.stt.kind,
+        baseUrl: override?.baseUrl ?? s.stt.baseUrl,
+        apiKey: override?.apiKey ?? settings.getSecret('stt'),
+        model: override?.model ?? s.stt.model,
+        language: 'en',
+        timeoutMs: 45000
+      }
+      try {
+        const wav = new Uint8Array(readFileSync(fixtureWav))
+        const res = await getSttProvider(cfg.kind).transcribe(
+          { wav, prompt: buildSttPrompt([]) },
+          cfg
+        )
+        const ok = /country/i.test(res.text)
+        return {
+          ok,
+          latencyMs: res.latencyMs,
+          text: res.text,
+          message: ok
+            ? `Transcribed the test clip in ${res.latencyMs} ms`
+            : `Connected, but the transcript looks wrong: "${res.text.slice(0, 80)}"`
+        }
+      } catch (err) {
+        const e = err as { suggestedModels?: string[] }
+        return { ok: false, message: friendlyError(err), suggestedModels: e.suggestedModels ?? [] }
+      }
     }
-  })
+  )
+
+  ipcMain.handle(
+    IPC.llmListModels,
+    async (_e, override?: { baseUrl?: string; apiKey?: string }) => {
+      const conn = settings.llmConnection()
+      try {
+        return {
+          ok: true,
+          models: await listChatModels({
+            baseUrl: override?.baseUrl ?? conn.baseUrl,
+            apiKey: override?.apiKey ?? conn.apiKey
+          })
+        }
+      } catch (err) {
+        return { ok: false, models: [], error: friendlyError(err) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.llmTest,
+    async (
+      _e,
+      override?: { baseUrl?: string; apiKey?: string; model?: string }
+    ): Promise<ProviderTestResult> => {
+      const conn = settings.llmConnection()
+      const cfg = {
+        baseUrl: override?.baseUrl ?? conn.baseUrl,
+        apiKey: override?.apiKey ?? conn.apiKey,
+        model: override?.model ?? conn.model,
+        timeoutMs: 20000
+      }
+      try {
+        const res = await chatComplete(
+          cfg,
+          [
+            {
+              role: 'system',
+              content:
+                "Rewrite the user's dictated text with correct punctuation and capitalization and without filler words. Output only the text."
+            },
+            { role: 'user', content: 'um so this is a quick test of the uh formatting model' }
+          ],
+          { maxTokens: 768 }
+        )
+        const ok = res.text.trim().length > 0 && !/\bum\b|\buh\b/i.test(res.text)
+        return {
+          ok,
+          latencyMs: res.latencyMs,
+          text: res.text.trim(),
+          message: ok
+            ? `Formatted in ${res.latencyMs} ms`
+            : `Model answered but did not clean the text: "${res.text.trim().slice(0, 80)}"`
+        }
+      } catch (err) {
+        const e = err as { suggestedModels?: string[] }
+        return { ok: false, message: friendlyError(err), suggestedModels: e.suggestedModels ?? [] }
+      }
+    }
+  )
 
   ipcMain.handle(IPC.hotkeyCaptureStart, () => hook.startCapture())
   ipcMain.handle(IPC.hotkeyCaptureStop, () => hook.stopCapture())
   ipcMain.handle(IPC.hotkeyLabel, (_e, keys: number[]) => hook.labelFor(keys))
+
   ipcMain.handle(IPC.dictationToggle, () => controller.toggle())
   ipcMain.handle(IPC.dictationCancel, () => controller.handle({ type: 'cancel' }))
-  ipcMain.handle(IPC.appInfo, (): AppInfo => ({ version: app.getVersion(), platform: process.platform, arch: process.arch, electron: process.versions.electron, hookBackend: hook.backend, injectionBackend: injectionBackendName(), sessionType: process.platform === 'linux' ? sessionType() : undefined, userDataPath: app.getPath('userData'), logPath: getLogPath() }))
-  ipcMain.handle(IPC.appOpenExternal, (_e, url: string) => { if (/^https?:\/\//.test(url)) void shell.openExternal(url) })
+
+  ipcMain.handle(IPC.appInfo, (): AppInfo => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    electron: process.versions.electron,
+    hookBackend: hook.backend,
+    injectionBackend: injectionBackendName(),
+    sessionType: process.platform === 'linux' ? sessionType() : undefined,
+    userDataPath: app.getPath('userData'),
+    logPath: getLogPath()
+  }))
+  ipcMain.handle(IPC.appOpenExternal, (_e, url: string) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+  })
   ipcMain.handle(IPC.appOpenLogs, () => shell.showItemInFolder(getLogPath()))
   ipcMain.handle(IPC.appSetEnabled, (_e, enabled: boolean) => deps.onEnabledChange(enabled))
   ipcMain.handle(IPC.appQuit, () => deps.quit())
-  ipcMain.handle(IPC.onboardingComplete, () => { settings.patch({ onboardingComplete: true }); showMainWindow('home') })
+  ipcMain.handle(IPC.onboardingComplete, () => {
+    settings.patch({ onboardingComplete: true })
+    showMainWindow('home')
+  })
+
   ipcMain.handle(IPC.injectTest, async (_e, text: string) => {
     const s = settings.get()
     await new Promise((r) => setTimeout(r, 1200))
-    return injectText(text, { method: s.injection.method, restoreClipboard: s.injection.restoreClipboard, restoreClipboardDelayMs: s.injection.restoreClipboardDelayMs, typeChunkSize: s.injection.typeChunkSize, typeChunkDelayMs: s.injection.typeChunkDelayMs, waitForKeysUp: () => hook.waitForKeysUp(1000) })
+    return injectText(text, {
+      method: s.injection.method,
+      restoreClipboard: s.injection.restoreClipboard,
+      restoreClipboardDelayMs: s.injection.restoreClipboardDelayMs,
+      typeChunkSize: s.injection.typeChunkSize,
+      typeChunkDelayMs: s.injection.typeChunkDelayMs,
+      waitForKeysUp: () => hook.waitForKeysUp(1000)
+    })
   })
-  ipcMain.handle(IPC.pipelinePreview, (_e, raw: string) => runPipeline(raw, controller.pipelineOptions(settings.get())))
+
+  ipcMain.handle(IPC.pipelinePreview, (_e, raw: string) => {
+    const s = settings.get()
+    return runPipeline(raw, controller.pipelineOptions(s))
+  })
+
   ipcMain.handle(IPC.sttListModels + ':presets', () => STT_PRESETS)
 }

@@ -99,7 +99,7 @@ export interface SanitizeResult {
 export function sanitizeLlmOutput(output: string, raw: string): SanitizeResult {
   let text = output.replace(/\r\n?/g, '\n').trim()
   text = text.replace(/^```[a-z]*\n?([\s\S]*?)\n?```$/i, '$1').trim()
-  if (/^["“”'].*["“”']$/s.test(text) && !/^["“”']/.test(raw.trim())) text = text.slice(1, -1).trim()
+  if (/^[""''].*[""'']$/s.test(text) && !/^[""'']/.test(raw.trim())) text = text.slice(1, -1).trim()
   text = text.replace(LABEL_PREFIX, '').trim()
 
   if (!text) return { ok: false, text: '', reason: 'empty' }

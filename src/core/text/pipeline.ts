@@ -112,6 +112,7 @@ export function finalizeAfterLlm(llmText: string, opts: PipelineOptions): Pipeli
     text = applyTrailing(text, { trailingSpace: opts.trailingSpace && !text.endsWith('\n') })
   return {
     text: empty ? '' : text,
+    text: empty ? '' : text,
     pressEnter: false,
     wordCount: countWords(text),
     snippetsExpanded: snippetResult.expanded,

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Murmur</string>
+    <string name="accessibility_service_label">Murmur dictation</string>
+    <string name="accessibility_service_description">Shows the Murmur dictation pill above the keyboard and inserts transcribed text into the focused text field. Murmur never reads screen content except the text field you are dictating into.</string>
+    <string name="notification_channel_name">Dictation</string>
+    <string name="notification_recording">Listening…</string>
+</resources>

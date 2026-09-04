@@ -1,0 +1,89 @@
+appId: app.murmur.dictation
+productName: Murmur
+copyright: Copyright © 2026 Murmur contributors
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!tests/*'
+  - '!scripts/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!vitest.config.{js,ts}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,README.md,CONTRIBUTING.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,bun.lockb}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+# Native N-API addons must live outside the asar so their .node binaries can be dlopen'd.
+asarUnpack:
+  - resources/**
+  - '**/node_modules/uiohook-napi/**'
+  - '**/node_modules/koffi/**'
+extraResources:
+  - from: resources/fixtures
+    to: fixtures
+win:
+  executableName: Murmur
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+  shortcutName: Murmur
+  uninstallDisplayName: Murmur
+  createDesktopShortcut: always
+  include: build/installer.nsh
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+linux:
+  executableName: murmur
+  category: Utility
+  synopsis: Voice dictation that types where your cursor is
+  description: Hold a key, speak, and clean text lands in any app. Wispr Flow-style dictation with your own speech models.
+  desktop:
+    entry:
+      Name: Murmur
+      Comment: Voice dictation
+      Keywords: dictation;speech;voice;transcribe;stt;whisper;
+      StartupWMClass: Murmur
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+  maintainer: Murmur contributors
+appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+deb:
+  # xdotool covers X11; wtype/ydotool are recommended for Wayland but optional at install time.
+  recommends:
+    - xdotool
+  depends:
+    - libnotify4
+    - libxtst6
+    - libnss3
+mac:
+  category: public.app-category.productivity
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: Murmur needs the microphone to transcribe your speech.
+    # Synthetic keystrokes (paste / type / press-enter) go through System Events.
+    NSAppleEventsUsageDescription: Murmur sends keystrokes to insert dictated text where your cursor is.
+    LSUIElement: 1
+npmRebuild: false
+electronLanguages:
+  - en-US
+publish: null

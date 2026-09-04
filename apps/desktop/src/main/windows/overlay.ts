@@ -156,7 +156,7 @@ export class OverlayWindow {
       const display = screen.getDisplayNearestPoint(cursor)
       const area = display.workArea
       let x = Math.round(area.x + (area.width - WIDTH) / 2)
-      let y = Math.round(area.y + area.height - HEIGHT - MARGIN
+      let y = Math.round(area.y + area.height - HEIGHT - MARGIN)
       if (this.position === 'top-center') y = area.y + MARGIN
       if (this.position === 'bottom-right') x = area.x + area.width - WIDTH - MARGIN
       const b = this.win.getBounds()

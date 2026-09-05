@@ -1,6 +1,18 @@
 import React from 'react'
-import { BookA, Clock3, Home, Keyboard, Mic, Settings2, Sparkles, Waves, Zap } from 'lucide-react'
+import {
+  BookA,
+  Clock3,
+  Home,
+  Keyboard,
+  Mic,
+  Settings2,
+  Sparkles,
+  UserRound,
+  Waves,
+  Zap
+} from 'lucide-react'
 import type { OverlayState } from '@shared/types'
+import { SyncCard } from '@renderer/components/SyncBadge'
 import { cn } from '@renderer/lib/utils'
 
 export type Route =
@@ -13,12 +25,15 @@ export type Route =
   | 'audio'
   | 'providers'
   | 'general'
+  | 'account'
 
 const NAV: Array<{
   id: Route
   label: string
   icon: React.ComponentType<{ className?: string }>
   group?: string
+  /** Only shown when the build talks to a Murmur cloud instance. */
+  cloud?: boolean
 }> = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'history', label: 'History', icon: Clock3 },
@@ -28,7 +43,8 @@ const NAV: Array<{
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard, group: 'Setup' },
   { id: 'audio', label: 'Microphone', icon: Mic },
   { id: 'providers', label: 'Models', icon: Waves },
-  { id: 'general', label: 'General', icon: Settings2 }
+  { id: 'general', label: 'General', icon: Settings2 },
+  { id: 'account', label: 'Account', icon: UserRound, group: 'Cloud', cloud: true }
 ]
 
 interface Props {
@@ -37,6 +53,7 @@ interface Props {
   state: OverlayState
   enabled: boolean
   platform: string
+  showAccount?: boolean
   children: React.ReactNode
 }
 
@@ -46,9 +63,11 @@ export function Shell({
   state,
   enabled,
   platform,
+  showAccount = false,
   children
 }: Props): React.JSX.Element {
   const isWin = platform === 'win32'
+  const nav = NAV.filter((item) => !item.cloud || showAccount)
   return (
     <div className="flex h-full">
       <aside className="flex w-56 shrink-0 flex-col border-r bg-sidebar">
@@ -57,7 +76,7 @@ export function Shell({
           <span className="text-[15px] font-semibold tracking-tight">Murmur</span>
         </div>
         <nav className="flex-1 space-y-0.5 px-3 pt-2">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <React.Fragment key={item.id}>
               {item.group && (
                 <div className="px-2 pb-1.5 pt-4 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
@@ -77,7 +96,8 @@ export function Shell({
             </React.Fragment>
           ))}
         </nav>
-        <div className="p-3">
+        <div className="space-y-2 p-3">
+          {showAccount && <SyncCard />}
           <StatusCard state={state} enabled={enabled} />
         </div>
       </aside>

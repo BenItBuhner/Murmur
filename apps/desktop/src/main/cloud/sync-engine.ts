@@ -66,11 +66,19 @@ const IMPORT_CHUNK = 500
 
 type Platform = 'win32' | 'darwin' | 'linux'
 
+/** Structural views of the stores so the engine can be exercised outside Electron. */
+export type SettingsSource = Pick<SettingsStore, 'get' | 'patch' | 'on' | 'off'>
+export type HistorySource = Pick<
+  HistoryStore,
+  'on' | 'off' | 'list' | 'mergeRemote' | 'removeRemote' | 'replaceAll'
+>
+export type TokenSource = Pick<TokenBridge, 'request'>
+
 export interface SyncDeps {
   config: CloudConfig
-  settings: SettingsStore
-  history: HistoryStore
-  tokenBridge: TokenBridge
+  settings: SettingsSource
+  history: HistorySource
+  tokenBridge: TokenSource
   userDataPath: string
   appVersion: string
   platform: NodeJS.Platform
@@ -232,6 +240,9 @@ export class CloudSync extends EventEmitter {
     this.connectionUnsub = this.client.subscribeToConnectionState((state) => {
       const was = this.connected
       this.connected = state.isWebSocketConnected
+      if (this.connected !== was) {
+        log.info(this.connected ? 'connected to Convex' : 'disconnected from Convex')
+      }
       if (this.connected && !was) {
         this.error = undefined
         this.scheduleFlush(0)
@@ -817,6 +828,9 @@ export class CloudSync extends EventEmitter {
           await this.send(op)
           if (generation !== this.generation) break
           this.error = undefined
+          // The server snapshot may already include this change; recompute without the op so a
+          // pending increment is never counted twice.
+          this.applyDerived()
         } catch (err) {
           if (generation !== this.generation) break
           if (isPermanentError(err)) {

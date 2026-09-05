@@ -2,7 +2,7 @@ import React from 'react'
 import { cn } from '@renderer/lib/utils'
 
 interface RowProps {
-  title: string
+  title: React.ReactNode
   description?: React.ReactNode
   children?: React.ReactNode
   className?: string

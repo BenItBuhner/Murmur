@@ -1,31 +1,72 @@
 import React, { useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BookA, Check, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@renderer/components/ui/button'
-import { Textarea } from '@renderer/components/ui/input'
-import { Segmented } from '@renderer/components/ui/misc'
+import { Input, Textarea } from '@renderer/components/ui/input'
+import { Label } from '@renderer/components/ui/label'
+import { Switch } from '@renderer/components/ui/switch'
+import { Badge, Segmented } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { HotkeyRecorder } from '@renderer/components/HotkeyRecorder'
 import { Logo } from '@renderer/components/Shell'
+import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
-import { cn } from '@renderer/lib/utils'
+import { cn, uid } from '@renderer/lib/utils'
 import { ProvidersPage } from './Providers'
 import { AudioPage } from './Audio'
-import type { HandsFreeTrigger } from '@shared/settings'
+import type { DictionaryEntry, HandsFreeTrigger, Tone } from '@shared/settings'
 
-const STEPS = ['Welcome', 'Speech model', 'Microphone', 'Shortcut', 'Try it'] as const
+type StepId = 'welcome' | 'personalize' | 'model' | 'mic' | 'shortcut' | 'try'
 
+const TITLES: Record<StepId, string> = {
+  welcome: 'Welcome',
+  personalize: 'Personalize',
+  model: 'Speech model',
+  mic: 'Microphone',
+  shortcut: 'Shortcut',
+  try: 'Try it'
+}
+
+const TONES: Array<{ value: Tone; label: string }> = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'casual', label: 'Casual' },
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'professional', label: 'Professional' }
+]
+
+/**
+ * First-run flow. Account-level steps (Personalize) run once per account and are skipped on the
+ * next device; device-level steps (model, microphone, shortcut) run on every install because API
+ * keys and hardware are local.
+ */
 export function Onboarding(): React.JSX.Element {
   const { settings, patch, info } = useSettings()
-  const [step, setStep] = useState(0)
+  const cloud = useCloud()
+  const [steps, setSteps] = useState<StepId[]>(['welcome'])
+  const [index, setIndex] = useState(0)
   const [sttOk, setSttOk] = useState(false)
   const [dictated, setDictated] = useState(false)
   const platform = platformFor(info?.platform)
 
   useEffect(() => window.murmur.history.onAdded((e) => e.finalText && setDictated(true)), [])
 
+  const signedIn = cloud.enabled && cloud.clerk.signedIn
+  const accountOnboarded = !!cloud.status?.user?.onboardingCompletedAt
+  const returning = signedIn && accountOnboarded
+  const firstName = cloud.clerk.firstName ?? cloud.status?.user?.name?.split(' ')[0]
+
+  const step = steps[index]
   const configured = !!settings.stt.baseUrl && !!settings.stt.model
-  const canNext = step === 1 ? configured : true
-  const last = step === STEPS.length - 1
+  const canNext = step === 'model' ? configured : true
+  const last = index === steps.length - 1
+
+  const start = (): void => {
+    const flow: StepId[] = ['welcome']
+    if (signedIn && !accountOnboarded) flow.push('personalize')
+    flow.push('model', 'mic', 'shortcut', 'try')
+    setSteps(flow)
+    setIndex(1)
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -40,14 +81,14 @@ export function Onboarding(): React.JSX.Element {
           <span className="text-[15px] font-semibold tracking-tight">Murmur</span>
         </div>
         <ol className="no-drag flex items-center gap-1.5">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <li
               key={s}
               className={cn(
                 'h-1.5 w-8 rounded-full transition-colors',
-                i <= step ? 'bg-primary' : 'bg-muted'
+                i <= index ? 'bg-primary' : 'bg-muted'
               )}
-              title={s}
+              title={TITLES[s]}
             />
           ))}
         </ol>
@@ -55,40 +96,75 @@ export function Onboarding(): React.JSX.Element {
 
       <div className="flex-1 overflow-y-auto px-8 pb-8">
         <div className="mx-auto max-w-2xl pt-6 animate-fade-in" key={step}>
-          {step === 0 && (
+          {step === 'welcome' && (
             <div className="space-y-6 pt-10 text-center">
               <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
                 <Logo className="size-10 rounded-xl [&>svg]:size-6" />
               </div>
-              <h1 className="text-3xl font-semibold tracking-tight">Speak. It types.</h1>
-              <p className="mx-auto max-w-md text-[15px] text-muted-foreground">
-                Hold one key anywhere on your computer, say what you mean, let go. Murmur
-                transcribes it, cleans up the ums and self-corrections, and drops finished text
-                right where your cursor is.
-              </p>
-              <div className="mx-auto grid max-w-md gap-2 pt-2 text-left text-[13px]">
-                {[
-                  'Hold to talk, tap for hands-free',
-                  'Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server',
-                  'Personal dictionary and snippets',
-                  'Nothing stored anywhere but this device'
-                ].map((t) => (
-                  <div
-                    key={t}
-                    className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2"
-                  >
-                    <Check className="size-4 text-success" /> {t}
+              {returning ? (
+                <>
+                  <h1 className="text-3xl font-semibold tracking-tight">
+                    Welcome back{firstName ? `, ${firstName}` : ''}.
+                  </h1>
+                  <p className="mx-auto max-w-md text-[15px] text-muted-foreground">
+                    Your account is already set up, so your dictionary, snippets and style are on
+                    this computer now. Three quick device steps and you are dictating: connect a
+                    speech model, check the microphone, pick a shortcut.
+                  </p>
+                  <div className="mx-auto grid max-w-md gap-2 pt-2 text-left text-[13px]">
+                    {[
+                      `${settings.dictionary.length} dictionary ${settings.dictionary.length === 1 ? 'word' : 'words'}`,
+                      `${settings.snippets.length} ${settings.snippets.length === 1 ? 'snippet' : 'snippets'}`,
+                      `Tone: ${TONES.find((t) => t.value === settings.formatting.tone)?.label ?? 'Auto'}`
+                    ].map((t) => (
+                      <div
+                        key={t}
+                        className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2"
+                      >
+                        <Check className="size-4 text-success" /> {t}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              ) : (
+                <>
+                  <h1 className="text-3xl font-semibold tracking-tight">Speak. It types.</h1>
+                  <p className="mx-auto max-w-md text-[15px] text-muted-foreground">
+                    Hold one key anywhere on your computer, say what you mean, let go. Murmur
+                    transcribes it, cleans up the ums and self-corrections, and drops finished text
+                    right where your cursor is.
+                  </p>
+                  <div className="mx-auto grid max-w-md gap-2 pt-2 text-left text-[13px]">
+                    {[
+                      'Hold to talk, tap for hands-free',
+                      'Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server',
+                      signedIn
+                        ? 'Your dictionary and snippets sync to every device you sign in on'
+                        : 'Personal dictionary and snippets',
+                      signedIn
+                        ? 'API keys stay on this device; only your words and settings sync'
+                        : 'Nothing stored anywhere but this device'
+                    ].map((t) => (
+                      <div
+                        key={t}
+                        className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2"
+                      >
+                        <Check className="size-4 text-success" /> {t}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {step === 1 && (
+          {step === 'personalize' && <PersonalizeStep />}
+
+          {step === 'model' && (
             <div className="space-y-6">
               <Header
                 title="Connect a speech model"
-                description="Murmur sends your recording to a transcription API you control. Pick a provider, paste a key, choose a model, and run the test."
+                description="Murmur sends your recording to a transcription API you control. Pick a provider, paste a key, choose a model, and run the test. Keys stay on this computer."
               />
               <ProvidersPage embedded onReady={setSttOk} />
               {sttOk && (
@@ -99,7 +175,7 @@ export function Onboarding(): React.JSX.Element {
             </div>
           )}
 
-          {step === 2 && (
+          {step === 'mic' && (
             <div className="space-y-6">
               <Header
                 title="Check your microphone"
@@ -109,7 +185,7 @@ export function Onboarding(): React.JSX.Element {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 'shortcut' && (
             <div className="space-y-6">
               <Header
                 title="Your shortcut"
@@ -151,7 +227,7 @@ export function Onboarding(): React.JSX.Element {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 'try' && (
             <div className="space-y-6">
               <Header
                 title="Try it"
@@ -186,26 +262,155 @@ export function Onboarding(): React.JSX.Element {
       <div className="flex items-center justify-between border-t px-8 py-4">
         <Button
           variant="ghost"
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
-          disabled={step === 0}
+          onClick={() => setIndex((i) => Math.max(0, i - 1))}
+          disabled={index === 0}
         >
           <ArrowLeft /> Back
         </Button>
         <div className="flex items-center gap-2">
-          {step === 1 && !configured && (
-            <Button variant="ghost" onClick={() => setStep(2)}>
+          {step === 'model' && !configured && (
+            <Button variant="ghost" onClick={() => setIndex((i) => i + 1)}>
               Skip for now
             </Button>
           )}
-          {last ? (
+          {step === 'welcome' ? (
+            <Button onClick={start}>
+              Get started <ArrowRight />
+            </Button>
+          ) : last ? (
             <Button onClick={() => void window.murmur.app.completeOnboarding()}>
               Finish <Check />
             </Button>
           ) : (
-            <Button onClick={() => setStep((s) => s + 1)} disabled={!canNext}>
-              {step === 0 ? 'Get started' : 'Continue'} <ArrowRight />
+            <Button onClick={() => setIndex((i) => i + 1)} disabled={!canNext}>
+              Continue <ArrowRight />
             </Button>
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Account-level step: seed the dictionary and pick defaults that sync to every device. */
+function PersonalizeStep(): React.JSX.Element {
+  const { settings, patch } = useSettings()
+  const cloud = useCloud()
+  const [names, setNames] = useState(() => cloud.clerk.name ?? cloud.status?.user?.name ?? '')
+  const [terms, setTerms] = useState('')
+
+  const addWords = async (raw: string): Promise<void> => {
+    const words = raw
+      .split(/[,;\n]/)
+      .map((w) => w.trim())
+      .filter(Boolean)
+    const existing = new Set(settings.dictionary.map((d) => d.word.toLowerCase()))
+    const fresh: DictionaryEntry[] = words
+      .filter((w) => !existing.has(w.toLowerCase()))
+      .map((word) => ({ id: uid(), word, aliases: [], fuzzy: true, createdAt: Date.now() }))
+    if (!fresh.length) {
+      toast.message('Already in your dictionary')
+      return
+    }
+    await patch({ dictionary: [...fresh, ...settings.dictionary] })
+    toast.success(`Added ${fresh.length} ${fresh.length === 1 ? 'word' : 'words'}`)
+  }
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title={`Make it yours${cloud.clerk.firstName ? `, ${cloud.clerk.firstName}` : ''}`}
+        description="These choices live in your account, so every device you sign in on picks them up. You only do this once."
+      />
+
+      <div className="rounded-xl border bg-card p-5 shadow-xs space-y-5">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <BookA className="size-4" /> Teach Murmur your name
+          </div>
+          <p className="text-[13px] text-muted-foreground">
+            Speech models often misspell names. Anything in your dictionary is spelled the way you
+            wrote it, every time.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={names}
+              onChange={(e) => setNames(e.target.value)}
+              placeholder="Your name"
+              onKeyDown={(e) => e.key === 'Enter' && names.trim() && void addWords(names)}
+            />
+            <Button variant="outline" onClick={() => void addWords(names)} disabled={!names.trim()}>
+              <Plus /> Add
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2 border-t pt-5">
+          <Label htmlFor="onb-terms">People, products and tools you say often</Label>
+          <div className="flex gap-2">
+            <Input
+              id="onb-terms"
+              value={terms}
+              onChange={(e) => setTerms(e.target.value)}
+              placeholder="Wispr Flow, Kubernetes, Priya"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && terms.trim()) {
+                  void addWords(terms)
+                  setTerms('')
+                }
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => {
+                void addWords(terms)
+                setTerms('')
+              }}
+              disabled={!terms.trim()}
+            >
+              <Plus /> Add
+            </Button>
+          </div>
+          {settings.dictionary.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {settings.dictionary.slice(0, 12).map((d) => (
+                <Badge key={d.id} variant="secondary">
+                  {d.word}
+                </Badge>
+              ))}
+              {settings.dictionary.length > 12 && (
+                <Badge variant="outline">+{settings.dictionary.length - 12} more</Badge>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-card p-5 shadow-xs space-y-5">
+        <div className="flex items-center justify-between gap-6">
+          <div>
+            <div className="text-sm font-medium">Default tone</div>
+            <div className="text-[13px] text-muted-foreground">
+              Auto reads the app you are typing in: casual in chat, professional in email.
+            </div>
+          </div>
+          <Segmented<Tone>
+            value={settings.formatting.tone}
+            onChange={(v) => void patch({ formatting: { tone: v } })}
+            options={TONES}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-6 border-t pt-5">
+          <div>
+            <div className="text-sm font-medium">Sync dictation history</div>
+            <div className="text-[13px] text-muted-foreground">
+              Keep the text of your dictations in your account so History shows every device. Off by
+              default; your dictionary and snippets sync either way.
+            </div>
+          </div>
+          <Switch
+            checked={settings.cloud.historySync}
+            onCheckedChange={(v) => void window.murmur.cloud.setHistorySync(v)}
+          />
         </div>
       </div>
     </div>

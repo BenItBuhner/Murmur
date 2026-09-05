@@ -5,6 +5,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/input'
 import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
+import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
 import type { Route } from '@renderer/components/Shell'
@@ -19,12 +20,21 @@ export function HomePage({
   onNavigate: (r: Route) => void
 }): React.JSX.Element {
   const { settings, info } = useSettings()
+  const { clerk, status } = useCloud()
   const [recent, setRecent] = useState<HistoryEntry[]>([])
   const platform = platformFor(info?.platform)
+  const firstName = clerk.firstName ?? status?.user?.name?.split(' ')[0]
 
   useEffect(() => {
-    void window.murmur.history.list(5).then((r) => setRecent(r.entries))
-    return window.murmur.history.onAdded((e) => setRecent((prev) => [e, ...prev].slice(0, 5)))
+    const load = (): void => void window.murmur.history.list(5).then((r) => setRecent(r.entries))
+    load()
+    const unsubs = [
+      window.murmur.history.onAdded((e) =>
+        setRecent((prev) => [e, ...prev.filter((x) => x.id !== e.id)].slice(0, 5))
+      ),
+      window.murmur.history.onChanged(load)
+    ]
+    return () => unsubs.forEach((u) => u())
   }, [])
 
   const stats = settings.stats
@@ -41,7 +51,10 @@ export function HomePage({
     <div className="space-y-8">
       <div className="flex items-start justify-between gap-6">
         <div>
-          <h1 className="text-[26px] font-semibold tracking-tight">{greeting}.</h1>
+          <h1 className="text-[26px] font-semibold tracking-tight">
+            {greeting}
+            {firstName ? `, ${firstName}` : ''}.
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Click into any text field, hold your shortcut, speak, let go.
           </p>

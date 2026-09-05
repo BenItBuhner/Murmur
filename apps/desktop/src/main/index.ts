@@ -98,15 +98,14 @@ async function main(): Promise<void> {
 
   // The settings window is served from a stable origin in packaged builds (Clerk requires one; it
   // also gives the renderer a real Content-Security-Policy). Dev builds keep using Vite's server.
+  const devServer = is.dev && !!process.env['ELECTRON_RENDERER_URL']
   const csp = buildRendererCsp({
     clerkFrontendApiHost: cloudConfig.clerkFrontendApiHost || undefined,
-    dev: is.dev
+    dev: devServer
   })
   serveRenderer(cloudConfig.deepLinkScheme, join(__dirname, '../renderer'), csp)
   setRendererOrigin(rendererOrigin(cloudConfig.deepLinkScheme))
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    installDevCsp(csp, process.env['ELECTRON_RENDERER_URL'])
-  }
+  if (devServer) installDevCsp(csp, process.env['ELECTRON_RENDERER_URL']!)
   if (cloudConfig.accountMode !== 'off') registerDeepLinkHandler(cloudConfig.deepLinkScheme)
 
   const settings = new SettingsStore(userData)

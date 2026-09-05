@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import { Toaster } from 'sonner'
 import type { OverlayState } from '@shared/types'
 import { Shell, type Route } from './components/Shell'
+import { Logo } from './components/Shell'
 import { TooltipProvider } from './components/ui/misc'
+import { CloudProvider, useCloud } from './hooks/useCloud'
 import { SettingsProvider, useSettingsMaybe } from './hooks/useSettings'
+import { AccountPage } from './pages/Account'
+import { AccountGate } from './pages/AccountGate'
 import { AudioPage } from './pages/Audio'
 import { DictionaryPage } from './pages/Dictionary'
 import { GeneralPage } from './pages/General'
@@ -24,30 +29,35 @@ const ROUTES = new Set<Route>([
   'shortcuts',
   'audio',
   'providers',
-  'general'
+  'general',
+  'account'
 ])
 
 export default function App(): React.JSX.Element {
   return (
     <SettingsProvider>
-      <TooltipProvider delayDuration={300}>
-        <Root />
-        <Toaster
-          position="bottom-right"
-          richColors
-          closeButton
-          toastOptions={{ className: 'text-sm' }}
-        />
-      </TooltipProvider>
+      <CloudProvider>
+        <TooltipProvider delayDuration={300}>
+          <Root />
+          <Toaster
+            position="bottom-right"
+            richColors
+            closeButton
+            toastOptions={{ className: 'text-sm' }}
+          />
+        </TooltipProvider>
+      </CloudProvider>
     </SettingsProvider>
   )
 }
 
 function Root(): React.JSX.Element | null {
   const { settings, info } = useSettingsMaybe()
+  const cloud = useCloud()
   const [route, setRoute] = useState<Route>('home')
   const [state, setState] = useState<OverlayState>({ phase: 'idle' })
   const [enabled, setEnabled] = useState(true)
+  const [dark, setDark] = useState(false)
 
   useEffect(() => {
     const unsubs = [
@@ -63,16 +73,38 @@ function Root(): React.JSX.Element | null {
     if (!settings) return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = (): void => {
-      const dark =
+      const isDark =
         settings.general.theme === 'dark' || (settings.general.theme === 'system' && mq.matches)
-      document.documentElement.classList.toggle('dark', dark)
+      document.documentElement.classList.toggle('dark', isDark)
+      setDark(isDark)
     }
     apply()
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
   }, [settings])
 
-  if (!settings) return null
+  if (!settings || !cloud.config) return null
+
+  const mode = cloud.config.accountMode
+  const accountWanted =
+    mode === 'required' || (mode === 'optional' && !settings.cloud.accountSkipped)
+  if (accountWanted && !cloud.clerk.signedIn) {
+    // Offline but previously signed in on this device: keep dictating from the local mirror.
+    const offlineFallback = cloud.clerk.failed && !!settings.cloud.lastSignedInUserId
+    if (!offlineFallback) {
+      if (!cloud.clerk.loaded && !cloud.clerk.failed) return <Splash />
+      return (
+        <AccountGate
+          mode={mode}
+          clerk={cloud.clerk}
+          platform={info?.platform}
+          dark={dark}
+          onSkip={mode === 'optional' ? () => void window.murmur.cloud.skipAccount() : undefined}
+        />
+      )
+    }
+  }
+
   if (!settings.onboardingComplete) return <Onboarding />
 
   return (
@@ -82,6 +114,7 @@ function Root(): React.JSX.Element | null {
       state={state}
       enabled={enabled}
       platform={info?.platform ?? 'linux'}
+      showAccount={cloud.enabled}
     >
       {route === 'home' && <HomePage state={state} onNavigate={setRoute} />}
       {route === 'history' && <HistoryPage />}
@@ -92,6 +125,18 @@ function Root(): React.JSX.Element | null {
       {route === 'audio' && <AudioPage />}
       {route === 'providers' && <ProvidersPage />}
       {route === 'general' && <GeneralPage />}
+      {route === 'account' && cloud.enabled && <AccountPage />}
     </Shell>
+  )
+}
+
+function Splash(): React.JSX.Element {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
+      <Logo className="size-10 rounded-xl [&>svg]:size-6" />
+      <div className="flex items-center gap-2 text-sm">
+        <Loader2 className="size-4 animate-spin" /> Starting Murmur…
+      </div>
+    </div>
   )
 }

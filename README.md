@@ -11,6 +11,7 @@ This is a monorepo:
 | --- | --- | --- |
 | Desktop (Electron) | [`apps/desktop`](apps/desktop) | **Windows**, **Linux**, macOS (experimental) |
 | Android | [`apps/android`](apps/android) | Android 8.0+ |
+| Cloud backend (Convex + Clerk) | [`packages/backend`](packages/backend) | Accounts, synchronized dictionary and settings for both apps |
 
 ![Murmur home](docs/home.png)
 
@@ -84,6 +85,53 @@ cd apps/android
 ./gradlew :app:assembleDebug
 ```
 
+## Accounts and sync (`packages/backend`)
+
+Murmur runs in one of two modes, decided when the apps are built:
+
+- **Local** (no cloud configured): no account, everything stays on the device. This is what `npm run dev`
+  and a checkout without keys give you.
+- **Cloud**: the app talks to a Murmur instance made of a [Convex](https://convex.dev) deployment
+  (`packages/backend`) with [Clerk](https://clerk.com) as the identity provider. Everyone signs up and
+  onboards before dictating (`required`, the production default) or can skip sign-in (`optional`).
+
+With an account, the **dictionary**, **snippets**, **style rules and preferences**, **stats**, the
+**device list** and (opt-in) **dictation history** are synchronized across every desktop and Android
+install. Speech-model connections and API keys are device settings and never leave the device. Both
+apps keep working offline from a local mirror; local edits queue in a persisted outbox and replay in
+order, and a device that already had a dictionary merges it into the account the first time it signs in.
+
+### Setting up an instance
+
+1. **Convex** — from `packages/backend` run `npx convex dev` (development) or `npx convex deploy`
+   (production only; the release workflow does this when `CONVEX_DEPLOY_KEY` is set). In the Convex
+   dashboard set the deployment's environment variables:
+   `CLERK_JWT_ISSUER_DOMAIN` (the Clerk Frontend API URL, e.g. `https://clerk.your-domain.com` or
+   `https://your-slug.clerk.accounts.dev`) and `CLERK_WEBHOOK_SIGNING_SECRET`.
+2. **Clerk** — in the Clerk dashboard:
+   - create a JWT template named `convex` (the Convex preset); add `email`, `name` and `picture`
+     claims if you want profile data without the webhook;
+   - add a webhook endpoint `https://<deployment>.convex.site/clerk/webhook` subscribed to
+     `user.created`, `user.updated` and `user.deleted`, and copy its signing secret into Convex;
+   - enable the **Native API** (Native applications page) and register the Android package
+     `app.murmur.android`; the desktop app uses the same native integration through
+     [`@clerk/electron`](https://www.npmjs.com/package/@clerk/electron) (pre-1.0, pinned) and completes
+     OAuth in the system browser via the `murmur://` deep link.
+3. **Builds** — bake the instance into the apps with `VITE_CONVEX_URL` and `VITE_CLERK_PUBLISHABLE_KEY`
+   (desktop, see [`apps/desktop/.env.example`](apps/desktop/.env.example)) and `MURMUR_CONVEX_URL` /
+   `MURMUR_CLERK_PUBLISHABLE_KEY` (Android Gradle). `VITE_MURMUR_ACCOUNT_MODE` / `MURMUR_ACCOUNT_MODE`
+   choose `required` (default), `optional` or `off`. In CI and releases these come from the repository
+   variables `CONVEX_URL`, `CLERK_PUBLISHABLE_KEY` and `MURMUR_ACCOUNT_MODE`. At runtime the desktop
+   app also honours `MURMUR_CONVEX_URL`, `MURMUR_CLERK_PUBLISHABLE_KEY` and `MURMUR_ACCOUNT_MODE`,
+   which is handy for pointing a dev build at a staging instance.
+
+Backend checks: `npm run typecheck && npm run lint && npm test` in `packages/backend` (the tests run
+against an in-memory Convex via `convex-test`). The desktop app typechecks against the committed
+`packages/backend/convex/_generated`, so run `npx convex dev` (or `npx convex codegen`) after
+changing backend functions and commit the result. `MURMUR_LIVE=1 npm run test:live -- tests/live/cloud-sync.test.ts`
+in `apps/desktop` drives the real sync engine against a Convex deployment that trusts a test JWT
+issuer (see the header of that file).
+
 ## Releases
 
 Pushing a `v*` tag runs [`release.yml`](.github/workflows/release.yml), which builds every platform
@@ -115,6 +163,10 @@ Code signing is optional and switched on by repository secrets:
 | `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` | Developer ID Application certificate (`.p12`, base64-encoded) for macOS code signing. |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | macOS notarization; requires the certificate above. |
 | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` | Windows code-signing certificate (`.pfx`, base64-encoded). |
+| `CONVEX_DEPLOY_KEY` | Production deploy key for the Convex backend; the release workflow deploys `packages/backend` before building the apps when it is set. |
+
+The repository **variables** `CONVEX_URL`, `CLERK_PUBLISHABLE_KEY` and `MURMUR_ACCOUNT_MODE` select the
+cloud instance the builds talk to (see [Accounts and sync](#accounts-and-sync-packagesbackend)).
 
 Locally, `npm run android:build:release` honours the same keystore through the
 `MURMUR_KEYSTORE_FILE`, `MURMUR_KEYSTORE_PASSWORD`, `MURMUR_KEY_ALIAS` and `MURMUR_KEY_PASSWORD`

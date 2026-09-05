@@ -21,6 +21,11 @@ asarUnpack:
 extraResources:
   - from: resources/fixtures
     to: fixtures
+# murmur:// serves the settings window and receives account sign-in (OAuth) callbacks from the
+# system browser. Must match VITE_MURMUR_DEEP_LINK_SCHEME.
+protocols:
+  - name: Murmur
+    schemes: [murmur]
 win:
   executableName: Murmur
   artifactName: ${productName}-${version}-${arch}-setup.${ext}
@@ -51,6 +56,7 @@ linux:
       Comment: Voice dictation
       Keywords: dictation;speech;voice;transcribe;stt;whisper;
       StartupWMClass: Murmur
+      MimeType: x-scheme-handler/murmur;
   target:
     - target: AppImage
       arch: [x64, arm64]

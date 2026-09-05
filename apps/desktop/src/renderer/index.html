@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <title>Murmur</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: http://localhost:* http://127.0.0.1:*" />
+    <!-- The Content-Security-Policy is set by the main process as a response header
+         (src/main/cloud/csp.ts) so it can allow the Clerk hosts only when a cloud instance is
+         configured. -->
   </head>
   <body>
     <div id="root"></div>

@@ -67,18 +67,34 @@ data class MurmurSettings(
     // and the deterministic pipeline still covers any timeout.
     val llmTimeoutMs: Int = 15_000,
     val maxDurationSec: Int = 300,
-    /** Comma-separated custom terms; used as the STT prompt hint and LLM spelling list. */
-    val dictionary: String = "",
+    /**
+     * Personal dictionary: STT prompt hint, LLM spelling list and enforced in the text. Synced with
+     * the account when signed in (same shape as the desktop app and the backend).
+     */
+    val dictionaryEntries: List<DictionaryEntry> = emptyList(),
     /** Debug aid: dictate the bundled fixture clip instead of the microphone. */
-    val useFixtureAudio: Boolean = false
+    val useFixtureAudio: Boolean = false,
+    /** Device-level first-run flow finished (permissions, provider). */
+    val onboardingComplete: Boolean = false,
+    /** `optional` account mode: the user chose to keep using Murmur without an account. */
+    val accountSkipped: Boolean = false,
+    /** Stable per-install id reported to the account's device list. */
+    val deviceId: String = "",
+    /** Clerk user id of the last signed-in account (lets the app open offline). */
+    val lastSignedInUserId: String = "",
+    /** Account whose cloud data absorbed this device's pre-account local dictionary. */
+    val importedForUserId: String = ""
 ) {
     val dictionaryTerms: List<String>
-        get() = dictionary.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        get() = dictionaryEntries.map { it.word.trim() }.filter { it.isNotEmpty() }
 
     fun llmConnection(): Triple<String, String, String> =
         if (llmSameAsStt) Triple(sttBaseUrl, sttApiKey, llmModel)
         else Triple(llmBaseUrl, llmApiKey, llmModel)
 }
+
+/** Who made a change: the user on this device, or the sync engine mirroring the account. */
+enum class SettingsOrigin { LOCAL, CLOUD }
 
 class SettingsStore(context: Context) {
     private val prefs: SharedPreferences =
@@ -87,12 +103,45 @@ class SettingsStore(context: Context) {
     private val _flow = MutableStateFlow(read())
     val flow: StateFlow<MurmurSettings> = _flow
 
+    /** Emits (previous, next, origin) for every change so the sync engine can diff local edits. */
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(MurmurSettings, MurmurSettings, SettingsOrigin) -> Unit>()
+
+    init {
+        migrate()
+    }
+
     fun get(): MurmurSettings = _flow.value
 
-    fun update(transform: (MurmurSettings) -> MurmurSettings) {
-        val next = transform(_flow.value)
+    fun update(origin: SettingsOrigin = SettingsOrigin.LOCAL, transform: (MurmurSettings) -> MurmurSettings) {
+        val previous = _flow.value
+        val next = transform(previous)
+        if (next == previous) return
         write(next)
         _flow.value = next
+        for (l in listeners) l(previous, next, origin)
+    }
+
+    fun update(transform: (MurmurSettings) -> MurmurSettings) = update(SettingsOrigin.LOCAL, transform)
+
+    fun addListener(listener: (MurmurSettings, MurmurSettings, SettingsOrigin) -> Unit) {
+        listeners.add(listener)
+    }
+
+    fun removeListener(listener: (MurmurSettings, MurmurSettings, SettingsOrigin) -> Unit) {
+        listeners.remove(listener)
+    }
+
+    /** One-time upgrades of persisted data. */
+    private fun migrate() {
+        val legacy = prefs.getString("dictionary", null)
+        if (!legacy.isNullOrBlank() && !prefs.contains("dictionaryEntries")) {
+            val entries = DictionaryCodec.fromLegacy(legacy)
+            update(SettingsOrigin.LOCAL) { it.copy(dictionaryEntries = entries) }
+            prefs.edit().remove("dictionary").apply()
+        }
+        if (_flow.value.deviceId.isEmpty()) {
+            update(SettingsOrigin.CLOUD) { it.copy(deviceId = java.util.UUID.randomUUID().toString()) }
+        }
     }
 
     private fun read(): MurmurSettings {
@@ -120,8 +169,13 @@ class SettingsStore(context: Context) {
             llmMinWords = prefs.getInt("llmMinWords", d.llmMinWords),
             llmTimeoutMs = prefs.getInt("llmTimeoutMs", d.llmTimeoutMs),
             maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec),
-            dictionary = prefs.getString("dictionary", d.dictionary) ?: "",
-            useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio)
+            dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
+            useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio),
+            onboardingComplete = prefs.getBoolean("onboardingComplete", d.onboardingComplete),
+            accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
+            deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
+            lastSignedInUserId = prefs.getString("lastSignedInUserId", d.lastSignedInUserId) ?: "",
+            importedForUserId = prefs.getString("importedForUserId", d.importedForUserId) ?: ""
         )
     }
 
@@ -149,8 +203,13 @@ class SettingsStore(context: Context) {
             .putInt("llmMinWords", s.llmMinWords)
             .putInt("llmTimeoutMs", s.llmTimeoutMs)
             .putInt("maxDurationSec", s.maxDurationSec)
-            .putString("dictionary", s.dictionary)
+            .putString("dictionaryEntries", DictionaryCodec.encode(s.dictionaryEntries))
             .putBoolean("useFixtureAudio", s.useFixtureAudio)
+            .putBoolean("onboardingComplete", s.onboardingComplete)
+            .putBoolean("accountSkipped", s.accountSkipped)
+            .putString("deviceId", s.deviceId)
+            .putString("lastSignedInUserId", s.lastSignedInUserId)
+            .putString("importedForUserId", s.importedForUserId)
             .apply()
     }
 

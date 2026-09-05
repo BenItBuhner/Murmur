@@ -40,6 +40,10 @@ export interface HistoryEntry {
   llmUsed: boolean
   timings: StageTimings
   error?: string
+  /** Set on entries that arrived through account history sync from another device. */
+  deviceId?: string
+  deviceName?: string
+  remote?: boolean
 }
 
 export interface SttModelInfo {

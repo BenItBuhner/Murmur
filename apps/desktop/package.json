@@ -30,8 +30,11 @@
     "build:mac": "npm run build && electron-builder --mac"
   },
   "dependencies": {
+    "@clerk/electron": "0.0.41",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "convex": "1.45.0",
+    "electron-store": "^8.2.0",
     "koffi": "^3.2.0",
     "uiohook-napi": "^1.5.5"
   },

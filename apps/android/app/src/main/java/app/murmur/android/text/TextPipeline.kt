@@ -365,7 +365,9 @@ data class PipelineOptions(
     val selfCorrections: Boolean = true,
     val autoCapitalize: Boolean = true,
     val trailingSpace: Boolean = true,
-    val pressEnterCommand: Boolean = true
+    val pressEnterCommand: Boolean = true,
+    /** Spellings to enforce, same stage order as the desktop pipeline. */
+    val dictionary: List<app.murmur.android.settings.DictionaryEntry> = emptyList()
 )
 
 data class PipelineResult(
@@ -404,6 +406,7 @@ fun runPipeline(raw: String, opts: PipelineOptions): PipelineResult {
     if (opts.removeFillers) step("fillers") { removeFillers(it, opts.fillerWords) }
     if (opts.collapseRepeats) step("repeats", ::collapseRepeats)
     if (opts.selfCorrections) step("self-corrections", ::applySelfCorrections)
+    step("dictionary") { applyDictionary(it, opts.dictionary) }
     step("punctuation", ::fixPunctuationSpacing)
     if (opts.autoCapitalize) step("capitalize", ::capitalizeSentences)
     text = normalizeWhitespace(text)
@@ -423,6 +426,7 @@ fun runPipeline(raw: String, opts: PipelineOptions): PipelineResult {
 /** Second pass after the LLM: re-assert layout rules only. */
 fun finalizeAfterLlm(llmText: String, opts: PipelineOptions): PipelineResult {
     var text = normalizeWhitespace(llmText)
+    text = applyDictionary(text, opts.dictionary)
     text = fixPunctuationSpacing(text)
     val empty = !isMeaningful(text)
     if (!empty) text = applyTrailing(text, opts.trailingSpace && !text.endsWith("\n"))

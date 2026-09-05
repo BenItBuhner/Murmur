@@ -30,14 +30,28 @@ export const IPC = {
   onboardingComplete: 'onboarding:complete',
   injectTest: 'inject:test',
   pipelinePreview: 'pipeline:preview',
+  cloudConfig: 'cloud:config',
+  cloudStatus: 'cloud:status',
+  cloudAuthState: 'cloud:auth-state',
+  cloudSyncNow: 'cloud:sync-now',
+  cloudRemoveDevice: 'cloud:remove-device',
+  cloudDeleteData: 'cloud:delete-data',
+  cloudSetHistorySync: 'cloud:set-history-sync',
+  cloudSkipAccount: 'cloud:skip-account',
+  cloudSignedOut: 'cloud:signed-out',
 
   // main -> renderer (send)
   settingsChanged: 'settings:changed',
   historyAdded: 'history:added',
+  historyChanged: 'history:changed',
   hotkeyCaptured: 'hotkey:captured',
   dictationState: 'dictation:state',
   enabledChanged: 'app:enabled-changed',
   navigate: 'app:navigate',
+  cloudStatusChanged: 'cloud:status-changed',
+  cloudTokenRequest: 'cloud:token-request',
+  // renderer -> main (send)
+  cloudTokenResponse: 'cloud:token-response',
 
   // overlay <-> main
   overlayState: 'overlay:state',

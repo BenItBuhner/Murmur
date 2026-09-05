@@ -8,13 +8,29 @@ import { createLogger } from '../logger'
 const log = createLogger('window')
 let win: BrowserWindow | null = null
 let quitting = false
+/** Origin the packaged renderer is served from (`murmur://app`); dev builds use Vite's server. */
+let rendererOriginUrl: string | null = null
 
 export function setQuitting(v: boolean): void {
   quitting = v
 }
 
+export function setRendererOrigin(origin: string): void {
+  rendererOriginUrl = origin
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return win
+}
+
+function loadRenderer(target: BrowserWindow): void {
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    void target.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/index.html`)
+  } else if (rendererOriginUrl) {
+    void target.loadURL(`${rendererOriginUrl}/index.html`)
+  } else {
+    void target.loadFile(join(__dirname, '../renderer/index.html'))
+  }
 }
 
 export function createMainWindow(theme: 'light' | 'dark'): BrowserWindow {
@@ -43,11 +59,19 @@ export function createMainWindow(theme: 'light' | 'dark'): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      contextIsolation: true
+      contextIsolation: true,
+      // The hidden window keeps the Clerk session alive and answers token requests for the
+      // main-process sync engine; throttled timers would delay token refreshes.
+      backgroundThrottling: false
     }
   })
   win.on('ready-to-show', () => {
     if (!win?.isVisible() && shouldShowOnReady) win?.show()
+  })
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit' || quitting || !win) return
+    log.error(`renderer crashed (${details.reason}); reloading`)
+    loadRenderer(win)
   })
   win.on('close', (e) => {
     if (!quitting) {
@@ -66,11 +90,7 @@ export function createMainWindow(theme: 'light' | 'dark'): BrowserWindow {
     if (event.level === 'error' || event.level === 'warning')
       log.warn(`[renderer] ${event.message} (${event.sourceId}:${event.lineNumber})`)
   })
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/index.html`)
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  loadRenderer(win)
   return win
 }
 

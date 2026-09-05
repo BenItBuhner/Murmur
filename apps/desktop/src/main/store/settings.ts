@@ -18,6 +18,12 @@ type DeepPartial<T> = {
 }
 export type SettingsPatch = DeepPartial<Settings>
 
+/**
+ * Who made a change. `cloud` marks writes performed by the sync engine when it mirrors account
+ * data, so the engine does not echo them back to the server.
+ */
+export type SettingsOrigin = 'local' | 'cloud'
+
 function deepMerge<T>(base: T, patch: unknown): T {
   if (Array.isArray(patch)) return patch as T
   if (
@@ -89,23 +95,25 @@ export class SettingsStore extends EventEmitter {
     return this.store.get()
   }
 
-  patch(patch: SettingsPatch): Settings {
+  patch(patch: SettingsPatch, origin: SettingsOrigin = 'local'): Settings {
     const merged = deepMerge(this.store.get(), patch)
     const next = parseSettings(merged)
     this.store.set(next)
-    this.emit('change', next, patch)
+    this.emit('change', next, patch, origin)
     return next
   }
 
-  replace(next: Settings): Settings {
+  replace(next: Settings, origin: SettingsOrigin = 'local'): Settings {
     const parsed = parseSettings(next)
     this.store.set(parsed)
-    this.emit('change', parsed, {})
+    this.emit('change', parsed, {}, origin)
     return parsed
   }
 
+  /** Back to defaults, keeping the device identity and the account relationship intact. */
   reset(): Settings {
-    return this.replace(parseSettings({ onboardingComplete: true }))
+    const current = this.get()
+    return this.replace(parseSettings({ onboardingComplete: true, cloud: current.cloud }))
   }
 
   setSecret(slot: SecretSlot, plain: string): void {

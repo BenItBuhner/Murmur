@@ -30,6 +30,7 @@ import type {
 } from '@shared/types'
 import type { SoundName } from '@shared/ipc'
 import { createLogger } from '../logger'
+import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
 import type { HookService } from '../hotkeys/hook'
 import type { SettingsStore } from '../store/settings'
@@ -559,8 +560,8 @@ export class DictationController extends EventEmitter {
 
   private updateStats(entry: HistoryEntry): void {
     const s = this.deps.settings.get()
-    const today = new Date().toISOString().slice(0, 10)
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    const today = localDay(new Date(entry.createdAt))
+    const yesterday = localDay(new Date(entry.createdAt - 86400000))
     let streak = s.stats.streakDays
     if (s.stats.lastSessionDay !== today)
       streak = s.stats.lastSessionDay === yesterday ? streak + 1 : 1

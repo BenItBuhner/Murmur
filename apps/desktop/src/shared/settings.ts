@@ -153,6 +153,21 @@ export const settingsSchema = z.object({
       streakDays: z.number().default(0),
       lastSessionDay: z.string().default('')
     })
+    .prefault({}),
+  cloud: z
+    .object({
+      /** Stable per-install id reported to the account's device list. Generated on first run. */
+      deviceId: z.string().default(''),
+      deviceName: z.string().default(''),
+      /** `optional` account mode: the user chose to keep using Murmur without an account. */
+      accountSkipped: z.boolean().default(false),
+      /** Clerk user id of the last signed-in account; lets the app open offline after a restart. */
+      lastSignedInUserId: z.string().default(''),
+      /** Account whose cloud data absorbed this device's pre-account local data. */
+      importedForUserId: z.string().default(''),
+      /** Mirror of the account preference; history stays local unless the user opts in. */
+      historySync: z.boolean().default(false)
+    })
     .prefault({})
 })
 

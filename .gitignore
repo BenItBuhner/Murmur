@@ -7,6 +7,7 @@ out
 agent-tools
 .env
 .env.*
+!.env.example
 
 # Android
 apps/android/.gradle

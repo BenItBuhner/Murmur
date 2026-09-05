@@ -6,6 +6,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Badge } from '@renderer/components/ui/misc'
 import { Empty, PageHeader } from '@renderer/components/SettingRow'
+import { SyncBadge } from '@renderer/components/SyncBadge'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatRelative } from '@renderer/lib/utils'
 import { LatencyBar } from './Home'
@@ -24,10 +25,15 @@ export function HistoryPage(): React.JSX.Element {
   }
   useEffect(() => {
     void load()
-    return window.murmur.history.onAdded((e) => {
-      setEntries((prev) => [e, ...prev])
-      setTotal((t) => t + 1)
-    })
+    const unsubs = [
+      window.murmur.history.onAdded((e) => {
+        setEntries((prev) => [e, ...prev.filter((x) => x.id !== e.id)])
+        setTotal((t) => t + 1)
+      }),
+      // Entries merged from other devices (or removed there) arrive through the sync engine.
+      window.murmur.history.onChanged(() => void load())
+    ]
+    return () => unsubs.forEach((u) => u())
   }, [])
 
   const filtered = useMemo(() => {
@@ -66,13 +72,18 @@ export function HistoryPage(): React.JSX.Element {
     <div>
       <PageHeader
         title="History"
-        description={`${total} dictation${total === 1 ? '' : 's'}, stored only on this device.`}
+        description={`${total} dictation${total === 1 ? '' : 's'}, ${
+          settings.cloud.historySync ? 'synced across your devices.' : 'stored only on this device.'
+        }`}
         actions={
-          entries.length > 0 && (
-            <Button variant="outline" size="sm" onClick={clear}>
-              <Trash2 /> Clear all
-            </Button>
-          )
+          <>
+            {settings.cloud.historySync && <SyncBadge />}
+            {entries.length > 0 && (
+              <Button variant="outline" size="sm" onClick={clear}>
+                <Trash2 /> Clear all
+              </Button>
+            )}
+          </>
         }
       />
       {entries.length > 0 && (
@@ -125,9 +136,16 @@ export function HistoryPage(): React.JSX.Element {
                         </Badge>
                       )}
                       {e.llmUsed && <Badge variant="secondary">smart</Badge>}
-                      {!e.injected && !e.error && <Badge variant="outline">clipboard</Badge>}
+                      {e.remote && (
+                        <Badge variant="outline" title="Dictated on another device">
+                          {e.deviceName ?? 'other device'}
+                        </Badge>
+                      )}
+                      {!e.injected && !e.error && !e.remote && (
+                        <Badge variant="outline">clipboard</Badge>
+                      )}
                       {e.error && e.finalText && <Badge variant="destructive">not inserted</Badge>}
-                      {settings.general.showLatencyInHistory && !e.error && (
+                      {settings.general.showLatencyInHistory && !e.error && !e.remote && (
                         <span className="ml-auto tabular-nums">{e.timings.totalMs} ms</span>
                       )}
                     </div>
@@ -145,7 +163,7 @@ export function HistoryPage(): React.JSX.Element {
                         </div>
                       </div>
                     )}
-                    {settings.general.showLatencyInHistory && !e.error && (
+                    {settings.general.showLatencyInHistory && !e.error && !e.remote && (
                       <LatencyBar t={e.timings} />
                     )}
                     <div className="flex items-center gap-2 text-[12px] text-muted-foreground">

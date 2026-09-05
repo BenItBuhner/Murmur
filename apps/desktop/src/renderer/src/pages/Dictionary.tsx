@@ -8,11 +8,15 @@ import { Label } from '@renderer/components/ui/label'
 import { Switch } from '@renderer/components/ui/switch'
 import { Badge } from '@renderer/components/ui/misc'
 import { Empty, PageHeader } from '@renderer/components/SettingRow'
+import { SyncBadge } from '@renderer/components/SyncBadge'
+import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { uid } from '@renderer/lib/utils'
 
 export function DictionaryPage(): React.JSX.Element {
   const { settings, patch } = useSettings()
+  const { status } = useCloud()
+  const synced = !!status?.signedIn
   const [word, setWord] = useState('')
   const [aliases, setAliases] = useState('')
   const [fuzzy, setFuzzy] = useState(false)
@@ -65,7 +69,12 @@ export function DictionaryPage(): React.JSX.Element {
     <div className="space-y-8">
       <PageHeader
         title="Dictionary"
-        description="Names, jargon, and spellings the transcriber should get right. Words are sent to the speech model as a hint and enforced in the text afterwards."
+        description={
+          synced
+            ? 'Names, jargon, and spellings the transcriber should get right. Saved to your account and shared with every device you sign in on.'
+            : 'Names, jargon, and spellings the transcriber should get right. Words are sent to the speech model as a hint and enforced in the text afterwards.'
+        }
+        actions={<SyncBadge />}
       />
 
       <div className="rounded-xl border bg-card p-5 shadow-xs">

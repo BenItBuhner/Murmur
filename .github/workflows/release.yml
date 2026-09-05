@@ -27,6 +27,15 @@ concurrency:
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  # Murmur cloud instance baked into the desktop and Android builds. Set the repository variables
+  # CONVEX_URL and CLERK_PUBLISHABLE_KEY (production instance) to ship account-required builds;
+  # leave them unset for local-only builds. MURMUR_ACCOUNT_MODE=optional keeps sign-in skippable.
+  VITE_CONVEX_URL: ${{ vars.CONVEX_URL }}
+  VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+  VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
+  MURMUR_CONVEX_URL: ${{ vars.CONVEX_URL }}
+  MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+  MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
 
 jobs:
   verify:
@@ -47,6 +56,38 @@ jobs:
         id: versions
         run: node scripts/release.mjs check --tag "$RELEASE_TAG"
 
+  backend:
+    name: Backend test and deploy
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/backend
+    env:
+      # Production deploy key from the Convex dashboard (Settings -> Deploy keys). Without it the
+      # backend is only tested, not deployed.
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - name: Deploy backend to production
+        if: env.CONVEX_DEPLOY_KEY != ''
+        run: npx convex deploy --yes
+      - name: Note skipped deploy
+        if: env.CONVEX_DEPLOY_KEY == ''
+        run: echo "::warning::CONVEX_DEPLOY_KEY is not set; the backend was tested but not deployed."
+
   desktop-check:
     name: Desktop typecheck, lint, test
     needs: verify
@@ -65,13 +106,15 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       - run: npm ci
+        working-directory: packages/backend
+      - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
 
   desktop:
     name: Desktop ${{ matrix.name }}
-    needs: [verify, desktop-check]
+    needs: [verify, desktop-check, backend]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -113,6 +156,8 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       - run: npm ci
+        working-directory: packages/backend
+      - run: npm ci
 
       - name: Enable macOS code signing
         if: matrix.os == 'macos-latest' && env.MAC_CSC_LINK != ''
@@ -151,7 +196,7 @@ jobs:
 
   android:
     name: Android
-    needs: verify
+    needs: [verify, backend]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:

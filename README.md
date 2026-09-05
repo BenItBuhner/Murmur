@@ -11,6 +11,7 @@ This is a monorepo:
 | --- | --- | --- |
 | Desktop (Electron) | [`apps/desktop`](apps/desktop) | **Windows**, **Linux**, macOS (experimental) |
 | Android | [`apps/android`](apps/android) | Android 8.0+ |
+| Cloud backend (Convex + Clerk) | [`packages/backend`](packages/backend) | Accounts, synchronized dictionary and settings for both apps |
 
 ![Murmur home](docs/home.png)
 

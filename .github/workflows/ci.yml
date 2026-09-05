@@ -6,6 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+# Cloud builds: set the repository variables CONVEX_URL, CLERK_PUBLISHABLE_KEY (and optionally
+# MURMUR_ACCOUNT_MODE) to bake the production instance into the desktop and Android builds.
+# Without them every artifact is a local-only build.
+env:
+  VITE_CONVEX_URL: ${{ vars.CONVEX_URL }}
+  VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+  VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
+  MURMUR_CONVEX_URL: ${{ vars.CONVEX_URL }}
+  MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+  MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
+
 jobs:
   versions:
     name: Version consistency
@@ -18,6 +29,37 @@ jobs:
       # All version files (root + desktop package.json/lock, Android Gradle, README download table)
       # must agree; `npm run release -- <version>` keeps them in sync.
       - run: node scripts/release.mjs check
+
+  backend-check:
+    name: Backend typecheck, lint, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      # Push to Convex's anonymous local backend: validates the schema, indexes, auth config and
+      # every function for real, and regenerates convex/_generated, which must match what is committed
+      # (the desktop app typechecks against it).
+      - name: Deploy to a local Convex backend and check generated code
+        env:
+          CONVEX_AGENT_MODE: anonymous
+        run: |
+          # The first run creates the local deployment; it fails before the env vars exist.
+          npx convex dev --once --typecheck disable || true
+          npx convex env set CLERK_JWT_ISSUER_DOMAIN https://ci-placeholder.clerk.accounts.dev
+          npx convex env set CLERK_WEBHOOK_SIGNING_SECRET whsec_Y2ktcGxhY2Vob2xkZXItc2VjcmV0
+          npx convex dev --once
+          git diff --exit-code -- convex/_generated
 
   desktop-check:
     name: Desktop typecheck, lint, test
@@ -32,6 +74,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
+      # The desktop typecheck resolves backend types from packages/backend/convex.
+      - run: npm ci
+        working-directory: packages/backend
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -55,6 +100,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+        working-directory: packages/backend
       - run: npm ci
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'

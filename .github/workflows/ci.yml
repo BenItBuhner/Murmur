@@ -18,6 +18,8 @@ jobs:
       # All version files (root + desktop package.json/lock, Android Gradle, README download table)
       # must agree; `npm run release -- <version>` keeps them in sync.
       - run: node scripts/release.mjs check
+      - run: node --test scripts/release.test.mjs
+      - run: bash -n scripts/install.sh
 
   desktop-check:
     name: Desktop typecheck, lint, test

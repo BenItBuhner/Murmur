@@ -2,6 +2,8 @@ name: Release
 
 # Builds every platform and publishes a GitHub release (with SHA256SUMS) when a `v*` tag is pushed.
 # Cut a release with `npm run release -- <version>` and push the tag it creates (README → Releases).
+# Stable releases also upload unversioned aliases + install.sh/install.ps1, mark the GitHub release
+# as latest, and move the `latest` git tag to the same commit.
 # If a job flakes, re-run the failed jobs, or dispatch this workflow for the existing tag.
 
 on:
@@ -227,6 +229,9 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Add stable aliases and install helpers
+        run: node scripts/release.mjs aliases "$VERSION" release-assets
+
       - name: Generate checksums
         working-directory: release-assets
         run: sha256sum -- * | tee SHA256SUMS.txt
@@ -251,6 +256,11 @@ jobs:
             --prerelease="$PRERELEASE"
             --draft="$DRAFT"
           )
+          if [ "$PRERELEASE" != "true" ] && [ "$DRAFT" != "true" ]; then
+            args+=(--latest=true)
+          else
+            args+=(--latest=false)
+          fi
           if gh release view "$RELEASE_TAG" --json id >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists: updating notes and replacing assets."
             gh release edit "$RELEASE_TAG" "${args[@]}"
@@ -259,12 +269,26 @@ jobs:
             gh release create "$RELEASE_TAG" release-assets/* "${args[@]}" --verify-tag
           fi
 
+      - name: Point the latest tag at this stable release
+        if: env.PRERELEASE != 'true' && env.DRAFT != 'true'
+        run: |
+          commit="$(git rev-parse HEAD)"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/latest" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/latest" \
+              -f sha="$commit" -F force=true
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/latest" -f sha="$commit"
+          fi
+          echo "latest -> $commit ($RELEASE_TAG)"
+
       - name: Job summary
         run: |
           {
             echo "## Murmur $RELEASE_TAG"
             echo
             echo "Release page: https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG"
+            echo "Latest downloads: https://github.com/$GITHUB_REPOSITORY/releases/latest"
             echo
             cat "$RUNNER_TEMP/notes.md"
           } >> "$GITHUB_STEP_SUMMARY"

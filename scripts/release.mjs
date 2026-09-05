@@ -4,7 +4,8 @@
 //   node scripts/release.mjs <version> [--dry-run] [--no-git]
 //     Bump every version file to <version>, regenerate the README download table, commit
 //     "chore(release): v<version>" and create the annotated tag v<version>. Pushing that tag
-//     triggers .github/workflows/release.yml, which builds every platform and publishes the release.
+//     triggers .github/workflows/release.yml, which builds every platform and publishes the
+//     release, then moves the `latest` tag to the same commit (stable releases only).
 //
 //   node scripts/release.mjs check [--tag v<version>]
 //     Verify that all version files agree (and match the given tag). Used by CI.
@@ -12,9 +13,14 @@
 //   node scripts/release.mjs notes <version> <assets-dir>
 //     Print release-notes markdown (download table + install notes) for the files in <assets-dir>.
 //     Used by the release workflow to fill in the GitHub release body.
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+//
+//   node scripts/release.mjs aliases <version> <assets-dir>
+//     Copy each built file to its stable (unversioned) name and add install.sh / install.ps1 so
+//     https://github.com/<repo>/releases/latest/download/<alias> keeps working after the next bump.
+import { appendFileSync, copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const FILES = {
@@ -32,27 +38,99 @@ const GRADLE_VERSION_RE = /^val murmurVersion = "([^"]*)"$/m
 const README_BLOCK_RE = /<!-- downloads:start v(\S+) -->[\s\S]*?<!-- downloads:end -->/
 
 /**
- * Every file a release ships, in display order. File names must match the artifactName patterns
- * in apps/desktop/electron-builder.yml and the Android step of .github/workflows/release.yml.
+ * Every file a release ships, in display order. `file` must match the artifactName patterns in
+ * apps/desktop/electron-builder.yml and the Android step of .github/workflows/release.yml.
+ * `alias` is the stable name uploaded alongside it so /releases/latest/download/<alias> does not
+ * break when the version changes.
  * Quirks worth knowing: NSIS emits a combined x64+arm64 installer in addition to the per-arch
  * ones when the pattern contains ${arch}, and .deb / AppImage use Debian arch names (amd64, x86_64).
  */
 const ASSETS = [
-  { group: 'Windows', label: 'Installer (x64 + arm64)', file: (v) => `Murmur-${v}-setup.exe` },
-  { group: 'Windows', label: 'Portable (x64)', file: (v) => `Murmur-${v}-portable.exe` },
-  { group: 'Windows x64 only', label: 'Installer', file: (v) => `Murmur-${v}-x64-setup.exe` },
-  { group: 'Windows arm64 only', label: 'Installer', file: (v) => `Murmur-${v}-arm64-setup.exe` },
-  { group: 'Linux x64', label: 'AppImage', file: (v) => `Murmur-${v}-x86_64.AppImage` },
-  { group: 'Linux x64', label: '.deb', file: (v) => `murmur_${v}_amd64.deb` },
-  { group: 'Linux arm64', label: 'AppImage', file: (v) => `Murmur-${v}-arm64.AppImage` },
-  { group: 'Linux arm64', label: '.deb', file: (v) => `murmur_${v}_arm64.deb` },
-  { group: 'macOS (Apple silicon)', label: '.dmg', file: (v) => `Murmur-${v}-arm64.dmg` },
-  { group: 'macOS (Apple silicon)', label: '.zip', file: (v) => `Murmur-${v}-arm64.zip` },
-  { group: 'macOS (Intel)', label: '.dmg', file: (v) => `Murmur-${v}-x64.dmg` },
-  { group: 'macOS (Intel)', label: '.zip', file: (v) => `Murmur-${v}-x64.zip` },
-  { group: 'Android', label: 'APK', file: (v) => `Murmur-${v}-android.apk` }
+  {
+    group: 'Windows',
+    label: 'Installer (x64 + arm64)',
+    file: (v) => `Murmur-${v}-setup.exe`,
+    alias: 'Murmur-setup.exe'
+  },
+  {
+    group: 'Windows',
+    label: 'Portable (x64)',
+    file: (v) => `Murmur-${v}-portable.exe`,
+    alias: 'Murmur-portable.exe'
+  },
+  {
+    group: 'Windows x64 only',
+    label: 'Installer',
+    file: (v) => `Murmur-${v}-x64-setup.exe`,
+    alias: 'Murmur-x64-setup.exe'
+  },
+  {
+    group: 'Windows arm64 only',
+    label: 'Installer',
+    file: (v) => `Murmur-${v}-arm64-setup.exe`,
+    alias: 'Murmur-arm64-setup.exe'
+  },
+  {
+    group: 'Linux x64',
+    label: 'AppImage',
+    file: (v) => `Murmur-${v}-x86_64.AppImage`,
+    alias: 'Murmur-x86_64.AppImage'
+  },
+  {
+    group: 'Linux x64',
+    label: '.deb',
+    file: (v) => `murmur_${v}_amd64.deb`,
+    alias: 'murmur_amd64.deb'
+  },
+  {
+    group: 'Linux arm64',
+    label: 'AppImage',
+    file: (v) => `Murmur-${v}-arm64.AppImage`,
+    alias: 'Murmur-arm64.AppImage'
+  },
+  {
+    group: 'Linux arm64',
+    label: '.deb',
+    file: (v) => `murmur_${v}_arm64.deb`,
+    alias: 'murmur_arm64.deb'
+  },
+  {
+    group: 'macOS (Apple silicon)',
+    label: '.dmg',
+    file: (v) => `Murmur-${v}-arm64.dmg`,
+    alias: 'Murmur-arm64.dmg'
+  },
+  {
+    group: 'macOS (Apple silicon)',
+    label: '.zip',
+    file: (v) => `Murmur-${v}-arm64.zip`,
+    alias: 'Murmur-arm64.zip'
+  },
+  {
+    group: 'macOS (Intel)',
+    label: '.dmg',
+    file: (v) => `Murmur-${v}-x64.dmg`,
+    alias: 'Murmur-x64.dmg'
+  },
+  {
+    group: 'macOS (Intel)',
+    label: '.zip',
+    file: (v) => `Murmur-${v}-x64.zip`,
+    alias: 'Murmur-x64.zip'
+  },
+  {
+    group: 'Android',
+    label: 'APK',
+    file: (v) => `Murmur-${v}-android.apk`,
+    alias: 'Murmur-android.apk'
+  }
 ]
 const CHECKSUMS_FILE = 'SHA256SUMS.txt'
+const INSTALL_HELPERS = [
+  { file: 'install.sh', src: resolve(ROOT, 'scripts/install.sh') },
+  { file: 'install.ps1', src: resolve(ROOT, 'scripts/install.ps1') }
+]
+const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.file)]
 
 // ---- helpers ----------------------------------------------------------------------------------
 
@@ -125,18 +203,47 @@ function readVersions() {
   }
 }
 
+function latestDownloadBase(repo) {
+  return `https://github.com/${repo}/releases/latest/download`
+}
+
+function knownReleaseFiles(version) {
+  return new Set([
+    ...ASSETS.map((a) => a.file(version)),
+    ...ASSETS.map((a) => a.alias),
+    ...EXTRA_RELEASE_FILES
+  ])
+}
+
+function installOneLiners(repo) {
+  const latest = latestDownloadBase(repo)
+  return [
+    '```bash',
+    `# Linux / macOS`,
+    `curl -fsSL ${latest}/install.sh | bash`,
+    '',
+    `# Windows (PowerShell)`,
+    `irm ${latest}/install.ps1 | iex`,
+    '```'
+  ]
+}
+
 // ---- markdown ---------------------------------------------------------------------------------
 
 function downloadBase(repo, version) {
   return `https://github.com/${repo}/releases/download/v${version}`
 }
 
-/** Markdown table of download links, restricted to `present` files when given. */
-function downloadTable(repo, version, present = null) {
-  const base = downloadBase(repo, version)
+/**
+ * Markdown table of download links.
+ * `mode: 'versioned'` uses /releases/download/vX/Murmur-X-...
+ * `mode: 'latest'` uses /releases/latest/download/<alias> so README links survive the next bump.
+ */
+function downloadTable(repo, version, { present = null, mode = 'versioned' } = {}) {
+  const base = mode === 'latest' ? latestDownloadBase(repo) : downloadBase(repo, version)
   const rows = new Map()
   for (const asset of ASSETS) {
-    const file = asset.file(version)
+    const file = mode === 'latest' ? asset.alias : asset.file(version)
     if (present && !present.has(file)) continue
     const links = rows.get(asset.group) ?? []
     links.push(`[${asset.label}](${base}/${file})`)
@@ -151,12 +258,18 @@ function downloadTable(repo, version, present = null) {
 function readmeBlock(repo, version) {
   const tag = `v${version}`
   const releases = `https://github.com/${repo}/releases`
+  const latest = latestDownloadBase(repo)
   return [
     `<!-- downloads:start ${tag} -->`,
     '<!-- Generated by `npm run release`; edit scripts/release.mjs instead of this block. -->',
-    `**Latest release: [${tag}](${releases}/tag/${tag})** · [All releases](${releases}) · [Checksums](${releases}/download/${tag}/${CHECKSUMS_FILE})`,
+    `**Latest release: [${tag}](${releases}/tag/${tag})** · [All releases](${releases}) · [Checksums](${latest}/${CHECKSUMS_FILE})`,
     '',
-    downloadTable(repo, version),
+    'The links below always resolve to the current stable release (`/releases/latest`). Versioned',
+    `filenames for ${tag} are on the [release page](${releases}/tag/${tag}).`,
+    '',
+    ...installOneLiners(repo),
+    '',
+    downloadTable(repo, version, { mode: 'latest' }),
     '<!-- downloads:end -->'
   ].join('\n')
 }
@@ -204,7 +317,8 @@ function releaseNotes(repo, version, dir) {
   const expected = new Set(ASSETS.map((a) => a.file(version)))
   for (const file of expected)
     if (!present.has(file)) warn(`expected release asset is missing: ${file}`)
-  const other = [...present].filter((f) => !expected.has(f) && f !== CHECKSUMS_FILE).sort()
+  const known = knownReleaseFiles(version)
+  const other = [...present].filter((f) => !known.has(f)).sort()
   const groups = new Set(ASSETS.filter((a) => present.has(a.file(version))).map((a) => a.group))
   const signed = {
     windows: process.env.MURMUR_WIN_SIGNED === 'true',
@@ -212,8 +326,29 @@ function releaseNotes(repo, version, dir) {
     android: process.env.MURMUR_ANDROID_RELEASE_KEY === 'true'
   }
   const base = downloadBase(repo, version)
+  const latest = latestDownloadBase(repo)
+  const aliasPresent = new Set(ASSETS.filter((a) => present.has(a.alias)).map((a) => a.alias))
 
-  const md = ['## Downloads', '', downloadTable(repo, version, present)]
+  const md = [
+    'Hold a key (or tap a pill), speak, and clean text lands wherever your cursor is.',
+    '',
+    '## Downloads',
+    '',
+    downloadTable(repo, version, { present })
+  ]
+  if (aliasPresent.size) {
+    md.push(
+      '',
+      '### Always latest (stable filenames)',
+      '',
+      `These names stay the same on every stable release. ${latest}/<file> follows GitHub's latest release.`,
+      '',
+      downloadTable(repo, version, { present: aliasPresent, mode: 'latest' })
+    )
+  }
+  if (INSTALL_HELPERS.some((h) => present.has(h.file))) {
+    md.push('', '## Install in one command', '', ...installOneLiners(repo))
+  }
   if (other.length) {
     md.push('', `Other files: ${other.map((f) => `[${f}](${base}/${f})`).join(' · ')}`)
   }
@@ -340,8 +475,9 @@ tagged ${tag}. To release, push the commit and the tag:
 
   git push origin ${branch} ${tag}
 
-The Release workflow builds every platform and publishes
-https://github.com/${repo}/releases/tag/${tag}`)
+The Release workflow builds every platform, publishes
+https://github.com/${repo}/releases/tag/${tag},
+and (for stable releases) moves the \`latest\` tag to the same commit.`)
 }
 
 function notes(version, dir) {
@@ -349,6 +485,33 @@ function notes(version, dir) {
   parseSemver(version)
   if (!dir || !existsSync(dir)) fail(`assets directory not found: ${dir}`)
   process.stdout.write(releaseNotes(detectRepo(), version, dir))
+}
+
+/** Copy versioned artifacts to stable names and attach the one-line install helpers. */
+function aliases(version, dir) {
+  version = version.replace(/^v/, '')
+  parseSemver(version)
+  if (!dir || !existsSync(dir)) fail(`assets directory not found: ${dir}`)
+  const present = new Set(readdirSync(dir))
+  let copied = 0
+  for (const asset of ASSETS) {
+    const srcName = asset.file(version)
+    if (!present.has(srcName)) continue
+    if (srcName === asset.alias) continue
+    copyFileSync(resolve(dir, srcName), resolve(dir, asset.alias))
+    console.error(`aliased ${srcName} -> ${asset.alias}`)
+    copied += 1
+  }
+  for (const helper of INSTALL_HELPERS) {
+    if (!existsSync(helper.src)) {
+      warn(`install helper missing: ${rel(helper.src)}`)
+      continue
+    }
+    copyFileSync(helper.src, resolve(dir, helper.file))
+    console.error(`copied   ${rel(helper.src)} -> ${helper.file}`)
+    copied += 1
+  }
+  if (!copied) warn('no aliases or install helpers were written')
 }
 
 // ---- cli --------------------------------------------------------------------------------------
@@ -368,14 +531,33 @@ function main(argv) {
   const [command, ...rest] = positional
   if (!command)
     fail(
-      'usage: release.mjs <version> [--dry-run] [--no-git] | check [--tag vX.Y.Z] | notes <version> <dir>'
+      'usage: release.mjs <version> [--dry-run] [--no-git] | check [--tag vX.Y.Z] | notes <version> <dir> | aliases <version> <dir>'
     )
   if (command === 'check') return check(flags)
   if (command === 'notes') {
     if (rest.length !== 2) fail('usage: release.mjs notes <version> <assets-dir>')
     return notes(rest[0], rest[1])
   }
+  if (command === 'aliases') {
+    if (rest.length !== 2) fail('usage: release.mjs aliases <version> <assets-dir>')
+    return aliases(rest[0], rest[1])
+  }
   return bump(command, flags)
 }
 
-main(process.argv.slice(2))
+const invokedDirectly =
+  Boolean(process.argv[1]) && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+if (invokedDirectly) main(process.argv.slice(2))
+
+export {
+  ASSETS,
+  CHECKSUMS_FILE,
+  EXTRA_RELEASE_FILES,
+  INSTALL_HELPERS,
+  downloadTable,
+  knownReleaseFiles,
+  latestDownloadBase,
+  parseSemver,
+  readmeBlock,
+  releaseNotes
+}

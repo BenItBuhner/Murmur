@@ -1,23 +1,63 @@
-name: Actions ping
+name: Restore Origin tree v2
 
 on:
   push:
     branches: [main]
-    paths: ['.github/restore/PING']
+    paths: ['.github/restore/GO']
   workflow_dispatch: {}
 
 permissions:
   contents: write
 
 jobs:
-  ping:
+  restore:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Delete marker to prove Actions runs
+      - name: Restore assets and prune stale files
+        id: restore
+        continue-on-error: true
         run: |
+          set -euxo pipefail
+          exec > /tmp/restore.log 2>&1
+          test -f .github/restore/GO
+          cat .github/restore/home-part-* | tr -d '\n' | base64 -d > docs/home.png
+          echo 'a900f6fac5f36e92c0666bd24458c791526cb56984b1cd850b5de973837a50e0  docs/home.png' | sha256sum -c -
+          curl -fsSL --max-time 120 -o /tmp/jfk.wav https://raw.githubusercontent.com/ggml-org/whisper.cpp/master/samples/jfk.wav
+          echo '59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e  /tmp/jfk.wav' | sha256sum -c -
+          mkdir -p apps/desktop/resources/fixtures apps/android/app/src/main/assets/fixtures
+          cp /tmp/jfk.wav apps/desktop/resources/fixtures/jfk.wav
+          cp /tmp/jfk.wav apps/android/app/src/main/assets/fixtures/jfk.wav
+          curl -fsSL --max-time 120 -o /tmp/gw.jar https://raw.githubusercontent.com/gradle/gradle/v8.13.0/gradle/wrapper/gradle-wrapper.jar
+          echo '81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f  /tmp/gw.jar' | sha256sum -c -
+          mkdir -p apps/android/gradle/wrapper
+          cp /tmp/gw.jar apps/android/gradle/wrapper/gradle-wrapper.jar
+          node --version
+          cd apps/desktop && node scripts/gen-icons.mjs && cd ../..
+          cd apps/desktop && npm install --package-lock-only --ignore-scripts --no-audit --no-fund && cd ../..
+          chmod +x apps/android/gradlew
+          sort .github/restore/keep-list.txt > /tmp/keep.txt
+          git add -A
+          git ls-files | sort > /tmp/have.txt
+          comm -23 /tmp/have.txt /tmp/keep.txt > /tmp/stale.txt
+          wc -l /tmp/stale.txt
+          while IFS= read -r f; do git rm -qf -- "$f"; done < /tmp/stale.txt
+          git add -A
           git config user.name 'Bennett Buhner'
           git config user.email '136861830+BenItBuhner@users.noreply.github.com'
-          git rm -q .github/restore/PING
-          git commit -m 'Actions proof-of-life: runner is alive'
+          git commit -m 'Restore binaries and lockfile from verified sources; prune stale pre-monorepo files'
           git push origin HEAD:main
+      - name: Commit failure log
+        if: steps.restore.outcome == 'failure'
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+          mkdir -p .github/restore
+          cp /tmp/restore.log .github/restore/last-run.log 2>/dev/null || echo 'restore.log missing' > .github/restore/last-run.log
+          git config user.name 'Bennett Buhner'
+          git config user.email '136861830+BenItBuhner@users.noreply.github.com'
+          git add .github/restore/last-run.log
+          git commit -m 'Restore run failed; see .github/restore/last-run.log'
+          git push origin HEAD:main
+          exit 1

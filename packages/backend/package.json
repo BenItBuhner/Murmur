@@ -1,0 +1,32 @@
+{
+  "name": "@murmur/backend",
+  "version": "0.1.0",
+  "description": "Murmur cloud backend - Convex functions and schema behind the synchronized dictionary, snippets, preferences and account state. Authenticated with Clerk.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "convex dev",
+    "codegen": "convex codegen",
+    "deploy": "convex deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "convex": "1.45.0",
+    "convex-helpers": "0.1.124",
+    "svix": "^2.3.0"
+  },
+  "devDependencies": {
+    "@convex-dev/eslint-plugin": "^4.0.0",
+    "@edge-runtime/vm": "^5.0.0",
+    "@types/node": "^22.20.1",
+    "convex-test": "^0.0.56",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^4.0.0"
+  }
+}

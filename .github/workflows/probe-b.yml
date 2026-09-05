@@ -1,0 +1,32 @@
+name: Probe B two-step
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/restore/PROBE-B']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove run
+        id: s1
+        continue-on-error: true
+        run: |
+          git config user.name 'Bennett Buhner'
+          git config user.email '136861830+BenItBuhner@users.noreply.github.com'
+          git rm -q .github/restore/PROBE-B
+          git commit -m 'probe-b ok: two-step structure works'
+          for i in 1 2 3 4 5; do
+            git push origin HEAD:main && exit 0
+            git pull --rebase origin main
+          done
+          exit 1
+      - name: Failure branch
+        if: steps.s1.outcome == 'failure'
+        run: echo 'step one failed'

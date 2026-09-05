@@ -1,0 +1,32 @@
+name: Probe C script features
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/restore/PROBE-C']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove run
+        run: |
+          set -euxo pipefail
+          exec > /tmp/probe.log 2>&1
+          curl -fsSL --max-time 60 -o /tmp/probe.wav https://raw.githubusercontent.com/ggml-org/whisper.cpp/master/samples/jfk.wav
+          echo '59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e  /tmp/probe.wav' | sha256sum -c -
+          node --version
+          git config user.name 'Bennett Buhner'
+          git config user.email '136861830+BenItBuhner@users.noreply.github.com'
+          git rm -q .github/restore/PROBE-C
+          git commit -m 'probe-c ok: script features work'
+          for i in 1 2 3 4 5; do
+            git push origin HEAD:main && exit 0
+            git pull --rebase origin main
+          done
+          exit 1

@@ -1,4 +1,5 @@
 {
   "name": "Murmur",
-  "install": "npm ci"
+  "install": "bash .cursor/setup.sh",
+  "start": "bash .cursor/start.sh"
 }

@@ -1,0 +1,23 @@
+name: Actions ping 2
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/restore/PING2']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete marker to prove Actions runs
+        run: |
+          git config user.name 'Bennett Buhner'
+          git config user.email '136861830+BenItBuhner@users.noreply.github.com'
+          git rm -q .github/restore/PING2
+          git commit -m 'Actions proof-of-life 2: runner is alive'
+          git push origin HEAD:main

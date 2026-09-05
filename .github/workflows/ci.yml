@@ -7,6 +7,18 @@ on:
     branches: [main]
 
 jobs:
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # All version files (root + desktop package.json/lock, Android Gradle, README download table)
+      # must agree; `npm run release -- <version>` keeps them in sync.
+      - run: node scripts/release.mjs check
+
   desktop-check:
     name: Desktop typecheck, lint, test
     runs-on: ubuntu-latest
@@ -80,7 +92,8 @@ jobs:
       # v5 is the last MIT-licensed major; v6 moves caching into a proprietary
       # component that requires accepting Gradle's Terms of Use.
       - uses: gradle/actions/setup-gradle@v5
-      - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest
+      # assembleRelease exercises the release signing config (debug-key fallback without secrets).
+      - run: ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
       - uses: actions/upload-artifact@v7
         with:
           name: murmur-android

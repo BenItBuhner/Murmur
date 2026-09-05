@@ -1,0 +1,270 @@
+name: Release
+
+# Builds every platform and publishes a GitHub release (with SHA256SUMS) when a `v*` tag is pushed.
+# Cut a release with `npm run release -- <version>` and push the tag it creates (README → Releases).
+# If a job flakes, re-run the failed jobs, or dispatch this workflow for the existing tag.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish (e.g. v0.2.0)
+        required: true
+        type: string
+      draft:
+        description: Save the GitHub release as a draft
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    name: Verify tag and versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.versions.outputs.version }}
+      prerelease: ${{ steps.versions.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check that every version file matches the tag
+        id: versions
+        run: node scripts/release.mjs check --tag "$RELEASE_TAG"
+
+  desktop-check:
+    name: Desktop typecheck, lint, test
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  desktop:
+    name: Desktop ${{ matrix.name }}
+    needs: [verify, desktop-check]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            script: build:win
+          - name: Linux
+            os: ubuntu-latest
+            script: build:linux
+          - name: macOS
+            os: macos-latest
+            script: build:mac
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    env:
+      # Code signing is optional: without these secrets the builds are simply unsigned. The values
+      # are copied into the variables electron-builder reads only when non-empty, because it treats
+      # an empty CSC_LINK as a real (broken) certificate.
+      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      WIN_CSC_LINK_SECRET: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD_SECRET: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      # Notarization runs only after a successful signing and only when APPLE_ID is set.
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+
+      - name: Enable macOS code signing
+        if: matrix.os == 'macos-latest' && env.MAC_CSC_LINK != ''
+        run: |
+          echo "CSC_LINK=$MAC_CSC_LINK" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=$MAC_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+      - name: Skip macOS identity discovery (no signing certificate configured)
+        if: matrix.os == 'macos-latest' && env.MAC_CSC_LINK == ''
+        run: |
+          echo "::warning::MAC_CSC_LINK is not set; the macOS build is unsigned and not notarized."
+          echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+      - name: Enable Windows code signing
+        if: matrix.os == 'windows-latest' && env.WIN_CSC_LINK_SECRET != ''
+        run: |
+          echo "WIN_CSC_LINK=$WIN_CSC_LINK_SECRET" >> "$GITHUB_ENV"
+          echo "WIN_CSC_KEY_PASSWORD=$WIN_CSC_KEY_PASSWORD_SECRET" >> "$GITHUB_ENV"
+      - name: Note unsigned Windows build
+        if: matrix.os == 'windows-latest' && env.WIN_CSC_LINK_SECRET == ''
+        run: echo "::warning::WIN_CSC_LINK is not set; the Windows build is unsigned (SmartScreen will warn)."
+
+      - name: Build ${{ matrix.name }} packages
+        run: npm run ${{ matrix.script }} -- --publish never
+      - name: List build output
+        run: ls -la dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.name }}
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    name: Android
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/android
+    env:
+      # Optional release keystore (base64 of the .jks/.keystore file). Without it the APK is signed
+      # with the debug key, which is fine for testing but cannot be upgraded by a release-signed APK.
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      MURMUR_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      MURMUR_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      MURMUR_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      # v5 is the last MIT-licensed major; v6 moves caching into a proprietary
+      # component that requires accepting Gradle's Terms of Use.
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Decode release keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/murmur-release.jks"
+          echo "MURMUR_KEYSTORE_FILE=$RUNNER_TEMP/murmur-release.jks" >> "$GITHUB_ENV"
+      - name: Note debug-signed build
+        if: env.ANDROID_KEYSTORE_BASE64 == ''
+        run: echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; the release APK is signed with the debug key."
+
+      - name: Test and build release APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleRelease
+      - name: Collect APK
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/Murmur-${VERSION}-android.apk"
+          ls -la dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android
+          path: apps/android/dist/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: [verify, desktop, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+      DRAFT: ${{ inputs.draft && 'true' || 'false' }}
+      # Lets the release notes drop the "unsigned build" hints when signing was configured.
+      MURMUR_WIN_SIGNED: ${{ secrets.WIN_CSC_LINK != '' }}
+      MURMUR_MAC_SIGNED: ${{ secrets.MAC_CSC_LINK != '' && secrets.APPLE_ID != '' }}
+      MURMUR_ANDROID_RELEASE_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release-assets
+        run: sha256sum -- * | tee SHA256SUMS.txt
+
+      - name: Write release notes
+        run: |
+          node scripts/release.mjs notes "$VERSION" release-assets > "$RUNNER_TEMP/notes.md"
+          # Append GitHub's auto-generated changelog (merged PRs / commits since the previous tag).
+          if gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f tag_name="$RELEASE_TAG" --jq .body > "$RUNNER_TEMP/changelog.md"; then
+            { echo; cat "$RUNNER_TEMP/changelog.md"; } >> "$RUNNER_TEMP/notes.md"
+          else
+            echo "::warning::Could not generate the changelog section; publishing without it."
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Create or update the release
+        run: |
+          args=(
+            --title "Murmur $RELEASE_TAG"
+            --notes-file "$RUNNER_TEMP/notes.md"
+            --prerelease="$PRERELEASE"
+            --draft="$DRAFT"
+          )
+          if gh release view "$RELEASE_TAG" --json id >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists: updating notes and replacing assets."
+            gh release edit "$RELEASE_TAG" "${args[@]}"
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/* "${args[@]}" --verify-tag
+          fi
+
+      - name: Job summary
+        run: |
+          {
+            echo "## Murmur $RELEASE_TAG"
+            echo
+            echo "Release page: https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG"
+            echo
+            cat "$RUNNER_TEMP/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"

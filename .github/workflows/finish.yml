@@ -1,0 +1,56 @@
+name: Finish migration
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/restore/LOCKGO-*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble lockfile and prune
+        id: fin
+        continue-on-error: true
+        run: |
+          set -euxo pipefail
+          exec > /tmp/fin.log 2>&1
+          git config user.name 'Bennett Buhner'
+          git config user.email '136861830+BenItBuhner@users.noreply.github.com'
+          cat .github/restore/lock-part-* | tr -d '\n' | base64 -d | gunzip > apps/desktop/package-lock.json
+          echo '69af273051258554e1c39cfaf605ca6890c4b75f20d1801930f815bf047643b7  apps/desktop/package-lock.json' | sha256sum -c -
+          sort .github/restore/keep-list.txt > /tmp/keep.txt
+          git add -A
+          git ls-files | sort > /tmp/have.txt
+          comm -23 /tmp/have.txt /tmp/keep.txt | grep -v '^\.github/workflows/' > /tmp/stale.txt || true
+          wc -l /tmp/stale.txt
+          while IFS= read -r f; do git rm -qf -- "$f"; done < /tmp/stale.txt
+          git add -A
+          git commit -m 'Add exact desktop package-lock.json from Origin; prune stale and payload files'
+          for i in 1 2 3 4 5; do
+            git push origin HEAD:main && exit 0
+            git pull --rebase origin main
+          done
+          exit 1
+      - name: Commit failure log
+        if: steps.fin.outcome == 'failure'
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+          mkdir -p .github/restore
+          cp /tmp/fin.log .github/restore/fin-fail.log 2>/dev/null || echo 'log missing' > .github/restore/fin-fail.log
+          git config user.name 'Bennett Buhner'
+          git config user.email '136861830+BenItBuhner@users.noreply.github.com'
+          git add .github/restore/fin-fail.log
+          git commit -m 'Finish run failed; see fin-fail.log'
+          for i in 1 2 3 4 5; do
+            git push origin HEAD:main && break
+            git pull --rebase origin main
+          done
+          exit 1

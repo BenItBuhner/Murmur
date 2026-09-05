@@ -11,7 +11,7 @@ cd "$REPO_ROOT"
 npm --prefix apps/desktop ci
 
 # --- Android SDK -------------------------------------------------------------
-# The Android app builds with AGP 8.7.3 / compileSdk 35 via the Gradle wrapper.
+# The Android app builds with AGP 8.13 / compileSdk 36 via the Gradle wrapper.
 # Install the command-line tools and the SDK packages Gradle needs.
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
@@ -36,7 +36,7 @@ set +o pipefail
 yes | "$CMDLINE_BIN/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses >/dev/null
 set -o pipefail
 "$CMDLINE_BIN/sdkmanager" --sdk_root="$ANDROID_HOME" \
-  "platform-tools" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+  "platform-tools" "platforms;android-36" "build-tools;36.0.0" >/dev/null
 
 # Point Gradle at the SDK (local.properties is gitignored).
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > apps/android/local.properties

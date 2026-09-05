@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 // Seed provider defaults from the environment, mirroring the desktop app's
@@ -40,7 +41,7 @@ if (releaseKeystore != null) {
 
 android {
     namespace = "app.murmur.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.murmur.android"
@@ -53,6 +54,15 @@ android {
         buildConfigField("String", "DEFAULT_API_KEY", "\"${envOrProp("MURMUR_API_KEY")}\"")
         buildConfigField("String", "DEFAULT_STT_MODEL", "\"${envOrProp("MURMUR_STT_MODEL")}\"")
         buildConfigField("String", "DEFAULT_LLM_MODEL", "\"${envOrProp("MURMUR_LLM_MODEL")}\"")
+
+        // Murmur cloud (accounts + sync). Same variables as the desktop build: leave them empty for
+        // a local-only build, set both for a build against a Murmur instance. Accounts are required
+        // by default when both are set; MURMUR_ACCOUNT_MODE=optional allows skipping.
+        buildConfigField("String", "CONVEX_URL", "\"${envOrProp("MURMUR_CONVEX_URL")}\"")
+        buildConfigField(
+            "String", "CLERK_PUBLISHABLE_KEY", "\"${envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY")}\""
+        )
+        buildConfigField("String", "ACCOUNT_MODE", "\"${envOrProp("MURMUR_ACCOUNT_MODE")}\"")
     }
 
     signingConfigs {
@@ -81,8 +91,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
     buildFeatures {
         compose = true
@@ -94,16 +106,25 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
+    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Accounts (Clerk) and the synced backend (Convex). See packages/backend.
+    implementation("com.clerk:clerk-android-api:1.1.5")
+    implementation("com.clerk:clerk-android-ui:1.1.5")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.2")
+    implementation("dev.convex:android-convexmobile:0.8.0@aar") {
+        isTransitive = true
+    }
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

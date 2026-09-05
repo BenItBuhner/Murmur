@@ -12,7 +12,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,7 +37,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -64,6 +62,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.murmur.android.audio.SAMPLE_RATE
 import app.murmur.android.audio.Wav
+import app.murmur.android.cloud.AccountMode
+import app.murmur.android.cloud.CloudConfig
+import app.murmur.android.cloud.CloudSync
 import app.murmur.android.llm.LlmClient
 import app.murmur.android.llm.LlmConfig
 import app.murmur.android.service.MurmurAccessibilityService
@@ -77,14 +78,21 @@ import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttException
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.AppContext
+import app.murmur.android.text.PipelineOptions
 import app.murmur.android.text.buildFormatMessages
 import app.murmur.android.text.maxTokensFor
 import app.murmur.android.text.runPipeline
 import app.murmur.android.text.sanitizeLlmOutput
-import app.murmur.android.text.PipelineOptions
+import app.murmur.android.ui.AccountGateScreen
+import app.murmur.android.ui.AccountSection
+import app.murmur.android.ui.Accent
+import app.murmur.android.ui.DictionaryEditor
+import app.murmur.android.ui.OnboardingScreen
+import app.murmur.android.ui.fieldColors
+import com.clerk.api.Clerk
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
-private val Accent = Color(0xFFFF5A36)
 private val DarkScheme = darkColorScheme(
     primary = Accent,
     background = Color(0xFF0E0E10),
@@ -98,57 +106,66 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val config = (application as? MurmurApplication)?.cloudConfig ?: CloudConfig.OFF
         setContent {
             MaterialTheme(colorScheme = DarkScheme) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    SettingsScreen()
+                    Root(config)
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Cloud builds: account gate -> onboarding -> settings. Local builds: onboarding -> settings.
+ * A device that signed in before keeps working from its local mirror when Clerk cannot be reached.
+ */
 @Composable
-fun SettingsScreen() {
+private fun Root(config: CloudConfig) {
     val context = LocalContext.current
     val store = remember { SettingsStore.get(context) }
     val settings by store.flow.collectAsState()
-    val scope = rememberCoroutineScope()
 
-    var micGranted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        )
+    val clerkReady by (if (config.enabled) Clerk.isInitialized else remember { MutableStateFlow(true) }).collectAsState()
+    val clerkUser by (if (config.enabled) Clerk.userFlow else remember { MutableStateFlow(null) }).collectAsState()
+    val syncStatus = CloudSync.get()?.status?.collectAsState()?.value
+    val signedIn = config.enabled && clerkUser != null
+
+    val accountWanted = config.accountMode == AccountMode.REQUIRED ||
+        (config.accountMode == AccountMode.OPTIONAL && !settings.accountSkipped)
+    if (accountWanted && !signedIn) {
+        val offlineFallback = clerkReady && settings.lastSignedInUserId.isNotEmpty()
+        if (!offlineFallback) {
+            AccountGateScreen(config, onSkip = { store.update { it.copy(accountSkipped = true) } })
+            return
+        }
     }
-    var overlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
-    var a11yRunning by remember { mutableStateOf(MurmurAccessibilityService.isRunning) }
 
-    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        micGranted = it
-    }
-    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
-    // Refresh permission states when returning from system settings.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(lifecycleOwner) {
-        lifecycleOwner.lifecycle.addObserver(
-            LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_RESUME) {
-                    micGranted = ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                    overlayGranted = Settings.canDrawOverlays(context)
-                    a11yRunning = MurmurAccessibilityService.isRunning
-                }
+    if (!settings.onboardingComplete) {
+        OnboardingScreen(
+            store = store,
+            signedIn = signedIn,
+            accountOnboarded = syncStatus?.user?.onboardingCompletedAt != null,
+            firstName = clerkUser?.firstName ?: syncStatus?.user?.name?.substringBefore(' '),
+            permissions = { PermissionRows() },
+            provider = { ProviderFields(store, settings, showDiscover = true) },
+            onFinish = {
+                store.update { it.copy(onboardingComplete = true) }
+                CloudSync.get()?.completeOnboarding()
             }
         )
+        return
     }
+    SettingsScreen(config, store, settings, signedIn)
+}
 
-    var models by remember { mutableStateOf<List<String>>(emptyList()) }
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSettings, signedIn: Boolean) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var llmModels by remember { mutableStateOf<List<String>>(emptyList()) }
-    var discovering by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     var testPad by remember { mutableStateOf("") }
@@ -170,61 +187,15 @@ fun SettingsScreen() {
             fontSize = 13.sp
         )
 
-        SectionCard("Setup") {
-            PermissionRow("Microphone", micGranted) {
-                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            }
-            PermissionRow("Display over other apps", overlayGranted) {
-                context.startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:${context.packageName}")
-                    )
-                )
-            }
-            PermissionRow("Accessibility service", a11yRunning) {
-                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-            if (Build.VERSION.SDK_INT >= 33) {
-                LaunchedEffect(Unit) {
-                    notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
+        if (config.enabled) {
+            SectionCard("Account") {
+                AccountSection(config, store, onSignIn = { store.update { it.copy(accountSkipped = false) } })
             }
         }
 
-        SectionCard("Speech to text") {
-            LabeledField("Base URL", settings.sttBaseUrl, placeholder = "https://api.groq.com/openai/v1") {
-                store.update { s -> s.copy(sttBaseUrl = it) }
-            }
-            LabeledField("API key", settings.sttApiKey, password = true) {
-                store.update { s -> s.copy(sttApiKey = it) }
-            }
-            LabeledField("Model", settings.sttModel, placeholder = "whisper-large-v3-turbo") {
-                store.update { s -> s.copy(sttModel = it) }
-            }
-            if (models.isNotEmpty()) {
-                ModelChips(models.take(8), settings.sttModel) {
-                    store.update { s -> s.copy(sttModel = it) }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        discovering = true
-                        scope.launch {
-                            try {
-                                models = SttClient.listModels(sttConfig(settings))
-                            } catch (e: Exception) {
-                                testResult = "Model discovery failed: ${friendly(e)}"
-                            } finally {
-                                discovering = false
-                            }
-                        }
-                    },
-                    enabled = !discovering && settings.sttBaseUrl.isNotEmpty()
-                ) { Text(if (discovering) "Discovering…" else "Discover models") }
-            }
-        }
+        SectionCard("Setup") { PermissionRows() }
+
+        SectionCard("Speech to text") { ProviderFields(store, settings, showDiscover = true) }
 
         SectionCard("Smart formatting") {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -270,9 +241,10 @@ fun SettingsScreen() {
                 },
                 enabled = settings.sttBaseUrl.isNotEmpty()
             ) { Text("Discover models") }
-            LabeledField("Custom words (comma-separated)", settings.dictionary, placeholder = "Murmur, Wispr") {
-                store.update { s -> s.copy(dictionary = it) }
-            }
+        }
+
+        SectionCard(if (signedIn) "Dictionary (synced)" else "Dictionary") {
+            DictionaryEditor(store, synced = signedIn)
         }
 
         SectionCard("Try it") {
@@ -327,6 +299,103 @@ fun SettingsScreen() {
     }
 }
 
+/** Microphone, overlay and accessibility permission rows; refreshed when returning from system settings. */
+@Composable
+fun PermissionRows() {
+    val context = LocalContext.current
+    var micGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var overlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var a11yRunning by remember { mutableStateOf(MurmurAccessibilityService.isRunning) }
+
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        micGranted = it
+    }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    micGranted = ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                    overlayGranted = Settings.canDrawOverlays(context)
+                    a11yRunning = MurmurAccessibilityService.isRunning
+                }
+            }
+        )
+    }
+
+    PermissionRow("Microphone", micGranted) {
+        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+    PermissionRow("Display over other apps", overlayGranted) {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            )
+        )
+    }
+    PermissionRow("Accessibility service", a11yRunning) {
+        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }
+    if (Build.VERSION.SDK_INT >= 33) {
+        LaunchedEffect(Unit) {
+            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
+/** Speech-to-text connection. Keys are device settings and are never synced. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProviderFields(store: SettingsStore, settings: MurmurSettings, showDiscover: Boolean) {
+    val scope = rememberCoroutineScope()
+    var models by remember { mutableStateOf<List<String>>(emptyList()) }
+    var discovering by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LabeledField("Base URL", settings.sttBaseUrl, placeholder = "https://api.groq.com/openai/v1") {
+        store.update { s -> s.copy(sttBaseUrl = it) }
+    }
+    LabeledField("API key", settings.sttApiKey, password = true) {
+        store.update { s -> s.copy(sttApiKey = it) }
+    }
+    LabeledField("Model", settings.sttModel, placeholder = "whisper-large-v3-turbo") {
+        store.update { s -> s.copy(sttModel = it) }
+    }
+    if (models.isNotEmpty()) {
+        ModelChips(models.take(8), settings.sttModel) {
+            store.update { s -> s.copy(sttModel = it) }
+        }
+    }
+    if (showDiscover) {
+        OutlinedButton(
+            onClick = {
+                discovering = true
+                error = null
+                scope.launch {
+                    try {
+                        models = SttClient.listModels(sttConfig(settings))
+                    } catch (e: Exception) {
+                        error = "Model discovery failed: ${friendly(e)}"
+                    } finally {
+                        discovering = false
+                    }
+                }
+            },
+            enabled = !discovering && settings.sttBaseUrl.isNotEmpty()
+        ) { Text(if (discovering) "Discovering…" else "Discover models") }
+        error?.let { Text(it, fontSize = 12.sp, color = Color(0xFFE08A8A)) }
+    }
+}
+
 private fun sttConfig(s: MurmurSettings) = SttConfig(
     kind = s.sttKind,
     baseUrl = s.sttBaseUrl,
@@ -345,7 +414,7 @@ private suspend fun runSampleTest(context: android.content.Context, s: MurmurSet
     val (pcm, rate) = Wav.decodePcm16(bytes)
     val wav = Wav.encodePcm16(Wav.resample(pcm, rate, SAMPLE_RATE), SAMPLE_RATE)
     val stt = SttClient.transcribeWithFallback(wav, null, sttConfig(s), s.sttFallbackModel)
-    val light = runPipeline(stt.text, PipelineOptions())
+    val light = runPipeline(stt.text, PipelineOptions(dictionary = s.dictionaryEntries))
     var out = "STT ${stt.latencyMs}ms: ${light.text.trim()}"
     val (base, key, model) = s.llmConnection()
     if (s.formattingMode == FormattingMode.SMART && base.isNotEmpty() && model.isNotEmpty()) {
@@ -415,15 +484,6 @@ private fun LabeledField(
     )
 }
 
-@Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Accent,
-    unfocusedBorderColor = Color(0xFF2A2A30),
-    focusedLabelColor = Accent,
-    unfocusedLabelColor = Color(0xFF9A9AA2),
-    cursorColor = Accent
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelChips(models: List<String>, selected: String, onSelect: (String) -> Unit) {
@@ -442,3 +502,6 @@ private fun ModelChips(models: List<String>, selected: String, onSelect: (String
         }
     }
 }
+
+@Suppress("unused")
+private val sttKinds = SttKind.entries

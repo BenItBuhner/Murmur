@@ -5,6 +5,7 @@ import android.util.Log
 import app.murmur.android.audio.Recorder
 import app.murmur.android.audio.SAMPLE_RATE
 import app.murmur.android.audio.Wav
+import app.murmur.android.cloud.CloudSync
 import app.murmur.android.llm.LlmClient
 import app.murmur.android.llm.LlmConfig
 import app.murmur.android.service.RecordingService
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 private const val TAG = "MurmurDictation"
 
@@ -196,7 +198,8 @@ object DictationController {
             selfCorrections = s.selfCorrections,
             autoCapitalize = s.autoCapitalize,
             trailingSpace = s.trailingSpace,
-            pressEnterCommand = s.spokenCommands
+            pressEnterCommand = s.spokenCommands,
+            dictionary = s.dictionaryEntries
         )
         val light = runPipeline(raw, pipelineOpts)
         var final = light
@@ -246,6 +249,11 @@ object DictationController {
         val error = currentSink.insert(final.text, final.pressEnter)
         if (error == null) {
             showTransient(DictationState.Success("Inserted"), 1500)
+            CloudSync.get()?.recordSession(
+                sessionId = UUID.randomUUID().toString(),
+                words = final.wordCount,
+                speechMs = System.currentTimeMillis() - startedAt
+            )
         } else {
             showTransient(DictationState.Error(error))
         }

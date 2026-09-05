@@ -64,6 +64,22 @@ describe('stats', () => {
       asAda.mutation(api.stats.recordSession, { words: 1, speechMs: 1, day: 'yesterday' })
     ).rejects.toThrow(/YYYY-MM-DD/)
 
+    // A replayed operation (same session id) must not count twice.
+    const once = await asAda.mutation(api.stats.recordSession, {
+      words: 7,
+      speechMs: 700,
+      day: '2026-09-05',
+      sessionId: 'session-1'
+    })
+    const twice = await asAda.mutation(api.stats.recordSession, {
+      words: 7,
+      speechMs: 700,
+      day: '2026-09-05',
+      sessionId: 'session-1'
+    })
+    expect(once.totalSessions).toBe(3)
+    expect(twice).toEqual(once)
+
     const imported = await asAda.mutation(api.stats.importLocal, {
       totalWords: 100,
       totalSessions: 20,
@@ -72,9 +88,9 @@ describe('stats', () => {
       lastSessionDay: '2026-09-01'
     })
     expect(imported).toMatchObject({
-      totalWords: 115,
-      totalSessions: 22,
-      totalSpeechMs: 65_000,
+      totalWords: 122,
+      totalSessions: 23,
+      totalSpeechMs: 65_700,
       streakDays: 7,
       lastSessionDay: '2026-09-05'
     })

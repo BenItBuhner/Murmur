@@ -20,7 +20,8 @@
     "paths": {
       "@renderer/*": ["src/renderer/src/*"],
       "@core/*": ["src/core/*"],
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["src/shared/*"],
+      "@backend/*": ["../../packages/backend/convex/*"]
     }
   }
 }

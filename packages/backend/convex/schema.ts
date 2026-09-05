@@ -96,6 +96,8 @@ export default defineSchema({
     streakDays: v.number(),
     /** Local calendar day (YYYY-MM-DD) of the last session, as reported by the device. */
     lastSessionDay: v.string(),
+    /** Recently counted session ids; lets a device replay `recordSession` without double counting. */
+    recentSessionIds: v.optional(v.array(v.string())),
     updatedAt: v.number()
   }).index('by_user', ['userId']),
 

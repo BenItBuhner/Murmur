@@ -6,8 +6,10 @@ import { runPipeline } from '@core/text/pipeline'
 import { buildSttPrompt } from '@core/text/dictionary'
 import { IPC } from '@shared/ipc'
 import type { Settings } from '@shared/settings'
+import type { CloudConfig, RendererAuthState, SyncStatus } from '@shared/cloud'
 import type { AppInfo, HistoryEntry, ProviderTestResult } from '@shared/types'
 import fixtureWav from '../../resources/fixtures/jfk.wav?asset'
+import type { CloudSync } from './cloud/sync-engine'
 import type { DictationController } from './dictation/session'
 import { friendlyError } from './dictation/session'
 import type { HookService } from './hotkeys/hook'
@@ -23,6 +25,8 @@ export interface IpcDeps {
   history: HistoryStore
   controller: DictationController
   hook: HookService
+  cloudConfig: CloudConfig
+  cloud: CloudSync
   onEnabledChange: (enabled: boolean) => void
   quit: () => void
 }
@@ -34,12 +38,43 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { settings, history, controller, hook } = deps
+  const { settings, history, controller, hook, cloud, cloudConfig } = deps
 
   settings.on('change', (next: Settings) => broadcast(IPC.settingsChanged, next))
   history.on('added', (entry: HistoryEntry) => broadcast(IPC.historyAdded, entry))
+  history.on('changed', () => broadcast(IPC.historyChanged, undefined))
   hook.on('capture', (c) => broadcast(IPC.hotkeyCaptured, { ...c, final: false }))
   hook.on('captured', (c) => broadcast(IPC.hotkeyCaptured, { ...c, final: true }))
+  cloud.on('status', (status: SyncStatus) => broadcast(IPC.cloudStatusChanged, status))
+
+  ipcMain.handle(IPC.cloudConfig, (): CloudConfig => cloudConfig)
+  ipcMain.handle(IPC.cloudStatus, (): SyncStatus => cloud.getStatus())
+  ipcMain.handle(IPC.cloudAuthState, (_e, state: RendererAuthState) => {
+    cloud.setAuthState(state)
+    return cloud.getStatus()
+  })
+  ipcMain.handle(IPC.cloudSyncNow, () => cloud.syncNow())
+  ipcMain.handle(IPC.cloudRemoveDevice, async (_e, deviceId: string) => {
+    try {
+      return { ok: await cloud.removeDevice(deviceId) }
+    } catch (err) {
+      return { ok: false, error: friendlyError(err) }
+    }
+  })
+  ipcMain.handle(IPC.cloudDeleteData, async () => {
+    try {
+      await cloud.deleteMyData()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: friendlyError(err) }
+    }
+  })
+  ipcMain.handle(IPC.cloudSetHistorySync, (_e, enabled: boolean) => cloud.setHistorySync(!!enabled))
+  ipcMain.handle(IPC.cloudSkipAccount, () => {
+    if (cloudConfig.accountMode !== 'optional') return false
+    settings.patch({ cloud: { accountSkipped: true } })
+    return true
+  })
 
   ipcMain.handle(IPC.settingsGet, () => settings.get())
   ipcMain.handle(IPC.settingsPatch, (_e, patch: SettingsPatch) => settings.patch(patch))
@@ -222,6 +257,7 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IPC.appQuit, () => deps.quit())
   ipcMain.handle(IPC.onboardingComplete, () => {
     settings.patch({ onboardingComplete: true })
+    cloud.completeOnboarding()
     showMainWindow('home')
   })
 

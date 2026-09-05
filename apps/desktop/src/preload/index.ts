@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { exposeClerkBridge } from '@clerk/electron/preload'
 import { IPC } from '@shared/ipc'
 import type { Settings, SttProviderKind } from '@shared/settings'
+import type {
+  CloudConfig,
+  RendererAuthState,
+  SyncStatus,
+  TokenRequest,
+  TokenResponse
+} from '@shared/cloud'
 import type {
   AppInfo,
   DictationEvent,
@@ -61,7 +69,25 @@ const api = {
     delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC.historyDelete, id),
     clear: (): Promise<void> => ipcRenderer.invoke(IPC.historyClear),
     reinsert: (id: string): Promise<InjectResultDto> => ipcRenderer.invoke(IPC.historyReinsert, id),
-    onAdded: (cb: (e: HistoryEntry) => void): Unsub => on(IPC.historyAdded, cb)
+    onAdded: (cb: (e: HistoryEntry) => void): Unsub => on(IPC.historyAdded, cb),
+    onChanged: (cb: () => void): Unsub => on(IPC.historyChanged, cb)
+  },
+  cloud: {
+    config: (): Promise<CloudConfig> => ipcRenderer.invoke(IPC.cloudConfig),
+    status: (): Promise<SyncStatus> => ipcRenderer.invoke(IPC.cloudStatus),
+    onStatus: (cb: (s: SyncStatus) => void): Unsub => on(IPC.cloudStatusChanged, cb),
+    reportAuth: (state: RendererAuthState): Promise<SyncStatus> =>
+      ipcRenderer.invoke(IPC.cloudAuthState, state),
+    onTokenRequest: (cb: (req: TokenRequest) => void): Unsub => on(IPC.cloudTokenRequest, cb),
+    respondToken: (res: TokenResponse): void => ipcRenderer.send(IPC.cloudTokenResponse, res),
+    syncNow: (): Promise<void> => ipcRenderer.invoke(IPC.cloudSyncNow),
+    removeDevice: (deviceId: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.cloudRemoveDevice, deviceId),
+    deleteData: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.cloudDeleteData),
+    setHistorySync: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC.cloudSetHistorySync, enabled),
+    skipAccount: (): Promise<boolean> => ipcRenderer.invoke(IPC.cloudSkipAccount)
   },
   stt: {
     listModels: (override?: SttOverride): Promise<ModelListResult> =>
@@ -112,3 +138,6 @@ const api = {
 export type MurmurApi = typeof api
 
 contextBridge.exposeInMainWorld('murmur', api)
+// Token cache + OAuth transport for @clerk/electron/react. Harmless when no cloud is configured:
+// the renderer only mounts ClerkProvider when it receives a publishable key from main.
+exposeClerkBridge()

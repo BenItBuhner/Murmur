@@ -35,9 +35,19 @@ export const get = authedQuery({
   }
 })
 
-/** Count one finished dictation. `day` is the device's local calendar day. */
+const RECENT_SESSION_IDS = 100
+
+/**
+ * Count one finished dictation. `day` is the device's local calendar day. `sessionId` makes the
+ * call idempotent so an offline queue can safely replay it.
+ */
 export const recordSession = authedMutation({
-  args: { words: v.number(), speechMs: v.number(), day: v.string() },
+  args: {
+    words: v.number(),
+    speechMs: v.number(),
+    day: v.string(),
+    sessionId: v.optional(v.string())
+  },
   returns: statsDtoValidator,
   handler: async (ctx, args) => {
     const day = requireDay(args.day)
@@ -46,12 +56,18 @@ export const recordSession = authedMutation({
     const now = Date.now()
     const existing = await loadStats(ctx)
     if (existing) {
+      if (args.sessionId && existing.recentSessionIds?.includes(args.sessionId)) return toDto(existing)
+      const recentSessionIds = args.sessionId
+        ? [...(existing.recentSessionIds ?? []), args.sessionId].slice(-RECENT_SESSION_IDS)
+        : existing.recentSessionIds
       const next = {
         totalWords: existing.totalWords + words,
         totalSessions: existing.totalSessions + 1,
         totalSpeechMs: existing.totalSpeechMs + speechMs,
         streakDays: nextStreak(existing, day),
-        lastSessionDay: daysBetween(existing.lastSessionDay || day, day) >= 0 ? day : existing.lastSessionDay,
+        lastSessionDay:
+          daysBetween(existing.lastSessionDay || day, day) >= 0 ? day : existing.lastSessionDay,
+        recentSessionIds,
         updatedAt: now
       }
       await ctx.db.patch('stats', existing._id, next)
@@ -64,6 +80,7 @@ export const recordSession = authedMutation({
       totalSpeechMs: speechMs,
       streakDays: 1,
       lastSessionDay: day,
+      recentSessionIds: args.sessionId ? [args.sessionId] : undefined,
       updatedAt: now
     }
     const id = await ctx.db.insert('stats', doc)

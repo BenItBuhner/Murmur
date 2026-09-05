@@ -1,9 +1,23 @@
-import { app, BrowserWindow, nativeTheme, shell } from 'electron'
-import { electronApp, optimizer } from '@electron-toolkit/utils'
+import { join } from 'node:path'
+import { app, BrowserWindow, nativeTheme, protocol, shell } from 'electron'
+import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import type { ClerkBridge } from '@clerk/electron'
 import { chordLabel } from '@core/hotkey/keys'
 import type { Settings } from '@shared/settings'
 import { Recorder } from './audio/recorder'
 import { applyLaunchAtLogin } from './autostart'
+import { buildTimeCloudConfig, resolveCloudConfig } from './cloud/config'
+import {
+  createClerk,
+  installDevCsp,
+  registerDeepLinkHandler,
+  rendererOrigin,
+  RENDERER_HOST,
+  serveRenderer
+} from './cloud/clerk'
+import { buildRendererCsp } from './cloud/csp'
+import { CloudSync } from './cloud/sync-engine'
+import { TokenBridge } from './cloud/token-bridge'
 import { DictationController } from './dictation/session'
 import { HookService } from './hotkeys/hook'
 import { registerIpc } from './ipc'
@@ -16,6 +30,7 @@ import {
   createMainWindow,
   getMainWindow,
   setQuitting,
+  setRendererOrigin,
   setShowOnReady,
   showMainWindow,
   updateTitleBar
@@ -31,17 +46,40 @@ if (process.platform === 'linux' && !process.env.MURMUR_KEEP_GPU) {
   app.disableHardwareAcceleration()
 }
 
+// Cloud/account configuration is decided before `ready`: the Clerk bridge must register the
+// privileged `murmur://` scheme the packaged renderer is served from before the app is ready.
+const cloud = resolveCloudConfig(process.env, buildTimeCloudConfig())
+const cloudConfig = cloud.config
+const userDataPath = app.getPath('userData')
+let clerk: ClerkBridge | null = null
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  if (cloudConfig.accountMode !== 'off') {
+    clerk = createClerk(cloudConfig, userDataPath)
+  } else {
+    protocol.registerSchemesAsPrivileged([
+      {
+        scheme: cloudConfig.deepLinkScheme,
+        privileges: {
+          standard: true,
+          secure: true,
+          supportFetchAPI: true,
+          corsEnabled: true,
+          stream: true
+        }
+      }
+    ])
+  }
   void main()
 }
 
 async function main(): Promise<void> {
   await app.whenReady()
   electronApp.setAppUserModelId('app.murmur.dictation')
-  const userData = app.getPath('userData')
+  const userData = userDataPath
   const logPath = initLogger(
     `${userData}/logs`,
     process.env.MURMUR_LOG_LEVEL === 'debug' ? 'debug' : 'info'
@@ -51,12 +89,41 @@ async function main(): Promise<void> {
     `Murmur ${app.getVersion()} starting (electron ${process.versions.electron}, ${process.platform}/${process.arch})`
   )
   log.info(`logs: ${logPath}`)
+  for (const warning of cloud.warnings) log.warn(warning)
+  log.info(
+    cloudConfig.accountMode === 'off'
+      ? 'accounts: off (local mode)'
+      : `accounts: ${cloudConfig.accountMode} (convex ${cloudConfig.convexUrl}, clerk ${cloudConfig.clerkFrontendApiHost})`
+  )
+
+  // The settings window is served from a stable origin in packaged builds (Clerk requires one; it
+  // also gives the renderer a real Content-Security-Policy). Dev builds keep using Vite's server.
+  const csp = buildRendererCsp({
+    clerkFrontendApiHost: cloudConfig.clerkFrontendApiHost || undefined,
+    dev: is.dev
+  })
+  serveRenderer(cloudConfig.deepLinkScheme, join(__dirname, '../renderer'), csp)
+  setRendererOrigin(rendererOrigin(cloudConfig.deepLinkScheme))
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    installDevCsp(csp, process.env['ELECTRON_RENDERER_URL'])
+  }
+  if (cloudConfig.accountMode !== 'off') registerDeepLinkHandler(cloudConfig.deepLinkScheme)
 
   const settings = new SettingsStore(userData)
   const history = new HistoryStore(userData)
   const overlay = new OverlayWindow()
   const recorder = new Recorder(overlay)
   const hook = new HookService(settings.get())
+  const tokenBridge = new TokenBridge(() => getMainWindow()?.webContents ?? null)
+  const cloudSync = new CloudSync({
+    config: cloudConfig,
+    settings,
+    history,
+    tokenBridge,
+    userDataPath: userData,
+    appVersion: app.getVersion(),
+    platform: process.platform
+  })
   let tray: AppTray | null = null
   let quitting = false
 
@@ -126,12 +193,22 @@ async function main(): Promise<void> {
     quit
   })
 
-  registerIpc({ settings, history, controller, hook, onEnabledChange: setEnabled, quit })
+  registerIpc({
+    settings,
+    history,
+    controller,
+    hook,
+    cloudConfig,
+    cloud: cloudSync,
+    onEnabledChange: setEnabled,
+    quit
+  })
+  cloudSync.start()
 
   hook.on('action', (a) => controller.handle(a))
   hook.start()
   controller.on('state', (phase: 'idle' | 'listening' | 'processing') => tray?.setPhase(phase))
-  controller.on('entry', () => undefined)
+  controller.on('entry', (entry) => cloudSync.recordSession(entry))
   settings.on('change', (s: Settings) => applySettings(s))
   applySettings(s0)
 
@@ -148,7 +225,15 @@ async function main(): Promise<void> {
   controller.on('state', relay)
   controller.on('entry', relay)
 
-  app.on('second-instance', () => showMainWindow())
+  app.on('second-instance', (_e, argv) => {
+    // OAuth deep links (murmur://app/sso-callback?...) arrive here on Windows/Linux; the Clerk
+    // bridge consumes them from argv. Either way, bring the window forward.
+    if (argv.some((a) => a.startsWith(`${cloudConfig.deepLinkScheme}://${RENDERER_HOST}`))) {
+      log.info('received deep link')
+    }
+    showMainWindow()
+  })
+  app.on('open-url', () => showMainWindow())
   app.on('activate', () => {
     if (!getMainWindow()) createMainWindow(resolvedTheme(settings.get()))
     showMainWindow()
@@ -161,10 +246,13 @@ async function main(): Promise<void> {
     quitting = true
     setQuitting(true)
     hook.stop()
+    cloudSync.dispose()
+    tokenBridge.dispose()
     settings.flush()
     history.flush()
   })
   app.on('will-quit', () => {
+    clerk?.cleanup()
     tray?.destroy()
     overlay.destroy()
   })

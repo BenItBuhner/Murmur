@@ -1,4 +1,11 @@
 {
   "name": "Murmur",
-  "install": "npm ci"
+  "install": "bash .cursor/setup.sh",
+  "terminals": [
+    {
+      "name": "xvfb",
+      "command": "rm -f /tmp/.X99-lock; Xvfb :99 -screen 0 1400x900x24 -ac +extension GLX +render -noreset",
+      "description": "Headless X display on :99 for the Electron desktop app. Run GUI commands with DISPLAY=:99, e.g. `DISPLAY=:99 npm --prefix apps/desktop run dev`."
+    }
+  ]
 }

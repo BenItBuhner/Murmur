@@ -22,8 +22,9 @@ This is a monorepo:
 
 | Platform | Download |
 | --- | --- |
-| Windows x64 | [Installer](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-x64-setup.exe) · [Portable](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-portable.exe) |
-| Windows arm64 | [Installer](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-arm64-setup.exe) |
+| Windows | [Installer (x64 + arm64)](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-setup.exe) · [Portable (x64)](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-portable.exe) |
+| Windows x64 only | [Installer](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-x64-setup.exe) |
+| Windows arm64 only | [Installer](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-arm64-setup.exe) |
 | Linux x64 | [AppImage](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-x86_64.AppImage) · [.deb](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/murmur_0.1.0_amd64.deb) |
 | Linux arm64 | [AppImage](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-arm64.AppImage) · [.deb](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/murmur_0.1.0_arm64.deb) |
 | macOS (Apple silicon) | [.dmg](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-arm64.dmg) · [.zip](https://github.com/BenItBuhner/voxflow/releases/download/v0.1.0/Murmur-0.1.0-arm64.zip) |
@@ -81,7 +82,7 @@ git push origin main v0.2.0   # the Release workflow builds and publishes the re
 ```
 
 The workflow checks that the tag matches the version files (`npm run release:check`), runs the
-desktop typecheck/lint/tests, then builds Windows (x64 and arm64 installers, portable), Linux
+desktop typecheck/lint/tests, then builds Windows (combined and per-arch installers, portable), Linux
 (AppImage and `.deb`, x64 and arm64), macOS (`.dmg` and `.zip`, Apple silicon and Intel) and the
 Android APK, and publishes them with `SHA256SUMS.txt` and auto-generated notes. A pre-release
 suffix (`v0.2.0-beta.1`) publishes a pre-release. If a job flakes, re-run it or dispatch the

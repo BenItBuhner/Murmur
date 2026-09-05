@@ -33,13 +33,15 @@ const README_BLOCK_RE = /<!-- downloads:start v(\S+) -->[\s\S]*?<!-- downloads:e
 
 /**
  * Every file a release ships, in display order. File names must match the artifactName patterns
- * in apps/desktop/electron-builder.yml (electron-builder uses Debian arch names for .deb and
- * AppImage: amd64 / x86_64) and the Android step of .github/workflows/release.yml.
+ * in apps/desktop/electron-builder.yml and the Android step of .github/workflows/release.yml.
+ * Quirks worth knowing: NSIS emits a combined x64+arm64 installer in addition to the per-arch
+ * ones when the pattern contains ${arch}, and .deb / AppImage use Debian arch names (amd64, x86_64).
  */
 const ASSETS = [
-  { group: 'Windows x64', label: 'Installer', file: (v) => `Murmur-${v}-x64-setup.exe` },
-  { group: 'Windows x64', label: 'Portable', file: (v) => `Murmur-${v}-portable.exe` },
-  { group: 'Windows arm64', label: 'Installer', file: (v) => `Murmur-${v}-arm64-setup.exe` },
+  { group: 'Windows', label: 'Installer (x64 + arm64)', file: (v) => `Murmur-${v}-setup.exe` },
+  { group: 'Windows', label: 'Portable (x64)', file: (v) => `Murmur-${v}-portable.exe` },
+  { group: 'Windows x64 only', label: 'Installer', file: (v) => `Murmur-${v}-x64-setup.exe` },
+  { group: 'Windows arm64 only', label: 'Installer', file: (v) => `Murmur-${v}-arm64-setup.exe` },
   { group: 'Linux x64', label: 'AppImage', file: (v) => `Murmur-${v}-x86_64.AppImage` },
   { group: 'Linux x64', label: '.deb', file: (v) => `murmur_${v}_amd64.deb` },
   { group: 'Linux arm64', label: 'AppImage', file: (v) => `Murmur-${v}-arm64.AppImage` },
@@ -161,7 +163,8 @@ function readmeBlock(repo, version) {
 
 function installNotes(groups, signed) {
   const notes = []
-  if (groups.has('Windows x64') || groups.has('Windows arm64')) {
+  const has = (platform) => [...groups].some((g) => g.startsWith(platform))
+  if (has('Windows')) {
     let note = '**Windows** — run the installer, or use the portable `.exe` without installing.'
     if (!signed.windows) {
       note +=
@@ -169,12 +172,12 @@ function installNotes(groups, signed) {
     }
     notes.push(note)
   }
-  if (groups.has('Linux x64') || groups.has('Linux arm64')) {
+  if (has('Linux')) {
     notes.push(
       '**Linux** — `chmod +x Murmur-*.AppImage && ./Murmur-*.AppImage`, or `sudo apt install ./murmur_*.deb`.'
     )
   }
-  if (groups.has('macOS (Apple silicon)') || groups.has('macOS (Intel)')) {
+  if (has('macOS')) {
     let note =
       '**macOS** — open the `.dmg`, drag Murmur to Applications, then grant Microphone and Accessibility access when asked.'
     if (!signed.mac) {
@@ -183,7 +186,7 @@ function installNotes(groups, signed) {
     }
     notes.push(note)
   }
-  if (groups.has('Android')) {
+  if (has('Android')) {
     let note =
       '**Android** — install the APK (allow installs from your browser or file manager if prompted), then enable the Murmur accessibility service and "display over other apps" from the setup screen.'
     if (!signed.android) {

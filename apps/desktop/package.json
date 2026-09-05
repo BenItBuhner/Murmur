@@ -4,6 +4,12 @@
   "description": "Murmur - hold a key, speak, and clean text lands wherever your cursor is. Wispr Flow-style voice dictation for Windows and Linux.",
   "main": "./out/main/index.js",
   "author": "Murmur contributors",
+  "homepage": "https://github.com/BenItBuhner/voxflow",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BenItBuhner/voxflow.git",
+    "directory": "apps/desktop"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {

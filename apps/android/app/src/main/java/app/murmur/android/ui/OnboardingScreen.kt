@@ -175,6 +175,11 @@ fun OnboardingScreen(
                         )
                         Spacer(Modifier.height(32.dp))
                         SpeechModelForm(store, settings, showAdvanced = false)
+                        SectionGap()
+                        Group("Language") {
+                            Spacer(Modifier.height(10.dp))
+                            LanguagePicker(store, settings)
+                        }
                     }
                 }
                 Spacer(Modifier.height(32.dp))

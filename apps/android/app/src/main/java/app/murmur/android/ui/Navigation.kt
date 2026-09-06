@@ -16,7 +16,7 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 
-enum class Route { HOME, BUTTON, MODEL, STYLE, DICTIONARY, PERMISSIONS, TRY_IT, ACCOUNT }
+enum class Route { HOME, BUTTON, MODEL, LANGUAGE, STYLE, DICTIONARY, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT, ACCOUNT }
 
 /** A plain back stack held in Compose state; the system back gesture pops it. */
 class Navigator(initial: List<Route>) {

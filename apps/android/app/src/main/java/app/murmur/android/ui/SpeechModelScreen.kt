@@ -154,14 +154,6 @@ fun SpeechModelForm(store: SettingsStore, settings: MurmurSettings, showAdvanced
                 placeholder = "Optional",
                 helper = "Tried when the first model is unavailable or rate limited."
             )
-            Spacer(Modifier.height(20.dp))
-            Field(
-                value = settings.language,
-                onValueChange = { store.update { s -> s.copy(language = it.trim()) } },
-                label = "Language",
-                placeholder = "auto",
-                helper = "A code such as en or de pins the language; auto lets the model decide."
-            )
         }
     }
 }

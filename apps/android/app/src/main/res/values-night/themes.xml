@@ -1,10 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Murmur" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/paper</item>
-        <item name="android:colorBackground">@color/paper</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
-    </style>
+    <!-- Following the system, at night. -->
+    <style name="Theme.Murmur" parent="Theme.Murmur.Dark" />
 </resources>

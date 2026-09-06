@@ -1,4 +1,5 @@
 import { Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
+import type { UpdateStatus } from '@shared/updates'
 import idleIcon from '../../resources/tray/idle.png?asset'
 import idleIcon2x from '../../resources/tray/idle@2x.png?asset'
 import listeningIcon from '../../resources/tray/listening.png?asset'
@@ -15,6 +16,8 @@ export interface TrayActions {
   setEnabled: (enabled: boolean) => void
   openApp: (route?: string) => void
   openLogs: () => void
+  checkForUpdates: () => void
+  installUpdate: () => void
   quit: () => void
 }
 
@@ -36,6 +39,7 @@ export class AppTray {
   private phase: TrayPhase = 'idle'
   private enabled = true
   private hotkeyLabel = ''
+  private update: UpdateStatus | null = null
   private icons: Record<TrayPhase, Electron.NativeImage>
 
   constructor(private actions: TrayActions) {
@@ -71,6 +75,43 @@ export class AppTray {
     this.rebuild()
   }
 
+  setUpdate(status: UpdateStatus): void {
+    // Progress ticks arrive several times a second; only rebuild the menu when the item changes.
+    const before = this.updateItem()
+    this.update = status
+    if (before.label !== this.updateItem().label) this.rebuild()
+  }
+
+  /** The update entry: install when ready, otherwise point at the release, otherwise check. */
+  private updateItem(): MenuItemConstructorOptions {
+    const u = this.update
+    if (u?.phase === 'ready' && u.release) {
+      return u.canInstall
+        ? {
+            label: `Install Murmur ${u.release.version} and restart`,
+            click: () => this.actions.installUpdate()
+          }
+        : {
+            label: `Murmur ${u.release.version} downloaded…`,
+            click: () => this.actions.openApp('general')
+          }
+    }
+    if ((u?.phase === 'available' || u?.phase === 'downloading') && u.release) {
+      return {
+        label:
+          u.phase === 'downloading'
+            ? `Downloading Murmur ${u.release.version}…`
+            : `Murmur ${u.release.version} is available…`,
+        click: () => this.actions.openApp('general')
+      }
+    }
+    return {
+      label: u?.phase === 'checking' ? 'Checking for updates…' : 'Check for updates…',
+      enabled: u?.phase !== 'checking' && u?.phase !== 'installing',
+      click: () => this.actions.checkForUpdates()
+    }
+  }
+
   private rebuild(): void {
     const listening = this.phase === 'listening'
     const status = !this.enabled
@@ -103,6 +144,8 @@ export class AppTray {
       { label: 'History', click: () => this.actions.openApp('history') },
       { label: 'Settings', click: () => this.actions.openApp('general') },
       { label: 'Open log file', click: () => this.actions.openLogs() },
+      { type: 'separator' },
+      this.updateItem(),
       { type: 'separator' },
       { label: 'Quit Murmur', click: () => this.actions.quit() }
     ]

@@ -12,6 +12,32 @@ describe('settings schema', () => {
     expect(s.formatting.fillerWords).toContain('um')
     expect(s.stt.kind).toBe('openai-compatible')
     expect(s.stats.totalWords).toBe(0)
+    // Appearance defaults keep the original look until the user opts in.
+    expect(s.general.theme).toBe('system')
+    expect(s.general.accent).toBe('neutral')
+    expect(s.general.accentColor).toBe('#ff5a36')
+    expect(s.general.tintedSurfaces).toBe(false)
+  })
+
+  it('accepts every accent choice and repairs a broken custom colour', () => {
+    expect(parseSettings({ general: { accent: 'system' } }).general.accent).toBe('system')
+    expect(parseSettings({ general: { accent: 'violet' } }).general.accent).toBe('violet')
+    const custom = parseSettings({
+      general: { accent: 'custom', accentColor: '#1E90FF', tintedSurfaces: true }
+    })
+    expect(custom.general.accent).toBe('custom')
+    expect(custom.general.accentColor).toBe('#1E90FF')
+    expect(custom.general.tintedSurfaces).toBe(true)
+    // A malformed colour falls back to the default instead of resetting the whole section.
+    const broken = parseSettings({
+      general: { accent: 'custom', accentColor: 'blue-ish', theme: 'dark' }
+    })
+    expect(broken.general.accentColor).toBe('#ff5a36')
+    expect(broken.general.theme).toBe('dark')
+    // An unknown accent id (older or newer build) drops to the section defaults, nothing else lost.
+    const unknown = parseSettings({ general: { accent: 'rainbow' }, stats: { totalWords: 7 } })
+    expect(unknown.general.accent).toBe('neutral')
+    expect(unknown.stats.totalWords).toBe(7)
   })
 
   it('keeps valid values and repairs invalid sections independently', () => {

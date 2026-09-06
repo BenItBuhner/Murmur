@@ -501,7 +501,7 @@ fun PrimaryButton(
     }
     val fg = when {
         !enabled -> c.inkMuted
-        tone == ButtonTone.EMBER -> Color.White
+        tone == ButtonTone.EMBER -> c.onEmber
         else -> c.paper
     }
     Row(

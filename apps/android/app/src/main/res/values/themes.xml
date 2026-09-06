@@ -1,12 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Window themes only cover the frame before Compose draws and the window background behind the
+    keyboard; MurmurTheme (ui/theme/Theme.kt) owns every colour on screen. Theme.Murmur follows the
+    system (values-night overrides it); MainActivity switches to the Light/Dark variants when the
+    user forces a mode. values-v31 swaps in the DeviceDefault parents so the window background picks
+    up wallpaper (Material You) colours too.
+-->
 <resources>
-    <!-- The window matches the Compose "paper" so there is no flash before the first frame.
-         System bar icon colours are set at runtime by enableEdgeToEdge(). -->
-    <style name="Theme.Murmur" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/paper</item>
-        <item name="android:colorBackground">@color/paper</item>
+    <style name="Theme.Murmur.Base" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.Murmur" parent="Theme.Murmur.Base" />
+
+    <style name="Theme.Murmur.Light" parent="Theme.Murmur.Base" />
+
+    <style name="Theme.Murmur.Dark" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

@@ -82,7 +82,7 @@ export function Shell({
                 onClick={() => onNavigate(item.id)}
                 className={cn(
                   'flex w-full items-center gap-2.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground',
-                  route === item.id && 'bg-accent text-foreground'
+                  route === item.id && 'bg-accent text-foreground [&>svg]:text-primary'
                 )}
               >
                 <item.icon className="size-4 opacity-80" strokeWidth={1.75} />
@@ -133,7 +133,7 @@ function StatusCard({
       title={listening ? 'Stop and insert' : 'Start hands-free dictation'}
     >
       <span className="relative flex size-2">
-        {(listening || processing) && (
+        {listening && (
           <span className="absolute inline-flex size-full rounded-full bg-record opacity-70 animate-pulse-soft" />
         )}
         <span
@@ -141,9 +141,11 @@ function StatusCard({
             'relative inline-flex size-2 rounded-full',
             !enabled
               ? 'bg-muted-foreground/40'
-              : listening || processing
+              : listening
                 ? 'bg-record'
-                : 'bg-success'
+                : processing
+                  ? 'bg-info'
+                  : 'bg-success'
           )}
         />
       </span>

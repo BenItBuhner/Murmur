@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import app.murmur.android.BuildConfig
 import app.murmur.android.audio.SAMPLE_RATE
 import app.murmur.android.audio.Wav
 import app.murmur.android.llm.LlmClient
@@ -104,18 +105,22 @@ fun TryItScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Un
             }
         }
 
-        SectionGap()
+        // Debug builds only: release installs always record from the microphone, so a phone can
+        // never be stuck dictating the sample sentence because this was left on.
+        if (BuildConfig.DEBUG) {
+            SectionGap()
 
-        Group("Without a microphone") {
-            Spacer(Modifier.height(6.dp))
-            Hairline()
-            ToggleRow(
-                "Dictate the sample clip instead",
-                settings.useFixtureAudio,
-                { v -> store.update { s -> s.copy(useFixtureAudio = v) } },
-                description = "For emulators: the button runs the bundled clip through the whole pipeline."
-            )
-            Hairline()
+            Group("Without a microphone") {
+                Spacer(Modifier.height(6.dp))
+                Hairline()
+                ToggleRow(
+                    "Dictate the sample clip instead",
+                    settings.useFixtureAudio,
+                    { v -> store.update { s -> s.copy(useFixtureAudio = v) } },
+                    description = "For emulators: the button runs the bundled clip through the whole pipeline (debug builds only)."
+                )
+                Hairline()
+            }
         }
     }
 }

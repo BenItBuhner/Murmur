@@ -6,6 +6,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Segmented } from '@renderer/components/ui/misc'
 import { Wordmark } from '@renderer/components/Shell'
 import { clerkAppearance, type ClerkView } from '@renderer/hooks/useCloud'
+import { useTheme } from '@renderer/hooks/useTheme'
 import { cn } from '@renderer/lib/utils'
 
 type Tab = 'sign-in' | 'sign-up'
@@ -14,7 +15,6 @@ interface Props {
   mode: AccountMode
   clerk: ClerkView
   platform?: string
-  dark: boolean
   /** Only offered in `optional` mode. */
   onSkip?: () => void
 }
@@ -24,9 +24,10 @@ interface Props {
  * renders the actual forms; Murmur supplies the framing, the sign-in/sign-up switch and offline
  * handling.
  */
-export function AccountGate({ mode, clerk, platform, dark, onSkip }: Props): React.JSX.Element {
+export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX.Element {
   const [tab, setTabState] = useState<Tab>('sign-up')
-  const appearance = clerkAppearance(dark)
+  const { theme } = useTheme()
+  const appearance = clerkAppearance(theme)
   const setTab = (next: Tab): void => {
     // Both forms use hash routing; drop any in-progress step of the other form when switching.
     if (window.location.hash) window.history.replaceState(null, '', window.location.pathname)

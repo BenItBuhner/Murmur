@@ -167,6 +167,11 @@ function parseSemver(version) {
   return { major: Number(major), minor: Number(minor), patch: Number(patch), prerelease }
 }
 
+/** True only when the release workflow is explicitly allowed to bake/deploy a cloud instance. */
+function isCloudRelease() {
+  return process.env.MURMUR_CLOUD_RELEASE === 'true'
+}
+
 function detectRepo() {
   if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY
   let url = ''
@@ -331,11 +336,19 @@ function releaseNotes(repo, version, dir) {
 
   const md = [
     'Hold a key (or tap a pill), speak, and clean text lands wherever your cursor is.',
-    '',
-    '## Downloads',
-    '',
-    downloadTable(repo, version, { present })
+    ''
   ]
+  if (!isCloudRelease()) {
+    md.push(
+      '## Local-only build',
+      '',
+      'This release is **local-only**. There is no production Convex or Clerk instance yet, so',
+      'accounts and cloud sync are disabled: dictionary, snippets, and settings stay on the device.',
+      'Nothing is uploaded. A future release will turn accounts on once that instance exists.',
+      ''
+    )
+  }
+  md.push('## Downloads', '', downloadTable(repo, version, { present }))
   if (aliasPresent.size) {
     md.push(
       '',
@@ -555,6 +568,7 @@ export {
   EXTRA_RELEASE_FILES,
   INSTALL_HELPERS,
   downloadTable,
+  isCloudRelease,
   knownReleaseFiles,
   latestDownloadBase,
   parseSemver,

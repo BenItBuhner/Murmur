@@ -1,10 +1,22 @@
 package app.murmur.android.ui
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SttKind
 import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttException
+import app.murmur.android.ui.theme.MurmurTheme
 import java.util.Calendar
+
+/** Secondary text, from the active palette (used by the shared Material sections). */
+internal val Muted: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+
+/** "Done" green, harmonized with the active palette. */
+internal val Success: Color
+    @Composable get() = MurmurTheme.colors.success
 
 fun sttConfig(s: MurmurSettings) = SttConfig(
     kind = s.sttKind,

@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -27,6 +28,7 @@ import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayPillView
+import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.OverlayShape
 import app.murmur.android.settings.SettingsStore
@@ -149,6 +151,8 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack
 fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modifier) {
     var previewState by remember { mutableStateOf<DictationState>(DictationState.Idle) }
     var playing by remember { mutableStateOf(false) }
+    // The same colours the accessibility service gives the real button.
+    val palette = PillTheme.resolve(LocalContext.current, settings)
 
     Stage(modifier.height(height)) {
         AndroidView(
@@ -161,6 +165,7 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
             },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
+                view.setPalette(palette)
                 view.configure(settings.overlayShape, OverlayAnchor.DEFAULT)
                 view.render(previewState)
             }

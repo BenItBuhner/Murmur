@@ -5,4 +5,5 @@
     <string name="accessibility_service_description">Shows the Murmur dictation pill above the keyboard and inserts transcribed text into the focused text field. Murmur never reads screen content except the text field you are dictating into.</string>
     <string name="notification_channel_name">Dictation</string>
     <string name="notification_recording">Listening…</string>
+    <string name="notification_channel_updates">Updates</string>
 </resources>

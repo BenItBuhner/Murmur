@@ -23,14 +23,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.murmur.android.BuildConfig
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.SyncStatus
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.settings.Languages
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SttKind
+import app.murmur.android.settings.ThemeMode
 import app.murmur.android.ui.components.Dot
 import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.NavRow
@@ -38,6 +41,10 @@ import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.PageMargin
 import app.murmur.android.ui.components.Wordmark
 import app.murmur.android.ui.theme.Murmur
+import app.murmur.android.ui.theme.supportsDynamicColor
+import app.murmur.android.update.UpdateManager
+import app.murmur.android.update.UpdatePhase
+import app.murmur.android.update.UpdateState
 
 /**
  * The index. A greeting, the live button, and one row per concern showing what it is currently
@@ -53,8 +60,10 @@ fun HomeScreen(
     onOpen: (Route) -> Unit
 ) {
     val c = Murmur.colors
+    val context = LocalContext.current
     val permissions = rememberPermissionState()
     val dictation by DictationController.state.collectAsState()
+    val updateState by UpdateManager.get(context).state.collectAsState()
     val modelReady = settings.speechModelConfigured
     val ready = permissions.allGranted && modelReady
     val greeting = remember { greetingFor() }
@@ -105,6 +114,8 @@ fun HomeScreen(
                 attention = !modelReady
             )
             Hairline()
+            NavRow("Language", Languages.label(settings.language), onClick = { onOpen(Route.LANGUAGE) })
+            Hairline()
             NavRow(
                 "Style",
                 "${settings.formattingMode.displayName} formatting, ${settings.tone.displayName.lowercase()} tone",
@@ -122,12 +133,16 @@ fun HomeScreen(
             Overline("This phone")
             Spacer(Modifier.height(6.dp))
             Hairline()
+            NavRow("Appearance", appearanceSummary(settings), onClick = { onOpen(Route.APPEARANCE) })
+            Hairline()
             NavRow(
                 "Permissions",
                 if (permissions.allGranted) "All allowed" else "${permissions.granted} of ${permissions.total} allowed",
                 onClick = { onOpen(Route.PERMISSIONS) },
                 attention = !permissions.allGranted
             )
+            Hairline()
+            NavRow("Updates", updateSummary(updateState, settings), onClick = { onOpen(Route.UPDATES) }, attention = updateState.phase == UpdatePhase.READY)
             Hairline()
             NavRow("Try it", "Test pad and sample clip", onClick = { onOpen(Route.TRY_IT) })
             Hairline()
@@ -177,6 +192,27 @@ private fun StatusLine(state: DictationState, ready: Boolean, onClick: () -> Uni
         Spacer(Modifier.width(9.dp))
         Overline(label, color = if (ready) c.inkSoft else c.ink)
     }
+}
+
+private fun appearanceSummary(s: MurmurSettings): String {
+    val mode = when (s.themeMode) {
+        ThemeMode.SYSTEM -> "Follows the system"
+        ThemeMode.LIGHT -> "Light"
+        ThemeMode.DARK -> "Dark"
+    }
+    val source = if (s.dynamicColor && supportsDynamicColor) "wallpaper colours" else "${s.accent.label.lowercase()} accent"
+    return "$mode, $source"
+}
+
+private fun updateSummary(state: UpdateState, s: MurmurSettings): String = when (state.phase) {
+    UpdatePhase.CHECKING -> "Checking…"
+    UpdatePhase.AVAILABLE -> "Version ${state.release?.version ?: ""} available".trim()
+    UpdatePhase.DOWNLOADING -> "Downloading version ${state.release?.version ?: ""}".trim()
+    UpdatePhase.READY -> "Version ${state.release?.version ?: ""} ready to install".trim()
+    UpdatePhase.INSTALLING -> "Installing…"
+    UpdatePhase.ERROR -> "Could not check for updates"
+    UpdatePhase.UP_TO_DATE, UpdatePhase.IDLE ->
+        if (s.updateAutoInstall) "Up to date, installs automatically" else if (s.updateAutoCheck) "Up to date, checks automatically" else "Manual"
 }
 
 private fun modelSummary(s: MurmurSettings): String {

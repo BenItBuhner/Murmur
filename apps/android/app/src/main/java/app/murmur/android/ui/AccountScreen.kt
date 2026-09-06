@@ -29,7 +29,7 @@ import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.theme.Murmur
-import app.murmur.android.ui.theme.MurmurColors
+import app.murmur.android.ui.theme.Paper
 import com.clerk.api.Clerk
 import kotlinx.coroutines.launch
 
@@ -44,7 +44,7 @@ fun syncLabel(status: SyncStatus): String = when (status.phase) {
 }
 
 @Composable
-fun syncColor(status: SyncStatus, c: MurmurColors = Murmur.colors): Color = when (status.phase) {
+fun syncColor(status: SyncStatus, c: Paper = Murmur.colors): Color = when (status.phase) {
     SyncPhase.SYNCED -> c.sage
     SyncPhase.ERROR -> c.clay
     SyncPhase.SYNCING, SyncPhase.CONNECTING -> c.ember

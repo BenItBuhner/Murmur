@@ -20,7 +20,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
@@ -45,7 +44,7 @@ import com.clerk.ui.auth.AuthView
 fun AccountGateScreen(config: CloudConfig, onSkip: () -> Unit) {
     val ready by Clerk.isInitialized.collectAsState()
     val c = Murmur.colors
-    val theme = remember { clerkTheme() }
+    val theme = clerkTheme()
     Column(
         Modifier
             .fillMaxSize()

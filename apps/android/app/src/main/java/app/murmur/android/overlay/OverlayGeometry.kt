@@ -121,10 +121,11 @@ object OverlayGeometry {
     }
 
     /**
-     * The spot (index into [spots], screen-space centres) a drag released at (cx, cy) should land
-     * on: the one nearest to where the finger was heading. A flick therefore reaches a spot the
-     * finger did not travel all the way to. [vx]/[vy] are in px per second; the look-ahead is
-     * capped at [maxLookaheadPx] so a violent fling does not sail past the intended spot.
+     * The spot (index into [spots], screen-space centres) nearest to (cx, cy). Given a velocity
+     * ([vx]/[vy] in px per second) the point is first projected [FLING_LOOKAHEAD_S] ahead, capped
+     * at [maxLookaheadPx], so a flick can reach a spot the finger did not travel all the way to.
+     * The pill both highlights and lands without one: what is nearest to the button is where it
+     * goes, so the target never changes hands at the moment of release.
      */
     fun nearestSpot(
         spots: List<Pair<Float, Float>>,

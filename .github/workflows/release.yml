@@ -29,15 +29,18 @@ concurrency:
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-  # Murmur cloud instance baked into the desktop and Android builds. Set the repository variables
-  # CONVEX_URL and CLERK_PUBLISHABLE_KEY (production instance) to ship account-required builds;
-  # leave them unset for local-only builds. MURMUR_ACCOUNT_MODE=optional keeps sign-in skippable.
-  VITE_CONVEX_URL: ${{ vars.CONVEX_URL }}
-  VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
-  VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
-  MURMUR_CONVEX_URL: ${{ vars.CONVEX_URL }}
-  MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
-  MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
+  # LOCAL-ONLY UNTIL A PRODUCTION INSTANCE EXISTS.
+  # Cloud keys are baked in only when MURMUR_CLOUD_RELEASE is explicitly "true". A stray
+  # CONVEX_URL / CLERK_PUBLISHABLE_KEY repository variable must not ship a production
+  # instance we do not have yet. Set MURMUR_CLOUD_RELEASE=true (plus CONVEX_URL,
+  # CLERK_PUBLISHABLE_KEY, and optionally MURMUR_ACCOUNT_MODE) when that instance is ready.
+  MURMUR_CLOUD_RELEASE: ${{ vars.MURMUR_CLOUD_RELEASE }}
+  VITE_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
+  VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
+  VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
+  MURMUR_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
+  MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
+  MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
 
 jobs:
   verify:
@@ -84,11 +87,16 @@ jobs:
       - run: npm run lint
       - run: npm test
       - name: Deploy backend to production
-        if: env.CONVEX_DEPLOY_KEY != ''
+        if: env.CONVEX_DEPLOY_KEY != '' && vars.MURMUR_CLOUD_RELEASE == 'true'
         run: npx convex deploy --yes
       - name: Note skipped deploy
-        if: env.CONVEX_DEPLOY_KEY == ''
-        run: echo "::warning::CONVEX_DEPLOY_KEY is not set; the backend was tested but not deployed."
+        if: env.CONVEX_DEPLOY_KEY == '' || vars.MURMUR_CLOUD_RELEASE != 'true'
+        run: |
+          if [ "${{ vars.MURMUR_CLOUD_RELEASE }}" != "true" ]; then
+            echo "::notice::Local-only release: Convex production deploy skipped (MURMUR_CLOUD_RELEASE is not true)."
+          else
+            echo "::warning::CONVEX_DEPLOY_KEY is not set; the backend was tested but not deployed."
+          fi
 
   desktop-check:
     name: Desktop typecheck, lint, test
@@ -334,6 +342,12 @@ jobs:
             echo
             echo "Release page: https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG"
             echo "Latest downloads: https://github.com/$GITHUB_REPOSITORY/releases/latest"
+            echo
+            if [ "$MURMUR_CLOUD_RELEASE" = "true" ]; then
+              echo "Cloud: production instance baked in (MURMUR_CLOUD_RELEASE=true)."
+            else
+              echo "Cloud: **local-only** — no Convex/Clerk instance baked in."
+            fi
             echo
             cat "$RUNNER_TEMP/notes.md"
           } >> "$GITHUB_STEP_SUMMARY"

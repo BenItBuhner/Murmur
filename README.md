@@ -50,6 +50,11 @@ ships the versioned names, per-platform install notes, and a `SHA256SUMS.txt`. B
 unsigned until the code-signing secrets described under [Releases](#releases) are configured, so
 Windows SmartScreen and macOS Gatekeeper will ask you to confirm the first launch.
 
+**These published builds are local-only.** There is no production Convex or Clerk instance yet, so
+the downloadable apps do not offer accounts or cloud sync — everything stays on the device. The
+code for accounts is in the repo (`packages/backend`); it is not baked into GitHub release
+artifacts until the `MURMUR_CLOUD_RELEASE` repository variable is set to `true`.
+
 ## Desktop (`apps/desktop`)
 
 - **One key, two behaviours, at the same time**
@@ -120,10 +125,11 @@ order, and a device that already had a dictionary merges it into the account the
 3. **Builds** — bake the instance into the apps with `VITE_CONVEX_URL` and `VITE_CLERK_PUBLISHABLE_KEY`
    (desktop, see [`apps/desktop/.env.example`](apps/desktop/.env.example)) and `MURMUR_CONVEX_URL` /
    `MURMUR_CLERK_PUBLISHABLE_KEY` (Android Gradle). `VITE_MURMUR_ACCOUNT_MODE` / `MURMUR_ACCOUNT_MODE`
-   choose `required` (default), `optional` or `off`. In CI and releases these come from the repository
-   variables `CONVEX_URL`, `CLERK_PUBLISHABLE_KEY` and `MURMUR_ACCOUNT_MODE`. At runtime the desktop
-   app also honours `MURMUR_CONVEX_URL`, `MURMUR_CLERK_PUBLISHABLE_KEY` and `MURMUR_ACCOUNT_MODE`,
-   which is handy for pointing a dev build at a staging instance.
+   choose `required` (default), `optional` or `off`. In CI and releases those values are used only
+   when the repository variable `MURMUR_CLOUD_RELEASE` is `true`; until then every artifact is
+   local-only, even if `CONVEX_URL` / `CLERK_PUBLISHABLE_KEY` happen to be set. At runtime the
+   desktop app also honours `MURMUR_CONVEX_URL`, `MURMUR_CLERK_PUBLISHABLE_KEY` and
+   `MURMUR_ACCOUNT_MODE`, which is handy for pointing a dev build at a staging instance.
 
 Backend checks: `npm run typecheck && npm run lint && npm test` in `packages/backend` (the tests run
 against an in-memory Convex via `convex-test`). The desktop app typechecks against the committed
@@ -163,10 +169,13 @@ Code signing is optional and switched on by repository secrets:
 | `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` | Developer ID Application certificate (`.p12`, base64-encoded) for macOS code signing. |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | macOS notarization; requires the certificate above. |
 | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` | Windows code-signing certificate (`.pfx`, base64-encoded). |
-| `CONVEX_DEPLOY_KEY` | Production deploy key for the Convex backend; the release workflow deploys `packages/backend` before building the apps when it is set. |
+| `CONVEX_DEPLOY_KEY` | Production deploy key for the Convex backend; the release workflow deploys `packages/backend` only when this is set **and** `MURMUR_CLOUD_RELEASE=true`. |
 
-The repository **variables** `CONVEX_URL`, `CLERK_PUBLISHABLE_KEY` and `MURMUR_ACCOUNT_MODE` select the
-cloud instance the builds talk to (see [Accounts and sync](#accounts-and-sync-packagesbackend)).
+The repository **variable** `MURMUR_CLOUD_RELEASE` is the master switch for a production instance.
+It must be the literal `true` before `CONVEX_URL`, `CLERK_PUBLISHABLE_KEY` or `MURMUR_ACCOUNT_MODE`
+are baked into desktop/Android artifacts, and before the backend is deployed. Leave it unset
+(the current state — there is no production instance yet) for local-only CI and releases. See
+[Accounts and sync](#accounts-and-sync-packagesbackend).
 
 Locally, `npm run android:build:release` honours the same keystore through the
 `MURMUR_KEYSTORE_FILE`, `MURMUR_KEYSTORE_PASSWORD`, `MURMUR_KEY_ALIAS` and `MURMUR_KEY_PASSWORD`

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ClerkProvider, useAuth, useUser } from '@clerk/electron/react'
 import type { CloudConfig, RendererAuthState, SyncStatus } from '@shared/cloud'
+import type { ResolvedTheme } from '@shared/theme'
 
 /** How long Clerk may take to load before the UI treats the device as offline. */
 const CLERK_LOAD_TIMEOUT_MS = 8000
@@ -197,22 +198,26 @@ export function useCloud(): Ctx {
   return ctx
 }
 
-/** Colors for Clerk's prebuilt components so they read as part of Murmur. */
-export function clerkAppearance(dark: boolean): {
+/**
+ * Colors for Clerk's prebuilt components so they read as part of Murmur. Clerk derives its own
+ * shades from these, so they come from the resolved palette as plain hex rather than CSS variables.
+ */
+export function clerkAppearance(theme: ResolvedTheme): {
   variables: Record<string, string>
   elements: Record<string, string | Record<string, string>>
 } {
+  const { hex } = theme
   return {
     variables: {
-      colorPrimary: dark ? '#ECEAE6' : '#262321',
-      colorBackground: dark ? '#1F1E1D' : '#FFFFFF',
-      colorText: dark ? '#ECEAE6' : '#2B2724',
-      colorTextSecondary: dark ? '#A8A29E' : '#78716C',
-      colorInputBackground: dark ? '#262524' : '#FFFFFF',
-      colorInputText: dark ? '#ECEAE6' : '#2B2724',
-      colorNeutral: dark ? '#ECEAE6' : '#262321',
-      colorDanger: '#DC4B3B',
-      colorSuccess: '#3BAA6C',
+      colorPrimary: hex.primary,
+      colorBackground: hex.card,
+      colorText: hex['card-foreground'],
+      colorTextSecondary: hex['muted-foreground'],
+      colorInputBackground: hex.card,
+      colorInputText: hex['card-foreground'],
+      colorNeutral: hex.foreground,
+      colorDanger: hex.destructive,
+      colorSuccess: hex.success,
       borderRadius: '0.75rem',
       fontFamily: 'var(--font-sans)',
       fontSize: '14px'

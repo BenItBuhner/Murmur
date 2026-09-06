@@ -29,7 +29,7 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }): Re
     if (!status?.updatedFrom) return
     toast.success(`Murmur updated to ${status.currentVersion}`, {
       description: `You were on ${status.updatedFrom}.`,
-      duration: 8000
+      duration: 15000
     })
     void window.murmur.updates.ackUpdated()
   }, [status?.updatedFrom, status?.currentVersion])

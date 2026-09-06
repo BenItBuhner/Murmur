@@ -199,15 +199,31 @@ function quoteShell(value: string): string {
 
 /**
  * Start the new version once this process has exited, so the single-instance lock is free. A
- * detached `sh` polls our pid; it survives us because it is its own session.
+ * detached shell polls our pid; it survives us because it is its own session.
+ *
+ * Chromium opens its files without O_CLOEXEC, so the shell inherits descriptors into the old
+ * AppImage mount; left open they would keep that mount (and the deleted old file) alive for as
+ * long as the new instance runs. bash can close arbitrary descriptors, dash cannot, hence the
+ * preference; without bash the relaunch still works, the old mount just lingers until quit.
  */
 function relaunchAfterExit(command: string, args: string[], ctx: InstallContext): void {
   const exec = [command, ...args].map(quoteShell).join(' ')
-  const script = `while kill -0 ${ctx.pid} 2>/dev/null; do sleep 0.2; done; exec ${exec}`
-  // Drop the AppImage runtime's variables so the new runtime sets its own.
+  const closeInherited =
+    'if [ -n "$BASH_VERSION" ] && [ -d /proc/self/fd ]; then ' +
+    'for fd in $(ls /proc/self/fd); do [ "$fd" -gt 2 ] && eval "exec $fd>&-" 2>/dev/null; done; ' +
+    'fi; '
+  const script = `${closeInherited}while kill -0 ${ctx.pid} 2>/dev/null; do sleep 0.2; done; exec ${exec}`
+  const shell = existsSync('/bin/bash') ? '/bin/bash' : '/bin/sh'
+  // Drop the AppImage runtime's variables (and its PATH entries) so the new runtime sets its own.
   const env = { ...ctx.env }
+  const appDir = env.APPDIR
   for (const key of ['APPIMAGE', 'APPDIR', 'OWD', 'ARGV0']) delete env[key]
-  const child = spawn('/bin/sh', ['-c', script], { detached: true, stdio: 'ignore', env })
+  if (appDir && env.PATH) {
+    env.PATH = env.PATH.split(':')
+      .filter((entry) => !entry.startsWith(appDir))
+      .join(':')
+  }
+  const child = spawn(shell, ['-c', script], { detached: true, stdio: 'ignore', env })
   child.on('error', (err) => ctx.log.error('relauncher failed to start', err))
   child.unref()
 }

@@ -84,6 +84,8 @@ export class UpdateService extends EventEmitter {
   private status: UpdateStatus
   private readonly state: JsonStore<UpdaterState>
   private readonly restoreWindow: boolean
+  /** This process was started by an update; confirm "up to date" soon instead of waiting a cycle. */
+  private readonly justUpdated: boolean
   /** Whether the asset selected for the current release can be applied on this install kind. */
   private installable = false
   private checkTimer: NodeJS.Timeout | null = null
@@ -111,6 +113,7 @@ export class UpdateService extends EventEmitter {
       this.state.flush()
     }
     this.restoreWindow = restoreWindow
+    this.justUpdated = updatedFrom !== null
     this.cleanDownloadDir()
     this.lastPrefs = deps.settings.get().updates
     this.status = {
@@ -487,8 +490,10 @@ export class UpdateService extends EventEmitter {
     const interval = this.deps.checkIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS
     const initial = this.deps.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS
     const last = this.status.lastCheckedAt
-    // Soon after start, unless a check happened recently (an update relaunch, a quick restart).
-    const first = last ? Math.max(initial, last + interval - Date.now()) : initial
+    // Soon after start, unless a check happened recently (a quick restart); an update relaunch
+    // always re-checks so the UI can confirm the new version is current.
+    const first =
+      last && !this.justUpdated ? Math.max(initial, last + interval - Date.now()) : initial
     this.checkTimer = setTimeout(() => {
       this.checkTimer = null
       void this.check({ manual: false })

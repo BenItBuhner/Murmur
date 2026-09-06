@@ -46,9 +46,26 @@ private fun languageLines(language: String?, style: FormatStyle): List<String> {
     return pinned.ifEmpty { listOf("- Write the output in the language the speaker used; never translate it.") }
 }
 
-private fun dictionaryLine(terms: List<String>): String {
-    val clean = terms.map { it.trim() }.filter { it.isNotEmpty() }.take(80)
-    return if (clean.isEmpty()) "" else "Spell these exactly as written: ${clean.joinToString(", ")}."
+/**
+ * The user's dictionary, with the mis-hearings they recorded as aliases (desktop: `dictionaryLine`).
+ * The recognizer has no idea "Wispr Flow" exists and writes "whisper flow"; the model is the stage
+ * that can hear the resemblance, so it is told to, and told just as clearly not to invent occurrences.
+ */
+fun dictionaryLine(terms: List<String>, aliases: Map<String, List<String>> = emptyMap()): String {
+    val items = ArrayList<String>()
+    val seen = HashSet<String>()
+    for (raw in terms) {
+        val w = raw.trim()
+        if (w.isEmpty() || !seen.add(w.lowercase())) continue
+        val heard = (aliases[raw] ?: aliases[w] ?: emptyList())
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.equals(w, ignoreCase = true) }
+            .take(2)
+        items.add(if (heard.isEmpty()) w else "$w (heard as ${heard.joinToString(", ") { "\"$it\"" }})")
+        if (items.size >= 80) break
+    }
+    if (items.isEmpty()) return ""
+    return "Personal dictionary: ${items.joinToString("; ")}. The recognizer often renders these names and terms as similar-sounding ordinary words or a slightly different spelling; where the text has something that sounds like one of them, write the dictionary spelling exactly as given. Never insert a dictionary term where nothing similar was said."
 }
 
 private fun freedomFixes(freedom: LlmFreedom): List<String> = when (freedom) {
@@ -112,7 +129,9 @@ fun buildFormatMessages(
     hints: TextHints? = null,
     /** Dictation language as stored in settings: "auto" or an ISO-639-1 code. */
     language: String = Languages.AUTO,
-    examples: Boolean = true
+    examples: Boolean = true,
+    /** Aliases per dictionary term: the mis-hearings the user recorded, passed on as hints. */
+    dictionaryAliases: Map<String, List<String>> = emptyMap()
 ): List<ChatMessage> {
     val fixes = mutableListOf(
         "Punctuation, capitalization and sentence boundaries, and obvious mis-hearings (homophones, split or merged words).",
@@ -148,7 +167,7 @@ fun buildFormatMessages(
     lines.add("")
     lines.add("Tone: ${toneDescription(style.tone)}")
     lines.add("Destination: ${categoryHint(app.category)}${if (app.packageName.isNotEmpty()) " (${app.packageName})" else ""}.")
-    dictionaryLine(dictionaryTerms).takeIf { it.isNotEmpty() }?.let { lines.add(it) }
+    dictionaryLine(dictionaryTerms, dictionaryAliases).takeIf { it.isNotEmpty() }?.let { lines.add(it) }
     if (hintText.isNotEmpty()) lines.add("About this dictation: ${hintText.joinToString(" ")}")
     if (style.instructions.isNotEmpty()) lines.add("Instructions from the user, which take precedence over the tone above:\n${style.instructions}")
     lines.add("")
@@ -314,9 +333,30 @@ fun maxTokensFor(raw: String, multiplier: Double = 2.0): Int {
     return minOf(4096, maxOf(768, Math.ceil(words * 1.6 * multiplier).toInt() + 512))
 }
 
-/** STT prompt hint built from the custom dictionary, mirroring the desktop behaviour. */
-fun buildSttPrompt(terms: List<String>): String? {
-    val clean = terms.map { it.trim() }.filter { it.isNotEmpty() }.take(60)
-    if (clean.isEmpty()) return null
-    return "Glossary: ${clean.joinToString(", ")}."
+/** Style hint that goes to the speech model on its own; nothing in it can be mistaken for speech. */
+const val STT_BASE_PROMPT = "Dictation with punctuation."
+
+/**
+ * Whisper-style prompt that biases decoding toward the user's vocabulary (desktop:
+ * `buildSttPrompt`). Whisper reads the prompt as the transcript of the previous segment, so it
+ * must never end with a term the speaker may say: with a term at the very end the model learns
+ * that "end of text" follows it, and the transcript stops the moment the term is spoken. The
+ * vocabulary therefore comes first and a neutral sentence closes the prompt. Kept short: Whisper
+ * only honours the last ~224 tokens.
+ */
+fun buildSttPrompt(terms: List<String>, maxChars: Int = 600): String {
+    val clean = ArrayList<String>()
+    val seen = HashSet<String>()
+    for (t in terms) {
+        val w = t.trim()
+        if (w.isNotEmpty() && seen.add(w.lowercase())) clean.add(w)
+    }
+    if (clean.isEmpty()) return STT_BASE_PROMPT
+    var glossary = ""
+    for (t in clean) {
+        val next = if (glossary.isEmpty()) t else "$glossary, $t"
+        if (STT_BASE_PROMPT.length + next.length + 14 > maxChars) break
+        glossary = next
+    }
+    return if (glossary.isEmpty()) STT_BASE_PROMPT else "Vocabulary: $glossary. $STT_BASE_PROMPT"
 }

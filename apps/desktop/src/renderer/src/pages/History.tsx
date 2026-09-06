@@ -11,6 +11,56 @@ import { useSettings } from '@renderer/hooks/useSettings'
 import { formatRelative } from '@renderer/lib/utils'
 import { LatencyBar } from './Home'
 
+/**
+ * What the smart-formatting stage did. The short form sits in the row; the detailed form in the
+ * expanded view explains rejections and how many model edits were reverted to the spoken words.
+ */
+function LlmBadge({
+  entry,
+  detailed
+}: {
+  entry: HistoryEntry
+  detailed?: boolean
+}): React.JSX.Element | null {
+  const llm = entry.llm
+  if (!llm) return entry.llmUsed ? <Badge variant="secondary">smart</Badge> : null
+  switch (llm.outcome) {
+    case 'used':
+      return <Badge variant="secondary">smart</Badge>
+    case 'partial':
+      return (
+        <Badge variant="secondary" title="Some model edits were reverted to your words">
+          smart · {llm.reverted} reverted
+        </Badge>
+      )
+    case 'rejected':
+      return detailed ? (
+        <Badge
+          variant="destructive"
+          title="The model's answer failed the guard rails; the rule-based text was inserted"
+        >
+          model rejected: {llm.detail}
+        </Badge>
+      ) : (
+        <Badge variant="outline" title={`Model rejected (${llm.detail}); rules used`}>
+          rules
+        </Badge>
+      )
+    case 'failed':
+      return detailed ? (
+        <Badge variant="destructive" title={llm.detail}>
+          model failed
+        </Badge>
+      ) : (
+        <Badge variant="outline" title={`Model failed (${llm.detail}); rules used`}>
+          rules
+        </Badge>
+      )
+    default:
+      return detailed ? <Badge variant="outline">model skipped: {llm.detail}</Badge> : null
+  }
+}
+
 export function HistoryPage(): React.JSX.Element {
   const { settings } = useSettings()
   const [entries, setEntries] = useState<HistoryEntry[]>([])
@@ -135,7 +185,7 @@ export function HistoryPage(): React.JSX.Element {
                           {e.mode === 'hands-free' ? 'hands-free' : 'command'}
                         </Badge>
                       )}
-                      {e.llmUsed && <Badge variant="secondary">smart</Badge>}
+                      <LlmBadge entry={e} />
                       {e.remote && (
                         <Badge variant="outline" title="Dictated on another device">
                           {e.deviceName ?? 'other device'}
@@ -165,6 +215,19 @@ export function HistoryPage(): React.JSX.Element {
                     )}
                     {settings.general.showLatencyInHistory && !e.error && !e.remote && (
                       <LatencyBar t={e.timings} />
+                    )}
+                    {(e.stages?.length || e.llm) && (
+                      <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                        <span className="mr-1 font-medium uppercase tracking-wider text-muted-foreground">
+                          Stages
+                        </span>
+                        {e.stages?.map((s) => (
+                          <Badge key={s} variant="outline">
+                            {s}
+                          </Badge>
+                        ))}
+                        {e.llm && <LlmBadge entry={e} detailed />}
+                      </div>
                     )}
                     <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
                       <span>

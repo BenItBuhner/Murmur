@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,7 @@ object MurmurTheme {
 
 /** Wallpaper (Material You) colours exist from Android 12. */
 val supportsDynamicColor: Boolean
+    @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.S)
     get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
 @Composable

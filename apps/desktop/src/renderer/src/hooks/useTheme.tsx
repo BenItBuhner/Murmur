@@ -65,16 +65,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
     [themeSetting, accent, accentColor, tinted, systemAccent, systemDark]
   )
 
-  const first = useRef(true)
+  const loaded = !!g
+  const settled = useRef(false)
   useEffect(() => {
     const root = document.documentElement
-    // Crossfade between palettes, but not on the initial paint.
+    // Crossfade between palettes the user picks, not on the initial paint or when the saved
+    // settings first replace the neutral placeholder.
     let timer: number | undefined
-    if (!first.current) {
+    if (settled.current) {
       root.classList.add('theme-transition')
       timer = window.setTimeout(() => root.classList.remove('theme-transition'), 320)
     }
-    first.current = false
+    settled.current = loaded
     applyTheme(root, theme)
     void window.murmur.theme.report({
       mode: theme.mode,
@@ -84,7 +86,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
     return () => {
       if (timer) window.clearTimeout(timer)
     }
-  }, [theme])
+  }, [theme, loaded])
 
   const value = useMemo<Ctx>(
     () => ({ theme, dark: theme.mode === 'dark', systemAccent }),

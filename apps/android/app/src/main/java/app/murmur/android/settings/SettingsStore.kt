@@ -3,6 +3,9 @@ package app.murmur.android.settings
 import android.content.Context
 import android.content.SharedPreferences
 import app.murmur.android.BuildConfig
+import app.murmur.android.overlay.OverlayAnchor
+import app.murmur.android.overlay.OverlayLayout
+import app.murmur.android.overlay.OverlayLayoutCodec
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -147,8 +150,9 @@ enum class AccentPreset(val id: String, val label: String, val seed: Int) {
 /**
  * Mirror of the desktop settings that matter on Android. Same defaults as the desktop
  * schema in apps/desktop/src/shared/settings.ts, minus desktop-only concerns (hotkeys,
- * injection strategies). The overlay button's shape and position, and the appearance
- * (theme, wallpaper colours, accent) are device settings and are never synced.
+ * injection strategies). The overlay button's shape and spots, and the appearance
+ * (theme, wallpaper colours, accent) are device settings (screens and keyboards differ)
+ * and are never synced.
  */
 data class MurmurSettings(
     val sttKind: SttKind = SttKind.OPENAI_COMPATIBLE,
@@ -194,13 +198,11 @@ data class MurmurSettings(
     val useFixtureAudio: Boolean = false,
     /** Resting shape of the floating dictation button. */
     val overlayShape: OverlayShape = OverlayShape.PILL,
-    /** Horizontal centre of the button as a fraction of the screen width (0 = left, 1 = right). */
-    val overlayAnchorX: Float = DEFAULT_OVERLAY_ANCHOR_X,
     /**
-     * Vertical position of the button's centre in dp, measured from the top edge of the keyboard.
-     * Positive floats above the keyboard; negative sits over it (for example on its toolbar row).
+     * The spots the floating button can be parked on (relative to the keyboard), which of them it
+     * rests on, and whether they are locked into one row or column.
      */
-    val overlayOffsetDp: Float = DEFAULT_OVERLAY_OFFSET_DP,
+    val overlayLayout: OverlayLayout = OverlayLayout.DEFAULT,
     /** Light, dark or follow the system. */
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     /** Material You: take the palette from the wallpaper (Android 12+). Ignored on older devices. */
@@ -233,16 +235,7 @@ data class MurmurSettings(
     fun llmConnection(): Triple<String, String, String> =
         if (llmSameAsStt) Triple(sttBaseUrl, sttApiKey, llmModel)
         else Triple(llmBaseUrl, llmApiKey, llmModel)
-
-    val overlayAtDefaultPosition: Boolean
-        get() = overlayAnchorX == DEFAULT_OVERLAY_ANCHOR_X && overlayOffsetDp == DEFAULT_OVERLAY_OFFSET_DP
 }
-
-/** Centred above the keyboard. */
-const val DEFAULT_OVERLAY_ANCHOR_X = 0.5f
-
-/** A 36 dp button whose bottom edge floats 12 dp above the keyboard: centre = 12 + 36 / 2. */
-const val DEFAULT_OVERLAY_OFFSET_DP = 30f
 
 /** Who made a change: the user on this device, or the sync engine mirroring the account. */
 enum class SettingsOrigin { LOCAL, CLOUD }
@@ -293,6 +286,23 @@ class SettingsStore(context: Context) {
         if (_flow.value.deviceId.isEmpty()) {
             update(SettingsOrigin.CLOUD) { it.copy(deviceId = java.util.UUID.randomUUID().toString()) }
         }
+        // Builds before spots stored one button position; read() already turned it into a layout.
+        if (prefs.contains(LEGACY_ANCHOR_X) || prefs.contains(LEGACY_OFFSET_DP)) {
+            write(_flow.value)
+            prefs.edit().remove(LEGACY_ANCHOR_X).remove(LEGACY_OFFSET_DP).apply()
+        }
+    }
+
+    private fun readOverlayLayout(default: OverlayLayout): OverlayLayout {
+        OverlayLayoutCodec.decode(prefs.getString("overlayLayout", null))?.let { return it }
+        if (prefs.contains(LEGACY_ANCHOR_X) || prefs.contains(LEGACY_OFFSET_DP)) {
+            val legacy = OverlayAnchor(
+                xFraction = prefs.getFloat(LEGACY_ANCHOR_X, OverlayAnchor.DEFAULT_X).coerceIn(0f, 1f),
+                offsetDp = prefs.getFloat(LEGACY_OFFSET_DP, OverlayAnchor.DEFAULT_OFFSET_DP)
+            )
+            return if (legacy == OverlayAnchor.DEFAULT) default else OverlayLayout.fromLegacy(legacy)
+        }
+        return default
     }
 
     private fun read(): MurmurSettings {
@@ -333,8 +343,7 @@ class SettingsStore(context: Context) {
             dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
             useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio),
             overlayShape = OverlayShape.from(prefs.getString("overlayShape", d.overlayShape.id)),
-            overlayAnchorX = prefs.getFloat("overlayAnchorX", d.overlayAnchorX).coerceIn(0f, 1f),
-            overlayOffsetDp = prefs.getFloat("overlayOffsetDp", d.overlayOffsetDp),
+            overlayLayout = readOverlayLayout(d.overlayLayout),
             themeMode = ThemeMode.from(prefs.getString("themeMode", d.themeMode.id)),
             dynamicColor = prefs.getBoolean("dynamicColor", d.dynamicColor),
             accent = AccentPreset.from(prefs.getString("accent", d.accent.id)),
@@ -387,8 +396,7 @@ class SettingsStore(context: Context) {
             .putString("dictionaryEntries", DictionaryCodec.encode(s.dictionaryEntries))
             .putBoolean("useFixtureAudio", s.useFixtureAudio)
             .putString("overlayShape", s.overlayShape.id)
-            .putFloat("overlayAnchorX", s.overlayAnchorX)
-            .putFloat("overlayOffsetDp", s.overlayOffsetDp)
+            .putString("overlayLayout", OverlayLayoutCodec.encode(s.overlayLayout))
             .putString("themeMode", s.themeMode.id)
             .putBoolean("dynamicColor", s.dynamicColor)
             .putString("accent", s.accent.id)
@@ -405,6 +413,9 @@ class SettingsStore(context: Context) {
     }
 
     companion object {
+        private const val LEGACY_ANCHOR_X = "overlayAnchorX"
+        private const val LEGACY_OFFSET_DP = "overlayOffsetDp"
+
         @Volatile
         private var instance: SettingsStore? = null
 

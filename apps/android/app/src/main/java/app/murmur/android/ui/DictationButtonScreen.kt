@@ -1,13 +1,18 @@
 package app.murmur.android.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,8 +30,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.murmur.android.dictation.DictationState
-import app.murmur.android.overlay.OverlayAnchor
+import app.murmur.android.overlay.OverlayArrangement
 import app.murmur.android.overlay.OverlayEditor
+import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.MurmurSettings
@@ -45,8 +51,6 @@ import app.murmur.android.ui.components.Segmented
 import app.murmur.android.ui.components.Stage
 import app.murmur.android.ui.theme.Murmur
 import kotlinx.coroutines.delay
-import kotlin.math.abs
-import kotlin.math.roundToInt
 import kotlin.math.sin
 
 @Composable
@@ -56,6 +60,7 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack
     var keepOpen by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val layout = settings.overlayLayout
 
     Screen(
         title = "Dictation button",
@@ -87,16 +92,29 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack
 
         SectionGap()
 
-        Group("Position") {
+        Group("Spots") {
             Spacer(Modifier.height(8.dp))
-            Text(describePosition(settings), style = Murmur.type.body, color = Murmur.colors.ink)
+            Text(
+                "The button rests on one of its spots. When it is in the way — a suggestion, a key — " +
+                    "drag it and let go: it snaps to the nearest spot, so it is always somewhere you chose.",
+                style = Murmur.type.bodySmall,
+                color = Murmur.colors.inkSoft
+            )
+            Spacer(Modifier.height(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                layout.spots.forEachIndexed { i, spot ->
+                    SpotRow(index = i, spot = spot.describe(), active = i == layout.activeIndex)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(describeArrangement(layout), style = Murmur.type.bodySmall, color = Murmur.colors.inkSoft)
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (editing) {
                     PrimaryButton("Done", onClick = { OverlayEditor.stop() }, modifier = Modifier.weight(1f))
                 } else {
                     PrimaryButton(
-                        "Move the button",
+                        "Edit spots",
                         modifier = Modifier.weight(1f),
                         onClick = {
                             editError = if (OverlayEditor.start()) null
@@ -106,12 +124,8 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack
                 }
                 SecondaryButton(
                     "Reset",
-                    enabled = !settings.overlayAtDefaultPosition,
-                    onClick = {
-                        store.update {
-                            it.copy(overlayAnchorX = OverlayAnchor.DEFAULT.xFraction, overlayOffsetDp = OverlayAnchor.DEFAULT.offsetDp)
-                        }
-                    }
+                    enabled = !layout.isDefault,
+                    onClick = { store.update { it.copy(overlayLayout = OverlayLayout.DEFAULT) } }
                 )
             }
             editError?.let {
@@ -121,8 +135,10 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack
             if (editing) {
                 Spacer(Modifier.height(18.dp))
                 Notice(
-                    "Drag the button anywhere; it snaps to the middle. Park it on your keyboard's toolbar if you like. " +
-                        "It follows the keyboard wherever it appears. Tap Done at the top of the screen when it is in place.",
+                    "Drag a spot anywhere; it snaps to the middle and to the other spots' rows and columns, " +
+                        "with a guide line when it lines up. Use the arrows to nudge it a dp at a time, + to add " +
+                        "up to ${OverlayLayout.MAX_SPOTS} spots, and Same row or Same column to keep them aligned. " +
+                        "Tap Done at the top of the screen when you are happy.",
                     NoticeTone.SUCCESS
                 )
                 Spacer(Modifier.height(18.dp))
@@ -140,6 +156,22 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack
                 }
             }
         }
+    }
+}
+
+/** One spot in the list: a numbered dot (filled when it is where the button rests) and its position. */
+@Composable
+private fun SpotRow(index: Int, spot: String, active: Boolean) {
+    val c = Murmur.colors
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            Modifier.size(22.dp).clip(CircleShape).background(if (active) c.ember else c.paperRaised),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("${index + 1}", style = Murmur.type.labelSmall, color = if (active) c.onEmber else c.inkSoft)
+        }
+        Text(spot, style = Murmur.type.body, color = if (active) c.ink else c.inkSoft)
+        if (active) Text("rests here", style = Murmur.type.labelSmall, color = c.emberText)
     }
 }
 
@@ -166,7 +198,7 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
             modifier = Modifier.fillMaxSize(),
             update = { view ->
                 view.setPalette(palette)
-                view.configure(settings.overlayShape, OverlayAnchor.DEFAULT)
+                view.configure(settings.overlayShape, OverlayLayout.DEFAULT)
                 view.render(previewState)
             }
         )
@@ -202,29 +234,26 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
     }
 }
 
+private fun describeArrangement(layout: OverlayLayout): String {
+    val count = if (layout.spots.size == 1) "One spot" else "${layout.spots.size} spots"
+    return when (layout.arrangement) {
+        OverlayArrangement.SAME_ROW -> "$count, locked to one row — drag any of them up or down and they all follow."
+        OverlayArrangement.SAME_COLUMN -> "$count, locked to one column — drag any of them sideways and they all follow."
+        OverlayArrangement.FREE ->
+            if (layout.spots.size == 1) "$count. Add another so you can flick the button out of the way." else "$count, placed freely."
+    }
+}
+
 fun describePosition(s: MurmurSettings): String {
-    val across = when {
-        abs(s.overlayAnchorX - 0.5f) < 0.015f -> "Centred"
-        s.overlayAnchorX < 0.5f -> "${(s.overlayAnchorX * 100).roundToInt()}% in from the left"
-        else -> "${((1f - s.overlayAnchorX) * 100).roundToInt()}% in from the right"
-    }
-    val offset = s.overlayOffsetDp.roundToInt()
-    val vertical = when {
-        offset > 0 -> "floating $offset dp above the keyboard"
-        offset == 0 -> "on the keyboard's top edge"
-        else -> "${-offset} dp down over the keyboard"
-    }
-    return "$across, $vertical."
+    val layout = s.overlayLayout
+    val here = layout.active.describe()
+    return if (layout.spots.size == 1) "$here." else "$here, and ${layout.spots.size - 1} more."
 }
 
 /** Short form for the home index. */
 fun shortPosition(s: MurmurSettings): String {
     val shape = if (s.overlayShape == OverlayShape.CIRCLE) "Circle" else "Pill"
-    val where = when {
-        s.overlayAtDefaultPosition -> "centred above the keyboard"
-        abs(s.overlayAnchorX - 0.5f) < 0.015f -> "centred, custom height"
-        s.overlayAnchorX < 0.5f -> "left of centre"
-        else -> "right of centre"
-    }
+    val spots = s.overlayLayout.spots.size
+    val where = if (spots == 1) "one spot" else "$spots spots"
     return "$shape, $where"
 }

@@ -22,11 +22,10 @@ import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.dictation.TextSink
 import app.murmur.android.overlay.Box
-import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayEditor
+import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
-import app.murmur.android.overlay.overlayAnchor
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.update.UpdateManager
 import kotlinx.coroutines.CoroutineScope
@@ -107,7 +106,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         mainScope.launch {
             settings.flow.collect { s ->
                 pill?.setPalette(PillTheme.resolve(this@MurmurAccessibilityService, s))
-                pill?.configure(s.overlayShape, s.overlayAnchor())
+                pill?.configure(s.overlayShape, s.overlayLayout)
             }
         }
         mainScope.launch {
@@ -213,11 +212,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             onMicTap = { DictationController.toggle(this@MurmurAccessibilityService) }
             onCancelTap = { DictationController.cancel(this@MurmurAccessibilityService) }
             onConfirmTap = { DictationController.stopAndInsert(this@MurmurAccessibilityService) }
-            onAnchorChanged = { a -> settings.update { it.copy(overlayAnchorX = a.xFraction, overlayOffsetDp = a.offsetDp) } }
+            onLayoutChanged = { layout -> settings.update { it.copy(overlayLayout = layout) } }
             onEditDone = { OverlayEditor.stop() }
-            onEditReset = {
-                settings.update { it.copy(overlayAnchorX = OverlayAnchor.DEFAULT.xFraction, overlayOffsetDp = OverlayAnchor.DEFAULT.offsetDp) }
-            }
+            onEditReset = { settings.update { it.copy(overlayLayout = OverlayLayout.DEFAULT) } }
         }
         // Raw coordinates are display coordinates, which is the pill's own frame of reference, so
         // the relay does not depend on where the touch window happens to be at that instant.
@@ -227,7 +224,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         touchWindow = OverlayWindow(wm, relay, touchable = true)
         val s = settings.get()
         view.setPalette(PillTheme.resolve(this, s))
-        view.configure(s.overlayShape, s.overlayAnchor())
+        view.configure(s.overlayShape, s.overlayLayout)
         view.setEditing(OverlayEditor.editing.value)
         // Computes the first frames and, through the Host callbacks, adds both windows.
         view.setScreen(screenW, screenH, keyboardReference())

@@ -7,6 +7,7 @@ import android.widget.FrameLayout
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayAnchor
+import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.OverlayShape
@@ -62,7 +63,7 @@ class OverlayPillWindowTest {
         // Attached to a real window so the view's deferred (posted) work runs.
         activity.setContentView(view, FrameLayout.LayoutParams(SCREEN_W, SCREEN_H))
         ShadowLooper.idleMainLooper()
-        view.configure(OverlayShape.CIRCLE, OverlayAnchor(0.07f, -20f))
+        view.configure(OverlayShape.CIRCLE, OverlayLayout(listOf(OverlayAnchor(0.07f, -20f))))
         view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP)
         view.render(DictationState.Idle)
         frames(10)

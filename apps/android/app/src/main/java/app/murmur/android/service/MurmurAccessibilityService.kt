@@ -17,10 +17,9 @@ import android.view.accessibility.AccessibilityWindowInfo
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.Box
-import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayEditor
+import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
-import app.murmur.android.overlay.overlayAnchor
 import app.murmur.android.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,9 +33,11 @@ private const val TAG = "MurmurA11y"
 
 /**
  * The Wispr Flow pattern on Android: whenever the keyboard comes up, a floating dictation
- * button appears next to it (by default centred just above it; the user can park it anywhere,
- * including on the keyboard's own toolbar). Tap to dictate, tap again to stop; the transcribed,
- * cleaned text is inserted into the focused text field via accessibility actions.
+ * button appears next to it on one of the user's spots (by default centred just above it, with a
+ * second spot at the right end of the same row; spots can sit anywhere, including on the
+ * keyboard's own toolbar). Drag the button to flick it to another spot when it is in the way.
+ * Tap to dictate, tap again to stop; the transcribed, cleaned text is inserted into the focused
+ * text field via accessibility actions.
  *
  * The pill view owns its geometry and animations and asks this service (its [OverlayPillView.Host])
  * to move or resize the overlay window; that only happens before a morph starts and after it
@@ -74,7 +75,7 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
             }
         }
         mainScope.launch {
-            settings.flow.collect { s -> pill?.configure(s.overlayShape, s.overlayAnchor()) }
+            settings.flow.collect { s -> pill?.configure(s.overlayShape, s.overlayLayout) }
         }
         mainScope.launch {
             OverlayEditor.editing.collect { editing ->
@@ -164,11 +165,9 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
             onMicTap = { DictationController.toggle(this@MurmurAccessibilityService) }
             onCancelTap = { DictationController.cancel(this@MurmurAccessibilityService) }
             onConfirmTap = { DictationController.stopAndInsert(this@MurmurAccessibilityService) }
-            onAnchorChanged = { a -> settings.update { it.copy(overlayAnchorX = a.xFraction, overlayOffsetDp = a.offsetDp) } }
+            onLayoutChanged = { layout -> settings.update { it.copy(overlayLayout = layout) } }
             onEditDone = { OverlayEditor.stop() }
-            onEditReset = {
-                settings.update { it.copy(overlayAnchorX = OverlayAnchor.DEFAULT.xFraction, overlayOffsetDp = OverlayAnchor.DEFAULT.offsetDp) }
-            }
+            onEditReset = { settings.update { it.copy(overlayLayout = OverlayLayout.DEFAULT) } }
         }
         val params = WindowManager.LayoutParams(
             1,
@@ -190,7 +189,7 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
         pillParams = params
         pillAttached = false
         val s = settings.get()
-        view.configure(s.overlayShape, s.overlayAnchor())
+        view.configure(s.overlayShape, s.overlayLayout)
         view.setEditing(OverlayEditor.editing.value)
         // Computes the first window frame and, through applyWindowFrame, adds the window.
         view.setScreen(screenW, screenH, keyboardReference())

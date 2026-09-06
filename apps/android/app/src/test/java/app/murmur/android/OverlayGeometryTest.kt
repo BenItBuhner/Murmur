@@ -1,12 +1,16 @@
 package app.murmur.android
 
 import app.murmur.android.overlay.Box
+import app.murmur.android.overlay.FlingTracker
 import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayGeometry
+import app.murmur.android.overlay.Spring
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 
 /** Layout maths for the floating pill: a 1080 x 2400 px screen at 3x with the keyboard's top edge at 1500 px. */
 class OverlayGeometryTest {
@@ -103,9 +107,105 @@ class OverlayGeometryTest {
 
     @Test
     fun `dragging near the middle snaps to it`() {
-        assertEquals(540f, OverlayGeometry.snapX(540f + 10f, screenW, density), 0.01f)
-        assertEquals(540f, OverlayGeometry.snapX(540f - OverlayGeometry.SNAP_DP * density, screenW, density), 0.01f)
-        assertEquals(400f, OverlayGeometry.snapX(400f, screenW, density), 0.01f)
+        val guides = listOf(screenW / 2f)
+        val near = OverlayGeometry.snapToGuides(540f + 10f, 1400f, guides, emptyList(), density)
+        assertEquals(540f, near.x, 0.01f)
+        assertEquals(540f, near.guideX!!, 0.01f)
+        assertEquals(1400f, near.y, 0.01f)
+        assertNull(near.guideY)
+        val edge = OverlayGeometry.snapToGuides(540f - OverlayGeometry.SNAP_DP * density, 1400f, guides, emptyList(), density)
+        assertEquals(540f, edge.x, 0.01f)
+        val far = OverlayGeometry.snapToGuides(400f, 1400f, guides, emptyList(), density)
+        assertEquals(400f, far.x, 0.01f)
+        assertNull(far.guideX)
+    }
+
+    @Test
+    fun `guides snap each axis independently to the nearest candidate`() {
+        // Another spot's column at x=300 and rows at y=1200 and y=1300.
+        val snap = OverlayGeometry.snapToGuides(310f, 1290f, listOf(screenW / 2f, 300f), listOf(1200f, 1300f), density)
+        assertEquals(300f, snap.x, 0.01f)
+        assertEquals(300f, snap.guideX!!, 0.01f)
+        assertEquals(1300f, snap.y, 0.01f)
+        assertEquals(1300f, snap.guideY!!, 0.01f)
+        // Only one axis within reach.
+        val onlyY = OverlayGeometry.snapToGuides(700f, 1205f, listOf(screenW / 2f, 300f), listOf(1200f), density)
+        assertEquals(700f, onlyY.x, 0.01f)
+        assertNull(onlyY.guideX)
+        assertEquals(1200f, onlyY.y, 0.01f)
+    }
+
+    @Test
+    fun `a released drag lands on the nearest spot`() {
+        val spots = listOf(540f to 1400f, 1000f to 1400f, 540f to 900f)
+        assertEquals(0, OverlayGeometry.nearestSpot(spots, 600f, 1380f))
+        assertEquals(1, OverlayGeometry.nearestSpot(spots, 900f, 1450f))
+        assertEquals(2, OverlayGeometry.nearestSpot(spots, 500f, 1000f))
+    }
+
+    @Test
+    fun `a flick reaches the spot the finger was heading for`() {
+        val spots = listOf(540f to 1400f, 1000f to 1400f)
+        // Released just past the middle but moving right fast: 2500 px/s * 0.12 s looks 300 px ahead.
+        assertEquals(1, OverlayGeometry.nearestSpot(spots, 600f, 1400f, vx = 2500f, vy = 0f))
+        // The same release point at rest stays on the first spot.
+        assertEquals(0, OverlayGeometry.nearestSpot(spots, 600f, 1400f))
+        // The look-ahead is capped so a wild fling does not sail past the intended spot.
+        val row = listOf(200f to 1400f, 540f to 1400f, 900f to 1400f)
+        assertEquals(1, OverlayGeometry.nearestSpot(row, 250f, 1400f, vx = 9000f, vy = 0f, maxLookaheadPx = 300f))
+        assertEquals(2, OverlayGeometry.nearestSpot(row, 250f, 1400f, vx = 9000f, vy = 0f))
+    }
+
+    @Test
+    fun `the spring lands quickly with only a hint of overshoot`() {
+        val spring = Spring(position = 0f).apply { target = 300f }
+        var elapsed = 0L
+        var peak = 0f
+        while (!spring.settled && elapsed < 2000L) {
+            spring.advance(16L)
+            elapsed += 16L
+            peak = maxOf(peak, spring.position)
+        }
+        assertTrue("settled in $elapsed ms", spring.settled && elapsed <= 600L)
+        assertEquals(300f, spring.position, 0.001f)
+        assertTrue("overshoot ${peak - 300f}", peak - 300f < 300f * 0.06f)
+        // Any frame rate ends in the same place.
+        val coarse = Spring(position = 0f).apply { target = 300f }
+        repeat(40) { coarse.advance(50L) }
+        assertTrue(coarse.settled)
+    }
+
+    @Test
+    fun `the spring carries the velocity a drag left it with`() {
+        val thrown = Spring(position = 0f, velocity = 1500f).apply { target = 100f }
+        thrown.advance(50L)
+        val still = Spring(position = 0f).apply { target = 100f }
+        still.advance(50L)
+        assertTrue(thrown.position > still.position)
+        // A throw away from the target first travels away, then comes back.
+        val away = Spring(position = 0f, velocity = -1500f).apply { target = 100f }
+        away.advance(30L)
+        assertTrue(away.position < 0f)
+        repeat(60) { away.advance(16L) }
+        assertTrue(abs(away.position - 100f) < 0.01f)
+    }
+
+    @Test
+    fun `the fling tracker measures the last hundred milliseconds only`() {
+        val tracker = FlingTracker()
+        assertEquals(0f to 0f, tracker.velocity())
+        tracker.add(0L, 0f, 0f)
+        tracker.add(50L, 100f, 0f)
+        tracker.add(100L, 200f, 50f)
+        val (vx, vy) = tracker.velocity()
+        assertEquals(2000f, vx, 0.01f)
+        assertEquals(500f, vy, 0.01f)
+        // Holding still before letting go is not a fling.
+        tracker.add(400L, 200f, 50f)
+        assertEquals(0f to 0f, tracker.velocity())
+        tracker.reset()
+        tracker.add(0L, 0f, 0f)
+        assertEquals(0f to 0f, tracker.velocity())
     }
 
     @Test

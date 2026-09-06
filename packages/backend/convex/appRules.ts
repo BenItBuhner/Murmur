@@ -6,7 +6,7 @@ import { normalizeKey, requireMaxLength, requireNonEmpty } from './lib/normalize
 import {
   appRuleDtoValidator,
   appRuleInputValidator,
-  formattingModeValidator,
+  appRuleOverrides,
   toneValidator,
   type AppRuleDto,
   type AppRuleInput
@@ -19,6 +19,10 @@ function toDto(doc: Doc<'appRules'>): AppRuleDto {
     tone: doc.tone,
     formatting: doc.formatting,
     trailingSpace: doc.trailingSpace,
+    lists: doc.lists,
+    numbers: doc.numbers,
+    freedom: doc.freedom,
+    instructions: doc.instructions,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt
   }
@@ -42,12 +46,18 @@ async function upsertRule(
 ): Promise<{ id: Id<'appRules'>; created: boolean }> {
   const match = requireMaxLength(requireNonEmpty(input.match, 'match'), LIMITS.appRuleMatchLength, 'match')
   const matchKey = normalizeKey(match)
+  const instructions = input.instructions?.trim()
+  if (instructions !== undefined) requireMaxLength(instructions, LIMITS.instructionsLength, 'instructions')
   const fields = {
     match,
     matchKey,
     tone: input.tone ?? ('auto' as const),
     formatting: input.formatting,
     trailingSpace: input.trailingSpace,
+    lists: input.lists,
+    numbers: input.numbers,
+    freedom: input.freedom,
+    instructions: instructions || undefined,
     updatedAt: now
   }
   const target = targetId ? await ctx.db.get('appRules', targetId) : null
@@ -97,8 +107,7 @@ export const upsert = authedMutation({
     id: v.optional(v.id('appRules')),
     match: v.string(),
     tone: v.optional(toneValidator),
-    formatting: v.optional(formattingModeValidator),
-    trailingSpace: v.optional(v.boolean()),
+    ...appRuleOverrides,
     createdAt: v.optional(v.number())
   },
   returns: v.id('appRules'),

@@ -89,12 +89,20 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
 - **Bring your own models.** Any OpenAI-compatible `/v1/audio/transcriptions` endpoint works, plus
   native Deepgram and ElevenLabs. One-click **model discovery**, a **fallback model**, and a
   built-in **latency test**.
-- **Wispr Flow–style cleanup.** Filler removal, stutter collapsing, self-corrections
-  (“Tuesday, no, Wednesday” → “Wednesday”), spoken commands (“new line”, “new paragraph”,
-  “scratch that”, “question mark”, “press enter”), a personal **dictionary**, and voice **snippets**.
-- **Optional smart formatting.** A small, fast LLM pass fixes punctuation, lists, numbers, and tone
-  per app. It always falls back to the instant rule-based result — a guard rejects
-  answers/commentary so the model can never “reply” to your dictation.
+- **Wispr Flow–style cleanup, rule-based.** Filler sounds, hesitation phrases (“you know”,
+  “I mean”, a pause-“like”, “let me think”), repeated words and phrases, false starts,
+  self-corrections (“Tuesday, no, Wednesday” → “Wednesday”), spoken commands (“new line”,
+  “new paragraph”, “scratch that”, “question mark”, “press enter”), a personal **dictionary**, and
+  voice **snippets**. Every stage has an off/light/thorough style control.
+- **Lists and numbers without a model.** “bullet point …”, “number one …”, “make this a numbered
+  list: …”, “first…, second…, third…” and “here are three things: a, b and c” become bullets or
+  numbered lines; “five thirty pm” → “5:30 pm”, “twenty three percent” → “23%”, “ten dollars” →
+  “$10”, “version two point three” → “version 2.3”. Never inside code editors or terminals.
+- **Optional smart formatting, reviewed.** A small, fast LLM pass polishes the rule-based text with
+  a freedom level you choose (strict / balanced / natural), your own instructions, and per-app
+  overrides. Its answer is cleaned (reasoning tags, markdown, commentary), guarded (no answering,
+  no chatting) and diffed word by word against your words: edits it cannot justify are reverted,
+  names, numbers and negations always survive, and History shows what happened.
 - **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”; the
   selection is rewritten in place.
 - **Your colours.** Light, dark or follow the system; keep the neutral look or pick an accent — your

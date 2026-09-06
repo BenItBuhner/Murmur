@@ -58,8 +58,8 @@ export function DictionaryPage(): React.JSX.Element {
     const t = setTimeout(
       () =>
         void window.murmur.pipeline
-          .preview(preview)
-          .then((r) => setPreviewOut({ text: r.text, stages: r.stages })),
+          .preview({ raw: preview })
+          .then((r) => setPreviewOut({ text: r.light.text, stages: r.light.stages })),
       200
     )
     return () => clearTimeout(t)

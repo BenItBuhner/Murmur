@@ -2,9 +2,17 @@ package app.murmur.android.cloud
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.murmur.android.settings.BulletMarker
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
+import app.murmur.android.settings.HesitationLevel
+import app.murmur.android.settings.ListStyle
+import app.murmur.android.settings.ListsMode
+import app.murmur.android.settings.LlmFreedom
+import app.murmur.android.settings.LlmStructure
 import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.NumbersMode
+import app.murmur.android.settings.RepetitionScope
 import app.murmur.android.settings.Tone
 import java.util.UUID
 import kotlinx.serialization.SerialName
@@ -57,12 +65,22 @@ data class FormattingPreferencesDto(
     val tone: String? = null,
     val removeFillers: Boolean? = null,
     val fillerWords: List<String>? = null,
+    val hesitations: String? = null,
+    val hesitationPhrases: List<String>? = null,
     val collapseRepeats: Boolean? = null,
+    val repetitionScope: String? = null,
     val spokenCommands: Boolean? = null,
     val selfCorrections: Boolean? = null,
     val autoCapitalize: Boolean? = null,
     val trailingSpace: Boolean? = null,
-    val pressEnterCommand: Boolean? = null
+    val pressEnterCommand: Boolean? = null,
+    val lists: String? = null,
+    val listStyle: String? = null,
+    val bulletMarker: String? = null,
+    val numbers: String? = null,
+    val llmFreedom: String? = null,
+    val llmStructure: String? = null,
+    val llmInstructions: String? = null
 )
 
 @Serializable
@@ -87,7 +105,18 @@ data class StylePreferences(
     val selfCorrections: Boolean,
     val autoCapitalize: Boolean,
     val trailingSpace: Boolean,
-    val language: String
+    val language: String,
+    // Added with the structured-cleanup release; defaults keep older persisted outbox entries decodable.
+    val hesitations: String = HesitationLevel.LIGHT.id,
+    val hesitationPhrases: List<String> = emptyList(),
+    val repetitionScope: String = RepetitionScope.PHRASES.id,
+    val lists: String = ListsMode.AUTO.id,
+    val listStyle: String = ListStyle.AUTO.id,
+    val bulletMarker: String = BulletMarker.DASH.id,
+    val numbers: String = NumbersMode.SMART.id,
+    val llmFreedom: String = LlmFreedom.BALANCED.id,
+    val llmStructure: String = LlmStructure.ASSIST.id,
+    val llmInstructions: String = ""
 ) {
     companion object {
         fun of(s: MurmurSettings) = StylePreferences(
@@ -99,7 +128,17 @@ data class StylePreferences(
             selfCorrections = s.selfCorrections,
             autoCapitalize = s.autoCapitalize,
             trailingSpace = s.trailingSpace,
-            language = s.language
+            language = s.language,
+            hesitations = s.hesitations.id,
+            hesitationPhrases = s.hesitationPhrases,
+            repetitionScope = s.repetitionScope.id,
+            lists = s.lists.id,
+            listStyle = s.listStyle.id,
+            bulletMarker = s.bulletMarker.id,
+            numbers = s.numbers.id,
+            llmFreedom = s.llmFreedom.id,
+            llmStructure = s.llmStructure.id,
+            llmInstructions = s.llmInstructions
         )
     }
 
@@ -113,7 +152,17 @@ data class StylePreferences(
             "spokenCommands" to spokenCommands,
             "selfCorrections" to selfCorrections,
             "autoCapitalize" to autoCapitalize,
-            "trailingSpace" to trailingSpace
+            "trailingSpace" to trailingSpace,
+            "hesitations" to hesitations,
+            "hesitationPhrases" to hesitationPhrases,
+            "repetitionScope" to repetitionScope,
+            "lists" to lists,
+            "listStyle" to listStyle,
+            "bulletMarker" to bulletMarker,
+            "numbers" to numbers,
+            "llmFreedom" to llmFreedom,
+            "llmStructure" to llmStructure,
+            "llmInstructions" to llmInstructions
         )
         val args = LinkedHashMap<String, Any?>()
         if (previous == null || previous.copy(language = language) != this) args["formatting"] = formatting
@@ -134,6 +183,16 @@ fun applyRemotePreferences(s: MurmurSettings, remote: PreferencesDto): MurmurSet
         selfCorrections = f?.selfCorrections ?: s.selfCorrections,
         autoCapitalize = f?.autoCapitalize ?: s.autoCapitalize,
         trailingSpace = f?.trailingSpace ?: s.trailingSpace,
+        hesitations = f?.hesitations?.let { HesitationLevel.from(it) } ?: s.hesitations,
+        hesitationPhrases = f?.hesitationPhrases ?: s.hesitationPhrases,
+        repetitionScope = f?.repetitionScope?.let { RepetitionScope.from(it) } ?: s.repetitionScope,
+        lists = f?.lists?.let { ListsMode.from(it) } ?: s.lists,
+        listStyle = f?.listStyle?.let { ListStyle.from(it) } ?: s.listStyle,
+        bulletMarker = f?.bulletMarker?.let { BulletMarker.from(it) } ?: s.bulletMarker,
+        numbers = f?.numbers?.let { NumbersMode.from(it) } ?: s.numbers,
+        llmFreedom = f?.llmFreedom?.let { LlmFreedom.from(it) } ?: s.llmFreedom,
+        llmStructure = f?.llmStructure?.let { LlmStructure.from(it) } ?: s.llmStructure,
+        llmInstructions = f?.llmInstructions ?: s.llmInstructions,
         language = remote.language ?: s.language
     )
 }

@@ -388,7 +388,11 @@ export class CloudSync extends EventEmitter {
           match: r.match,
           tone: r.tone,
           formatting: r.formatting,
-          trailingSpace: r.trailingSpace
+          trailingSpace: r.trailingSpace,
+          lists: r.lists,
+          numbers: r.numbers,
+          freedom: r.freedom,
+          instructions: r.instructions
         }))
       })
     }
@@ -898,6 +902,10 @@ export class CloudSync extends EventEmitter {
           tone: op.rule.tone,
           formatting: op.rule.formatting,
           trailingSpace: op.rule.trailingSpace,
+          lists: op.rule.lists,
+          numbers: op.rule.numbers,
+          freedom: op.rule.freedom,
+          instructions: op.rule.instructions,
           createdAt: op.rule.createdAt
         })
         this.outbox.update((ops) => ackUpsert(ops, op.id, id))

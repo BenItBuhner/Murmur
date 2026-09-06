@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { defaultSettings } from '@shared/settings'
+import { classifyApp, resolveStyle } from '@core/text/app-context'
 import {
   applyLineCommands,
   applyLiteralPunctuation,
@@ -18,12 +20,19 @@ const FILLERS = ['um', 'uh', 'uhm', 'erm', 'hmm', 'mhm']
 const opts: PipelineOptions = {
   removeFillers: true,
   fillerWords: FILLERS,
+  hesitations: 'light',
+  hesitationPhrases: [],
   collapseRepeats: true,
+  repetitionScope: 'phrases',
   spokenCommands: true,
   selfCorrections: true,
   autoCapitalize: true,
   trailingSpace: true,
   pressEnterCommand: true,
+  lists: 'auto',
+  listStyle: 'auto',
+  bulletMarker: '-',
+  numbers: 'smart',
   dictionary: [
     {
       id: '1',
@@ -245,5 +254,95 @@ describe('full pipeline', () => {
   })
   it('snippet content is not re-capitalized', () => {
     expect(runPipeline('my email', opts).text).toBe('ben@example.com ')
+  })
+  it('removes hesitation phrases, repeated phrases and hanging conjunctions', () => {
+    const r = runPipeline(
+      'so I think, you know, we should, we should ship it on, um, friday at five pm and',
+      opts
+    )
+    expect(r.text).toBe('So I think we should ship it on friday at 5 pm ')
+    expect(r.stages).toEqual(
+      expect.arrayContaining(['hesitations', 'repeats', 'fillers', 'numbers'])
+    )
+  })
+  it('turns spoken enumerations into lists and reports the intent', () => {
+    const r = runPipeline(
+      'here are three things for today, first finish the deck, second email the vendor about pricing, and third book the flights',
+      opts
+    )
+    expect(r.text).toBe(
+      'Here are three things for today:\n1. Finish the deck\n2. Email the vendor about pricing\n3. Book the flights\n'
+    )
+    expect(r.hints.listApplied).toBe(true)
+    expect(r.stages).toContain('lists')
+  })
+  it('honours spoken list requests and strips the instruction', () => {
+    const r = runPipeline('make this a bulleted list: milk, eggs and bread', opts)
+    expect(r.text).toBe('- Milk\n- Eggs\n- Bread\n')
+    expect(r.hints.list.requested).toBe('bullets')
+    expect(r.hints.list.explicit).toBe(true)
+  })
+  it('keeps prose as prose when lists are off but still reports the request', () => {
+    const r = runPipeline('make this a bulleted list: milk, eggs and bread', {
+      ...opts,
+      lists: 'off'
+    })
+    expect(r.text).toBe('Make this a bulleted list: milk, eggs and bread ')
+    expect(r.hints.list.requested).toBe('bullets')
+  })
+  it('converts numbers by context and flags questions', () => {
+    expect(
+      runPipeline('the budget is twenty five thousand dollars for version two point three', opts)
+        .text
+    ).toBe('The budget is $25,000 for version 2.3 ')
+    expect(runPipeline('I have five apples', opts).text).toBe('I have five apples ')
+    expect(runPipeline('I have five apples', { ...opts, numbers: 'all' }).text).toBe(
+      'I have 5 apples '
+    )
+    const q = runPipeline('what time is the meeting tomorrow', opts)
+    expect(q.hints.isQuestion).toBe(true)
+  })
+  it('thorough levels catch false starts and openers', () => {
+    const r = runPipeline('okay so, I want to, I need to go to the store', {
+      ...opts,
+      hesitations: 'thorough',
+      repetitionScope: 'thorough'
+    })
+    expect(r.text).toBe('I need to go to the store ')
+  })
+})
+
+describe('app context policy', () => {
+  const formatting = defaultSettings().formatting
+  it('turns lists off and digits on for code and terminals', () => {
+    const style = resolveStyle(formatting, classifyApp('Code.exe', 'main.ts - project'))
+    expect(style).toMatchObject({
+      lists: 'off',
+      numbers: 'all',
+      freedom: 'strict',
+      structure: 'keep'
+    })
+    expect(resolveStyle(formatting, classifyApp('slack', '')).lists).toBe('auto')
+  })
+  it('lets a matching rule override category defaults and merges instructions', () => {
+    const withRule = {
+      ...formatting,
+      llm: { ...formatting.llm, instructions: 'Use British spelling.' },
+      appRules: [
+        {
+          id: 'r',
+          match: 'code',
+          tone: 'auto' as const,
+          lists: 'auto' as const,
+          freedom: 'natural' as const,
+          instructions: 'Keep identifiers lower-case.'
+        }
+      ]
+    }
+    const style = resolveStyle(withRule, classifyApp('Code.exe', ''))
+    expect(style.lists).toBe('auto')
+    expect(style.freedom).toBe('natural')
+    expect(style.instructions).toBe('Use British spelling.\n\nKeep identifiers lower-case.')
+    expect(style.rule?.match).toBe('code')
   })
 })

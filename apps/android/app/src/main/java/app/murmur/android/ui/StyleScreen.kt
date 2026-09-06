@@ -15,8 +15,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.murmur.android.llm.LlmClient
+import app.murmur.android.settings.BulletMarker
 import app.murmur.android.settings.FormattingMode
+import app.murmur.android.settings.HesitationLevel
+import app.murmur.android.settings.ListStyle
+import app.murmur.android.settings.ListsMode
+import app.murmur.android.settings.LlmFreedom
+import app.murmur.android.settings.LlmStructure
 import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.NumbersMode
+import app.murmur.android.settings.RepetitionScope
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.Tone
 import app.murmur.android.ui.components.ChipRow
@@ -25,6 +33,7 @@ import app.murmur.android.ui.components.Group
 import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.Notice
 import app.murmur.android.ui.components.NoticeTone
+import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.SectionGap
@@ -49,13 +58,21 @@ val FormattingMode.displayName: String
         FormattingMode.SMART -> "Smart"
     }
 
+/** The "Repeats" control folds the on/off switch and the scope into one choice. */
+private enum class Repeats(val label: String, val scope: RepetitionScope?) {
+    OFF("Off", null), WORDS("Words", RepetitionScope.WORDS), PHRASES("Phrases", RepetitionScope.PHRASES), THOROUGH("Thorough", RepetitionScope.THOROUGH)
+}
+
+private fun repeatsOf(s: MurmurSettings): Repeats =
+    if (!s.collapseRepeats) Repeats.OFF else Repeats.entries.first { it.scope == s.repetitionScope }
+
 @Composable
 fun StyleScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var llmModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var discovering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val cleanupOn = settings.formattingMode != FormattingMode.OFF
+    val c = Murmur.colors
 
     Screen(
         title = "Style",
@@ -72,12 +89,12 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Un
             Spacer(Modifier.height(12.dp))
             Text(
                 when (settings.formattingMode) {
-                    FormattingMode.OFF -> "Exactly what the speech model heard, untouched."
-                    FormattingMode.LIGHT -> "Instant, rule-based cleanup: fillers, stutters, self-corrections and spoken commands."
-                    FormattingMode.SMART -> "Light cleanup plus a small, fast language model that fixes punctuation, lists and tone. Falls back to Light whenever it is unsure."
+                    FormattingMode.OFF -> "Exactly what the speech model heard, untouched. The cleanup and structure choices below still follow your account to other devices."
+                    FormattingMode.LIGHT -> "Instant, rule-based cleanup and structure: fillers, hesitation, repeats, self-corrections, spoken commands, lists and numbers."
+                    FormattingMode.SMART -> "The rule-based pass plus a small, fast language model that fixes punctuation, mis-hearings and tone. Falls back to Light whenever it is unsure."
                 },
                 style = Murmur.type.bodySmall,
-                color = Murmur.colors.inkSoft
+                color = c.inkSoft
             )
         }
 
@@ -99,48 +116,43 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Un
                     Tone.PROFESSIONAL -> "Composed and precise, everywhere."
                 },
                 style = Murmur.type.bodySmall,
-                color = Murmur.colors.inkSoft
+                color = c.inkSoft
             )
         }
 
         SectionGap()
 
         Group("Cleanup") {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Rule-based and instant; still applied when the model is off or unavailable.",
+                style = Murmur.type.bodySmall,
+                color = c.inkSoft
+            )
+            Spacer(Modifier.height(14.dp))
             Column {
                 Hairline()
                 ToggleRow(
                     "Remove filler words", settings.removeFillers,
                     { v -> store.update { s -> s.copy(removeFillers = v) } },
-                    description = "um, uh, you know, like",
-                    enabled = cleanupOn
-                )
-                Hairline()
-                ToggleRow(
-                    "Collapse stutters", settings.collapseRepeats,
-                    { v -> store.update { s -> s.copy(collapseRepeats = v) } },
-                    description = "\u201Cthe the report\u201D becomes \u201Cthe report\u201D",
-                    enabled = cleanupOn
+                    description = "um, uh, hmm and friends"
                 )
                 Hairline()
                 ToggleRow(
                     "Self-corrections", settings.selfCorrections,
                     { v -> store.update { s -> s.copy(selfCorrections = v) } },
-                    description = "\u201CTuesday, no, Wednesday\u201D keeps Wednesday",
-                    enabled = cleanupOn
+                    description = "\u201CTuesday, no, Wednesday\u201D keeps Wednesday"
                 )
                 Hairline()
                 ToggleRow(
                     "Spoken commands", settings.spokenCommands,
                     { v -> store.update { s -> s.copy(spokenCommands = v) } },
-                    description = "\u201Cnew line\u201D, \u201Cnew paragraph\u201D, \u201Cscratch that\u201D, \u201Cpress enter\u201D",
-                    enabled = cleanupOn
+                    description = "\u201Cnew line\u201D, \u201Cnew paragraph\u201D, \u201Cscratch that\u201D, \u201Cpress enter\u201D"
                 )
                 Hairline()
                 ToggleRow(
                     "Capitalize sentences", settings.autoCapitalize,
-                    { v -> store.update { s -> s.copy(autoCapitalize = v) } },
-                    enabled = cleanupOn
+                    { v -> store.update { s -> s.copy(autoCapitalize = v) } }
                 )
                 Hairline()
                 ToggleRow(
@@ -150,6 +162,127 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Un
                 )
                 Hairline()
             }
+
+            Spacer(Modifier.height(28.dp))
+            Overline("Hesitation")
+            Spacer(Modifier.height(10.dp))
+            Segmented(
+                options = listOf(
+                    Segment(HesitationLevel.OFF, "Off"),
+                    Segment(HesitationLevel.LIGHT, "Light"),
+                    Segment(HesitationLevel.THOROUGH, "Thorough")
+                ),
+                selected = settings.hesitations,
+                onSelect = { v -> store.update { s -> s.copy(hesitations = v) } }
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                when (settings.hesitations) {
+                    HesitationLevel.OFF -> "\u201Cyou know\u201D, \u201CI mean\u201D and friends stay as spoken."
+                    HesitationLevel.LIGHT -> "Pure hesitation goes where the transcript marks a pause: \u201Cyou know\u201D, \u201CI mean\u201D, a pause-\u201Clike\u201D, \u201Clet me think\u201D, \u201Cso yeah\u201D."
+                    HesitationLevel.THOROUGH -> "Also hedges and openers: \u201Csort of\u201D, \u201Cbasically\u201D, \u201CI guess\u201D, \u201COkay, so, \u2026\u201D, a trailing \u201C, yeah\u201D."
+                },
+                style = Murmur.type.bodySmall,
+                color = c.inkSoft
+            )
+
+            Spacer(Modifier.height(28.dp))
+            Overline("Repeats")
+            Spacer(Modifier.height(10.dp))
+            Segmented(
+                options = Repeats.entries.map { Segment(it, it.label) },
+                selected = repeatsOf(settings),
+                onSelect = { v ->
+                    store.update { s ->
+                        if (v.scope == null) s.copy(collapseRepeats = false) else s.copy(collapseRepeats = true, repetitionScope = v.scope)
+                    }
+                }
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                when (repeatsOf(settings)) {
+                    Repeats.OFF -> "Repeated words stay as spoken."
+                    Repeats.WORDS -> "\u201Cthe the report\u201D, \u201CI, I think\u201D, part-word stutters (\u201Cth- the\u201D)."
+                    Repeats.PHRASES -> "Also repeated phrases: \u201CI think, I think we should\u201D."
+                    Repeats.THOROUGH -> "Also restarts: \u201CI want to, I need to go\u201D becomes \u201CI need to go\u201D."
+                },
+                style = Murmur.type.bodySmall,
+                color = c.inkSoft
+            )
+        }
+
+        SectionGap()
+
+        Group("Structure") {
+            Spacer(Modifier.height(8.dp))
+            Overline("Lists", color = c.inkMuted)
+            Spacer(Modifier.height(10.dp))
+            Segmented(
+                options = listOf(
+                    Segment(ListsMode.OFF, "Off"),
+                    Segment(ListsMode.SPOKEN, "Spoken"),
+                    Segment(ListsMode.AUTO, "Auto")
+                ),
+                selected = settings.lists,
+                onSelect = { v -> store.update { s -> s.copy(lists = v) } }
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                when (settings.lists) {
+                    ListsMode.OFF -> "Never turned into a list."
+                    ListsMode.SPOKEN -> "Only when you ask: \u201Cbullet point \u2026\u201D, \u201Cnumber one \u2026\u201D, \u201Cmake this a numbered list\u201D."
+                    ListsMode.AUTO -> "Also when you enumerate: \u201Cfirst\u2026, second\u2026\u201D, \u201Chere are three things: a, b and c\u201D. Never in code or terminals."
+                },
+                style = Murmur.type.bodySmall,
+                color = c.inkSoft
+            )
+            if (settings.lists != ListsMode.OFF) {
+                Spacer(Modifier.height(24.dp))
+                Overline("List style", color = c.inkMuted)
+                Spacer(Modifier.height(10.dp))
+                Segmented(
+                    options = listOf(
+                        Segment(ListStyle.AUTO, "Auto"),
+                        Segment(ListStyle.BULLETS, "Bullets"),
+                        Segment(ListStyle.NUMBERS, "Numbers")
+                    ),
+                    selected = settings.listStyle,
+                    onSelect = { v -> store.update { s -> s.copy(listStyle = v) } }
+                )
+                if (settings.listStyle != ListStyle.NUMBERS) {
+                    Spacer(Modifier.height(24.dp))
+                    Overline("Bullet marker", color = c.inkMuted)
+                    Spacer(Modifier.height(10.dp))
+                    ChipRow(
+                        items = BulletMarker.entries.map { it.symbol },
+                        selected = settings.bulletMarker.symbol,
+                        onSelect = { symbol -> BulletMarker.entries.first { it.symbol == symbol }.let { m -> store.update { s -> s.copy(bulletMarker = m) } } }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
+            Overline("Numbers", color = c.inkMuted)
+            Spacer(Modifier.height(10.dp))
+            Segmented(
+                options = listOf(
+                    Segment(NumbersMode.OFF, "Off"),
+                    Segment(NumbersMode.SMART, "Smart"),
+                    Segment(NumbersMode.ALL, "All")
+                ),
+                selected = settings.numbers,
+                onSelect = { v -> store.update { s -> s.copy(numbers = v) } }
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                when (settings.numbers) {
+                    NumbersMode.OFF -> "Numbers stay as spoken."
+                    NumbersMode.SMART -> "Digits from ten up and with units: \u201Cfive pm\u201D becomes \u201C5 pm\u201D, \u201Ctwenty three percent\u201D becomes \u201C23%\u201D, \u201Cten dollars\u201D becomes \u201C\$10\u201D."
+                    NumbersMode.ALL -> "Every number becomes digits (\u201Cfive apples\u201D becomes \u201C5 apples\u201D)."
+                },
+                style = Murmur.type.bodySmall,
+                color = c.inkSoft
+            )
         }
 
         if (settings.formattingMode == FormattingMode.SMART) {
@@ -221,6 +354,62 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Un
                     Spacer(Modifier.height(14.dp))
                     Notice(it, NoticeTone.ERROR)
                 }
+            }
+
+            SectionGap()
+
+            Group("What the model may change") {
+                Spacer(Modifier.height(8.dp))
+                Overline("Freedom", color = c.inkMuted)
+                Spacer(Modifier.height(10.dp))
+                Segmented(
+                    options = listOf(
+                        Segment(LlmFreedom.STRICT, "Strict"),
+                        Segment(LlmFreedom.BALANCED, "Balanced"),
+                        Segment(LlmFreedom.NATURAL, "Natural")
+                    ),
+                    selected = settings.llmFreedom,
+                    onSelect = { v -> store.update { s -> s.copy(llmFreedom = v) } }
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    when (settings.llmFreedom) {
+                        LlmFreedom.STRICT -> "Punctuation, casing, spelling, mis-hearings, hesitation and self-corrections only."
+                        LlmFreedom.BALANCED -> "Also grammar slips and missing articles; no rephrasing or politeness changes."
+                        LlmFreedom.NATURAL -> "May smooth awkward phrasing; names, numbers and every point stay."
+                    },
+                    style = Murmur.type.bodySmall,
+                    color = c.inkSoft
+                )
+
+                Spacer(Modifier.height(28.dp))
+                Overline("Layout", color = c.inkMuted)
+                Spacer(Modifier.height(10.dp))
+                Segmented(
+                    options = listOf(Segment(LlmStructure.KEEP, "Keep mine"), Segment(LlmStructure.ASSIST, "Assist")),
+                    selected = settings.llmStructure,
+                    onSelect = { v -> store.update { s -> s.copy(llmStructure = v) } }
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    when (settings.llmStructure) {
+                        LlmStructure.KEEP -> "Your line breaks and list markers stay exactly as dictated; the model adds no lists, headings or paragraph breaks."
+                        LlmStructure.ASSIST -> "When you enumerate, the model lays the items out as a list, and starts a new paragraph where a long dictation clearly changes topic."
+                    },
+                    style = Murmur.type.bodySmall,
+                    color = c.inkSoft
+                )
+
+                Spacer(Modifier.height(28.dp))
+                Field(
+                    value = settings.llmInstructions,
+                    onValueChange = { store.update { s -> s.copy(llmInstructions = it.take(2000)) } },
+                    label = "Your instructions",
+                    placeholder = "Use British spelling. Dates as 2026-09-06.",
+                    helper = "Standing rules the model follows on every dictation.",
+                    singleLine = false,
+                    minLines = 3
+                )
             }
         }
     }

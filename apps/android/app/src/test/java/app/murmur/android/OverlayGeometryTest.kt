@@ -133,6 +133,17 @@ class OverlayGeometryTest {
     }
 
     @Test
+    fun `a box encloses what lies inside it, with a little slack`() {
+        val a = Box(10f, 10f, 50f, 30f)
+        assertTrue(a.encloses(a))
+        assertTrue(a.encloses(Box(20f, 12f, 40f, 28f)))
+        assertTrue(a.encloses(Box(9.7f, 10f, 50.3f, 30f)))
+        assertFalse(a.encloses(Box(9f, 10f, 50f, 30f)))
+        assertFalse(a.encloses(Box(10f, 10f, 50f, 31f)))
+        assertFalse(a.encloses(a.union(Box(0f, 0f, 5f, 5f))))
+    }
+
+    @Test
     fun `clampCenter keeps a segment inside its bounds`() {
         assertEquals(60f, OverlayGeometry.clampCenter(10f, 100f, 1000f, 10f), 0.01f)
         assertEquals(940f, OverlayGeometry.clampCenter(2000f, 100f, 1000f, 10f), 0.01f)

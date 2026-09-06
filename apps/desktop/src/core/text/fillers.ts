@@ -40,10 +40,7 @@ export function removeFillers(text: string, fillers: readonly string[]): string 
       if (lead.trim() === ',') {
         // "think, um, that" -> "think that" ; "So, uh, can you" -> "So, can you" ; "plan, um. Next" -> "plan. Next"
         if (sentenceEnding) return trail.replace(/,/g, '') + (space || ' ')
-        const clause = lastClause(before)
-        const keepComma =
-          OPENERS.test(clause) || (GREETING.test(clause) && clause.split(/\s+/).length <= 4)
-        return keepComma ? `, ${space ? '' : ''}` : ' '
+        return isOpenerClause(lastClause(before)) ? ', ' : ' '
       }
 
       if (sentenceEnding) return trail.replace(/,/g, '') + (space || ' ')
@@ -59,13 +56,16 @@ export function removeFillers(text: string, fillers: readonly string[]): string 
     .replace(/^[ \t]+|[ \t]+$/gm, '')
 }
 
-function lastClause(before: string): string {
+/** The current sentence up to `before`, without a trailing comma. */
+export function lastClause(before: string): string {
   const parts = before.split(/[.!?\n]/)
   const sentence = parts[parts.length - 1] ?? ''
   return sentence.trim().replace(/,\s*$/, '').trim()
 }
 
-/** "the the" -> "the"; "I I think" -> "I think". Only identical consecutive words. */
-export function collapseRepeats(text: string): string {
-  return text.replace(/\b([\p{L}\p{N}']+)(?:[ \t]+\1\b)+/giu, '$1')
+/** True when the clause is just an opener ("So") or a short greeting ("Hey Sarah") that keeps its comma. */
+export function isOpenerClause(clause: string): boolean {
+  return OPENERS.test(clause) || (GREETING.test(clause) && clause.split(/\s+/).length <= 4)
 }
+
+export { collapseRepeats } from './repeats'

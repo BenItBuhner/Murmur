@@ -14,6 +14,8 @@ import type {
   DictationEvent,
   HistoryEntry,
   HotkeyCapture,
+  PreviewRequest,
+  PreviewResult,
   ProviderTestResult
 } from '@shared/types'
 import type { UpdateStatus } from '@shared/updates'
@@ -147,10 +149,8 @@ const api = {
     test: (text: string): Promise<InjectResultDto> => ipcRenderer.invoke(IPC.injectTest, text)
   },
   pipeline: {
-    preview: (
-      raw: string
-    ): Promise<{ text: string; pressEnter: boolean; stages: string[]; wordCount: number }> =>
-      ipcRenderer.invoke(IPC.pipelinePreview, raw)
+    preview: (req: PreviewRequest): Promise<PreviewResult> =>
+      ipcRenderer.invoke(IPC.pipelinePreview, req)
   }
 }
 

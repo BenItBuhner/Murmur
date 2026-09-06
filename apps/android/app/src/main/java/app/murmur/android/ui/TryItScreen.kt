@@ -22,13 +22,13 @@ import app.murmur.android.llm.LlmConfig
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
-import app.murmur.android.settings.Tone
 import app.murmur.android.stt.SttClient
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.AppContext
 import app.murmur.android.text.PipelineOptions
 import app.murmur.android.text.buildFormatMessages
 import app.murmur.android.text.maxTokensFor
+import app.murmur.android.text.resolveStyle
 import app.murmur.android.text.runPipeline
 import app.murmur.android.text.sanitizeLlmOutput
 import app.murmur.android.ui.components.Field
@@ -135,12 +135,11 @@ private suspend fun runSampleTest(context: Context, s: MurmurSettings): String {
     var out = "Speech to text in ${stt.latencyMs} ms: ${light.text.trim()}"
     val (base, key, model) = s.llmConnection()
     if (s.formattingMode == FormattingMode.SMART && base.isNotEmpty() && model.isNotEmpty()) {
+        val app = AppContext("test", AppCategory.UNKNOWN)
         val res = LlmClient.chatComplete(
             LlmConfig(base, key, model, s.llmTimeoutMs),
-            buildFormatMessages(
-                light.text.trim(), s.dictionaryTerms, Tone.NEUTRAL,
-                AppContext("test", AppCategory.UNKNOWN)
-            ),
+            // The bundled sample clip is English regardless of the dictation language setting.
+            buildFormatMessages(light.text.trim(), s.dictionaryTerms, resolveStyle(s, app), app, light.hints, "en"),
             maxTokens = maxTokensFor(light.text)
         )
         val guard = sanitizeLlmOutput(res.text, light.text)

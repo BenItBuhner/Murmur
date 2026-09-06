@@ -62,22 +62,27 @@ private const val MUTED = 0xFF9A9AA2.toInt()
  * mic button (a wide pill or a compact circle) that lives on one of a few user-chosen *spots* near
  * the keyboard.
  *
- * At rest the button can be dragged: it follows the finger, every spot shows as a ghost with the
- * one it would land on highlighted, and on release it springs to the nearest spot (a flick reaches
- * a spot the finger did not travel all the way to). In edit mode all spots are shown and can be
- * dragged with alignment guides (the middle of the screen, another spot's row or column), locked
- * into a shared row or column, added, removed, or nudged one dp at a time.
+ * At rest the button can be picked up and dragged: it follows the finger in real time, every spot
+ * shows as a ghost with the one it would land on highlighted, and on release it springs onto the
+ * spot nearest to where it was let go (always the highlighted one), carrying the finger's momentum
+ * into the landing. In edit mode all spots are shown and can be dragged with alignment guides (the
+ * middle of the screen, another spot's row or column), locked into a shared row or column, added,
+ * removed, or nudged one dp at a time.
  *
  * Every state grows out of the same anchor point and all transitions are one continuous,
  * time-based morph: size, corner radius and colour interpolate while the old and new contents
  * cross-fade.
  *
  * The view lives in a *canvas* window that is never touchable and is sized for every state the
- * pill can take at its resting spot, so turning the mic on or off never moves or resizes it.
- * While the button is being dragged or edited both windows cover the whole screen (that is where
- * the ghost spots, guides and editor toolbar are drawn and touched). Taps at rest arrive through a
- * separate, invisible *touch* window that hugs the pill. Without a [host] the view is a
- * self-contained preview that handles its own touches.
+ * pill can take at its resting spot, so turning the mic on or off never moves or resizes it; it
+ * covers the whole screen while the button is dragged, lands, or is edited (that is where the
+ * ghost spots, guides and editor toolbar are drawn). Taps at rest arrive through a separate,
+ * invisible *touch* window that hugs the pill. Android delivers every later event of a gesture to
+ * the window that took its first touch, wherever the finger goes, so that window is left exactly
+ * where it is until the finger lifts: a drag never depends on a window being moved or resized
+ * underneath it. Only in edit mode, where the whole screen is a control surface, does the touch
+ * window cover it. Without a [host] the view is a self-contained preview that handles its own
+ * touches.
  */
 class OverlayPillView(context: Context) : View(context) {
 
@@ -209,6 +214,9 @@ class OverlayPillView(context: Context) : View(context) {
 
     /** Outside of editing: where the finger holds the button (it is not on a spot until released). */
     private var dragPosition: Pair<Float, Float>? = null
+
+    /** The spot the held button would land on if let go now (highlighted); -1 before the first move. */
+    private var flickCandidate = -1
     private var dragSince = 0L
     private var releasedAt = 0L
 
@@ -406,8 +414,8 @@ class OverlayPillView(context: Context) : View(context) {
         invalidate()
     }
 
-    /** The pill covers the whole screen while it is being dragged, edited, or springing to a spot. */
-    private fun fullScreenFrames(): Boolean = editing || dragging || springX != null
+    /** The canvas covers the whole screen while the button is dragged, lands on a spot, or is edited. */
+    private fun canvasCoversScreen(): Boolean = editing || dragging || springX != null
 
     /**
      * Every box the pill can occupy at this spot: the resting button, the listening bar and the
@@ -421,7 +429,12 @@ class OverlayPillView(context: Context) : View(context) {
             .union(boxFor(toLook, toAx, toAy))
     }
 
-    /** Ask the host for the windows this morph needs (or the whole screen while dragging or editing). */
+    /**
+     * Ask the host for the windows the current state needs. The canvas hugs the pill's states at
+     * rest and covers the screen while dragging, landing or editing. The touch window hugs the pill
+     * at rest and covers the screen in edit mode only; while a finger holds the button it is not
+     * moved or resized at all (see the class comment), it is re-placed once the finger lifts.
+     */
     private fun requestFrames() {
         if (previewMode || host == null) {
             windowFrame = Box(0f, 0f, width.toFloat(), height.toFloat())
@@ -429,17 +442,23 @@ class OverlayPillView(context: Context) : View(context) {
         }
         if (screenW <= 0f || screenH <= 0f) return
         val screen = Box(0f, 0f, screenW, screenH)
-        if (fullScreenFrames()) {
+        if (editing) {
             requestCanvas(screen)
             requestTouch(screen)
             return
         }
-        requestCanvas(
-            statesUnion(fromAx, fromAy).union(statesUnion(toAx, toAy)).inflate(dp(SHADOW_PAD_DP)).intersect(screen)
-        )
-        requestTouch(
-            boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy)).inflate(dp(TOUCH_PAD_DP)).intersect(screen)
-        )
+        if (canvasCoversScreen()) {
+            requestCanvas(screen)
+        } else {
+            requestCanvas(
+                statesUnion(fromAx, fromAy).union(statesUnion(toAx, toAy)).inflate(dp(SHADOW_PAD_DP)).intersect(screen)
+            )
+        }
+        if (!dragging) {
+            requestTouch(
+                boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy)).inflate(dp(TOUCH_PAD_DP)).intersect(screen)
+            )
+        }
     }
 
     /**
@@ -449,7 +468,7 @@ class OverlayPillView(context: Context) : View(context) {
      * change its origin, and an origin change is precisely the jump this design exists to avoid.
      */
     private fun requestCanvas(required: Box) {
-        val screenMode = fullScreenFrames()
+        val screenMode = canvasCoversScreen()
         val next = when {
             !canvasApplied || canvasIsScreen != screenMode -> required
             windowFrame.encloses(required) -> return
@@ -531,7 +550,11 @@ class OverlayPillView(context: Context) : View(context) {
             if (sx.settled && sy.settled) {
                 springX = null
                 springY = null
-                // The spring covered the screen; shrink both windows back around the landed pill.
+                // Landed: this is where the pill rests now. Shrink the canvas back around it and
+                // pull the touch window in from the release-to-landing span it covered in flight.
+                fromLook = toLook
+                fromAx = toAx
+                fromAy = toAy
                 post { requestFrames() }
             }
         } else {
@@ -779,11 +802,11 @@ class OverlayPillView(context: Context) : View(context) {
 
     // ---- flick between spots (normal mode) ------------------------------------------------------
 
-    /** While the button is held, every spot shows where it can land; the nearest one lights up. */
+    /** While the button is held, every spot shows where it can land; the one it would land on lights up. */
     private fun drawFlickTargets(canvas: Canvas, now: Long) {
         val idle = idleLook()
-        val points = layout.spots.map { spotPoint(it) }
-        val candidate = OverlayGeometry.nearestSpot(points, curAx, curAy)
+        val points = spotPoints()
+        val candidate = flickCandidate
         val fadeIn = smoothstep(0f, 1f, ((now - dragSince).toFloat() / 140f).coerceIn(0f, 1f))
         val fadeOut = if (dragging) 1f else 1f - smoothstep(0f, 1f, ((now - releasedAt).toFloat() / FLICK_GHOST_FADE_MS).coerceIn(0f, 1f))
         val alpha = (fadeIn * fadeOut).coerceIn(0f, 1f)
@@ -807,8 +830,14 @@ class OverlayPillView(context: Context) : View(context) {
         }
     }
 
-    private fun canFlick(): Boolean =
-        !previewMode && host != null && toLook.kind == Kind.IDLE && fromLook.kind == Kind.IDLE && layout.spots.isNotEmpty()
+    /**
+     * The button can be picked up whenever it is, or is about to be, the resting mic button: not
+     * while listening or showing a result, and not in the settings preview. Deliberately judged on
+     * the look the pill is heading for alone: the morph back from a result may still be running
+     * (or, long finished, still be recorded as where the last morph came from) when the finger
+     * lands, and a grab simply completes it.
+     */
+    private fun canFlick(): Boolean = !previewMode && host != null && !editing && toLook.kind == Kind.IDLE
 
     private fun startFlick(x: Float, y: Float) {
         dragging = true
@@ -817,7 +846,10 @@ class OverlayPillView(context: Context) : View(context) {
         releasedAt = 0L
         springX = null
         springY = null
+        // A grab finishes any morph still in flight: from here on the button is the resting look.
         morphStart = -1L
+        fromLook = toLook
+        flickCandidate = -1
         requestFrames()
         dragFree(x, y)
     }
@@ -834,16 +866,29 @@ class OverlayPillView(context: Context) : View(context) {
         toAy = ny
         curAx = nx
         curAy = ny
+        // Where it would land if let go right now; a light tick marks the target changing hands.
+        val candidate = OverlayGeometry.nearestSpot(spotPoints(), nx, ny)
+        if (candidate != flickCandidate) {
+            if (flickCandidate >= 0) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            flickCandidate = candidate
+        }
         invalidate()
     }
 
-    /** The finger let go: pick the spot it was heading for and spring onto it, carrying the finger's momentum. */
+    private fun spotPoints(): List<Pair<Float, Float>> = layout.spots.map { spotPoint(it) }
+
+    /**
+     * The finger let go: land on the spot nearest to where the button was released, which is the
+     * one that has been highlighted under the finger all along, so the landing never surprises.
+     * The finger's momentum only shapes the flight there.
+     */
     private fun endFlick() {
+        val points = spotPoints()
+        val index = OverlayGeometry.nearestSpot(points, curAx, curAy)
         val (vx, vy) = fling.velocity()
-        val points = layout.spots.map { spotPoint(it) }
-        val index = OverlayGeometry.nearestSpot(points, curAx, curAy, vx, vy, maxLookaheadPx = screenW * 0.4f)
         dragging = false
         dragPosition = null
+        flickCandidate = index
         releasedAt = AnimationUtils.currentAnimationTimeMillis()
         val next = layout.activated(index)
         if (next != layout) {
@@ -860,6 +905,8 @@ class OverlayPillView(context: Context) : View(context) {
         toAy = ty
         morphStart = -1L
         performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        // The gesture is over, so the touch window may move again: it spans the release point and
+        // the landing spot while the spring flies, then hugs the button where it landed.
         requestFrames()
         invalidate()
     }
@@ -1246,7 +1293,8 @@ class OverlayPillView(context: Context) : View(context) {
 
     private fun cancelGesture() {
         removeCallbacks(nudgeRepeat)
-        if (dragging && !editing) dragPosition = null
+        dragPosition = null
+        flickCandidate = -1
         dragging = false
         dragArmed = false
         pressed = false

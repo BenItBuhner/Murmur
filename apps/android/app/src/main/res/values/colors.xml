@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window chrome only; the Compose theme (ui/theme/Theme.kt) owns every in-app colour. -->
+    <color name="paper">#F6F3EE</color>
+    <color name="ink">#17151A</color>
+    <color name="ember">#FF5A36</color>
+</resources>

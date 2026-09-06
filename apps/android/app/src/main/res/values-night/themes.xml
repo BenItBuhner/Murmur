@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The window matches the Compose "paper" so there is no flash before the first frame.
-         System bar icon colours are set at runtime by enableEdgeToEdge(). -->
     <style name="Theme.Murmur" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/paper</item>
         <item name="android:colorBackground">@color/paper</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

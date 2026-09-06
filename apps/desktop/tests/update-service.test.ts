@@ -34,7 +34,9 @@ class FakeSettings extends EventEmitter {
     this.emit('change', this.data, patch, 'local')
     return this.data
   }
-  flush(): void {}
+  flush(): void {
+    // in-memory only
+  }
 }
 
 interface FakeAsset {
@@ -414,6 +416,40 @@ describe('UpdateService', () => {
     const again = await service.check({ manual: false })
     expect(again.phase).toBe('ready')
     expect(again.downloadedPath).toBe(ready.downloadedPath)
+  })
+
+  it('does not let a scheduled check interrupt a running download', async () => {
+    settings.patch({ updates: { autoInstall: false } })
+    let releaseBody: (() => void) | null = null
+    const slowFetch = async (url: string): Promise<Response> => {
+      const res = await gh.fetch(url)
+      if (!url.endsWith('.AppImage')) return res
+      const bytes = new Uint8Array(await res.arrayBuffer())
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes.slice(0, 10))
+          releaseBody = () => {
+            controller.enqueue(bytes.slice(10))
+            controller.close()
+          }
+        }
+      })
+      return new Response(stream, { status: 200, headers: res.headers })
+    }
+    const service = make({ fetch: slowFetch })
+    await service.check({ manual: true })
+    const downloading = service.download()
+    await vi.waitFor(() => expect(releaseBody).not.toBeNull())
+    expect(service.getStatus().phase).toBe('downloading')
+    const listCalls = gh.requests.filter((u) => u.includes('/releases?')).length
+
+    const during = await service.check({ manual: false })
+    expect(during.phase).toBe('downloading')
+    expect(gh.requests.filter((u) => u.includes('/releases?')).length).toBe(listCalls)
+
+    releaseBody!()
+    expect((await downloading).phase).toBe('ready')
+    expect(existsSync(join(dir, 'updates', 'Murmur-0.2.0-x86_64.AppImage'))).toBe(true)
   })
 
   it('ignores assets served from another origin', async () => {

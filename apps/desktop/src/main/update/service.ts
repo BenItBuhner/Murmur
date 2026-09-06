@@ -166,7 +166,10 @@ export class UpdateService extends EventEmitter {
 
   check(opts: { manual: boolean }): Promise<UpdateStatus> {
     if (this.inflight) return this.inflight
-    if (this.status.phase === 'installing') return Promise.resolve(this.status)
+    // A download or install owns the state until it finishes; the next cycle will re-check.
+    if (this.status.phase === 'installing' || this.status.phase === 'downloading') {
+      return Promise.resolve(this.status)
+    }
     this.inflight = this.doCheck(opts).finally(() => {
       this.inflight = null
     })

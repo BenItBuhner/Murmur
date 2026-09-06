@@ -12,12 +12,16 @@
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- usesCleartextTraffic: a self-hosted whisper server on the LAN (http://192.168.x.x:8000/v1)
+         is a first-class provider, and Android otherwise refuses every plain-http base URL. Hosted
+         providers keep using https. -->
     <application
         android:name=".MurmurApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Murmur">
 
         <activity

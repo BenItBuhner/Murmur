@@ -2,6 +2,8 @@ import './styles/globals.css'
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { OverlayState } from '@shared/types'
+import { buildTheme, resolveSeed } from '@shared/theme'
+import { applyTheme } from './lib/apply-theme'
 import { Overlay } from './overlay/Overlay'
 import { MicCapture } from './overlay/capture'
 import { playSound, setSoundVolume } from './overlay/sounds'
@@ -30,6 +32,17 @@ function App(): React.JSX.Element {
     const unsubs = [
       bridge.onState((s) => setState(s)),
       bridge.onPlaySound((name) => playSound(name)),
+      // The pill shares the settings window's palette; main sends the inputs, we do the maths.
+      bridge.onTheme((t) =>
+        applyTheme(
+          document.documentElement,
+          buildTheme({
+            mode: t.mode,
+            seed: resolveSeed(t, t.systemAccent),
+            tinted: t.tintedSurfaces
+          })
+        )
+      ),
       bridge.onAudioConfigure((cfg) => {
         setSoundVolume(cfg.soundVolume)
         capture.configure(cfg).catch(() => undefined)

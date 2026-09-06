@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -18,7 +18,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,9 +29,8 @@ import app.murmur.android.update.UpdatePhase
 import app.murmur.android.update.UpdateState
 import kotlinx.coroutines.launch
 
-private val Muted = Color(0xFF9A9AA2)
-private val Danger = Color(0xFFE08A8A)
-private val Good = Color(0xFF7EE2A8)
+// Colours come from the active Material palette: Muted/Success from CloudScreens.kt, the rest
+// straight off MaterialTheme, so the card follows the Appearance settings like every other section.
 
 private fun megabytes(bytes: Long): String = "%.1f MB".format(bytes / (1024f * 1024f))
 
@@ -91,23 +89,23 @@ fun UpdatesSection(store: SettingsStore, settings: MurmurSettings) {
     val state by manager.state.collectAsState()
     val scope = rememberCoroutineScope()
 
+    val danger = MaterialTheme.colorScheme.error
     Text(headline(state), fontWeight = FontWeight.Medium, fontSize = 14.sp)
     Text(
         detail(state),
         fontSize = 12.sp,
-        color = if (state.phase == UpdatePhase.ERROR) Danger else Muted
+        color = if (state.phase == UpdatePhase.ERROR) danger else Muted
     )
     if (state.phase != UpdatePhase.ERROR && state.error != null) {
-        Text(state.error!!, fontSize = 12.sp, color = Danger)
+        Text(state.error!!, fontSize = 12.sp, color = danger)
     }
     state.updatedFrom?.let {
-        Text("Updated from $it to ${state.currentVersion}.", fontSize = 12.sp, color = Good)
+        Text("Updated from $it to ${state.currentVersion}.", fontSize = 12.sp, color = Success)
     }
     if (state.phase == UpdatePhase.DOWNLOADING) {
         LinearProgressIndicator(
             progress = { state.progress },
-            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            color = Accent
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
         )
     }
 
@@ -119,9 +117,7 @@ fun UpdatesSection(store: SettingsStore, settings: MurmurSettings) {
         when (state.phase) {
             UpdatePhase.AVAILABLE -> {
                 if (state.release?.apk != null) {
-                    Button(onClick = { manager.download() }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
-                        Text("Download")
-                    }
+                    Button(onClick = { manager.download() }) { Text("Download") }
                 } else {
                     OutlinedButton(onClick = { manager.openReleasePage(context) }) { Text("View release") }
                 }
@@ -132,14 +128,9 @@ fun UpdatesSection(store: SettingsStore, settings: MurmurSettings) {
             }
             UpdatePhase.READY -> {
                 if (state.needsInstallPermission) {
-                    Button(
-                        onClick = { manager.requestInstallPermission(context) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent)
-                    ) { Text("Allow updates") }
+                    Button(onClick = { manager.requestInstallPermission(context) }) { Text("Allow updates") }
                 } else if (state.canInstall) {
-                    Button(onClick = { manager.install() }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
-                        Text("Install")
-                    }
+                    Button(onClick = { manager.install() }) { Text("Install") }
                 } else {
                     OutlinedButton(onClick = { manager.openReleasePage(context) }) { Text("View release") }
                 }

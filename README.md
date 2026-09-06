@@ -97,6 +97,9 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   answers/commentary so the model can never “reply” to your dictation.
 - **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”; the
   selection is rewritten in place.
+- **Your colours.** Light, dark or follow the system; keep the neutral look or pick an accent — your
+  OS accent colour (Windows, macOS, GNOME 47+, KDE), a preset, or any hex — and optionally Material
+  You style tinted surfaces. The whole window and the dictation pill follow, live.
 
 ### Quick start
 
@@ -108,7 +111,9 @@ npm run dev
 
 ## Android (`apps/android`)
 
-The same Wispr Flow pattern on your phone: a floating dictation pill above the keyboard.
+The same Wispr Flow pattern on your phone: a floating dictation pill above the keyboard. Material
+You throughout: light, dark or system, wallpaper colours on Android 12+ (or one of the accent
+presets on older devices), and the pill takes the same palette.
 
 ```bash
 cd apps/android

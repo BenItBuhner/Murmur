@@ -4,8 +4,9 @@ import { getSttProvider, STT_PRESETS, type SttConfig } from '@core/stt'
 import { chatComplete, listChatModels } from '@core/llm/client'
 import { runPipeline } from '@core/text/pipeline'
 import { buildSttPrompt } from '@core/text/dictionary'
-import { IPC } from '@shared/ipc'
+import { IPC, type ThemeReport } from '@shared/ipc'
 import type { Settings } from '@shared/settings'
+import { isHexColor } from '@shared/theme'
 import type { CloudConfig, RendererAuthState, SyncStatus } from '@shared/cloud'
 import type { AppInfo, HistoryEntry, ProviderTestResult } from '@shared/types'
 import type { UpdateStatus } from '@shared/updates'
@@ -21,7 +22,7 @@ import type { SettingsStore, SettingsPatch } from './store/settings'
 import type { HistoryStore } from './store/history'
 import type { UpdateService } from './update/service'
 import { releasesPageUrl, type UpdateSource } from './update/source'
-import { showMainWindow } from './windows/main-window'
+import { showMainWindow, updateChrome } from './windows/main-window'
 
 export interface IpcDeps {
   settings: SettingsStore
@@ -32,6 +33,8 @@ export interface IpcDeps {
   cloud: CloudSync
   updates: UpdateService
   updateSource: UpdateSource
+  /** Current OS accent colour (`#rrggbb`) or null. */
+  systemAccent: () => string | null
   onEnabledChange: (enabled: boolean) => void
   quit: () => void
 }
@@ -96,6 +99,13 @@ export function registerIpc(deps: IpcDeps): void {
     if (cloudConfig.accountMode !== 'optional') return false
     settings.patch({ cloud: { accountSkipped: true } })
     return true
+  })
+
+  ipcMain.handle(IPC.themeSystemAccent, () => deps.systemAccent())
+  ipcMain.handle(IPC.themeReport, (_e, report: ThemeReport) => {
+    if (isHexColor(report?.background) && isHexColor(report?.foreground)) {
+      updateChrome({ background: report.background, foreground: report.foreground })
+    }
   })
 
   ipcMain.handle(IPC.settingsGet, () => settings.get())

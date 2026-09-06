@@ -23,8 +23,8 @@ export function ShortcutsPage(): React.JSX.Element {
       />
 
       {fallback && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-[13px]">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+        <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3 text-[13px]">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <div>
             <div className="font-medium">Hold-to-talk is unavailable in this session</div>
             <div className="text-muted-foreground">

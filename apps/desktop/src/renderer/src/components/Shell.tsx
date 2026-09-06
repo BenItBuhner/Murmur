@@ -87,7 +87,7 @@ export function Shell({
                 onClick={() => onNavigate(item.id)}
                 className={cn(
                   'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-                  route === item.id && 'bg-card text-foreground shadow-xs'
+                  route === item.id && 'bg-card text-foreground shadow-xs [&>svg]:text-primary'
                 )}
               >
                 <item.icon className="size-4" />
@@ -149,7 +149,7 @@ function StatusCard({
               : listening
                 ? 'bg-record'
                 : processing
-                  ? 'bg-blue-400'
+                  ? 'bg-info'
                   : 'bg-success'
           )}
         />

@@ -14,7 +14,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import app.murmur.android.settings.Languages
@@ -39,7 +38,7 @@ fun LanguagePicker(store: SettingsStore, settings: MurmurSettings, showHint: Boo
                     "so mumbled words are fixed instead of guessed as another language."
             },
             fontSize = 12.sp,
-            color = Color(0xFF9A9AA2)
+            color = Muted
         )
     }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
@@ -50,8 +49,7 @@ fun LanguagePicker(store: SettingsStore, settings: MurmurSettings, showHint: Boo
             singleLine = true,
             label = { Text("Dictation language") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-            colors = fieldColors()
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             for ((code, name) in Languages.OPTIONS) {

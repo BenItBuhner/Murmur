@@ -15,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,7 +22,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,13 +45,18 @@ import app.murmur.android.settings.DictionaryCodec
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.Tone
+import app.murmur.android.ui.theme.MurmurTheme
 import com.clerk.api.Clerk
 import com.clerk.ui.auth.AuthView
 import kotlinx.coroutines.launch
 
-val Accent = Color(0xFFFF5A36)
-private val Muted = Color(0xFF9A9AA2)
-private val Success = Color(0xFF7EE2A8)
+/** Secondary text, from the active palette. */
+internal val Muted: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+
+/** "Done" green, harmonized with the active palette. */
+internal val Success: Color
+    @Composable get() = MurmurTheme.colors.success
 
 /**
  * The front door of a cloud build: Clerk's prebuilt sign-in/sign-up. Nobody reaches onboarding
@@ -148,7 +151,10 @@ fun OnboardingScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             steps.forEachIndexed { i, _ ->
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = if (i <= index) Accent else Color(0xFF2A2A30)),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (i <= index) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                    ),
                     shape = RoundedCornerShape(3.dp),
                     modifier = Modifier.weight(1f).height(4.dp)
                 ) {}
@@ -197,9 +203,9 @@ fun OnboardingScreen(
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             TextButton(onClick = { if (index > 0) index-- }, enabled = index > 0) { Text("Back") }
             if (index == steps.lastIndex) {
-                Button(onClick = onFinish, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Finish") }
+                Button(onClick = onFinish) { Text("Finish") }
             } else {
-                Button(onClick = { index++ }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                Button(onClick = { index++ }) {
                     Text(if (index == 0) "Get started" else "Continue")
                 }
             }
@@ -217,7 +223,7 @@ private fun PersonalizeStep(store: SettingsStore, firstName: String?) {
         color = Muted, fontSize = 13.sp
     )
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -230,10 +236,9 @@ private fun PersonalizeStep(store: SettingsStore, firstName: String?) {
                 value = terms,
                 onValueChange = { terms = it },
                 label = { Text("Comma-separated") },
-                placeholder = { Text("Wispr Flow, Kubernetes, Priya", color = Color(0xFF6A6A72)) },
+                placeholder = { Text("Wispr Flow, Kubernetes, Priya") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                colors = fieldColors()
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedButton(
                 onClick = {
@@ -248,7 +253,7 @@ private fun PersonalizeStep(store: SettingsStore, firstName: String?) {
         }
     }
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -292,13 +297,13 @@ fun DictionaryEditor(store: SettingsStore, synced: Boolean) {
     )
     OutlinedTextField(
         value = word, onValueChange = { word = it }, label = { Text("Word or phrase") },
-        placeholder = { Text("e.g. Wispr Flow", color = Color(0xFF6A6A72)) },
-        singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors()
+        placeholder = { Text("e.g. Wispr Flow") },
+        singleLine = true, modifier = Modifier.fillMaxWidth()
     )
     OutlinedTextField(
         value = aliases, onValueChange = { aliases = it }, label = { Text("Sounds like (optional, comma-separated)") },
-        placeholder = { Text("whisper flow, wisper flow", color = Color(0xFF6A6A72)) },
-        singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors()
+        placeholder = { Text("whisper flow, wisper flow") },
+        singleLine = true, modifier = Modifier.fillMaxWidth()
     )
     OutlinedButton(
         onClick = {
@@ -343,7 +348,7 @@ fun AccountSection(config: CloudConfig, store: SettingsStore, onSignIn: () -> Un
             "Sign in to sync your dictionary and style to your other devices. Your local words are merged into the account the first time you sign in.",
             color = Muted, fontSize = 12.sp
         )
-        Button(onClick = onSignIn, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Sign in or create account") }
+        Button(onClick = onSignIn) { Text("Sign in or create account") }
         return
     }
     val name = status.user?.name ?: listOfNotNull(user?.firstName, user?.lastName).joinToString(" ").ifBlank { "Your account" }
@@ -374,12 +379,3 @@ fun AccountSection(config: CloudConfig, store: SettingsStore, onSignIn: () -> Un
     Spacer(Modifier.height(2.dp))
     Text("${settings.dictionaryEntries.size} dictionary words on this account", fontSize = 12.sp, color = Muted)
 }
-
-@Composable
-fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Accent,
-    unfocusedBorderColor = Color(0xFF2A2A30),
-    focusedLabelColor = Accent,
-    unfocusedLabelColor = Muted,
-    cursorColor = Accent
-)

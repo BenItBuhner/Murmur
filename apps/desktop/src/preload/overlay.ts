@@ -6,7 +6,8 @@ import {
   type AudioStartMessage,
   type AudioStatusMessage,
   type AudioStoppedMessage,
-  type SoundName
+  type SoundName,
+  type ThemeMessage
 } from '@shared/ipc'
 import type { OverlayState } from '@shared/types'
 
@@ -20,6 +21,7 @@ const on = <T>(channel: string, cb: (payload: T) => void): Unsub => {
 const api = {
   onState: (cb: (s: OverlayState) => void): Unsub => on(IPC.overlayState, cb),
   onPlaySound: (cb: (name: SoundName) => void): Unsub => on(IPC.overlayPlaySound, cb),
+  onTheme: (cb: (theme: ThemeMessage) => void): Unsub => on(IPC.overlayTheme, cb),
   onAudioConfigure: (cb: (cfg: AudioConfigureMessage) => void): Unsub => on(IPC.audioConfigure, cb),
   onAudioStart: (cb: (m: AudioStartMessage) => void): Unsub => on(IPC.audioStart, cb),
   onAudioStop: (cb: (m: { sessionId: string }) => void): Unsub => on(IPC.audioStop, cb),

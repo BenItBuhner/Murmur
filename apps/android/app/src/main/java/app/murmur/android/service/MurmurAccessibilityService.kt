@@ -3,6 +3,7 @@ package app.murmur.android.service
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
@@ -20,6 +21,7 @@ import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayPillView
+import app.murmur.android.overlay.PillTheme
 import app.murmur.android.overlay.overlayAnchor
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.update.UpdateManager
@@ -86,7 +88,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             }
         }
         mainScope.launch {
-            settings.flow.collect { s -> pill?.configure(s.overlayShape, s.overlayAnchor()) }
+            settings.flow.collect { s ->
+                pill?.setPalette(PillTheme.resolve(this@MurmurAccessibilityService, s))
+                pill?.configure(s.overlayShape, s.overlayAnchor())
+            }
         }
         mainScope.launch {
             OverlayEditor.editing.collect { editing ->
@@ -114,6 +119,12 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     }
 
     override fun onInterrupt() = Unit
+
+    /** A new wallpaper (or dark mode flip) arrives as a configuration change; re-read the theme colours. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        pill?.setPalette(PillTheme.resolve(this, SettingsStore.get(this).get()))
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         when (event.eventType) {
@@ -208,6 +219,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         pillParams = params
         pillAttached = false
         val s = settings.get()
+        view.setPalette(PillTheme.resolve(this, s))
         view.configure(s.overlayShape, s.overlayAnchor())
         view.setEditing(OverlayEditor.editing.value)
         // Computes the first window frame and, through applyWindowFrame, adds the window.

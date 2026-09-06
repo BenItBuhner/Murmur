@@ -1,4 +1,13 @@
-import type { AppRule, Tone } from '@shared/settings'
+import type {
+  AppRule,
+  FormattingMode,
+  ListsMode,
+  LlmFreedom,
+  LlmStructure,
+  NumbersMode,
+  Settings,
+  Tone
+} from '@shared/settings'
 
 export type AppCategory =
   'chat' | 'email' | 'document' | 'code' | 'terminal' | 'browser' | 'notes' | 'unknown'
@@ -60,25 +69,52 @@ export function autoTone(category: AppCategory): Exclude<Tone, 'auto'> {
   }
 }
 
+/** Everything the text stages need to know about the destination, already merged. */
 export interface ResolvedStyle {
   tone: Exclude<Tone, 'auto'>
   rule?: AppRule
+  mode: FormattingMode
+  lists: ListsMode
+  numbers: NumbersMode
+  freedom: LlmFreedom
+  structure: LlmStructure
+  /** Global instructions followed by the matching rule's, blank line separated. */
+  instructions: string
+  trailingSpace: boolean
 }
 
-export function resolveStyle(
-  globalTone: Tone,
-  rules: readonly AppRule[],
-  ctx: AppContext
-): ResolvedStyle {
+export function findRule(rules: readonly AppRule[], ctx: AppContext): AppRule | undefined {
   const hay = `${ctx.app} ${ctx.title}`.toLowerCase()
-  const rule = rules.find((r) => r.match && hay.includes(r.match.toLowerCase()))
+  return rules.find((r) => r.match.trim() && hay.includes(r.match.trim().toLowerCase()))
+}
+
+/**
+ * Precedence: a matching per-app rule, then what the destination category demands (code and
+ * terminals never get lists and always get digits), then the global settings.
+ */
+export function resolveStyle(formatting: Settings['formatting'], ctx: AppContext): ResolvedStyle {
+  const rule = findRule(formatting.appRules, ctx)
   const tone =
     rule?.tone && rule.tone !== 'auto'
       ? rule.tone
-      : globalTone !== 'auto'
-        ? globalTone
+      : formatting.tone !== 'auto'
+        ? formatting.tone
         : autoTone(ctx.category)
-  return { tone, rule }
+  const technical = ctx.category === 'code' || ctx.category === 'terminal'
+  const instructions = [formatting.llm.instructions.trim(), rule?.instructions?.trim() ?? '']
+    .filter(Boolean)
+    .join('\n\n')
+  return {
+    tone,
+    rule,
+    mode: rule?.formatting ?? formatting.mode,
+    lists: rule?.lists ?? (technical ? 'off' : formatting.lists),
+    numbers: rule?.numbers ?? (technical ? 'all' : formatting.numbers),
+    freedom: rule?.freedom ?? (technical ? 'strict' : formatting.llm.freedom),
+    structure: technical ? 'keep' : formatting.llm.structure,
+    instructions,
+    trailingSpace: rule?.trailingSpace ?? formatting.trailingSpace
+  }
 }
 
 export function toneDescription(tone: Exclude<Tone, 'auto'>): string {

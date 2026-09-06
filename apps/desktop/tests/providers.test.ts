@@ -9,6 +9,7 @@ import {
 import { findPreset, STT_PRESETS } from '@core/stt/presets'
 import { buildFormatMessages, maxTokensFor, sanitizeLlmOutput } from '@core/text/llm-prompt'
 import { classifyApp, resolveStyle } from '@core/text/app-context'
+import { defaultSettings } from '@shared/settings'
 
 describe('STT error parsing', () => {
   it('extracts the message and the suggested model list from a routing error', () => {
@@ -57,11 +58,13 @@ describe('STT error parsing', () => {
 
 describe('LLM prompt and output guard', () => {
   it('builds a system prompt that carries dictionary, tone and app context', () => {
+    const formatting = { ...defaultSettings().formatting, tone: 'casual' as const }
+    const app = classifyApp('Slack', 'general - Slack')
     const msgs = buildFormatMessages({
       raw: 'hello there',
       dictionary: [{ id: '1', word: 'Wispr Flow', aliases: [], fuzzy: false, createdAt: 0 }],
-      style: { tone: 'casual' },
-      app: classifyApp('Slack', 'general - Slack')
+      style: resolveStyle(formatting, app),
+      app
     })
     expect(msgs[0].role).toBe('system')
     expect(msgs[0].content).toContain('Wispr Flow')
@@ -119,10 +122,13 @@ describe('app context', () => {
     expect(classifyApp('Code.exe', 'main.ts - project').category).toBe('code')
     expect(classifyApp('chrome.exe', 'Inbox - Gmail').category).toBe('email')
     expect(classifyApp('notepad.exe').category).toBe('unknown')
-    expect(resolveStyle('auto', [], classifyApp('outlook.exe')).tone).toBe('professional')
-    expect(resolveStyle('auto', [], classifyApp('discord.exe')).tone).toBe('casual')
-    expect(resolveStyle('professional', [], classifyApp('discord.exe')).tone).toBe('professional')
-    const rules = [{ id: 'r', match: 'discord', tone: 'neutral' as const }]
-    expect(resolveStyle('auto', rules, classifyApp('Discord.exe')).tone).toBe('neutral')
+    const f = defaultSettings().formatting
+    expect(resolveStyle(f, classifyApp('outlook.exe')).tone).toBe('professional')
+    expect(resolveStyle(f, classifyApp('discord.exe')).tone).toBe('casual')
+    expect(resolveStyle({ ...f, tone: 'professional' }, classifyApp('discord.exe')).tone).toBe(
+      'professional'
+    )
+    const appRules = [{ id: 'r', match: 'discord', tone: 'neutral' as const }]
+    expect(resolveStyle({ ...f, appRules }, classifyApp('Discord.exe')).tone).toBe('neutral')
   })
 })

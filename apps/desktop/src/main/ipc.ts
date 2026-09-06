@@ -4,10 +4,18 @@ import { getSttProvider, STT_PRESETS, type SttConfig } from '@core/stt'
 import { chatComplete, listChatModels } from '@core/llm/client'
 import { runPipeline } from '@core/text/pipeline'
 import { buildSttPrompt } from '@core/text/dictionary'
+import { classifyApp, resolveStyle } from '@core/text/app-context'
+import { smartFormat } from '@core/text/smart-format'
 import { IPC } from '@shared/ipc'
 import type { Settings } from '@shared/settings'
 import type { CloudConfig, RendererAuthState, SyncStatus } from '@shared/cloud'
-import type { AppInfo, HistoryEntry, ProviderTestResult } from '@shared/types'
+import type {
+  AppInfo,
+  HistoryEntry,
+  PreviewRequest,
+  PreviewResult,
+  ProviderTestResult
+} from '@shared/types'
 import fixtureWav from '../../resources/fixtures/jfk.wav?asset'
 import type { CloudSync } from './cloud/sync-engine'
 import type { DictationController } from './dictation/session'
@@ -274,10 +282,68 @@ export function registerIpc(deps: IpcDeps): void {
     })
   })
 
-  ipcMain.handle(IPC.pipelinePreview, (_e, raw: string) => {
-    const s = settings.get()
-    return runPipeline(raw, controller.pipelineOptions(s))
-  })
+  ipcMain.handle(
+    IPC.pipelinePreview,
+    async (_e, req: PreviewRequest | string): Promise<PreviewResult> => {
+      const request: PreviewRequest = typeof req === 'string' ? { raw: req } : req
+      const s = settings.get()
+      const app = classifyApp(request.app ?? '', request.title ?? '')
+      const style = resolveStyle(s.formatting, app)
+      const pipelineOpts = controller.pipelineOptions(s, style)
+      const light = runPipeline(request.raw, pipelineOpts)
+      const out: PreviewResult = {
+        light: {
+          text: light.text,
+          stages: light.stages,
+          wordCount: light.wordCount,
+          pressEnter: light.pressEnter,
+          listRequested: light.hints.list.requested,
+          listApplied: light.hints.listApplied,
+          isQuestion: light.hints.isQuestion
+        },
+        style: {
+          category: app.category,
+          ruleMatch: style.rule?.match,
+          tone: style.tone,
+          mode: style.mode,
+          lists: style.lists,
+          numbers: style.numbers,
+          freedom: style.freedom,
+          structure: style.structure
+        }
+      }
+      if (request.smart) {
+        const smart = await smartFormat({
+          light,
+          formatting: s.formatting,
+          dictionary: s.dictionary,
+          style: { ...style, mode: 'smart' },
+          app,
+          llm: {
+            ...settings.llmConnection(),
+            timeoutMs: Math.max(settings.llmConnection().timeoutMs, 20000)
+          },
+          pipelineOpts
+        })
+        out.smart = {
+          status: smart.status,
+          text:
+            smart.status.outcome === 'used' || smart.status.outcome === 'partial'
+              ? smart.result.text
+              : undefined,
+          modelText: smart.modelText,
+          llmMs: smart.llmMs,
+          review: smart.review?.map((d) => ({
+            accept: d.accept,
+            why: d.why,
+            from: d.from,
+            to: d.to
+          }))
+        }
+      }
+      return out
+    }
+  )
 
   ipcMain.handle(IPC.sttListModels + ':presets', () => STT_PRESETS)
 }

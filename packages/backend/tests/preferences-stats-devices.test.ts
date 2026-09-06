@@ -30,6 +30,41 @@ describe('preferences', () => {
     expect(blankLanguage.language).toBe('auto')
     expect(await t.withIdentity(bob).query(api.preferences.get, {})).toBeNull()
   })
+
+  it('syncs the cleanup, structure and model style fields', async () => {
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const saved = await asAda.mutation(api.preferences.update, {
+      formatting: {
+        hesitations: 'thorough',
+        hesitationPhrases: ['At The End Of The Day', 'so yeah', 'so yeah'],
+        repetitionScope: 'thorough',
+        lists: 'spoken',
+        listStyle: 'numbers',
+        bulletMarker: '•',
+        numbers: 'all',
+        llmFreedom: 'natural',
+        llmStructure: 'keep',
+        llmInstructions: '  Use British spelling.  '
+      }
+    })
+    expect(saved.formatting).toEqual({
+      hesitations: 'thorough',
+      hesitationPhrases: ['at the end of the day', 'so yeah'],
+      repetitionScope: 'thorough',
+      lists: 'spoken',
+      listStyle: 'numbers',
+      bulletMarker: '•',
+      numbers: 'all',
+      llmFreedom: 'natural',
+      llmStructure: 'keep',
+      llmInstructions: 'Use British spelling.'
+    })
+    // An older client that only knows the classic fields leaves the new ones untouched.
+    const merged = await asAda.mutation(api.preferences.update, { formatting: { tone: 'casual' } })
+    expect(merged.formatting?.llmFreedom).toBe('natural')
+    expect(merged.formatting?.tone).toBe('casual')
+  })
 })
 
 describe('stats', () => {

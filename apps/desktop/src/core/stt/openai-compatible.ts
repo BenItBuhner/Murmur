@@ -83,28 +83,19 @@ export class OpenAiCompatibleStt implements SttProvider {
     }
 
     try {
-      let res = await attempt(wantVerbose, !wordTimestampsUnsupported.has(base))
+      const wantWords = wantVerbose && !wordTimestampsUnsupported.has(base)
+      let res = await attempt(wantVerbose, wantWords)
+      if (!res.ok && res.status === 400 && wantWords) {
+        // Word timestamps are the newest thing we ask for, so they are the first suspect for a
+        // rejected request: try once without them before judging the error. A server that names
+        // the field is remembered so the extra round-trip is not paid again.
+        const body = await res.text()
+        if (/timestamp_granularities|granularit/i.test(body)) wordTimestampsUnsupported.add(base)
+        res = await attempt(true, false)
+      }
       if (!res.ok && wantVerbose && res.status === 400) {
         const body = await res.text()
-        if (/timestamp_granularities|granularit/i.test(body)) {
-          wordTimestampsUnsupported.add(base)
-          res = await attempt(true, false)
-          if (!res.ok && res.status === 400) {
-            const retryBody = await res.text()
-            if (/response_format|verbose/i.test(retryBody)) {
-              verboseUnsupported.add(base)
-              res = await attempt(false, false)
-            } else {
-              const { message, suggestedModels } = parseErrorBody(retryBody)
-              throw new SttError(
-                message,
-                classifyStatus(res.status, message),
-                res.status,
-                suggestedModels
-              )
-            }
-          }
-        } else if (/response_format|verbose/i.test(body)) {
+        if (/response_format|verbose/i.test(body)) {
           verboseUnsupported.add(base)
           res = await attempt(false, false)
         } else {

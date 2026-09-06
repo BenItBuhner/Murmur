@@ -220,25 +220,21 @@ object SttClient {
 
         val verboseRejected = Regex("response_format|verbose", RegexOption.IGNORE_CASE)
         val granularityRejected = Regex("timestamp_granularities|granularit", RegexOption.IGNORE_CASE)
-        var res = attempt(wantVerbose, base !in wordTimestampsUnsupported)
+        val wantWords = wantVerbose && base !in wordTimestampsUnsupported
+        var res = attempt(wantVerbose, wantWords)
+        if (!res.isSuccessful && res.code == 400 && wantWords) {
+            // Word timestamps are the newest thing we ask for, so they are the first suspect for a
+            // rejected request: try once without them before judging the error. A server that names
+            // the field is remembered so the extra round-trip is not paid again.
+            val body = res.body?.string() ?: ""
+            res.close()
+            if (granularityRejected.containsMatchIn(body)) wordTimestampsUnsupported.add(base)
+            res = attempt(true, false)
+        }
         if (!res.isSuccessful && wantVerbose && res.code == 400) {
             val body = res.body?.string() ?: ""
             res.close()
-            if (granularityRejected.containsMatchIn(body)) {
-                wordTimestampsUnsupported.add(base)
-                res = attempt(true, false)
-                if (!res.isSuccessful && res.code == 400) {
-                    val retryBody = res.body?.string() ?: ""
-                    res.close()
-                    if (verboseRejected.containsMatchIn(retryBody)) {
-                        verboseUnsupported.add(base)
-                        res = attempt(false, false)
-                    } else {
-                        val (message, suggested) = parseErrorBody(retryBody)
-                        throw SttException(message, classifyStatus(400, message), 400, suggested)
-                    }
-                }
-            } else if (verboseRejected.containsMatchIn(body)) {
+            if (verboseRejected.containsMatchIn(body)) {
                 verboseUnsupported.add(base)
                 res = attempt(false, false)
             } else {

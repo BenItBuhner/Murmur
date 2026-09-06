@@ -581,14 +581,16 @@ fun GlyphButton(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Co
 
 // ---- surfaces -------------------------------------------------------------------------------
 
-/** The dark block the live dictation button is shown on. */
+/** The dark block the live dictation button is shown on. At night a hairline keeps its edge. */
 @Composable
 fun Stage(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    val c = Murmur.colors
     Box(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radii.block))
-            .background(Murmur.colors.stage),
+            .background(c.stage)
+            .border(1.dp, if (c.isDark) c.hairline else Color.Transparent, RoundedCornerShape(Radii.block)),
         content = content
     )
 }

@@ -7,7 +7,6 @@ import android.widget.FrameLayout
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayAnchor
-import app.murmur.android.overlay.OverlayMotion
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.OverlayShape
@@ -28,6 +27,9 @@ private const val SCREEN_W = 1080
 private const val SCREEN_H = 2400
 private const val KEYBOARD_TOP = 1500
 private const val FRAME_MS = 8L
+
+/** The pill's outline morph (OverlayPillView.MORPH_MS) plus a little slack. */
+private const val MORPH_MS = 340L
 
 /**
  * The windows the pill asks its host for. Moving a window and redrawing into it are not atomic on
@@ -75,7 +77,7 @@ class OverlayPillWindowTest {
         }
     }
 
-    private fun settle() = frames((OverlayMotion.MORPH_MS / FRAME_MS).toInt() + 6)
+    private fun settle() = frames((MORPH_MS / FRAME_MS).toInt() + 6)
 
     private fun listen(ms: Long) {
         var t = 0L

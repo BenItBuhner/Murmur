@@ -30,6 +30,9 @@ private const val BAR_COUNT = 16
 private const val BAR_STEP_MS = 64L
 private const val SHADOW_PAD_DP = 12f
 
+/** Vertical travel of a label while it hands over to the next one. */
+private const val TEXT_SWAP_SHIFT_DP = 6f
+
 private const val ACCENT = 0xFFFF5A36.toInt()
 private const val BG_DARK = 0xF2141414.toInt()
 private const val BG_SUCCESS = 0xF20F2A1C.toInt()
@@ -472,6 +475,14 @@ class OverlayPillView(context: Context) : View(context) {
             canvas.saveLayerAlpha(box.left, box.top, box.right, box.bottom, (alpha * 255f).toInt().coerceIn(0, 255))
         }
         val look = layer.content
+        // Labels swap like a ticker: the outgoing one drifts up as it fades, the incoming one
+        // arrives from just below. Two labels dissolving in exactly the same place read as a
+        // smear; a few dp of separation makes it a clean hand-over. Icon-only states stay put so
+        // the outline can reveal them in place.
+        if (!full && (look.kind == Kind.PROCESSING || look.kind == Kind.SUCCESS || look.kind == Kind.ERROR)) {
+            val shift = dp(TEXT_SWAP_SHIFT_DP) * (1f - alpha)
+            canvas.translate(0f, if (layer.leaving) -shift else shift)
+        }
         when (look.kind) {
             Kind.IDLE -> drawIdle(canvas, box)
             Kind.LISTENING -> drawListening(canvas, box, now, dt)

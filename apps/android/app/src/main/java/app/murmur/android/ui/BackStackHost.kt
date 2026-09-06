@@ -105,10 +105,9 @@ fun <T : Any> BackStackHost(
         }
     }
 
-    val revealed = previous
-    if (seeking && revealed != null) {
+    if (seeking && previous != null) {
         val progress = gesture?.progress ?: 0f
-        LaunchedEffect(progress) { state.seekTo(progress, revealed) }
+        LaunchedEffect(progress) { state.seekTo(progress, previous) }
     } else {
         LaunchedEffect(current) {
             when {

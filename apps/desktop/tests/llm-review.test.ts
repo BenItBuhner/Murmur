@@ -11,6 +11,7 @@ const base: ReviewPolicy = {
   freedom: 'balanced',
   droppable: new Set(['um', 'uh', 'you', 'know', 'mean', 'like']),
   protectedTerms: new Set(['kubectl', 'wispr', 'flow']),
+  dictionaryPhrases: new Set(['kubectl', 'wispr flow']),
   allowNewLines: true,
   preserveLayout: false
 }
@@ -129,8 +130,27 @@ describe('reviewLlmEdits', () => {
     ],
     // dictionary canonical spelling accepted
     ['run cube control get pods', 'Run kubectl get pods.', 'Run kubectl get pods.', strict, 0],
+    // a multi-word term the recognizer mangled, fixed by the model, survives the review
+    ['I use whisper flow daily', 'I use Wispr Flow daily.', 'I use Wispr Flow daily.', strict, 0],
+    [
+      'install whisperflow today',
+      'Install Wispr Flow today.',
+      'Install Wispr Flow today.',
+      strict,
+      0
+    ],
+    ['try the whisper floh app', 'Try the Wispr Flow app.', 'Try the Wispr Flow app.', strict, 0],
+    // ...but the model may not conjure a dictionary term the speaker never said
+    [
+      'send the report today',
+      'Send the Wispr Flow report today.',
+      'Send the report today.',
+      base,
+      1
+    ],
     // protected term deletion reverted
     ['run kubectl get pods now', 'Run get pods now.', 'Run kubectl get pods now.', natural, 1],
+    ['and Wispr Flow too', 'And too.', 'And Wispr Flow too.', natural, 1],
     // list creation accepted when allowed
     [
       'first finish the deck second email the vendor',
@@ -141,7 +161,35 @@ describe('reviewLlmEdits', () => {
     ],
     // reverted deletion keeps the deterministic casing of the next word
     ['so hey Sarah how are you', 'Hey Sarah, how are you?', 'Hey Sarah, how are you?', strict, 0],
-    ['Bob said hi. Then we left', 'Then we left.', 'Bob said hi. Then we left.', natural, 1]
+    ['Bob said hi. Then we left', 'Then we left.', 'Bob said hi. Then we left.', natural, 1],
+    // deliberate repetition is the speaker's voice; flattening it is reverted at every level
+    [
+      'Fuck, fuck, fuck. This is so broken',
+      'Fuck. This is so broken.',
+      'Fuck, fuck, fuck. This is so broken.',
+      natural,
+      1
+    ],
+    ['go go go go', 'Go.', 'Go go go go.', natural, 1],
+    ['yeah, yeah, yeah, I know', 'Yeah, I know.', 'Yeah, yeah, yeah, I know.', natural, 1],
+    // ...while stutters of small words are still noise
+    ['I, I think we should go', 'I think we should go.', 'I think we should go.', strict, 0],
+    ['the the report is ready', 'The report is ready.', 'The report is ready.', strict, 0],
+    // spoken quote commands the rules missed, turned into marks by the model
+    [
+      'he said quote I will be late end quote and left',
+      'He said "I will be late" and left.',
+      'He said "I will be late" and left.',
+      strict,
+      0
+    ],
+    [
+      'She told me, quote, do not touch that, end quote.',
+      'She told me, "Do not touch that."',
+      'She told me, "Do not touch that."',
+      strict,
+      0
+    ]
   ]
   for (const [light, model, expected, policy, reverted] of cases) {
     it(`${policy.freedom}: ${light} -> ${model}`, () => {

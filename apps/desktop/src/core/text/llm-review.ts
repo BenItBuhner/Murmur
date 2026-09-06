@@ -1,6 +1,7 @@
 import type { LlmFreedom } from '@shared/settings'
 import { fixPunctuationSpacing, normalizeWhitespace } from './format'
 import { spokenNumberValue } from './numbers'
+import { STUTTER_PRONE } from './repeats'
 import { QUESTION_START, countWords, editDistance, isQuestion } from './util'
 
 /**
@@ -248,8 +249,13 @@ export interface ReviewPolicy {
   freedom: LlmFreedom
   /** Words the deterministic stage would drop as noise; their deletion is always fine. */
   droppable: ReadonlySet<string>
-  /** Dictionary terms (lower-cased); they must survive unless the model spelled them canonically. */
+  /**
+   * Every word of every dictionary term (lower-cased); they must survive unless the model spelled
+   * them canonically.
+   */
   protectedTerms: ReadonlySet<string>
+  /** Whole dictionary terms (lower-cased, single-spaced); a span rewritten into one is a correction. */
+  dictionaryPhrases?: ReadonlySet<string>
   /** The model may add line breaks and list markers. */
   allowNewLines: boolean
   /** Line breaks in the deterministic text are final. */
@@ -366,6 +372,8 @@ const CORRECTION_MARKERS = new Set([
   'that',
   'actually'
 ])
+
+const QUOTE_COMMAND = /^(?:(?:open|begin|start|end|close) )?quote$|^unquote$|^end of quote$/
 
 /** Words whose loss changes nothing but emphasis; the only single-word deletions balanced accepts. */
 const INTENSIFIERS = new Set([
@@ -679,8 +687,31 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
 
   // Deletion.
   if (!bWords.length) {
-    const prevKey = a[hunk.aStart - 1]?.key
-    const nextKey = a[hunk.aEnd]?.key
+    // The nearest words on either side of the hunk; the diff often cuts at a comma.
+    let p = hunk.aStart - 1
+    while (p >= 0 && a[p].kind !== 'word') p--
+    let n = hunk.aEnd
+    while (n < a.length && a[n].kind !== 'word') n++
+    const prevKey = p >= 0 ? a[p].key : undefined
+    const nextKey = n < a.length ? a[n].key : undefined
+    // Deliberate repetition: copies separated by pauses, or three or more of them, of a word
+    // people stress rather than stumble over ("no, no, no", "go go go"). Dropping them flattens
+    // the speaker's voice, however tidy the result looks.
+    const word = aKeys[0]
+    if (
+      aWords.length &&
+      aKeys.every((k) => k === word) &&
+      (prevKey === word || nextKey === word) &&
+      !STUTTER_PRONE.has(word) &&
+      !policy.droppable.has(word)
+    ) {
+      const paused = aTok.some((t) => t.kind === 'punct' && /^[,–—-]$/.test(t.text))
+      const copies = aWords.length + (prevKey === word ? 1 : 0) + (nextKey === word ? 1 : 0)
+      if (paused || copies >= 3) return { accept: false, why: 'emphasis-deleted' }
+    }
+    // "quote ... end quote" became quotation marks: the command words were meant to go.
+    if (QUOTE_COMMAND.test(aKeys.join(' ')) && b.some((t) => /^["“”]$/.test(t.text)))
+      return { accept: true, why: 'command' }
     const droppable = aWords.every(
       (t, i) =>
         policy.droppable.has(t.key) ||
@@ -747,7 +778,9 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
   if (aNum !== null && bNum !== null && aNum === bNum) return { accept: true, why: 'number' }
   if (aNum !== null && bNum !== null && aNum !== bNum)
     return { accept: false, why: 'number-changed' }
-  // "cube control" -> "kubectl": the model applied the user's dictionary.
+  // "cube control" -> "kubectl", "whisper flow" -> "Wispr Flow": the model applied the dictionary.
+  if (policy.dictionaryPhrases?.has(bJoined) && aWords.length <= bWords.length + 2)
+    return { accept: true, why: 'dictionary' }
   if (bKeys.every((k) => policy.protectedTerms.has(k)) && aWords.length <= 4)
     return { accept: true, why: 'dictionary' }
 
@@ -839,20 +872,29 @@ export function reviewLlmEdits(light: string, candidate: string, policy: ReviewP
   let i = 0
   let j = 0
   let afterRevert = false
+  let hugNext = false
 
   const emit = (t: DiffToken, useSpace: boolean): void => {
     if (t.kind === 'newline') {
       out.push(t.text)
+      hugNext = false
       return
     }
     const prev = out[out.length - 1]
+    // A quotation mark that had space before it (or opens the text) is an opening mark and hugs
+    // the word after it; any other mark is a closing one and hugs the word before it.
+    const isQuote = t.kind === 'punct' && /^["“”]$/.test(t.text)
+    const opening = isQuote && (t.spaced || out.length === 0 || prev.endsWith('\n'))
     const needSpace =
       useSpace &&
       out.length > 0 &&
       !prev.endsWith('\n') &&
+      !hugNext &&
+      !(isQuote && !opening) &&
       !/^[,.;:!?)\]%]$/.test(t.text) &&
       !/[([]$/.test(prev)
     out.push(needSpace ? ` ${t.text}` : t.text)
+    hugNext = opening
   }
 
   /** Same word, different case: the deterministic side knows whether it started a sentence. */

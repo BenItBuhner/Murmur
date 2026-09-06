@@ -96,8 +96,9 @@ interface Tok {
 export function applySelfCorrections(text: string): string {
   let out = text
   let guard = 0
-  while (guard++ < 10) {
-    markerRe.lastIndex = 0
+  let searchFrom = 0
+  while (guard++ < 20) {
+    markerRe.lastIndex = searchFrom
     const m = markerRe.exec(out)
     if (!m) break
     const before = out.slice(0, m.index)
@@ -106,6 +107,17 @@ export function applySelfCorrections(text: string): string {
     const afterAll = leadingTokens(after, 6)
     const beforeAll = trailingTokensInSentence(before, 6)
     const lastBefore = beforeAll[beforeAll.length - 1]
+    // "No, no, no, that is wrong": a marker inside a run of itself is repetition for emphasis,
+    // not a correction. Leave it and look further along.
+    const marker = m[0]
+      .replace(/[,\s]+/g, ' ')
+      .trim()
+      .toLowerCase()
+    if (lastBefore?.text.toLowerCase() === marker || afterAll[0]?.text.toLowerCase() === marker) {
+      searchFrom = m.index + m[0].length - 1
+      continue
+    }
+    searchFrom = 0
     if (
       !afterAll.length ||
       !beforeAll.length ||

@@ -17,8 +17,12 @@ import app.murmur.android.settings.SettingsStore
 import app.murmur.android.stt.SttClient
 import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttException
+import app.murmur.android.stt.adaptiveThreshold
+import app.murmur.android.stt.lastVoicedSec
+import app.murmur.android.stt.transcribeComplete
 import app.murmur.android.text.AppContext
 import app.murmur.android.text.PipelineOptions
+import app.murmur.android.text.STT_BASE_PROMPT
 import app.murmur.android.text.buildFormatMessages
 import app.murmur.android.text.buildSttPrompt
 import app.murmur.android.text.classifyPackage
@@ -153,22 +157,22 @@ object DictationController {
 
         scope.launch {
             try {
-                val wav: ByteArray = if (fixtureMode(settings)) {
+                val pcm: ShortArray = if (fixtureMode(settings)) {
                     loadFixture(appContext)
                 } else {
-                    val pcm = recorder.stop()
+                    val recorded = recorder.stop()
                     RecordingService.stop(appContext)
-                    if (pcm.size < SAMPLE_RATE * 15 / 100) {
+                    if (recorded.size < SAMPLE_RATE * 15 / 100) {
                         showTransient(DictationState.Error("Too short"))
                         return@launch
                     }
-                    if (Wav.peakDb(pcm) < -48.0) {
+                    if (Wav.peakDb(recorded) < -48.0) {
                         showTransient(DictationState.Error("No speech detected"))
                         return@launch
                     }
-                    Wav.encodePcm16(pcm, SAMPLE_RATE)
+                    recorded
                 }
-                process(wav, settings)
+                process(pcm, settings)
             } catch (e: Exception) {
                 Log.e(TAG, "dictation failed", e)
                 RecordingService.stop(appContext)
@@ -177,8 +181,8 @@ object DictationController {
         }
     }
 
-    private suspend fun process(wav: ByteArray, s: MurmurSettings) {
-        // 1. STT
+    private suspend fun process(pcm: ShortArray, s: MurmurSettings) {
+        // 1. STT, and make sure the transcript reaches the end of the speech
         val sttCfg = SttConfig(
             kind = s.sttKind,
             baseUrl = s.sttBaseUrl,
@@ -188,7 +192,22 @@ object DictationController {
             timeoutMs = s.sttTimeoutMs
         )
         val prompt = buildSttPrompt(s.dictionaryTerms)
-        val stt = SttClient.transcribeWithFallback(wav, prompt, sttCfg, s.sttFallbackModel)
+        val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
+        val complete = transcribeComplete(
+            pcm = pcm,
+            sampleRate = SAMPLE_RATE,
+            speechEndSec = lastVoicedSec(pcm, SAMPLE_RATE, threshold),
+            thresholdDb = threshold,
+            prompt = prompt,
+            // Resumed tails keep the style hint but never the vocabulary: a prompt that ends with a
+            // term the speaker says next is exactly what makes Whisper stop early.
+            tailPrompt = STT_BASE_PROMPT,
+            log = { Log.w(TAG, it) }
+        ) { wav, p -> SttClient.transcribeWithFallback(wav, p, sttCfg, s.sttFallbackModel) }
+        val stt = complete.output
+        if (complete.resumed > 0) {
+            Log.i(TAG, "transcript recovered ${"%.1f".format(complete.recoveredSec)}s of speech in ${complete.resumed} extra request(s)")
+        }
         val raw = stt.text.trim()
         Log.i(TAG, "stt done in ${stt.latencyMs}ms: ${raw.take(80)}")
         if (raw.isEmpty() ||
@@ -233,7 +252,8 @@ object DictationController {
                 val res = LlmClient.chatComplete(
                     LlmConfig(llmBase, llmKey, llmModel, s.llmTimeoutMs),
                     buildFormatMessages(
-                        light.text.trim(), s.dictionaryTerms, style, app, light.hints, s.language
+                        light.text.trim(), s.dictionaryTerms, style, app, light.hints, s.language,
+                        dictionaryAliases = s.dictionaryEntries.associate { it.word.trim() to it.aliases }
                     ),
                     maxTokens = maxTokensFor(light.text)
                 )
@@ -287,11 +307,10 @@ object DictationController {
         }
     }
 
-    private fun loadFixture(context: Context): ByteArray {
+    private fun loadFixture(context: Context): ShortArray {
         val bytes = context.assets.open("fixtures/jfk.wav").use { it.readBytes() }
         val (pcm, rate) = Wav.decodePcm16(bytes)
-        val resampled = Wav.resample(pcm, rate, SAMPLE_RATE)
-        return Wav.encodePcm16(resampled, SAMPLE_RATE)
+        return Wav.resample(pcm, rate, SAMPLE_RATE)
     }
 
     fun friendlyError(err: Throwable): String = when {

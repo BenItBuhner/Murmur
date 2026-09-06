@@ -18,12 +18,24 @@ export interface TranscribeInput {
   signal?: AbortSignal
 }
 
+/** A timed span of the transcript, in seconds from the start of the audio that was sent. */
+export interface TimedSpan {
+  start: number
+  end: number
+}
+
 export interface TranscribeOutput {
   text: string
   language?: string
   durationSec?: number
   noSpeechProb?: number
   latencyMs: number
+  /**
+   * Where in the audio the transcript's words sit: word-level timings when the provider offers
+   * them, otherwise segment-level. Lets the caller notice a transcript that stopped before the
+   * speech did and resume from that point.
+   */
+  spans?: TimedSpan[]
   raw?: unknown
 }
 

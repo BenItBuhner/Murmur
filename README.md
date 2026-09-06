@@ -89,11 +89,24 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
 - **Bring your own models.** Any OpenAI-compatible `/v1/audio/transcriptions` endpoint works, plus
   native Deepgram and ElevenLabs. One-click **model discovery**, a **fallback model**, and a
   built-in **latency test**.
+- **Nothing you said gets dropped.** Whisper-style models sometimes stop transcribing long before
+  you stopped talking (classically right after a word from your dictionary, because the vocabulary
+  prompt taught them the transcript ends there). Murmur compares the word timings it gets back with
+  where your speech actually ends and, when the transcript stops short, transcribes the rest from
+  the nearest pause and appends it. History shows an `stt-resumed` stage when that happened.
 - **Wispr Flow–style cleanup, rule-based.** Filler sounds, hesitation phrases (“you know”,
-  “I mean”, a pause-“like”, “let me think”), repeated words and phrases, false starts,
+  “I mean”, a pause-“like”, “let me think”), stutters and accidental repeats, false starts,
   self-corrections (“Tuesday, no, Wednesday” → “Wednesday”), spoken commands (“new line”,
-  “new paragraph”, “scratch that”, “question mark”, “press enter”), a personal **dictionary**, and
-  voice **snippets**. Every stage has an off/light/thorough style control.
+  “new paragraph”, “scratch that”, “question mark”, “quote … end quote”, “press enter”), a
+  personal **dictionary**, and voice **snippets**. Every stage has an off/light/thorough style
+  control. What you said on purpose stays: “no, no, no”, “very, very slowly”, “go go go” and any
+  swearing are your voice, not noise — only stumbles over small words (“I, I think”, “the the”)
+  are cleaned up, and the formatting model is held to the same rule.
+- **A dictionary that hears, not just spells.** Terms are matched by sound as well as by spelling:
+  “Wispr Flow” is recovered from “whisper flow”, “Wisper Flo” or “whisperflow” without an alias
+  for each, and names are corrected when the recognizer got a letter wrong. Aliases you add are
+  passed to the formatting model as the mis-hearings to watch for, and its corrections into a
+  dictionary term always survive the review.
 - **Lists and numbers without a model.** “bullet point …”, “number one …”, “make this a numbered
   list: …”, “first…, second…, third…” and “here are three things: a, b and c” become bullets or
   numbered lines; “five thirty pm” → “5:30 pm”, “twenty three percent” → “23%”, “ten dollars” →

@@ -139,7 +139,10 @@ private suspend fun runSampleTest(context: Context, s: MurmurSettings): String {
         val res = LlmClient.chatComplete(
             LlmConfig(base, key, model, s.llmTimeoutMs),
             // The bundled sample clip is English regardless of the dictation language setting.
-            buildFormatMessages(light.text.trim(), s.dictionaryTerms, resolveStyle(s, app), app, light.hints, "en"),
+            buildFormatMessages(
+                light.text.trim(), s.dictionaryTerms, resolveStyle(s, app), app, light.hints, "en",
+                dictionaryAliases = s.dictionaryEntries.associate { it.word.trim() to it.aliases }
+            ),
             maxTokens = maxTokensFor(light.text)
         )
         val guard = sanitizeLlmOutput(res.text, light.text)

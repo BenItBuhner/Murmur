@@ -6,6 +6,7 @@ import app.murmur.android.text.applyLineCommands
 import app.murmur.android.text.applyLiteralPunctuation
 import app.murmur.android.text.applyScratchThat
 import app.murmur.android.text.applySelfCorrections
+import app.murmur.android.text.applySpokenQuotes
 import app.murmur.android.text.capitalizeSentences
 import app.murmur.android.text.collapseRepeats
 import app.murmur.android.text.countWords
@@ -117,6 +118,28 @@ class TextPipelineTest {
     fun `ignores negations and plain uses of no`() {
         assertEquals("There is no way, honestly.", applySelfCorrections("There is no way, honestly."))
         assertEquals("Send it Tuesday, not Wednesday.", applySelfCorrections("Send it Tuesday, not Wednesday."))
+        // A repeated "no" is emphasis, not a correction marker; a real correction after it still works.
+        assertEquals("No, no, no, that is wrong.", applySelfCorrections("No, no, no, that is wrong."))
+        assertEquals("No, no, Wednesday.", applySelfCorrections("No, no, Tuesday, no, Wednesday."))
+    }
+
+    @Test
+    fun `spoken quote commands become quotation marks, the noun quote stays`() {
+        assertEquals("he said \"I will be late\" and left", applySpokenQuotes("he said quote I will be late end quote and left"))
+        assertEquals("She told me, \"Do not touch that\".", applySpokenQuotes("She told me, quote, do not touch that, end quote."))
+        assertEquals("the subject is \"weekly update\", then the body", applySpokenQuotes("the subject is quote weekly update unquote, then the body"))
+        assertEquals("\"Yes\"", applySpokenQuotes("open quote yes close quote"))
+        assertEquals("the \"expert\" showed up", applySpokenQuotes("the quote unquote expert showed up"))
+        assertEquals("I got a quote from the plumber", applySpokenQuotes("I got a quote from the plumber"))
+        assertEquals("end quote", applySpokenQuotes("end quote"))
+        assertEquals("quote unquote", applySpokenQuotes("quote unquote"))
+        assertEquals("a quote. \"No way\" was the answer", applySpokenQuotes("a quote. quote no way end quote was the answer"))
+        // Through the pipeline, with literal punctuation inside the quotation.
+        val opts = PipelineOptions()
+        assertEquals("She said \"I will be late\" and left ", runPipeline("she said quote I will be late end quote and left", opts).text)
+        assertEquals("The subject line should be \"weekly update?\" ", runPipeline("the subject line should be quote weekly update question mark end quote", opts).text)
+        assertEquals("Fuck, fuck, fuck. This is so broken ", runPipeline("fuck, fuck, fuck. this is so broken", opts).text)
+        assertEquals("No, no, no, that is wrong ", runPipeline("no, no, no, that is wrong", opts).text)
     }
 
     @Test

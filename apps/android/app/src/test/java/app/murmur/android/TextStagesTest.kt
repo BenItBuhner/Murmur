@@ -76,6 +76,17 @@ class TextStagesTest {
         assertEquals("re-read the book", collapseRepeats("re-read the book", RepetitionScope.WORDS))
         assertEquals("I know that that is true", collapseRepeats("I know that that is true", RepetitionScope.WORDS))
         assertEquals("very, very good", collapseRepeats("very, very good", RepetitionScope.WORDS))
+        assertEquals("very very good", collapseRepeats("very very good", RepetitionScope.WORDS))
+        // Emphasis and feeling are the speaker's wording, whatever the word.
+        assertEquals("fuck, fuck, fuck. This is broken", collapseRepeats("fuck, fuck, fuck. This is broken", RepetitionScope.WORDS))
+        assertEquals("fuck fuck fuck this is broken", collapseRepeats("fuck fuck fuck this is broken", RepetitionScope.WORDS))
+        assertEquals("okay, okay, I get it", collapseRepeats("okay, okay, I get it", RepetitionScope.WORDS))
+        assertEquals("go go go go", collapseRepeats("go go go go", RepetitionScope.PHRASES))
+        assertEquals("go away, go away, go away", collapseRepeats("go away, go away, go away", RepetitionScope.PHRASES))
+        // A bare double of a content word is still a stumble; small words stumble however said.
+        assertEquals("the report is ready", collapseRepeats("the report report is ready", RepetitionScope.WORDS))
+        assertEquals("we should go", collapseRepeats("we, we should go", RepetitionScope.WORDS))
+        assertEquals("let me see", collapseRepeats("let me, let me see", RepetitionScope.PHRASES))
         assertEquals("call five five five one two one two", collapseRepeats("call five five five one two one two", RepetitionScope.WORDS))
         assertEquals("I think we should go", collapseRepeats("I think, I think we should go", RepetitionScope.PHRASES))
         assertEquals("we need to go", collapseRepeats("we need to, we need to go", RepetitionScope.PHRASES))

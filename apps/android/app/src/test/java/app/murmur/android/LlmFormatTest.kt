@@ -7,8 +7,11 @@ import app.murmur.android.settings.Tone
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.AppContext
 import app.murmur.android.text.PipelineOptions
+import app.murmur.android.text.STT_BASE_PROMPT
 import app.murmur.android.text.buildFormatMessages
+import app.murmur.android.text.buildSttPrompt
 import app.murmur.android.text.cleanLlmOutput
+import app.murmur.android.text.dictionaryLine
 import app.murmur.android.text.languageRules
 import app.murmur.android.text.maxTokensFor
 import app.murmur.android.text.resolveStyle
@@ -76,7 +79,8 @@ class LlmFormatTest {
             AppContext("com.whatsapp", AppCategory.CHAT)
         )
         assertEquals("system", messages[0].role)
-        assertTrue(messages[0].content.contains("Murmur, kubectl"))
+        assertTrue(messages[0].content.contains("Personal dictionary: Murmur; kubectl."))
+        assertTrue(messages[0].content.contains("Never insert a dictionary term where nothing similar was said"))
         assertTrue(messages[0].content.contains("chat message"))
         assertTrue(messages[0].content.contains("Casual"))
         // Worked examples sit between the system prompt and the transcript.
@@ -92,6 +96,8 @@ class LlmFormatTest {
         val system = buildFormatMessages("x", emptyList(), resolveStyle(settings, app), app, light.hints)[0].content
         assertTrue(system.contains("Do not rephrase"))
         assertFalse(system.contains("Grammar slips"))
+        assertTrue(system.contains("Flatten deliberate repetition or soften strong language"))
+        assertTrue(system.contains("Spoken quotation marks"))
         assertTrue(system.contains("lay the items out as a list"))
         assertTrue(system.contains("It must stay a question"))
         assertTrue(system.contains("Use British spelling."))
@@ -194,5 +200,24 @@ class LlmFormatTest {
         assertTrue(maxTokensFor("short") >= 768)
         val long = (1..3000).joinToString(" ") { "word" }
         assertEquals(4096, maxTokensFor(long))
+    }
+
+    @Test
+    fun `dictionary line passes recorded mis-hearings on as hints`() {
+        val line = dictionaryLine(listOf("Wispr Flow", "kubectl"), mapOf("Wispr Flow" to listOf("whisper flow", "wisper flow", "wisp flow")))
+        assertTrue(line.startsWith("Personal dictionary: Wispr Flow (heard as \"whisper flow\", \"wisper flow\"); kubectl."))
+        assertEquals("", dictionaryLine(emptyList()))
+        // Matches the desktop wording (apps/desktop/src/core/text/llm-prompt.ts dictionaryLine).
+        assertTrue(line.contains("write the dictionary spelling exactly as given"))
+    }
+
+    @Test
+    fun `stt prompt lists the vocabulary first and never ends with a term`() {
+        val p = buildSttPrompt(listOf("Wispr Flow", "kubectl", "Wispr Flow"))
+        assertEquals("Vocabulary: Wispr Flow, kubectl. $STT_BASE_PROMPT", p)
+        assertEquals(STT_BASE_PROMPT, buildSttPrompt(emptyList()))
+        val long = buildSttPrompt((1..200).map { "term$it" })
+        assertTrue(long.length <= 600)
+        assertTrue(long.endsWith(STT_BASE_PROMPT))
     }
 }

@@ -5,10 +5,11 @@ import {
   applyLineCommands,
   applyLiteralPunctuation,
   applyScratchThat,
+  applySpokenQuotes,
   extractPressEnter
 } from '@core/text/commands'
 import { applySelfCorrections } from '@core/text/corrections'
-import { applyDictionary, buildSttPrompt } from '@core/text/dictionary'
+import { STT_BASE_PROMPT, applyDictionary, buildSttPrompt, soundKey } from '@core/text/dictionary'
 import { collapseRepeats, removeFillers } from '@core/text/fillers'
 import { capitalizeSentences, fixPunctuationSpacing } from '@core/text/format'
 import { runPipeline, type PipelineOptions } from '@core/text/pipeline'
@@ -130,6 +131,34 @@ describe('spoken commands', () => {
     expect(applyLiteralPunctuation('Are you coming question mark')).toBe('Are you coming?')
     expect(applyLiteralPunctuation('Do it now, exclamation point.')).toBe('Do it now!')
   })
+  it('turns spoken quote commands into quotation marks', () => {
+    expect(applySpokenQuotes('he said quote I will be late end quote and left')).toBe(
+      'he said "I will be late" and left'
+    )
+    expect(applySpokenQuotes('She told me, quote, do not touch that, end quote.')).toBe(
+      'She told me, "Do not touch that".'
+    )
+    expect(applySpokenQuotes('the subject is quote weekly update unquote, then the body')).toBe(
+      'the subject is "weekly update", then the body'
+    )
+    expect(applySpokenQuotes('open quote yes close quote')).toBe('"Yes"')
+    expect(applySpokenQuotes('reply with quote sounds good? end quote only')).toBe(
+      'reply with "sounds good?" only'
+    )
+    // "quote unquote X" is the spoken way of putting X in scare quotes.
+    expect(applySpokenQuotes('the quote unquote expert showed up')).toBe('the "expert" showed up')
+  })
+  it('leaves the noun quote alone', () => {
+    expect(applySpokenQuotes('I got a quote from the plumber')).toBe(
+      'I got a quote from the plumber'
+    )
+    expect(applySpokenQuotes('end quote')).toBe('end quote')
+    expect(applySpokenQuotes('quote unquote')).toBe('quote unquote')
+    // The noun and then a real quotation: only the pair converts.
+    expect(applySpokenQuotes('a quote. quote no way end quote was the answer')).toBe(
+      'a quote. "No way" was the answer'
+    )
+  })
 })
 
 describe('self corrections', () => {
@@ -159,6 +188,14 @@ describe('self corrections', () => {
       'Send it Tuesday, not Wednesday.'
     )
   })
+  it('does not read a repeated no as a correction', () => {
+    expect(applySelfCorrections('No, no, no, that is wrong.')).toBe('No, no, no, that is wrong.')
+    expect(applySelfCorrections('Oh no, no, no, no, not again')).toBe(
+      'Oh no, no, no, no, not again'
+    )
+    // ...but a genuine correction right after one still works.
+    expect(applySelfCorrections('No, no, Tuesday, no, Wednesday.')).toBe('No, no, Wednesday.')
+  })
 })
 
 describe('dictionary', () => {
@@ -177,14 +214,90 @@ describe('dictionary', () => {
   })
   it('does not rewrite unrelated words', () => {
     expect(applyDictionary('Bonnets are hats', opts.dictionary)).toBe('Bonnets are hats')
+    // Same consonants as Bennett, different vowel: a different name, not a mis-hearing.
+    expect(applyDictionary('Ask Bonnet about it', opts.dictionary)).toBe('Ask Bonnet about it')
+    expect(applyDictionary('The water flow is fine', opts.dictionary)).toBe(
+      'The water flow is fine'
+    )
   })
-  it('builds a bounded STT prompt', () => {
+  it('matches multi-word terms by sound, however the recognizer split or spelt them', () => {
+    // Not an alias: only the sound matches.
+    expect(applyDictionary('I use Wisper Flo every day', opts.dictionary)).toBe(
+      'I use Wispr Flow every day'
+    )
+    expect(applyDictionary('please implement this in whisperflow', opts.dictionary)).toBe(
+      'please implement this in Wispr Flow'
+    )
+    expect(applyDictionary('Whisper Floh is great', opts.dictionary)).toBe('Wispr Flow is great')
+    expect(applyDictionary('run kube control get pods', opts.dictionary)).toBe(
+      'run kubectl get pods'
+    )
+    // Punctuation between the words means they were not spoken as one term.
+    expect(applyDictionary('a whisper, flow of air', opts.dictionary)).toBe(
+      'a whisper, flow of air'
+    )
+    // Already canonical text is left alone, and its neighbours are never swallowed into it.
+    expect(applyDictionary('Wispr Flow rocks', opts.dictionary)).toBe('Wispr Flow rocks')
+    expect(applyDictionary('Also cc Wispr Flow support', opts.dictionary)).toBe(
+      'Also cc Wispr Flow support'
+    )
+    expect(applyDictionary('See Whisper Flow support', opts.dictionary)).toBe(
+      'See Wispr Flow support'
+    )
+  })
+  it('corrects single words by sound only for names and opted-in terms', () => {
+    const dict = [
+      { id: 'a', word: 'Convex', aliases: [], fuzzy: false, createdAt: 0 },
+      { id: 'b', word: 'Wispr', aliases: [], fuzzy: false, createdAt: 0 }
+    ]
+    expect(applyDictionary('we moved to Konvex', dict)).toBe('we moved to Convex')
+    expect(applyDictionary('the Whisper team', dict)).toBe('the Wispr team')
+    // Lower-case ordinary words never get pulled into a non-fuzzy term.
+    expect(applyDictionary('she began to whisper', dict)).toBe('she began to whisper')
+    expect(applyDictionary('a convex lens', dict)).toBe('a Convex lens')
+  })
+  it('ignores phrases with too little sound to be safe', () => {
+    const dict = [{ id: 'g', word: 'Go To', aliases: [], fuzzy: true, createdAt: 0 }]
+    expect(applyDictionary('I got it', dict)).toBe('I got it')
+    expect(applyDictionary('please go to the store', dict)).toBe('please Go To the store')
+  })
+  it('sound keys collapse spelling variants of the same word', () => {
+    expect(soundKey('whisper')).toBe(soundKey('Wispr'))
+    expect(soundKey('Bennett')).toBe(soundKey('bennet'))
+    expect(soundKey('Konvex')).toBe(soundKey('convex'))
+    expect(soundKey('flow')).toBe(soundKey('flo'))
+    expect(soundKey('kube')).toBe(soundKey('cube'))
+    expect(soundKey('night')).toBe(soundKey('nite'))
+    expect(soundKey('cat')).not.toBe(soundKey('dog'))
+    // Words that dissolve entirely ("why") never match anything.
+    expect(soundKey('why')).toBe('')
+    expect(soundKey('')).toBe('')
+    expect(
+      applyDictionary('why not', [{ id: 'w', word: 'Wye', aliases: [], fuzzy: true, createdAt: 0 }])
+    ).toBe('why not')
+  })
+  it('builds a bounded STT prompt that never ends with a vocabulary term', () => {
     const p = buildSttPrompt(opts.dictionary, ['my email'])
     expect(p).toContain('Wispr Flow')
     expect(p).toContain('kubectl')
     expect(p).toContain('my email')
     expect(p.length).toBeLessThan(600)
+    // Whisper reads the prompt as the previous segment: a term at the very end teaches it that
+    // the transcript ends right after that term is spoken.
+    expect(p.startsWith('Vocabulary: Wispr Flow')).toBe(true)
+    expect(p.endsWith(STT_BASE_PROMPT)).toBe(true)
     expect(buildSttPrompt([])).toBe('Dictation with punctuation.')
+    const long = buildSttPrompt(
+      Array.from({ length: 200 }, (_, i) => ({
+        id: String(i),
+        word: `term${i}`,
+        aliases: [],
+        fuzzy: false,
+        createdAt: 0
+      }))
+    )
+    expect(long.length).toBeLessThanOrEqual(600)
+    expect(long.endsWith(STT_BASE_PROMPT)).toBe(true)
   })
   it('edit distance handles transpositions', () => {
     expect(editDistance('bennet', 'bennett')).toBe(1)
@@ -301,6 +414,25 @@ describe('full pipeline', () => {
     )
     const q = runPipeline('what time is the meeting tomorrow', opts)
     expect(q.hints.isQuestion).toBe(true)
+  })
+  it('keeps emphasis and feeling through the whole pipeline', () => {
+    expect(runPipeline('fuck, fuck, fuck. this is so broken', opts).text).toBe(
+      'Fuck, fuck, fuck. This is so broken '
+    )
+    expect(runPipeline('no, no, no, that is wrong', opts).text).toBe('No, no, no, that is wrong ')
+    expect(runPipeline('go go go go', opts).text).toBe('Go go go go ')
+    expect(runPipeline('I, I think it was very, very slow', opts).text).toBe(
+      'I think it was very, very slow '
+    )
+  })
+  it('writes spoken quotations with quotation marks', () => {
+    expect(runPipeline('she said quote I will be late end quote and left', opts).text).toBe(
+      'She said "I will be late" and left '
+    )
+    expect(
+      runPipeline('the subject line should be quote weekly update question mark end quote', opts)
+        .text
+    ).toBe('The subject line should be "weekly update?" ')
   })
   it('thorough levels catch false starts and openers', () => {
     const r = runPipeline('okay so, I want to, I need to go to the store', {

@@ -7,12 +7,32 @@ import app.murmur.android.settings.RepetitionScope
  *   WORDS     "the the report", "I, I think", part-word stutters "th- the"
  *   PHRASES   repeated runs of up to five words: "I think, I think we should"
  *   THOROUGH  abandoned restarts: "I want to, I need to go" -> "I need to go"
+ *
+ * Repetition is only noise when it is a stumble. People stumble over the small words that hold a
+ * sentence together ("I, I think", "the the report"); they repeat content words on purpose, for
+ * emphasis or feeling ("no, no, no", "very, very slowly", "fuck, fuck, fuck", "go go go"). So a
+ * repeat separated by pauses, or said three or more times, stays unless the word is one people
+ * stumble over; a bare double ("report report") is a stutter unless the word is a usual emphatic.
  */
 
 private const val W = "[\\p{L}\\p{N}'’]"
 private const val NOT_W = "(?<![\\p{L}\\p{N}'’])"
 private const val END_W = "(?![\\p{L}\\p{N}'’])"
 
+/**
+ * Words people stumble over rather than stress: pronouns, articles, prepositions, conjunctions,
+ * auxiliaries, question words. Their repeats are stutters whatever the punctuation.
+ */
+val STUTTER_PRONE = setOf(
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "us", "them", "my", "your", "his", "its",
+    "our", "their", "a", "an", "the", "this", "that", "these", "those", "to", "of", "in", "at", "for",
+    "with", "from", "by", "about", "into", "and", "but", "or", "because", "if", "is", "are", "was",
+    "were", "be", "been", "am", "do", "does", "did", "have", "has", "had", "will", "would", "can",
+    "could", "should", "shall", "may", "might", "must", "what", "who", "where", "when", "why", "how",
+    "which", "just", "like", "let", "gonna", "wanna", "i'm", "it's", "that's", "there's", "don't"
+)
+
+/** Usual emphatics: even a bare double ("very very good", "no no") is on purpose. */
 private val EMPHASIS = setOf(
     "no", "yes", "yeah", "very", "really", "so", "go", "come", "please", "okay", "ok", "wait", "stop",
     "hey", "bye", "ha", "haha", "well", "again", "never", "ever", "more", "now", "quick", "quickly",
@@ -34,6 +54,8 @@ private val RESTART_TAILS = setOf(
 private val RESTART_SEPARATOR = Regex("\\s*[,–—-]\\s+($W+)(\\s+)($W+)", RegexOption.IGNORE_CASE)
 private val WORD_TOKEN = Regex("$W+")
 
+private val PAUSE = Regex("[,–—-]")
+
 fun collapseRepeats(text: String, scope: RepetitionScope = RepetitionScope.WORDS): String {
     if (text.isEmpty()) return text
     var out = PART_WORD_STUTTER.replace(PART_WORD_STUTTER.replace(text, ""), "")
@@ -41,16 +63,34 @@ fun collapseRepeats(text: String, scope: RepetitionScope = RepetitionScope.WORDS
         val word = m.groupValues[1]
         val rest = m.groupValues[2]
         val lower = word.lowercase()
+        val paused = PAUSE.containsMatchIn(rest)
         when {
+            // "five five five one two one two" is a phone number, not a stutter.
             lower in NUMBER_WORDS || Regex("^\\d+$").matches(lower) -> m.value
-            lower in GRAMMATICAL_DOUBLES && !Regex("[,–—-]").containsMatchIn(rest) -> m.value
-            lower in EMPHASIS && Regex("[,–—-]").containsMatchIn(rest) -> m.value
+            lower in GRAMMATICAL_DOUBLES && !paused -> m.value
+            // "I, I think", "the the report": a stumble however it was said.
+            lower in STUTTER_PRONE -> word
+            // "fuck, fuck, fuck", "very, very slowly": the pauses are the speaker stressing each copy.
+            paused -> m.value
+            // "go go go", "no no no": nobody says a word three times by accident.
+            1 + WORD_TOKEN.findAll(rest).count() >= 3 || lower in EMPHASIS -> m.value
             else -> word
         }
     }
     if (scope == RepetitionScope.WORDS) return out
     for (guard in 0 until 5) {
-        val next = PHRASE_REPEAT.replace(out, "$1")
+        val next = PHRASE_REPEAT.replace(out) { m ->
+            val phrase = m.groupValues[1]
+            val rest = m.value.substring(phrase.length)
+            val words = WORD_TOKEN.findAll(phrase).map { it.value.lowercase() }.toList()
+            when {
+                // "go go go go": one word said many times was already judged by the word pass.
+                words.all { it == words[0] } -> m.value
+                // "go away, go away" is said on purpose; "I think, I think we should" is a restart.
+                PAUSE.containsMatchIn(rest) && words[0] !in STUTTER_PRONE -> m.value
+                else -> phrase
+            }
+        }
         if (next == out) break
         out = next
     }

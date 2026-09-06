@@ -2,10 +2,16 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import type { HotkeyAction } from '@core/hotkey/engine'
 import { adaptiveThreshold, analyze, trimSilence } from '@core/audio/vad'
-import { encodeWavPcm16 } from '@core/audio/wav'
-import { getSttProvider, SttError, type SttConfig, type TranscribeOutput } from '@core/stt'
+import {
+  getSttProvider,
+  SttError,
+  transcribeComplete,
+  type CompleteResult,
+  type SttConfig,
+  type TranscribeOutput
+} from '@core/stt'
 import { chatComplete } from '@core/llm/client'
-import { buildSttPrompt } from '@core/text/dictionary'
+import { STT_BASE_PROMPT, buildSttPrompt } from '@core/text/dictionary'
 import { runPipeline, type PipelineOptions, type PipelineResult } from '@core/text/pipeline'
 import { buildCommandMessages, sanitizeLlmOutput } from '@core/text/llm-prompt'
 import { smartFormat } from '@core/text/smart-format'
@@ -252,14 +258,18 @@ export class DictationController extends EventEmitter {
       this.showNotice('No speech detected')
       return
     }
-    if (s.audio.trimSilence)
-      audio = trimSilence(pcm, {
+    // Where the speech ends in the audio we send: the transcript has to reach this far.
+    let speechEndSec = analysis.lastVoicedMs / 1000
+    if (s.audio.trimSilence) {
+      const trimmed = trimSilence(pcm, {
         sampleRate: SAMPLE_RATE,
         thresholdDb: threshold,
         paddingMs: 300
-      }).pcm
+      })
+      audio = trimmed.pcm
+      speechEndSec = (analysis.lastVoicedMs - trimmed.trimmedStartMs) / 1000
+    }
     timings.vadMs = Math.round(performance.now() - t)
-    const wav = encodeWavPcm16(audio, SAMPLE_RATE)
 
     // 2. STT
     t = performance.now()
@@ -278,9 +288,23 @@ export class DictationController extends EventEmitter {
         )
       : undefined
     const keyterms = s.dictionary.map((d) => d.word)
-    let stt: TranscribeOutput
+    const tag = session.id.slice(0, 8)
+    let stt: CompleteResult
     try {
-      stt = await this.transcribeWithFallback(wav, prompt, keyterms, sttCfg, s.stt.fallbackModel)
+      stt = await transcribeComplete(
+        (wav, p) => this.transcribeWithFallback(wav, p, keyterms, sttCfg, s.stt.fallbackModel),
+        {
+          pcm: audio,
+          sampleRate: SAMPLE_RATE,
+          speechEndSec,
+          thresholdDb: threshold,
+          prompt,
+          // Resumed tails keep the style hint but never the vocabulary: a prompt that ends with a
+          // term the speaker says next is exactly what makes Whisper stop early.
+          tailPrompt: prompt ? STT_BASE_PROMPT : undefined,
+          log: (m) => log.warn(`session ${tag}: ${m}`)
+        }
+      )
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
       this.recordFailure(session, '', app, timings, sttCfg, friendlyError(err))
@@ -288,6 +312,14 @@ export class DictationController extends EventEmitter {
       return
     }
     timings.sttMs = Math.round(performance.now() - t)
+    if (stt.resumed)
+      log.info(
+        `session ${tag}: transcript recovered ${stt.recoveredSec.toFixed(1)}s of speech in ${stt.resumed} extra request(s)`
+      )
+    else if (stt.coverage.truncated)
+      log.warn(
+        `session ${tag}: transcript still looks short (${stt.coverage.reason}); inserting what came back`
+      )
     const raw = stt.text.trim()
     if (
       !raw ||
@@ -433,7 +465,7 @@ export class DictationController extends EventEmitter {
       injectionMethod: injectResult.method,
       llmUsed,
       llm: llmStatus,
-      stages: final.stages,
+      stages: stt.resumed ? ['stt-resumed', ...final.stages] : final.stages,
       timings,
       error: injectResult.ok ? undefined : injectResult.error
     }

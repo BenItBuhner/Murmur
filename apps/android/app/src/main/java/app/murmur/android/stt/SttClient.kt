@@ -108,13 +108,47 @@ data class SttConfig(
     val timeoutMs: Int
 )
 
+/** A timed span of the transcript, in seconds from the start of the audio that was sent. */
+data class TimedSpan(val start: Double, val end: Double)
+
 data class TranscribeOutput(
     val text: String,
     val language: String? = null,
     val durationSec: Double? = null,
     val noSpeechProb: Double? = null,
-    val latencyMs: Long
+    val latencyMs: Long,
+    /**
+     * Where in the audio the transcript's words sit: word-level timings when the provider offers
+     * them, otherwise segment-level. Lets the caller notice a transcript that stopped before the
+     * speech did and resume from that point.
+     */
+    val spans: List<TimedSpan>? = null
 )
+
+/**
+ * Timed spans from a verbose_json body. Word timings win: they come from alignment and stay right
+ * even when the decoder stopped early, whereas a segment that was never closed with a timestamp is
+ * reported as running to the end of its 30-second window.
+ */
+fun spansFromVerbose(json: JSONObject): List<TimedSpan>? {
+    fun read(array: org.json.JSONArray?): List<TimedSpan> {
+        if (array == null) return emptyList()
+        val out = ArrayList<TimedSpan>()
+        for (i in 0 until array.length()) {
+            val o = array.optJSONObject(i) ?: continue
+            if (!o.has("start") || !o.has("end")) continue
+            val start = o.optDouble("start")
+            val end = o.optDouble("end")
+            if (start.isNaN() || end.isNaN() || end < 0) continue
+            out.add(TimedSpan(start, end))
+        }
+        return out
+    }
+    val words = read(json.optJSONArray("words"))
+    if (words.isNotEmpty()) return words
+    val segments = read(json.optJSONArray("segments"))
+    return segments.ifEmpty { null }
+}
 
 object SttClient {
     private val baseClient = OkHttpClient.Builder()
@@ -123,6 +157,8 @@ object SttClient {
 
     /** Servers that rejected verbose_json once are remembered, like the desktop client. */
     private val verboseUnsupported = ConcurrentHashMap.newKeySet<String>()
+    /** Servers that rejected word-level timestamps; they still get verbose_json for segment timings. */
+    private val wordTimestampsUnsupported = ConcurrentHashMap.newKeySet<String>()
 
     private fun client(timeoutMs: Int): OkHttpClient = baseClient.newBuilder()
         .callTimeout(timeoutMs.toLong().coerceAtLeast(1000), TimeUnit.MILLISECONDS)
@@ -164,12 +200,16 @@ object SttClient {
         val wantVerbose = base !in verboseUnsupported
         val started = System.nanoTime()
 
-        fun attempt(verbose: Boolean): okhttp3.Response {
+        fun attempt(verbose: Boolean, wordTimestamps: Boolean): okhttp3.Response {
             val form = MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("file", "audio.wav", wav.toRequestBody("audio/wav".toMediaType()))
                 .addFormDataPart("model", cfg.model)
                 .addFormDataPart("response_format", if (verbose) "verbose_json" else "json")
                 .addFormDataPart("temperature", "0")
+            if (verbose && wordTimestamps) {
+                form.addFormDataPart("timestamp_granularities[]", "word")
+                form.addFormDataPart("timestamp_granularities[]", "segment")
+            }
             if (cfg.language.isNotEmpty() && cfg.language != "auto") form.addFormDataPart("language", cfg.language)
             if (!prompt.isNullOrEmpty()) form.addFormDataPart("prompt", prompt)
             val req = Request.Builder().url(url).post(form.build()).apply {
@@ -178,13 +218,25 @@ object SttClient {
             return client(cfg.timeoutMs).newCall(req).execute()
         }
 
-        var res = attempt(wantVerbose)
+        val verboseRejected = Regex("response_format|verbose", RegexOption.IGNORE_CASE)
+        val granularityRejected = Regex("timestamp_granularities|granularit", RegexOption.IGNORE_CASE)
+        val wantWords = wantVerbose && base !in wordTimestampsUnsupported
+        var res = attempt(wantVerbose, wantWords)
+        if (!res.isSuccessful && res.code == 400 && wantWords) {
+            // Word timestamps are the newest thing we ask for, so they are the first suspect for a
+            // rejected request: try once without them before judging the error. A server that names
+            // the field is remembered so the extra round-trip is not paid again.
+            val body = res.body?.string() ?: ""
+            res.close()
+            if (granularityRejected.containsMatchIn(body)) wordTimestampsUnsupported.add(base)
+            res = attempt(true, false)
+        }
         if (!res.isSuccessful && wantVerbose && res.code == 400) {
             val body = res.body?.string() ?: ""
             res.close()
-            if (Regex("response_format|verbose", RegexOption.IGNORE_CASE).containsMatchIn(body)) {
+            if (verboseRejected.containsMatchIn(body)) {
                 verboseUnsupported.add(base)
-                res = attempt(false)
+                res = attempt(false, false)
             } else {
                 val (message, suggested) = parseErrorBody(body)
                 throw SttException(message, classifyStatus(400, message), 400, suggested)
@@ -205,6 +257,7 @@ object SttClient {
             var language: String? = null
             var duration: Double? = null
             var noSpeech: Double? = null
+            var spans: List<TimedSpan>? = null
             if (contentType.contains("json")) {
                 val json = JSONObject(bodyText)
                 text = json.optString("text", "")
@@ -217,13 +270,15 @@ object SttClient {
                         acc += segments.getJSONObject(i).optDouble("no_speech_prob", 0.0)
                     noSpeech = acc / segments.length()
                 }
+                spans = spansFromVerbose(json)
             }
             return TranscribeOutput(
                 text = text.trim(),
                 language = language,
                 durationSec = duration,
                 noSpeechProb = noSpeech,
-                latencyMs = (System.nanoTime() - started) / 1_000_000
+                latencyMs = (System.nanoTime() - started) / 1_000_000,
+                spans = spans
             )
         }
     }
@@ -248,12 +303,15 @@ object SttClient {
             }
             val json = JSONObject(r.body?.string() ?: "{}")
             val channel = json.optJSONObject("results")?.optJSONArray("channels")?.optJSONObject(0)
-            val text = channel?.optJSONArray("alternatives")?.optJSONObject(0)?.optString("transcript") ?: ""
+            val alternative = channel?.optJSONArray("alternatives")?.optJSONObject(0)
+            val text = alternative?.optString("transcript") ?: ""
+            val spans = alternative?.let { spansFromVerbose(JSONObject().put("words", it.optJSONArray("words"))) }
             return TranscribeOutput(
                 text = text.trim(),
                 language = channel?.optString("detected_language")?.takeIf { it.isNotEmpty() },
                 durationSec = json.optJSONObject("metadata")?.optDouble("duration"),
-                latencyMs = (System.nanoTime() - started) / 1_000_000
+                latencyMs = (System.nanoTime() - started) / 1_000_000,
+                spans = spans
             )
         }
     }
@@ -279,10 +337,20 @@ object SttClient {
                 throw SttException(message.ifEmpty { "HTTP ${r.code}" }, classifyStatus(r.code, message), r.code)
             }
             val json = JSONObject(r.body?.string() ?: "{}")
+            // Scribe lists words, spacing and audio events; only the words carry the transcript.
+            val words = json.optJSONArray("words")?.let { all ->
+                val onlyWords = org.json.JSONArray()
+                for (i in 0 until all.length()) {
+                    val w = all.optJSONObject(i) ?: continue
+                    if (w.optString("type", "word") == "word") onlyWords.put(w)
+                }
+                JSONObject().put("words", onlyWords)
+            }
             return TranscribeOutput(
                 text = json.optString("text", "").trim(),
                 language = json.optString("language_code").takeIf { it.isNotEmpty() },
-                latencyMs = (System.nanoTime() - started) / 1_000_000
+                latencyMs = (System.nanoTime() - started) / 1_000_000,
+                spans = words?.let { spansFromVerbose(it) }
             )
         }
     }

@@ -16,6 +16,9 @@ env:
   MURMUR_CONVEX_URL: ${{ vars.CONVEX_URL }}
   MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
   MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
+  # The in-app updater follows the GitHub Releases of the repository that built it.
+  VITE_MURMUR_UPDATE_REPO: ${{ github.repository }}
+  MURMUR_UPDATE_REPO: ${{ github.repository }}
 
 jobs:
   versions:

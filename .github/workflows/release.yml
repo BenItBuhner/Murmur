@@ -38,6 +38,10 @@ env:
   MURMUR_CONVEX_URL: ${{ vars.CONVEX_URL }}
   MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
   MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
+  # The in-app updater (desktop and Android) follows this repository's GitHub Releases, so a fork
+  # that cuts its own releases updates from those. It relies on SHA256SUMS.txt from the publish job.
+  VITE_MURMUR_UPDATE_REPO: ${{ github.repository }}
+  MURMUR_UPDATE_REPO: ${{ github.repository }}
 
 jobs:
   verify:

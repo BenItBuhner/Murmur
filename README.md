@@ -50,6 +50,31 @@ ships the versioned names, per-platform install notes, and a `SHA256SUMS.txt`. B
 unsigned until the code-signing secrets described under [Releases](#releases) are configured, so
 Windows SmartScreen and macOS Gatekeeper will ask you to confirm the first launch.
 
+### Updates
+
+You only download Murmur by hand once. Both apps watch this repository's GitHub Releases and keep
+themselves current:
+
+- **Desktop** checks shortly after start and every six hours (and whenever you press
+  **Check for updates** on the General page or in the tray menu). It picks the file that matches
+  this install — the x64/arm64 Windows installer, the AppImage, the `.deb` or the macOS `.zip` —
+  downloads it in the background, verifies it against the release's `SHA256SUMS.txt` and, with
+  **Install automatically** on (the default), restarts into the new version as soon as you are not
+  dictating. Windows runs the new installer silently, the AppImage is replaced in place, the `.deb`
+  goes through `pkexec dpkg -i`, and the macOS bundle is swapped. Turn **Install automatically** off
+  to be asked first; the portable Windows build and development builds only download the new file
+  and show it to you.
+- **Android** checks when you open the app and once a day while the dictation service is running.
+  It downloads `Murmur-<version>-android.apk`, verifies the checksum and installs it through the
+  system package installer. The first time you have to allow Murmur to install updates and confirm
+  the install; from then on (Android 12+) updates apply on their own, waiting until the keyboard is
+  away and nothing is being dictated. A release-signed APK cannot update a debug-signed install (see
+  the keystore secrets under [Releases](#releases)).
+
+Pre-releases (`vX.Y.Z-beta.N`) are only offered when **Include pre-releases** is on or you are
+already running one. **Skip this version** hides a release until a newer one appears. Releases
+without a `SHA256SUMS.txt` are shown but never installed unattended.
+
 ## Desktop (`apps/desktop`)
 
 - **One key, two behaviours, at the same time**
@@ -154,6 +179,11 @@ If a job flakes, re-run it or dispatch the workflow for the existing tag from th
 Version numbers live in the root and desktop `package.json` files, the desktop lockfile,
 `apps/android/app/build.gradle.kts` (`murmurVersion`; the Android `versionCode` is derived from
 it) and the README download table. CI fails when they disagree.
+
+The in-app updater ([Updates](#updates)) reads these releases through the GitHub API and needs
+nothing beyond what the workflow already publishes: the versioned file names above and
+`SHA256SUMS.txt`. Builds follow the repository that made them (`VITE_MURMUR_UPDATE_REPO` /
+`MURMUR_UPDATE_REPO`, set to `github.repository` in CI), so a fork updates from its own releases.
 
 Code signing is optional and switched on by repository secrets:
 

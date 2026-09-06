@@ -87,6 +87,10 @@ class DictionaryTest {
         assertEquals(soundKey("kube"), soundKey("cube"))
         assertEquals(soundKey("night"), soundKey("nite"))
         assertTrue(soundKey("cat") != soundKey("dog"))
+        // Words that dissolve entirely ("why") never match anything.
+        assertEquals("", soundKey("why"))
+        assertEquals("", soundKey(""))
+        assertEquals("why not", applyDictionary("why not", listOf(DictionaryEntry("w", "Wye", emptyList(), fuzzy = true))))
     }
 
     @Test

@@ -56,6 +56,7 @@ fun soundKey(word: String): String {
     w = w.replace(Regex("[wy](?![aeiou])"), "")
     w = w.replace("v", "f").replace("d", "t")
     w = w.replace(Regex("(.)\\1+"), "$1")
+    if (w.isEmpty()) return ""
     return w.substring(0, 1) + w.substring(1).replace(Regex("[aeiouy]"), "")
 }
 
@@ -126,6 +127,7 @@ private fun applyPhrases(text: String, c: Compiled): String {
     if (c.phrases.isEmpty()) return text
     val tokens = TOKEN_RE.findAll(text).map { Token(it.value, it.range.first, it.range.last + 1) }.toList()
     if (tokens.isEmpty()) return text
+    val tokenKeys = tokens.map { soundKey(it.text) }
     val taken = BooleanArray(tokens.size)
     // Words that already spell a term (or an alias) are final; no window may swallow them.
     c.exact?.findAll(text)?.forEach { m ->
@@ -152,7 +154,7 @@ private fun applyPhrases(text: String, c: Compiled): String {
                     val joined = window.joinToString(" ") { it.text }.lowercase().replace(Regex("\\s+"), " ")
                     if (joined != phrase.canonical.lowercase() && !c.canonical.containsKey(joined)) {
                         val letters = window.joinToString("") { it.text }
-                        val key = phraseKey(window.map { it.text })
+                        val key = tokenKeys.subList(i, i + size).joinToString("")
                         val capitalized = window.any { it.text.first().isUpperCase() }
                         val allowNear = size == n && (phrase.fuzzy || capitalized)
                         if (soundsLike(key, firstVowel(letters), phrase.key, phrase.vowel, allowNear)) {

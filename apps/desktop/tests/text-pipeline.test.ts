@@ -232,6 +232,12 @@ describe('dictionary', () => {
     expect(soundKey('kube')).toBe(soundKey('cube'))
     expect(soundKey('night')).toBe(soundKey('nite'))
     expect(soundKey('cat')).not.toBe(soundKey('dog'))
+    // Words that dissolve entirely ("why") never match anything.
+    expect(soundKey('why')).toBe('')
+    expect(soundKey('')).toBe('')
+    expect(
+      applyDictionary('why not', [{ id: 'w', word: 'Wye', aliases: [], fuzzy: true, createdAt: 0 }])
+    ).toBe('why not')
   })
   it('builds a bounded STT prompt that never ends with a vocabulary term', () => {
     const p = buildSttPrompt(opts.dictionary, ['my email'])

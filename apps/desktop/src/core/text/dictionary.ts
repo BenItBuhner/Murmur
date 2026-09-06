@@ -57,6 +57,7 @@ export function soundKey(word: string): string {
   w = w.replace(/[wy](?![aeiou])/g, '')
   w = w.replace(/v/g, 'f').replace(/d/g, 't')
   w = w.replace(/(.)\1+/g, '$1')
+  if (!w) return ''
   return w[0] + w.slice(1).replace(/[aeiouy]/g, '')
 }
 
@@ -164,6 +165,7 @@ function applyPhrases(text: string, c: Compiled): string {
   if (!c.phrases.length) return text
   const tokens = tokenize(text)
   if (tokens.length < 1) return text
+  const tokenKeys = tokens.map((t) => soundKey(t.text))
   const matches: Array<{ start: number; end: number; replacement: string }> = []
   const taken: boolean[] = new Array(tokens.length).fill(false)
   // Words that already spell a term (or an alias) are final; no window may swallow them.
@@ -199,7 +201,7 @@ function applyPhrases(text: string, c: Compiled): string {
           .replace(/\s+/g, ' ')
         if (joined === phrase.canonical.toLowerCase() || c.canonical.has(joined)) continue
         const letters = window.map((t) => t.text).join('')
-        const key = phraseKey(window.map((t) => t.text))
+        const key = tokenKeys.slice(i, i + size).join('')
         const capitalized = window.some((t) => isCapitalized(t.text))
         // A near match is only trusted when the word count lines up; a merged or split
         // rendering has to sound exactly right.

@@ -105,7 +105,16 @@ data class MurmurSettings(
     /** Clerk user id of the last signed-in account (lets the app open offline). */
     val lastSignedInUserId: String = "",
     /** Account whose cloud data absorbed this device's pre-account local dictionary. */
-    val importedForUserId: String = ""
+    val importedForUserId: String = "",
+    // Device-local update preferences (never synced), same defaults as the desktop app.
+    /** Look for new releases when the app opens and daily from the accessibility service. */
+    val updateAutoCheck: Boolean = true,
+    /** Download new versions and install them once nothing is being dictated. */
+    val updateAutoInstall: Boolean = true,
+    /** Offer pre-releases (vX.Y.Z-beta.N); always on while running a pre-release build. */
+    val updateIncludePrereleases: Boolean = false,
+    /** Version the user dismissed; withheld until a newer one appears. */
+    val updateSkippedVersion: String = ""
 ) {
     val dictionaryTerms: List<String>
         get() = dictionaryEntries.map { it.word.trim() }.filter { it.isNotEmpty() }
@@ -209,7 +218,11 @@ class SettingsStore(context: Context) {
             accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
             deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
             lastSignedInUserId = prefs.getString("lastSignedInUserId", d.lastSignedInUserId) ?: "",
-            importedForUserId = prefs.getString("importedForUserId", d.importedForUserId) ?: ""
+            importedForUserId = prefs.getString("importedForUserId", d.importedForUserId) ?: "",
+            updateAutoCheck = prefs.getBoolean("updateAutoCheck", d.updateAutoCheck),
+            updateAutoInstall = prefs.getBoolean("updateAutoInstall", d.updateAutoInstall),
+            updateIncludePrereleases = prefs.getBoolean("updateIncludePrereleases", d.updateIncludePrereleases),
+            updateSkippedVersion = prefs.getString("updateSkippedVersion", d.updateSkippedVersion) ?: ""
         )
     }
 
@@ -247,6 +260,10 @@ class SettingsStore(context: Context) {
             .putString("deviceId", s.deviceId)
             .putString("lastSignedInUserId", s.lastSignedInUserId)
             .putString("importedForUserId", s.importedForUserId)
+            .putBoolean("updateAutoCheck", s.updateAutoCheck)
+            .putBoolean("updateAutoInstall", s.updateAutoInstall)
+            .putBoolean("updateIncludePrereleases", s.updateIncludePrereleases)
+            .putString("updateSkippedVersion", s.updateSkippedVersion)
             .apply()
     }
 

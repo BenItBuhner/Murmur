@@ -90,7 +90,9 @@ import app.murmur.android.ui.Accent
 import app.murmur.android.ui.DictationButtonSection
 import app.murmur.android.ui.DictionaryEditor
 import app.murmur.android.ui.OnboardingScreen
+import app.murmur.android.ui.UpdatesSection
 import app.murmur.android.ui.fieldColors
+import app.murmur.android.update.UpdateManager
 import com.clerk.api.Clerk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -116,6 +118,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val updates = UpdateManager.get(this)
+        updates.foreground = true
+        updates.onAppVisible()
+    }
+
+    override fun onPause() {
+        UpdateManager.get(this).foreground = false
+        super.onPause()
     }
 
     override fun onStop() {
@@ -202,6 +216,8 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
         }
 
         SectionCard("Setup") { PermissionRows() }
+
+        SectionCard("Updates") { UpdatesSection(store, settings) }
 
         SectionCard("Dictation button") { DictationButtonSection(store, settings) }
 

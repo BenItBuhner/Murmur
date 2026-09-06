@@ -22,6 +22,7 @@ import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.overlayAnchor
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.update.UpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,6 +83,12 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
                 pill?.setEditing(editing)
                 syncPillVisibility()
             }
+        }
+        // The only long-lived part of the app: the daily update check lives here. An unattended
+        // install waits until no dictation is in flight and the keyboard is away.
+        UpdateManager.get(this).apply {
+            isIdle = { DictationController.state.value is DictationState.Idle && !keyboardVisible }
+            startBackgroundChecks(mainScope)
         }
         Log.i(TAG, "accessibility service connected")
     }

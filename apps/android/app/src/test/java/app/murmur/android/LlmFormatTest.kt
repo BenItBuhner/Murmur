@@ -96,6 +96,8 @@ class LlmFormatTest {
         val system = buildFormatMessages("x", emptyList(), resolveStyle(settings, app), app, light.hints)[0].content
         assertTrue(system.contains("Do not rephrase"))
         assertFalse(system.contains("Grammar slips"))
+        assertTrue(system.contains("Flatten deliberate repetition or soften strong language"))
+        assertTrue(system.contains("Spoken quotation marks"))
         assertTrue(system.contains("lay the items out as a list"))
         assertTrue(system.contains("It must stay a question"))
         assertTrue(system.contains("Use British spelling."))

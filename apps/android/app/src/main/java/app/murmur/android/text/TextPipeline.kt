@@ -206,6 +206,70 @@ fun applyLiteralPunctuation(text: String): String = text
     .replace(Regex("[,.]?\\s*\\bexclamation\\s+(?:point|mark)\\b[.,!?]*", RegexOption.IGNORE_CASE), "!")
     .replace(Regex("([?!])\\s*([?!])"), "$1")
 
+private val QUOTE_CMD = Regex(
+    "(?<![\\p{L}\\p{N}])(?:(?:open|begin|start)\\s+quote|(?:end|close)\\s+(?:of\\s+)?quote|unquote|quote)(?![\\p{L}\\p{N}])",
+    RegexOption.IGNORE_CASE
+)
+
+private class QuoteCmd(val start: Int, val end: Int, val close: Boolean)
+
+/**
+ * Spoken quotation marks (desktop: `applySpokenQuotes`):
+ *   "he said quote I will be late end quote"     -> he said "I will be late"
+ *   "she told me, quote, hands off, end quote."  -> she told me, "Hands off".
+ *   "the quote unquote expert"                   -> the "expert"
+ * Only a "quote" with a matching "end quote" / "unquote" / "close quote" is a command, so
+ * "I got a quote from the plumber" keeps its noun. Straight marks: right everywhere, code included.
+ */
+fun applySpokenQuotes(text: String): String {
+    val cmds = QUOTE_CMD.findAll(text).map {
+        QuoteCmd(it.range.first, it.range.last + 1, Regex("^(?:end|close|unquote)", RegexOption.IGNORE_CASE).containsMatchIn(it.value))
+    }.toList()
+    if (cmds.size < 2) return text
+    val out = StringBuilder()
+    var pos = 0
+    var i = 0
+    while (i < cmds.size - 1) {
+        val open = cmds[i]
+        val close = cmds[i + 1]
+        // A stray "end quote", or a "quote" followed by another "quote" (the noun, most likely):
+        // leave the word and look at the next pair.
+        if (open.close || !close.close) {
+            i++
+            continue
+        }
+        val before = text.substring(pos, open.start).trimEnd()
+        // The pauses around the commands ("quote, hands off, end quote") are not part of the quote.
+        val inner = text.substring(open.end, close.start)
+            .replace(Regex("^\\s*[,:;]?\\s*"), "")
+            .replace(Regex("\\s*[,;:]?\\s*$"), "")
+        var restStart = close.end
+        val quoted: String
+        if (!Regex("[\\p{L}\\p{N}]").containsMatchIn(inner)) {
+            // "quote unquote expert": the marks go around the word that follows.
+            val m = Regex("^[\\s,]*([\\p{L}\\p{N}'’-]+)").find(text.substring(close.end))
+            if (m == null) {
+                i += 2
+                continue
+            }
+            quoted = m.groupValues[1]
+            restStart = close.end + m.value.length
+        } else {
+            // A quotation that follows a pause or opens a sentence starts with a capital.
+            quoted = if (before.isEmpty() || Regex("[,:.!?\\n]$").containsMatchIn(before)) capitalizeFirst(inner) else inner
+        }
+        val gap = if (before.isNotEmpty() && !Regex("[\\s(\\[\\n]$").containsMatchIn(before)) " " else ""
+        out.append(before).append(gap).append('"').append(quoted).append('"')
+        // Punctuation spoken right after the command attaches to the closing mark.
+        val rest = text.substring(restStart)
+        val punct = Regex("^\\s*[.,!?;:)\\]]").containsMatchIn(rest)
+        pos = if (punct) restStart + rest.indexOfFirst { !it.isWhitespace() } else restStart
+        i += 2
+    }
+    out.append(text, pos, text.length)
+    return out.toString()
+}
+
 private val SCRATCH_RE = Regex(
     "(?:^|[,.;:]?\\s*)(?:scratch|delete|strike|undo|erase)\\s+that\\b[.,!?;:]*\\s*",
     RegexOption.IGNORE_CASE
@@ -284,14 +348,23 @@ private data class Tok(val text: String, val start: Int, val end: Int)
 fun applySelfCorrections(text: String): String {
     var out = text
     var guard = 0
-    while (guard++ < 10) {
-        val m = MARKER_RE.find(out) ?: break
+    var searchFrom = 0
+    while (guard++ < 20) {
+        val m = MARKER_RE.find(out, searchFrom) ?: break
         val before = out.substring(0, m.range.first)
         val after = out.substring(m.range.last + 1)
 
         val afterAll = leadingTokens(after, 6)
         val beforeAll = trailingTokensInSentence(before, 6)
         val lastBefore = beforeAll.lastOrNull()
+        // "No, no, no, that is wrong": a marker inside a run of itself is repetition for emphasis,
+        // not a correction. Leave it and look further along.
+        val marker = m.value.replace(Regex("[,\\s]+"), " ").trim().lowercase()
+        if (lastBefore?.text?.lowercase() == marker || afterAll.firstOrNull()?.text?.lowercase() == marker) {
+            searchFrom = m.range.last
+            continue
+        }
+        searchFrom = 0
         // After an unfinished phrase ("the flights for, I mean, ...") the marker is hesitation.
         if (afterAll.isEmpty() || beforeAll.isEmpty() ||
             (lastBefore != null && lastBefore.text.lowercase() in UNFINISHED_TAIL)
@@ -447,6 +520,7 @@ fun runPipeline(raw: String, opts: PipelineOptions): PipelineResult {
         step("scratch-that", ::applyScratchThat)
         step("line-commands", ::applyLineCommands)
         step("literal-punctuation", ::applyLiteralPunctuation)
+        step("quotes", ::applySpokenQuotes)
     }
     if (opts.removeFillers) step("fillers") { removeFillers(it, opts.fillerWords) }
     if (opts.selfCorrections) step("self-corrections", ::applySelfCorrections)

@@ -10,9 +10,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -28,7 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,15 +38,15 @@ import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayPillView
+import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.OverlayShape
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.ui.theme.MurmurTheme
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
-
-private val Muted = Color(0xFF9A9AA2)
 
 /**
  * "Dictation button" settings: its resting shape, a live preview of every state, and where it
@@ -55,6 +55,8 @@ private val Muted = Color(0xFF9A9AA2)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DictationButtonSection(store: SettingsStore, settings: MurmurSettings) {
+    val context = LocalContext.current
+    val palette = PillTheme.resolve(context, settings)
     val editing by OverlayEditor.editing.collectAsState()
     var previewState by remember { mutableStateOf<DictationState>(DictationState.Idle) }
     var playing by remember { mutableStateOf(false) }
@@ -82,12 +84,13 @@ fun DictationButtonSection(store: SettingsStore, settings: MurmurSettings) {
         fontSize = 12.sp, color = Muted
     )
 
+    // The pill floats over keyboards, so preview it on the palette's deepest surface.
     Box(
         Modifier
             .fillMaxWidth()
             .height(72.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF0B0B0D))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
     ) {
         AndroidView(
             factory = { ctx ->
@@ -99,6 +102,7 @@ fun DictationButtonSection(store: SettingsStore, settings: MurmurSettings) {
             },
             modifier = Modifier.fillMaxSize(),
             update = { view ->
+                view.setPalette(palette)
                 view.configure(settings.overlayShape, OverlayAnchor.DEFAULT)
                 view.render(previewState)
             }
@@ -135,14 +139,13 @@ fun DictationButtonSection(store: SettingsStore, settings: MurmurSettings) {
     Text(describePosition(settings), fontSize = 12.sp, color = Muted)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (editing) {
-            Button(onClick = { OverlayEditor.stop() }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text("Done") }
+            Button(onClick = { OverlayEditor.stop() }) { Text("Done") }
         } else {
             Button(
                 onClick = {
                     editError = if (OverlayEditor.start()) null
                     else "Turn on the accessibility service under Setup first; it draws the button."
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                }
             ) { Text("Edit position") }
         }
         OutlinedButton(
@@ -154,20 +157,19 @@ fun DictationButtonSection(store: SettingsStore, settings: MurmurSettings) {
             enabled = !settings.overlayAtDefaultPosition
         ) { Text("Reset") }
     }
-    editError?.let { Text(it, fontSize = 12.sp, color = Color(0xFFE08A8A)) }
+    editError?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
     if (editing) {
         Text(
             "Drag the button anywhere on screen (it snaps to the middle) — onto your keyboard's toolbar, for example. " +
                 "It follows the keyboard wherever it appears. Tap Done at the top of the screen when it is in place.",
-            fontSize = 12.sp, color = Color(0xFFB8E0C2)
+            fontSize = 12.sp, color = MurmurTheme.colors.success
         )
         OutlinedTextField(
             value = keepOpen,
             onValueChange = { keepOpen = it },
             label = { Text("This field keeps your keyboard open") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-            colors = fieldColors()
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
         )
         LaunchedEffect(Unit) {
             delay(60)

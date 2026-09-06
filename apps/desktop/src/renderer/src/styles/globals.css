@@ -2,17 +2,36 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Instrument Serif (OFL, see fonts/OFL-InstrumentSerif.txt): the display face shared with the
+   Android app. Headlines, the wordmark and large numerals; everything else stays in the sans. */
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/InstrumentSerif-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/InstrumentSerif-Italic.ttf') format('truetype');
+}
+
 /*
  * Colour tokens. The values below are the neutral palette and only cover the first frame: as soon
  * as the renderer mounts, ThemeProvider (hooks/useTheme.tsx) sets every token inline on <html>
  * from the user's appearance settings via shared/theme.ts. Add a token here, in @theme inline,
- * and in THEME_TOKENS so all three stay in step.
+ * and in THEME_TOKENS so all three stay in step. Structure comes from hairlines and whitespace
+ * rather than shadows and boxes, whatever the palette.
  */
 :root {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif;
-  --radius: 0.75rem;
+  --font-serif: 'Instrument Serif', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --radius: 0.875rem;
   color-scheme: light;
 
   --background: oklch(0.985 0.002 90);
@@ -85,6 +104,11 @@
 
 @theme inline {
   --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  /* Paper does not cast shadows. Only floating layers (dialogs, popovers, the pill) keep theirs. */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -248,6 +272,25 @@
   }
 }
 
+/* Tracked uppercase label that introduces a group. */
+@utility eyebrow {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Editorial serif for headlines and large numerals. */
+@utility serif-display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  font-feature-settings: normal;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -262,6 +305,9 @@
     font-feature-settings: 'cv11', 'ss01';
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--record) 28%, transparent);
   }
   ::-webkit-scrollbar {
     width: 10px;
@@ -285,6 +331,6 @@
     -webkit-app-region: no-drag;
   }
   kbd {
-    @apply inline-flex items-center justify-center rounded-md border bg-card px-1.5 min-w-6 h-6 text-[11px] font-medium text-foreground shadow-[inset_0_-1px_0_0_var(--border)];
+    @apply inline-flex items-center justify-center rounded-md border border-input bg-card px-1.5 min-w-6 h-6 text-[11px] font-medium text-foreground;
   }
 }

@@ -37,7 +37,7 @@ function Slider({
         <SliderPrimitive.Thumb
           key={i}
           data-slot="slider-thumb"
-          className="block size-4 shrink-0 rounded-full border border-primary bg-white shadow-sm transition-[color,box-shadow] hover:ring-4 hover:ring-ring/20 focus-visible:ring-4 focus-visible:ring-ring/30 focus-visible:outline-hidden disabled:pointer-events-none"
+          className="block size-4 shrink-0 rounded-full bg-primary transition-[color,box-shadow] hover:ring-4 hover:ring-ring/15 focus-visible:ring-4 focus-visible:ring-ring/25 focus-visible:outline-hidden disabled:pointer-events-none"
         />
       ))}
     </SliderPrimitive.Root>

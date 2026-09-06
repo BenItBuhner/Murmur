@@ -4,7 +4,7 @@ import { BookA, Check, KeyRound, Loader2, RefreshCw, Smartphone, WifiOff, Zap } 
 import type { AccountMode } from '@shared/cloud'
 import { Button } from '@renderer/components/ui/button'
 import { Segmented } from '@renderer/components/ui/misc'
-import { Logo } from '@renderer/components/Shell'
+import { Wordmark } from '@renderer/components/Shell'
 import { clerkAppearance, type ClerkView } from '@renderer/hooks/useCloud'
 import { useTheme } from '@renderer/hooks/useTheme'
 import { cn } from '@renderer/lib/utils'
@@ -42,53 +42,35 @@ export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX
           platform === 'win32' ? 'h-10 drag-region' : 'h-14'
         )}
       >
-        <div className="flex items-center gap-2.5">
-          <Logo />
-          <span className="text-[15px] font-semibold tracking-tight">Murmur</span>
-        </div>
+        <Wordmark />
       </div>
 
       <div className="flex-1 overflow-y-auto px-8 pb-8">
-        <div className="mx-auto grid max-w-4xl items-start gap-10 pt-6 md:grid-cols-[1fr_400px] animate-fade-in">
-          <div className="space-y-6 pt-6">
-            <div className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
-              <Logo className="size-9 rounded-xl [&>svg]:size-5" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">Speak. It types.</h1>
-              <p className="mt-2 max-w-md text-[15px] text-muted-foreground">
-                Hold one key anywhere on your computer, say what you mean, let go. Murmur
-                transcribes it, cleans up the ums and self-corrections, and drops finished text
-                right where your cursor is.
-              </p>
-            </div>
-            <div className="grid max-w-md gap-2 text-[13px]">
+        <div className="mx-auto grid max-w-4xl items-start gap-12 pt-6 md:grid-cols-[1fr_400px] animate-fade-in">
+          <div className="space-y-7 pt-8">
+            <h1 className="serif-display text-[64px]">
+              Speak.
+              <br />
+              <span className="italic text-muted-foreground">It types.</span>
+            </h1>
+            <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
+              Hold one key anywhere on your computer, say what you mean, let go. Murmur transcribes
+              it, cleans up the ums and self-corrections, and drops finished text right where your
+              cursor is.
+            </p>
+            <ul className="max-w-md divide-y border-y text-[14px]">
               {[
-                {
-                  icon: <BookA className="size-4 text-success" />,
-                  text: 'One dictionary for every device you sign in on'
-                },
-                {
-                  icon: <Zap className="size-4 text-success" />,
-                  text: 'Snippets, style rules and preferences follow you'
-                },
-                {
-                  icon: <Smartphone className="size-4 text-success" />,
-                  text: 'Desktop and Android share the same account'
-                },
-                {
-                  icon: <KeyRound className="size-4 text-success" />,
-                  text: 'Speech-model API keys never leave this device'
-                }
+                { icon: BookA, text: 'One dictionary for every device you sign in on' },
+                { icon: Zap, text: 'Snippets, style rules and preferences follow you' },
+                { icon: Smartphone, text: 'Desktop and Android share the same account' },
+                { icon: KeyRound, text: 'Speech-model API keys never leave this device' }
               ].map((item) => (
-                <div
-                  key={item.text}
-                  className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2"
-                >
-                  {item.icon} {item.text}
-                </div>
+                <li key={item.text} className="flex items-center gap-3.5 py-3.5">
+                  <item.icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                  {item.text}
+                </li>
               ))}
-            </div>
+            </ul>
           </div>
 
           <div className="space-y-3">
@@ -107,7 +89,7 @@ export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX
             ) : (
               <>
                 <ClerkLoading>
-                  <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-xl border bg-card text-sm text-muted-foreground">
+                  <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-2xl border bg-card text-sm text-muted-foreground">
                     <Loader2 className="size-5 animate-spin" /> Connecting to Murmur…
                   </div>
                 </ClerkLoading>
@@ -144,9 +126,9 @@ export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX
 
 function OfflineCard(): React.JSX.Element {
   return (
-    <div className="space-y-3 rounded-xl border bg-card px-6 py-8 text-center">
-      <WifiOff className="mx-auto size-6 text-muted-foreground" />
-      <div className="text-sm font-medium">Can&apos;t reach Murmur sign-in</div>
+    <div className="space-y-3 rounded-2xl border bg-card px-6 py-10 text-center">
+      <WifiOff className="mx-auto size-6 text-muted-foreground" strokeWidth={1.5} />
+      <div className="serif-display text-[22px]">Can&apos;t reach Murmur sign-in</div>
       <p className="text-[13px] text-muted-foreground">
         Check your connection and try again. If you have signed in on this computer before, your
         dictionary keeps working offline once you are back in.

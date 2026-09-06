@@ -218,19 +218,19 @@ export function clerkAppearance(theme: ResolvedTheme): {
       colorNeutral: hex.foreground,
       colorDanger: hex.destructive,
       colorSuccess: hex.success,
-      borderRadius: '0.75rem',
+      borderRadius: '0.875rem',
       fontFamily: 'var(--font-sans)',
       fontSize: '14px'
     },
     elements: {
       rootBox: 'w-full',
-      cardBox: 'w-full shadow-none border border-border rounded-xl',
+      cardBox: 'w-full shadow-none border border-border rounded-2xl',
       card: 'shadow-none bg-card px-6 py-6 gap-5',
-      headerTitle: 'text-lg font-semibold tracking-tight',
+      headerTitle: 'serif-display text-[26px]',
       headerSubtitle: 'text-[13px]',
-      formButtonPrimary: 'h-9 rounded-lg text-sm font-medium shadow-none',
-      formFieldInput: 'h-9 rounded-lg',
-      socialButtonsBlockButton: 'h-9 rounded-lg',
+      formButtonPrimary: 'h-9 rounded-full text-sm font-medium shadow-none',
+      formFieldInput: 'h-9 rounded-xl shadow-none',
+      socialButtonsBlockButton: 'h-9 rounded-full shadow-none',
       // Murmur switches between sign in and sign up with its own tabs.
       footerAction: { display: 'none' }
     }

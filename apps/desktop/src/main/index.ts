@@ -26,17 +26,18 @@ import { getActiveWindow } from './active-window'
 import { HistoryStore } from './store/history'
 import { SettingsStore } from './store/settings'
 import { AppTray } from './tray'
+import { SystemAccent } from './theme/system-accent'
 import {
   createMainWindow,
+  defaultChrome,
   getMainWindow,
   setQuitting,
   setRendererOrigin,
   setShowOnReady,
-  showMainWindow,
-  updateTitleBar
+  showMainWindow
 } from './windows/main-window'
 import { OverlayWindow } from './windows/overlay'
-import { IPC } from '@shared/ipc'
+import { IPC, type ThemeMessage } from '@shared/ipc'
 
 // Transparent overlay on Linux needs these before `ready`; harmless elsewhere.
 app.commandLine.appendSwitch('enable-transparent-visuals')
@@ -142,6 +143,21 @@ async function main(): Promise<void> {
         : 'light'
       : s.general.theme
 
+  // The OS accent colour, for the "System" accent choice. Both renderers build the palette
+  // themselves from this message (shared/theme.ts), so main never has to know about CSS.
+  const systemAccent = new SystemAccent()
+  const themeMessage = (s: Settings): ThemeMessage => ({
+    mode: resolvedTheme(s),
+    accent: s.general.accent,
+    accentColor: s.general.accentColor,
+    tintedSurfaces: s.general.tintedSurfaces,
+    systemAccent: systemAccent.get()
+  })
+  const pushTheme = (): void => {
+    const msg = themeMessage(settings.get())
+    void overlay.whenReady().then(() => overlay.send(IPC.overlayTheme, msg))
+  }
+
   const applySettings = (s: Settings): void => {
     hook.applySettings(s)
     recorder.configure({
@@ -150,8 +166,7 @@ async function main(): Promise<void> {
       preBufferMs: s.audio.preBufferMs,
       noiseSuppression: s.audio.noiseSuppression,
       autoGainControl: s.audio.autoGainControl,
-      soundVolume: s.general.sounds ? s.general.soundVolume : 0,
-      theme: resolvedTheme(s)
+      soundVolume: s.general.sounds ? s.general.soundVolume : 0
     })
     overlay.configureVisibility(
       s.general.showOverlayWhenIdle && s.onboardingComplete,
@@ -160,7 +175,7 @@ async function main(): Promise<void> {
     tray?.setHotkeyLabel(chordLabel(s.hotkeys.pushToTalk, hook.platform, s.hotkeys.sideSensitive))
     applyLaunchAtLogin(s.general.launchAtLogin)
     nativeTheme.themeSource = s.general.theme
-    updateTitleBar(resolvedTheme(s))
+    pushTheme()
   }
 
   const quit = (): void => {
@@ -180,9 +195,12 @@ async function main(): Promise<void> {
 
   overlay.create()
   const s0 = settings.get()
+  // Follow the OS setting from the very first paint so a system-themed window never flashes.
+  nativeTheme.themeSource = s0.general.theme
+  await systemAccent.start()
   const hidden = process.argv.includes('--hidden')
   setShowOnReady(!(hidden || (s0.general.startMinimized && s0.onboardingComplete)))
-  createMainWindow(resolvedTheme(s0))
+  createMainWindow(defaultChrome(resolvedTheme(s0)))
 
   tray = new AppTray({
     toggleDictation: () => controller.toggle(),
@@ -199,6 +217,7 @@ async function main(): Promise<void> {
     hook,
     cloudConfig,
     cloud: cloudSync,
+    systemAccent: () => systemAccent.get(),
     onEnabledChange: setEnabled,
     quit
   })
@@ -211,8 +230,17 @@ async function main(): Promise<void> {
   settings.on('change', (s: Settings) => applySettings(s))
   applySettings(s0)
 
+  // Light/dark flips of the OS ("System" theme) and accent changes reach both renderers.
+  nativeTheme.on('updated', pushTheme)
+  systemAccent.on('change', (hex: string | null) => {
+    for (const w of BrowserWindow.getAllWindows())
+      w.webContents.send(IPC.themeSystemAccentChanged, hex)
+    pushTheme()
+  })
+
   overlay.whenReady().then(() => {
     recorder.resend()
+    pushTheme()
     log.info(`overlay ready; hook=${hook.backend}`)
   })
 
@@ -234,7 +262,7 @@ async function main(): Promise<void> {
   })
   app.on('open-url', () => showMainWindow())
   app.on('activate', () => {
-    if (!getMainWindow()) createMainWindow(resolvedTheme(settings.get()))
+    if (!getMainWindow()) createMainWindow(defaultChrome(resolvedTheme(settings.get())))
     showMainWindow()
   })
   app.on('browser-window-created', (_e, window) => optimizer.watchWindowShortcuts(window))
@@ -247,6 +275,7 @@ async function main(): Promise<void> {
     hook.stop()
     cloudSync.dispose()
     tokenBridge.dispose()
+    systemAccent.dispose()
     settings.flush()
     history.flush()
   })

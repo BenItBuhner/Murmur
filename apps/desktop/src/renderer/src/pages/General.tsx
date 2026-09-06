@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { FolderOpen, Loader2, Power, RotateCcw, Type } from 'lucide-react'
 import { toast } from 'sonner'
-import type { InjectionMethod, OverlayPosition, Theme } from '@shared/settings'
+import type { InjectionMethod, OverlayPosition } from '@shared/settings'
 import { languageName } from '@shared/languages'
+import { AppearanceSettings } from '@renderer/components/AppearanceSettings'
 import { Button } from '@renderer/components/ui/button'
 import { Input, Textarea } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
@@ -88,17 +89,7 @@ export function GeneralPage(): React.JSX.Element {
       </Section>
 
       <Section title="Appearance">
-        <SettingRow title="Theme">
-          <Segmented<Theme>
-            value={g.theme}
-            onChange={(v) => void patch({ general: { theme: v } })}
-            options={[
-              { value: 'system', label: 'System' },
-              { value: 'light', label: 'Light' },
-              { value: 'dark', label: 'Dark' }
-            ]}
-          />
-        </SettingRow>
+        <AppearanceSettings />
         <SettingRow
           title="Overlay position"
           description="Where the listening pill appears on the screen with your cursor."

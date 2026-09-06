@@ -1,3 +1,5 @@
+import type { Accent } from './settings'
+
 /**
  * Single source of truth for IPC channel names. Main, preload and both renderers
  * import from here so a typo fails at compile time instead of silently at runtime.
@@ -39,9 +41,13 @@ export const IPC = {
   cloudSetHistorySync: 'cloud:set-history-sync',
   cloudSkipAccount: 'cloud:skip-account',
   cloudSignedOut: 'cloud:signed-out',
+  themeSystemAccent: 'theme:system-accent',
+  /** The settings window reports the colours it resolved so the native chrome can match. */
+  themeReport: 'theme:report',
 
   // main -> renderer (send)
   settingsChanged: 'settings:changed',
+  themeSystemAccentChanged: 'theme:system-accent-changed',
   historyAdded: 'history:added',
   historyChanged: 'history:changed',
   hotkeyCaptured: 'hotkey:captured',
@@ -56,6 +62,7 @@ export const IPC = {
   // overlay <-> main
   overlayState: 'overlay:state',
   overlayPlaySound: 'overlay:play-sound',
+  overlayTheme: 'overlay:theme',
   audioConfigure: 'audio:configure',
   audioStart: 'audio:start',
   audioStop: 'audio:stop',
@@ -74,7 +81,26 @@ export interface AudioConfigureMessage {
   noiseSuppression: boolean
   autoGainControl: boolean
   soundVolume: number
-  theme: 'light' | 'dark'
+}
+
+/**
+ * Everything a renderer needs to build the palette (see shared/theme.ts). Main resolves the
+ * light/dark mode (it knows the OS setting) and the OS accent colour; the renderers do the maths.
+ */
+export interface ThemeMessage {
+  mode: 'light' | 'dark'
+  accent: Accent
+  accentColor: string
+  tintedSurfaces: boolean
+  /** `#rrggbb` accent published by the desktop environment, when there is one. */
+  systemAccent: string | null
+}
+
+/** Colours the settings window resolved, for the native title bar and window background. */
+export interface ThemeReport {
+  mode: 'light' | 'dark'
+  background: string
+  foreground: string
 }
 
 export interface AudioStartMessage {

@@ -281,18 +281,22 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
             testResult?.let {
                 Text(it, fontSize = 12.sp, color = Color(0xFFB8E0C2))
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Use sample clip instead of microphone", fontSize = 13.sp)
-                    Text(
-                        "For emulators without a mic: the pill dictates the bundled JFK clip.",
-                        fontSize = 11.sp, color = Color(0xFF9A9AA2)
+            // Debug builds only: release installs always record from the microphone, so a phone
+            // can never be stuck dictating the sample sentence because this was left on.
+            if (BuildConfig.DEBUG) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use sample clip instead of microphone", fontSize = 13.sp)
+                        Text(
+                            "For emulators without a mic: the pill dictates the bundled JFK clip (debug builds only).",
+                            fontSize = 11.sp, color = Color(0xFF9A9AA2)
+                        )
+                    }
+                    Switch(
+                        checked = settings.useFixtureAudio,
+                        onCheckedChange = { store.update { s -> s.copy(useFixtureAudio = it) } }
                     )
                 }
-                Switch(
-                    checked = settings.useFixtureAudio,
-                    onCheckedChange = { store.update { s -> s.copy(useFixtureAudio = it) } }
-                )
             }
         }
         Spacer(Modifier.height(24.dp))

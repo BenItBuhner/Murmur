@@ -71,7 +71,15 @@ class OverlayPillView(context: Context) : View(context) {
 
     private enum class Kind { IDLE, LISTENING, PROCESSING, SUCCESS, ERROR }
 
-    private data class Look(val kind: Kind, val w: Float, val h: Float, val bg: Int, val text: String = "") {
+    /** [restingW] is the width the contents were laid out for; [w] may be a mid-morph snapshot. */
+    private data class Look(
+        val kind: Kind,
+        val w: Float,
+        val h: Float,
+        val bg: Int,
+        val text: String = "",
+        val restingW: Float = w
+    ) {
         fun sameContent(other: Look): Boolean = kind == other.kind && text == other.text
     }
 
@@ -266,7 +274,7 @@ class OverlayPillView(context: Context) : View(context) {
         } else {
             // The outgoing layer is whatever was (becoming) visible, starting at its current alpha.
             outgoingAlpha0 = if (fromLook.sameContent(toLook)) 1f else curIncomingAlpha
-            fromLook = Look(toLook.kind, curW, curH, curBg, toLook.text)
+            fromLook = Look(toLook.kind, curW, curH, curBg, toLook.text, toLook.restingW)
             fromAx = curAx
             fromAy = curAy
             toLook = newLook
@@ -379,6 +387,12 @@ class OverlayPillView(context: Context) : View(context) {
         clipPath.rewind()
         clipPath.addRoundRect(scratchRect, radius, radius, Path.Direction.CW)
 
+        // Hairline ring (as on the desktop pill) so the button stays legible on dark keyboards.
+        strokePaint.color = 0x1AFFFFFF
+        strokePaint.strokeWidth = dp(1f)
+        scratchRect.inset(dp(0.5f), dp(0.5f))
+        canvas.drawRoundRect(scratchRect, radius - dp(0.5f), radius - dp(0.5f), strokePaint)
+
         if (crossfade && outgoingAlpha > 0.01f) {
             drawLayer(canvas, drawn, fromLook, outgoingAlpha, lerp(1f, 0.9f, smoothstep(0f, 0.42f, t)), now, dt)
         }
@@ -404,8 +418,8 @@ class OverlayPillView(context: Context) : View(context) {
             Kind.IDLE -> drawIdle(canvas, box)
             Kind.LISTENING -> drawListening(canvas, box, now, dt)
             Kind.PROCESSING -> drawProcessing(canvas, box, look.text, now)
-            Kind.SUCCESS -> drawMessage(canvas, box, look.text, GREEN, true, now)
-            Kind.ERROR -> drawMessage(canvas, box, look.text, RED, false, now)
+            Kind.SUCCESS -> drawMessage(canvas, box, look, GREEN, true, now)
+            Kind.ERROR -> drawMessage(canvas, box, look, RED, false, now)
         }
         if (!full) canvas.restore()
         canvas.restore()
@@ -537,7 +551,7 @@ class OverlayPillView(context: Context) : View(context) {
         textPaint.color = Color.WHITE
     }
 
-    private fun drawMessage(canvas: Canvas, box: Box, message: String, color: Int, check: Boolean, now: Long) {
+    private fun drawMessage(canvas: Canvas, box: Box, look: Look, color: Int, check: Boolean, now: Long) {
         val cy = box.centerY
         val iconCx = box.left + dp(22f)
         strokePaint.color = color
@@ -562,8 +576,10 @@ class OverlayPillView(context: Context) : View(context) {
             paint.color = color
             canvas.drawCircle(iconCx, cy + dp(3.6f), dp(1f), paint)
         }
-        var msg = message
-        val maxWidth = box.width - dp(48f)
+        // Fit the text to the pill's resting width, not the box mid-morph: while the pill is still
+        // growing or shrinking the pill's outline clips it instead of re-ellipsizing every frame.
+        var msg = look.text
+        val maxWidth = look.restingW - dp(48f)
         if (textPaint.measureText(msg) > maxWidth) {
             while (msg.length > 4 && textPaint.measureText("$msg…") > maxWidth) msg = msg.dropLast(1)
             msg = "$msg…"

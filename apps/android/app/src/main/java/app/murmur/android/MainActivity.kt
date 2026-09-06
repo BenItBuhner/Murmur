@@ -67,6 +67,7 @@ import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.llm.LlmClient
 import app.murmur.android.llm.LlmConfig
+import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.service.MurmurAccessibilityService
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
@@ -86,6 +87,7 @@ import app.murmur.android.text.sanitizeLlmOutput
 import app.murmur.android.ui.AccountGateScreen
 import app.murmur.android.ui.AccountSection
 import app.murmur.android.ui.Accent
+import app.murmur.android.ui.DictationButtonSection
 import app.murmur.android.ui.DictionaryEditor
 import app.murmur.android.ui.OnboardingScreen
 import app.murmur.android.ui.fieldColors
@@ -114,6 +116,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStop() {
+        // Never leave the full-screen drag surface behind when the user leaves the app.
+        OverlayEditor.stop()
+        super.onStop()
     }
 }
 
@@ -182,7 +190,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
     ) {
         Text("Murmur", fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Text(
-            "Tap the pill above your keyboard, speak, and clean text lands in the focused field.",
+            "Tap the button next to your keyboard, speak, and clean text lands in the focused field.",
             color = Color(0xFF9A9AA2),
             fontSize = 13.sp
         )
@@ -194,6 +202,8 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
         }
 
         SectionCard("Setup") { PermissionRows() }
+
+        SectionCard("Dictation button") { DictationButtonSection(store, settings) }
 
         SectionCard("Speech to text") { ProviderFields(store, settings, showDiscover = true) }
 
@@ -249,7 +259,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
 
         SectionCard("Try it") {
             Text(
-                "Test pad: focus the field and the pill appears above the keyboard.",
+                "Test pad: focus the field and the dictation button appears next to the keyboard.",
                 fontSize = 12.sp, color = Color(0xFF9A9AA2)
             )
             OutlinedTextField(

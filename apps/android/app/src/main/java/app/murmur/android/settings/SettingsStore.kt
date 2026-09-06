@@ -37,10 +37,23 @@ enum class Tone(val id: String) {
     }
 }
 
+/** Resting shape of the floating dictation button. */
+enum class OverlayShape(val id: String) {
+    /** The classic wide pill (64 x 36 dp). */
+    PILL("pill"),
+    /** A compact circle (36 dp) small enough to sit on the keyboard's own toolbar row. */
+    CIRCLE("circle");
+
+    companion object {
+        fun from(id: String?): OverlayShape = entries.firstOrNull { it.id == id } ?: PILL
+    }
+}
+
 /**
  * Mirror of the desktop settings that matter on Android. Same defaults as the desktop
  * schema in apps/desktop/src/shared/settings.ts, minus desktop-only concerns (hotkeys,
- * injection strategies, overlay position).
+ * injection strategies). The overlay button's shape and position are device settings
+ * (screens and keyboards differ) and are never synced.
  */
 data class MurmurSettings(
     val sttKind: SttKind = SttKind.OPENAI_COMPATIBLE,
@@ -74,6 +87,15 @@ data class MurmurSettings(
     val dictionaryEntries: List<DictionaryEntry> = emptyList(),
     /** Debug aid: dictate the bundled fixture clip instead of the microphone. */
     val useFixtureAudio: Boolean = false,
+    /** Resting shape of the floating dictation button. */
+    val overlayShape: OverlayShape = OverlayShape.PILL,
+    /** Horizontal centre of the button as a fraction of the screen width (0 = left, 1 = right). */
+    val overlayAnchorX: Float = DEFAULT_OVERLAY_ANCHOR_X,
+    /**
+     * Vertical position of the button's centre in dp, measured from the top edge of the keyboard.
+     * Positive floats above the keyboard; negative sits over it (for example on its toolbar row).
+     */
+    val overlayOffsetDp: Float = DEFAULT_OVERLAY_OFFSET_DP,
     /** Device-level first-run flow finished (permissions, provider). */
     val onboardingComplete: Boolean = false,
     /** `optional` account mode: the user chose to keep using Murmur without an account. */
@@ -91,7 +113,16 @@ data class MurmurSettings(
     fun llmConnection(): Triple<String, String, String> =
         if (llmSameAsStt) Triple(sttBaseUrl, sttApiKey, llmModel)
         else Triple(llmBaseUrl, llmApiKey, llmModel)
+
+    val overlayAtDefaultPosition: Boolean
+        get() = overlayAnchorX == DEFAULT_OVERLAY_ANCHOR_X && overlayOffsetDp == DEFAULT_OVERLAY_OFFSET_DP
 }
+
+/** Centred above the keyboard. */
+const val DEFAULT_OVERLAY_ANCHOR_X = 0.5f
+
+/** A 36 dp button whose bottom edge floats 12 dp above the keyboard: centre = 12 + 36 / 2. */
+const val DEFAULT_OVERLAY_OFFSET_DP = 30f
 
 /** Who made a change: the user on this device, or the sync engine mirroring the account. */
 enum class SettingsOrigin { LOCAL, CLOUD }
@@ -171,6 +202,9 @@ class SettingsStore(context: Context) {
             maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec),
             dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
             useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio),
+            overlayShape = OverlayShape.from(prefs.getString("overlayShape", d.overlayShape.id)),
+            overlayAnchorX = prefs.getFloat("overlayAnchorX", d.overlayAnchorX).coerceIn(0f, 1f),
+            overlayOffsetDp = prefs.getFloat("overlayOffsetDp", d.overlayOffsetDp),
             onboardingComplete = prefs.getBoolean("onboardingComplete", d.onboardingComplete),
             accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
             deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
@@ -205,6 +239,9 @@ class SettingsStore(context: Context) {
             .putInt("maxDurationSec", s.maxDurationSec)
             .putString("dictionaryEntries", DictionaryCodec.encode(s.dictionaryEntries))
             .putBoolean("useFixtureAudio", s.useFixtureAudio)
+            .putString("overlayShape", s.overlayShape.id)
+            .putFloat("overlayAnchorX", s.overlayAnchorX)
+            .putFloat("overlayOffsetDp", s.overlayOffsetDp)
             .putBoolean("onboardingComplete", s.onboardingComplete)
             .putBoolean("accountSkipped", s.accountSkipped)
             .putString("deviceId", s.deviceId)

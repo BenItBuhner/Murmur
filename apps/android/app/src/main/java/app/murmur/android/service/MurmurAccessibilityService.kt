@@ -7,6 +7,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
@@ -33,6 +34,14 @@ import kotlin.math.roundToInt
 private const val TAG = "MurmurA11y"
 
 /**
+ * Inserting text fires a burst of focus/selection events, and re-scanning the window list (an IPC
+ * round trip) for each of them stalls the main thread exactly while the pill is morphing to
+ * "Inserted". Those events only trigger a scan when the last one is older than this; window
+ * events (the keyboard actually appearing or leaving) always scan.
+ */
+private const val WINDOW_SCAN_MIN_INTERVAL_MS = 120L
+
+/**
  * The Wispr Flow pattern on Android: whenever the keyboard comes up, a floating dictation
  * button appears next to it (by default centred just above it; the user can park it anywhere,
  * including on the keyboard's own toolbar). Tap to dictate, tap again to stop; the transcribed,
@@ -55,6 +64,7 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
 
     /** Top edge of the keyboard the last time it was on screen; kept while a dictation is in flight. */
     private var keyboardTop = -1
+    private var lastWindowScanAt = 0L
     private var lastEditable: AccessibilityNodeInfo? = null
     private var lastPackage: String = ""
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -106,16 +116,19 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
                     lastEditable = source
                     lastPackage = event.packageName?.toString() ?: lastPackage
                 }
-                updateKeyboardState()
+                updateKeyboardState(force = false)
             }
             AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> updateKeyboardState()
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> updateKeyboardState(force = true)
         }
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
 
-    private fun updateKeyboardState() {
+    private fun updateKeyboardState(force: Boolean) {
+        val now = SystemClock.uptimeMillis()
+        if (!force && now - lastWindowScanAt < WINDOW_SCAN_MIN_INTERVAL_MS) return
+        lastWindowScanAt = now
         var visible = false
         var top = -1
         try {

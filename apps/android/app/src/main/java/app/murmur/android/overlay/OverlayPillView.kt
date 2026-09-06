@@ -15,6 +15,9 @@ import android.view.WindowInsets
 import android.view.animation.AnimationUtils
 import androidx.core.graphics.ColorUtils
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.overlay.OverlayMotion.easeOutCubic
+import app.murmur.android.overlay.OverlayMotion.lerp
+import app.murmur.android.overlay.OverlayMotion.smoothstep
 import app.murmur.android.settings.OverlayShape
 import kotlin.math.PI
 import kotlin.math.abs
@@ -24,8 +27,6 @@ import kotlin.math.min
 import kotlin.math.sin
 
 private const val BAR_COUNT = 16
-private const val MORPH_MS = 340L
-private const val MOVE_MS = 240L
 private const val BAR_STEP_MS = 64L
 private const val SHADOW_PAD_DP = 12f
 
@@ -42,11 +43,18 @@ private const val RED = 0xFFFF8A70.toInt()
  * dots while processing; a check or warning with a message afterwards. At rest it collapses to a
  * mic button (a wide pill or a compact circle) that the user can park anywhere near the keyboard.
  *
- * Every state grows out of the same anchor point and all transitions are one continuous,
- * time-based morph: size, corner radius and colour interpolate while the old and new contents
- * cross-fade. The window that hosts the view is only ever resized *before* a morph starts (to the
- * union of both shapes) and tightened *after* it settles, so the pixels of the pill never jump
- * when the window changes. Without a [host] the view is a self-contained preview.
+ * Every state grows out of the same anchor point. The outline (size, corner radius, colour,
+ * position) is one continuous time-based morph; the contents are a [LayerStack] drawn on top and
+ * clipped by the outline. Contents are laid out in the box their state rests in, not in the
+ * mid-morph outline, so the outline *reveals* incoming controls as it grows and closes over
+ * outgoing ones as it shrinks instead of dragging them along. Layers cross-fade with
+ * complementary curves and each keeps its own clock, so the pill never shows an empty outline and
+ * a state change that lands mid-fade cannot drop whatever is currently visible (see
+ * [OverlayMotion]).
+ *
+ * The window that hosts the view is only ever resized *before* a morph starts (to the union of
+ * both shapes) and tightened *after* it settles, so the pixels of the pill never jump when the
+ * window changes. Without a [host] the view is a self-contained preview.
  */
 class OverlayPillView(context: Context) : View(context) {
 
@@ -71,15 +79,15 @@ class OverlayPillView(context: Context) : View(context) {
 
     private enum class Kind { IDLE, LISTENING, PROCESSING, SUCCESS, ERROR }
 
-    /** [restingW] is the width the contents were laid out for; [w] may be a mid-morph snapshot. */
+    /** The resting appearance of one state: its size, colour and what is drawn inside. */
     private data class Look(
         val kind: Kind,
         val w: Float,
         val h: Float,
         val bg: Int,
-        val text: String = "",
-        val restingW: Float = w
+        val text: String = ""
     ) {
+        /** Same drawn contents (size and colour may differ, e.g. after a screen change). */
         fun sameContent(other: Look): Boolean = kind == other.kind && text == other.text
     }
 
@@ -99,37 +107,46 @@ class OverlayPillView(context: Context) : View(context) {
     private var screenH = 0f
     private var keyboardTop: Float? = null
 
-    // ---- morph model ----------------------------------------------------------------------------
+    // ---- outline morph --------------------------------------------------------------------------
 
+    /** Where the outline is heading. */
     private var toLook: Look = idleLook()
-    private var fromLook: Look = toLook
     private var toAx = 0f
     private var toAy = 0f
+
+    /** Where the running morph started: a snapshot of wherever the outline was at that moment. */
+    private var fromW = 0f
+    private var fromH = 0f
+    private var fromBg = BG_DARK
     private var fromAx = 0f
     private var fromAy = 0f
+
+    /** The outline as drawn this frame. */
     private var curW = 0f
     private var curH = 0f
     private var curBg = BG_DARK
     private var curAx = 0f
     private var curAy = 0f
-    private var curIncomingAlpha = 1f
-    private var outgoingAlpha0 = 1f
 
     /** -1: at rest, 0: morph requested (clock starts on the first frame), otherwise the start time. */
     private var morphStart = -1L
-    private var morphDuration = MORPH_MS
-    private var contentSince = 0L
+    private var morphDuration = OverlayMotion.MORPH_MS
     private var hasDrawn = false
     private var lastFrameAt = 0L
     private var windowFrame = Box.EMPTY
     private var frameApplied = false
     private var pillBox = Box.EMPTY
 
+    // ---- contents -------------------------------------------------------------------------------
+
+    private val layers = LayerStack<Look>()
+
     // ---- continuous animation -------------------------------------------------------------------
 
     private val barTargets = FloatArray(BAR_COUNT + 1) { 0.06f }
     private val barLevels = FloatArray(BAR_COUNT + 1) { 0.06f }
     private var nextBarShiftAt = 0L
+    private var barsAdvancedAt = -1L
     private var latestLevel = 0f
     private var lastElapsedSec = 0
     private var pressed = false
@@ -247,7 +264,10 @@ class OverlayPillView(context: Context) : View(context) {
     private fun boxFor(look: Look, ax: Float, ay: Float): Box =
         OverlayGeometry.place(ax, ay, look.w, look.h, screenW, screenH, density)
 
-    /** Re-evaluate the target look and anchor; start a morph from wherever the pill currently is. */
+    /** The box the current state rests in once the outline has settled. */
+    private fun targetBox(): Box = boxFor(toLook, toAx, toAy)
+
+    /** Re-evaluate the target look and anchor; start a morph from wherever the outline currently is. */
     private fun retarget(animate: Boolean = true) {
         if (screenW <= 0f || screenH <= 0f) return
         val newLook = if (editing) idleLook() else lookFor(state)
@@ -256,33 +276,44 @@ class OverlayPillView(context: Context) : View(context) {
         val anchorChanged = abs(ax - toAx) > 0.5f || abs(ay - toAy) > 0.5f
         if (!lookChanged && !anchorChanged) return
         val now = AnimationUtils.currentAnimationTimeMillis()
+        val contentChanged = !newLook.sameContent(toLook)
         if (!hasDrawn || !animate || dragging) {
-            fromLook = newLook
             toLook = newLook
-            fromAx = ax
             toAx = ax
-            fromAy = ay
             toAy = ay
+            fromW = newLook.w
+            fromH = newLook.h
+            fromBg = newLook.bg
+            fromAx = ax
+            fromAy = ay
             curW = newLook.w
             curH = newLook.h
             curBg = newLook.bg
             curAx = ax
             curAy = ay
-            curIncomingAlpha = 1f
             morphStart = -1L
-            if (lookChanged) contentSince = now
+            layers.snap(newLook, targetBox(), now)
         } else {
-            // The outgoing layer is whatever was (becoming) visible, starting at its current alpha.
-            outgoingAlpha0 = if (fromLook.sameContent(toLook)) 1f else curIncomingAlpha
-            fromLook = Look(toLook.kind, curW, curH, curBg, toLook.text, toLook.restingW)
+            fromW = curW
+            fromH = curH
+            fromBg = curBg
             fromAx = curAx
             fromAy = curAy
             toLook = newLook
             toAx = ax
             toAy = ay
             morphStart = 0L
-            morphDuration = if (lookChanged) MORPH_MS else MOVE_MS
-            if (lookChanged) contentSince = now
+            morphDuration = if (lookChanged) OverlayMotion.MORPH_MS else OverlayMotion.MOVE_MS
+            val target = targetBox()
+            val current = layers.current
+            if (contentChanged || current == null) {
+                // New contents are laid out where they will rest; the outline reveals them.
+                layers.push(newLook, target, now)
+            } else {
+                // Same contents: they ride along with the outline from wherever they are now.
+                current.content = newLook
+                current.fromBox = current.box
+            }
         }
         requestFrame()
         invalidate()
@@ -296,7 +327,10 @@ class OverlayPillView(context: Context) : View(context) {
         }
         val screen = Box(0f, 0f, screenW, screenH)
         val frame = if (editing) screen else {
-            boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy)).inflate(dp(SHADOW_PAD_DP)).intersect(screen)
+            OverlayGeometry.place(fromAx, fromAy, fromW, fromH, screenW, screenH, density)
+                .union(targetBox())
+                .inflate(dp(SHADOW_PAD_DP))
+                .intersect(screen)
         }
         applyFrame(frame)
     }
@@ -312,7 +346,7 @@ class OverlayPillView(context: Context) : View(context) {
     private fun tightenFrame() {
         if (previewMode || host == null || editing || morphStart >= 0L) return
         val screen = Box(0f, 0f, screenW, screenH)
-        applyFrame(boxFor(toLook, toAx, toAy).inflate(dp(SHADOW_PAD_DP)).intersect(screen))
+        applyFrame(targetBox().inflate(dp(SHADOW_PAD_DP)).intersect(screen))
     }
 
     // ---- measure / layout -----------------------------------------------------------------------
@@ -353,27 +387,25 @@ class OverlayPillView(context: Context) : View(context) {
             }
         }
         val e = easeOutCubic(t)
-        curW = lerp(fromLook.w, toLook.w, e)
-        curH = lerp(fromLook.h, toLook.h, e)
-        curBg = ColorUtils.blendARGB(fromLook.bg, toLook.bg, e)
+        curW = lerp(fromW, toLook.w, e)
+        curH = lerp(fromH, toLook.h, e)
+        curBg = ColorUtils.blendARGB(fromBg, toLook.bg, e)
         curAx = lerp(fromAx, toAx, e)
         curAy = lerp(fromAy, toAy, e)
-        val crossfade = morphStart >= 0L && !fromLook.sameContent(toLook)
-        curIncomingAlpha = if (crossfade) smoothstep(0.32f, 1f, t) else 1f
-        val outgoingAlpha = if (crossfade) outgoingAlpha0 * (1f - smoothstep(0f, 0.42f, t)) else 0f
-        if (morphStart < 0L && toLook.kind != Kind.LISTENING) resetBars()
 
-        pressScale = approach(pressScale, pressTarget(), dt, 55f)
+        if (layers.isEmpty) layers.snap(toLook, targetBox(), now)
+        if (layers.layers.none { it.content.kind == Kind.LISTENING }) resetBars()
+
+        pressScale = OverlayMotion.approach(pressScale, pressTarget(), dt, 55f)
 
         // Everything below is in screen coordinates.
         canvas.save()
         canvas.translate(-windowFrame.left, -windowFrame.top)
 
-        val box = OverlayGeometry.place(curAx, curAy, curW, curH, screenW, screenH, density)
-        pillBox = box
-        val drawn = if (abs(pressScale - 1f) > 0.001f) {
-            Box.centered(box.centerX, box.centerY, box.width * pressScale, box.height * pressScale)
-        } else box
+        val outline = OverlayGeometry.place(curAx, curAy, curW, curH, screenW, screenH, density)
+        pillBox = outline
+        val pressing = abs(pressScale - 1f) > 0.001f
+        val drawn = if (pressing) outline.scaled(pressScale, outline.centerX, outline.centerY) else outline
 
         if (editing) drawEditGuides(canvas, now, drawn)
 
@@ -393,12 +425,8 @@ class OverlayPillView(context: Context) : View(context) {
         scratchRect.inset(dp(0.5f), dp(0.5f))
         canvas.drawRoundRect(scratchRect, radius - dp(0.5f), radius - dp(0.5f), strokePaint)
 
-        if (crossfade && outgoingAlpha > 0.01f) {
-            drawLayer(canvas, drawn, fromLook, outgoingAlpha, lerp(1f, 0.9f, smoothstep(0f, 0.42f, t)), now, dt)
-        }
-        if (curIncomingAlpha > 0.01f) {
-            drawLayer(canvas, drawn, toLook, curIncomingAlpha, if (crossfade) lerp(0.9f, 1f, curIncomingAlpha) else 1f, now, dt)
-        }
+        drawContents(canvas, drawn, e, pressing, now, dt)
+
         if (editing) drawEditChrome(canvas, now, drawn)
 
         canvas.restore()
@@ -406,23 +434,52 @@ class OverlayPillView(context: Context) : View(context) {
         if (isAnimating(now)) postInvalidateOnAnimation()
     }
 
-    private fun drawLayer(canvas: Canvas, box: Box, look: Look, alpha: Float, scale: Float, now: Long, dt: Long) {
-        val full = alpha >= 0.999f && abs(scale - 1f) < 0.001f
+    /**
+     * The layer stack, oldest first, each clipped by the outline. The current layer's box eases
+     * from where its slide began to the resting box of its state (they coincide for new contents,
+     * which are revealed in place); leaving layers stay where they were frozen and fade.
+     */
+    private fun drawContents(canvas: Canvas, outline: Box, e: Float, pressing: Boolean, now: Long, dt: Long) {
+        layers.current?.let { it.box = lerp(it.fromBox, targetBox(), e) }
+
+        // The bouncing dots are shared by every processing label: drawn once, with the layers'
+        // alphas summed, so a label change ("Transcribing…" -> "Formatting…") cross-fades only
+        // the text and the dots never dip.
+        var dotsAlpha = 0f
+        var dotsLayer: LayerStack.Layer<Look>? = null
+        for (layer in layers.layers) {
+            if (layer.content.kind != Kind.PROCESSING) continue
+            dotsAlpha += layers.alphaOf(layer, now)
+            dotsLayer = layer
+        }
+
         canvas.save()
         canvas.clipPath(clipPath)
+        for (layer in layers.layers) {
+            val box = if (pressing) layer.box.scaled(pressScale, outline.centerX, outline.centerY) else layer.box
+            if (layer === dotsLayer) drawProcessingDots(canvas, box, now, min(1f, dotsAlpha))
+            val alpha = layers.alphaOf(layer, now)
+            if (alpha <= OverlayMotion.GONE_ALPHA) continue
+            drawLayer(canvas, box, layer, alpha, now, dt)
+        }
+        canvas.restore()
+        layers.prune(now)
+    }
+
+    private fun drawLayer(canvas: Canvas, box: Box, layer: LayerStack.Layer<Look>, alpha: Float, now: Long, dt: Long) {
+        val full = alpha >= 0.999f
         if (!full) {
             canvas.saveLayerAlpha(box.left, box.top, box.right, box.bottom, (alpha * 255f).toInt().coerceIn(0, 255))
-            canvas.scale(scale, scale, box.centerX, box.centerY)
         }
+        val look = layer.content
         when (look.kind) {
             Kind.IDLE -> drawIdle(canvas, box)
             Kind.LISTENING -> drawListening(canvas, box, now, dt)
-            Kind.PROCESSING -> drawProcessing(canvas, box, look.text, now)
-            Kind.SUCCESS -> drawMessage(canvas, box, look, GREEN, true, now)
-            Kind.ERROR -> drawMessage(canvas, box, look, RED, false, now)
+            Kind.PROCESSING -> drawProcessingLabel(canvas, box, look.text)
+            Kind.SUCCESS -> drawMessage(canvas, box, look, GREEN, true, now - layer.shownSince)
+            Kind.ERROR -> drawMessage(canvas, box, look, RED, false, 0L)
         }
         if (!full) canvas.restore()
-        canvas.restore()
     }
 
     private fun drawIdle(canvas: Canvas, box: Box) {
@@ -456,8 +513,12 @@ class OverlayPillView(context: Context) : View(context) {
         paint.color = ACCENT
         canvas.drawCircle(dotCx, cy, dp(3.6f) * pulse, paint)
 
-        // Conveyor-belt waveform: bars slide left continuously between level samples.
-        advanceBars(now, dt)
+        // Conveyor-belt waveform: bars slide left continuously between level samples. Advanced once
+        // per frame even if two listening layers overlap for a moment.
+        if (barsAdvancedAt != now) {
+            advanceBars(now, dt)
+            barsAdvancedAt = now
+        }
         val barW = dp(2.6f)
         val gap = dp(2.2f)
         val pitch = barW + gap
@@ -534,31 +595,37 @@ class OverlayPillView(context: Context) : View(context) {
         else -> 0.93f
     }
 
-    private fun drawProcessing(canvas: Canvas, box: Box, label: String, now: Long) {
+    /** Left edge of a processing label: three dots, then the text. */
+    private fun processingTextX(box: Box): Float = box.left + dp(20f) + 3 * dp(10f) + dp(4f)
+
+    private fun drawProcessingDots(canvas: Canvas, box: Box, now: Long, alpha: Float) {
         val cy = box.centerY
         var x = box.left + dp(20f)
         paint.color = Color.WHITE
         val phase = 2.0 * PI * (now % 1100L) / 1100.0
         for (i in 0 until 3) {
             val bounce = max(0.0, sin(phase - i * 0.9)).toFloat() * dp(3.5f)
-            paint.alpha = (140 + 115 * (bounce / dp(3.5f))).toInt().coerceIn(0, 255)
+            paint.alpha = ((140 + 115 * (bounce / dp(3.5f))) * alpha).toInt().coerceIn(0, 255)
             canvas.drawCircle(x, cy - bounce + dp(1.5f), dp(2.6f), paint)
             x += dp(10f)
         }
         paint.alpha = 255
+    }
+
+    private fun drawProcessingLabel(canvas: Canvas, box: Box, label: String) {
         textPaint.color = 0xD9FFFFFF.toInt()
-        canvas.drawText(label, x + dp(4f), cy + textPaint.textSize / 2.8f, textPaint)
+        canvas.drawText(label, processingTextX(box), box.centerY + textPaint.textSize / 2.8f, textPaint)
         textPaint.color = Color.WHITE
     }
 
-    private fun drawMessage(canvas: Canvas, box: Box, look: Look, color: Int, check: Boolean, now: Long) {
+    private fun drawMessage(canvas: Canvas, box: Box, look: Look, color: Int, check: Boolean, shownForMs: Long) {
         val cy = box.centerY
         val iconCx = box.left + dp(22f)
         strokePaint.color = color
         strokePaint.strokeWidth = dp(2.4f)
         if (check) {
             // The tick draws itself in once the pill has (mostly) taken its new shape.
-            val p = smoothstep(0f, 1f, ((now - contentSince - 120L).toFloat() / 260f).coerceIn(0f, 1f))
+            val p = smoothstep(0f, 1f, ((shownForMs - 120L).toFloat() / 260f).coerceIn(0f, 1f))
             val ax = iconCx - dp(5f)
             val ay = cy
             val bx = iconCx - dp(1f)
@@ -576,10 +643,10 @@ class OverlayPillView(context: Context) : View(context) {
             paint.color = color
             canvas.drawCircle(iconCx, cy + dp(3.6f), dp(1f), paint)
         }
-        // Fit the text to the pill's resting width, not the box mid-morph: while the pill is still
-        // growing or shrinking the pill's outline clips it instead of re-ellipsizing every frame.
+        // Fit the text to the pill's resting width: the layer is laid out in that box and the
+        // outline clips it while morphing, so nothing re-ellipsizes frame by frame.
         var msg = look.text
-        val maxWidth = look.restingW - dp(48f)
+        val maxWidth = look.w - dp(48f)
         if (textPaint.measureText(msg) > maxWidth) {
             while (msg.length > 4 && textPaint.measureText("$msg…") > maxWidth) msg = msg.dropLast(1)
             msg = "$msg…"
@@ -670,28 +737,11 @@ class OverlayPillView(context: Context) : View(context) {
     private fun isAnimating(now: Long): Boolean {
         if (morphStart >= 0L || editing || dragging) return true
         if (abs(pressScale - pressTarget()) > 0.002f) return true
-        val kind = toLook.kind
+        if (!layers.isSettled(now)) return true
+        val current = layers.current ?: return false
+        val kind = current.content.kind
         if (kind == Kind.LISTENING || kind == Kind.PROCESSING) return true
-        return kind == Kind.SUCCESS && now - contentSince < 500L
-    }
-
-    private fun easeOutCubic(t: Float): Float {
-        val u = 1f - t
-        return 1f - u * u * u
-    }
-
-    private fun smoothstep(a: Float, b: Float, x: Float): Float {
-        if (b <= a) return if (x >= b) 1f else 0f
-        val t = ((x - a) / (b - a)).coerceIn(0f, 1f)
-        return t * t * (3f - 2f * t)
-    }
-
-    private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
-
-    /** Exponential approach with a time constant in milliseconds; frame-rate independent. */
-    private fun approach(current: Float, target: Float, dtMs: Long, tauMs: Float): Float {
-        if (abs(target - current) < 0.0005f) return target
-        return current + (target - current) * (1f - exp(-dtMs / tauMs))
+        return kind == Kind.SUCCESS && now - current.shownSince < 500L
     }
 
     // ---- touch ----------------------------------------------------------------------------------
@@ -796,6 +846,8 @@ class OverlayPillView(context: Context) : View(context) {
         curAx = nx
         curAy = ny
         morphStart = -1L
+        // Settled morph: the current layer's box tracks the target box directly.
+        layers.current?.let { it.fromBox = targetBox() }
     }
 
     private fun commitDrag() {

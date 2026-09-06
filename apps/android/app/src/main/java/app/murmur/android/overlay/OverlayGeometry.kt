@@ -23,6 +23,10 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
 
     fun offset(dx: Float, dy: Float): Box = Box(left + dx, top + dy, right + dx, bottom + dy)
 
+    /** This box scaled by [s] about the point ([cx], [cy]). */
+    fun scaled(s: Float, cx: Float, cy: Float): Box =
+        Box(cx + (left - cx) * s, cy + (top - cy) * s, cx + (right - cx) * s, cy + (bottom - cy) * s)
+
     /** The part of this box that lies inside [bounds]. */
     fun intersect(bounds: Box): Box {
         val l = left.coerceIn(bounds.left, bounds.right)

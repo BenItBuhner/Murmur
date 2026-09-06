@@ -8,7 +8,7 @@ import { Switch } from '@renderer/components/ui/switch'
 import { Badge, Segmented } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { HotkeyRecorder } from '@renderer/components/HotkeyRecorder'
-import { Logo } from '@renderer/components/Shell'
+import { Wordmark } from '@renderer/components/Shell'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, uid } from '@renderer/lib/utils'
@@ -76,17 +76,14 @@ export function Onboarding(): React.JSX.Element {
           info?.platform === 'win32' ? 'h-10 drag-region' : 'h-14'
         )}
       >
-        <div className="flex items-center gap-2.5">
-          <Logo />
-          <span className="text-[15px] font-semibold tracking-tight">Murmur</span>
-        </div>
+        <Wordmark />
         <ol className="no-drag flex items-center gap-1.5">
           {steps.map((s, i) => (
             <li
               key={s}
               className={cn(
-                'h-1.5 w-8 rounded-full transition-colors',
-                i <= index ? 'bg-primary' : 'bg-muted'
+                'h-0.5 w-8 rounded-full transition-colors duration-300',
+                i <= index ? 'bg-primary' : 'bg-border'
               )}
               title={TITLES[s]}
             />
@@ -97,45 +94,39 @@ export function Onboarding(): React.JSX.Element {
       <div className="flex-1 overflow-y-auto px-8 pb-8">
         <div className="mx-auto max-w-2xl pt-6 animate-fade-in" key={step}>
           {step === 'welcome' && (
-            <div className="space-y-6 pt-10 text-center">
-              <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
-                <Logo className="size-10 rounded-xl [&>svg]:size-6" />
-              </div>
+            <div className="mx-auto max-w-xl space-y-7 pt-12">
               {returning ? (
                 <>
-                  <h1 className="text-3xl font-semibold tracking-tight">
+                  <h1 className="serif-display text-[56px]">
                     Welcome back{firstName ? `, ${firstName}` : ''}.
                   </h1>
-                  <p className="mx-auto max-w-md text-[15px] text-muted-foreground">
+                  <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
                     Your account is already set up, so your dictionary, snippets and style are on
                     this computer now. Three quick device steps and you are dictating: connect a
                     speech model, check the microphone, pick a shortcut.
                   </p>
-                  <div className="mx-auto grid max-w-md gap-2 pt-2 text-left text-[13px]">
-                    {[
+                  <FeatureList
+                    items={[
                       `${settings.dictionary.length} dictionary ${settings.dictionary.length === 1 ? 'word' : 'words'}`,
                       `${settings.snippets.length} ${settings.snippets.length === 1 ? 'snippet' : 'snippets'}`,
                       `Tone: ${TONES.find((t) => t.value === settings.formatting.tone)?.label ?? 'Auto'}`
-                    ].map((t) => (
-                      <div
-                        key={t}
-                        className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2"
-                      >
-                        <Check className="size-4 text-success" /> {t}
-                      </div>
-                    ))}
-                  </div>
+                    ]}
+                  />
                 </>
               ) : (
                 <>
-                  <h1 className="text-3xl font-semibold tracking-tight">Speak. It types.</h1>
-                  <p className="mx-auto max-w-md text-[15px] text-muted-foreground">
+                  <h1 className="serif-display text-[64px]">
+                    Speak.
+                    <br />
+                    <span className="italic text-muted-foreground">It types.</span>
+                  </h1>
+                  <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
                     Hold one key anywhere on your computer, say what you mean, let go. Murmur
                     transcribes it, cleans up the ums and self-corrections, and drops finished text
                     right where your cursor is.
                   </p>
-                  <div className="mx-auto grid max-w-md gap-2 pt-2 text-left text-[13px]">
-                    {[
+                  <FeatureList
+                    items={[
                       'Hold to talk, tap for hands-free',
                       'Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server',
                       signedIn
@@ -144,15 +135,8 @@ export function Onboarding(): React.JSX.Element {
                       signedIn
                         ? 'API keys stay on this device; only your words and settings sync'
                         : 'Nothing stored anywhere but this device'
-                    ].map((t) => (
-                      <div
-                        key={t}
-                        className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2"
-                      >
-                        <Check className="size-4 text-success" /> {t}
-                      </div>
-                    ))}
-                  </div>
+                    ]}
+                  />
                 </>
               )}
             </div>
@@ -191,7 +175,7 @@ export function Onboarding(): React.JSX.Element {
                 title="Your shortcut"
                 description="This one key does both jobs. Keep the default or record your own."
               />
-              <div className="rounded-xl border bg-card p-5 shadow-xs space-y-5">
+              <div className="rounded-2xl border bg-card p-5 space-y-5">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm font-medium">Push to talk</div>
@@ -233,7 +217,7 @@ export function Onboarding(): React.JSX.Element {
                 title="Try it"
                 description="Click into the box, then hold your shortcut and say something like “Hey, this is my first dictation, new line, pretty neat.”"
               />
-              <div className="flex items-center justify-center gap-3 rounded-xl border bg-card px-5 py-4 shadow-xs">
+              <div className="flex items-center justify-center gap-3 rounded-2xl border bg-card px-5 py-4">
                 <span className="text-sm text-muted-foreground">Hold</span>
                 <KeyCaps
                   keys={settings.hotkeys.pushToTalk}
@@ -323,7 +307,7 @@ function PersonalizeStep(): React.JSX.Element {
         description="These choices live in your account, so every device you sign in on picks them up. You only do this once."
       />
 
-      <div className="rounded-xl border bg-card p-5 shadow-xs space-y-5">
+      <div className="rounded-2xl border bg-card p-5 space-y-5">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium">
             <BookA className="size-4" /> Teach Murmur your name
@@ -385,7 +369,7 @@ function PersonalizeStep(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="rounded-xl border bg-card p-5 shadow-xs space-y-5">
+      <div className="rounded-2xl border bg-card p-5 space-y-5">
         <div className="flex items-center justify-between gap-6">
           <div>
             <div className="text-sm font-medium">Default tone</div>
@@ -420,8 +404,24 @@ function PersonalizeStep(): React.JSX.Element {
 function Header({ title, description }: { title: string; description: string }): React.JSX.Element {
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      <h1 className="serif-display text-[36px]">{title}</h1>
+      <p className="mt-2.5 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
+        {description}
+      </p>
     </div>
+  )
+}
+
+/** Facts set as hairline rows rather than boxed bullets. */
+export function FeatureList({ items }: { items: string[] }): React.JSX.Element {
+  return (
+    <ul className="divide-y border-y text-[14px]">
+      {items.map((t) => (
+        <li key={t} className="flex items-start gap-3.5 py-3.5">
+          <Check className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+          <span>{t}</span>
+        </li>
+      ))}
+    </ul>
   )
 }

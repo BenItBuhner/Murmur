@@ -2,63 +2,90 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Instrument Serif (OFL, see fonts/OFL-InstrumentSerif.txt): the display face shared with the
+   Android app. Headlines, the wordmark and large numerals; everything else stays in the sans. */
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/InstrumentSerif-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/InstrumentSerif-Italic.ttf') format('truetype');
+}
+
+/*
+ * Ink on paper. Warm ivory by day, warm black by night; the ember the overlay pill wears is the
+ * only accent. Structure comes from hairlines and whitespace rather than shadows and boxes.
+ */
 :root {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif;
-  --radius: 0.75rem;
+  --font-serif: 'Instrument Serif', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --radius: 0.875rem;
 
-  --background: oklch(0.985 0.002 90);
-  --foreground: oklch(0.2 0.01 60);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.01 60);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.01 60);
-  --primary: oklch(0.22 0.01 60);
-  --primary-foreground: oklch(0.985 0.002 90);
-  --secondary: oklch(0.955 0.004 80);
-  --secondary-foreground: oklch(0.25 0.01 60);
-  --muted: oklch(0.955 0.004 80);
-  --muted-foreground: oklch(0.5 0.01 60);
-  --accent: oklch(0.94 0.005 80);
-  --accent-foreground: oklch(0.22 0.01 60);
-  --destructive: oklch(0.6 0.2 25);
+  --background: oklch(0.966 0.007 84); /* paper  #F6F3EE */
+  --foreground: oklch(0.19 0.01 300); /* ink    #17151A */
+  --card: oklch(0.988 0.004 90); /* raised #FCFBF8 */
+  --card-foreground: oklch(0.19 0.01 300);
+  --popover: oklch(0.988 0.004 90);
+  --popover-foreground: oklch(0.19 0.01 300);
+  --primary: oklch(0.19 0.01 300);
+  --primary-foreground: oklch(0.966 0.007 84);
+  --secondary: oklch(0.935 0.008 84);
+  --secondary-foreground: oklch(0.25 0.01 300);
+  --muted: oklch(0.935 0.008 84);
+  --muted-foreground: oklch(0.52 0.012 70); /* ink soft #6F6A64 */
+  --accent: oklch(0.925 0.009 84);
+  --accent-foreground: oklch(0.19 0.01 300);
+  --destructive: oklch(0.52 0.15 28); /* clay */
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.9 0.005 80);
-  --input: oklch(0.9 0.005 80);
-  --ring: oklch(0.55 0.02 60);
-  --record: oklch(0.68 0.21 35);
-  --success: oklch(0.65 0.16 150);
-  --sidebar: oklch(0.965 0.003 85);
+  --border: oklch(0.905 0.011 80); /* hairline #E6E1D9 */
+  --input: oklch(0.86 0.014 80);
+  --ring: oklch(0.19 0.01 300);
+  --record: oklch(0.68 0.21 35); /* ember #FF5A36 */
+  --success: oklch(0.58 0.11 155); /* sage */
+  --sidebar: oklch(0.966 0.007 84);
 }
 
 .dark {
-  --background: oklch(0.16 0.004 60);
-  --foreground: oklch(0.93 0.004 80);
-  --card: oklch(0.2 0.005 60);
-  --card-foreground: oklch(0.93 0.004 80);
-  --popover: oklch(0.21 0.005 60);
-  --popover-foreground: oklch(0.93 0.004 80);
-  --primary: oklch(0.93 0.004 80);
-  --primary-foreground: oklch(0.18 0.005 60);
-  --secondary: oklch(0.26 0.005 60);
-  --secondary-foreground: oklch(0.93 0.004 80);
-  --muted: oklch(0.25 0.005 60);
-  --muted-foreground: oklch(0.68 0.008 70);
-  --accent: oklch(0.27 0.006 60);
-  --accent-foreground: oklch(0.93 0.004 80);
-  --destructive: oklch(0.62 0.19 25);
+  --background: oklch(0.155 0.005 300); /* ink paper #0F0E10 */
+  --foreground: oklch(0.94 0.009 80); /* bone      #F1EDE6 */
+  --card: oklch(0.2 0.006 300); /* raised    #18171B */
+  --card-foreground: oklch(0.94 0.009 80);
+  --popover: oklch(0.21 0.006 300);
+  --popover-foreground: oklch(0.94 0.009 80);
+  --primary: oklch(0.94 0.009 80);
+  --primary-foreground: oklch(0.155 0.005 300);
+  --secondary: oklch(0.24 0.006 300);
+  --secondary-foreground: oklch(0.94 0.009 80);
+  --muted: oklch(0.23 0.006 300);
+  --muted-foreground: oklch(0.67 0.01 75); /* #9B968E */
+  --accent: oklch(0.25 0.006 300);
+  --accent-foreground: oklch(0.94 0.009 80);
+  --destructive: oklch(0.7 0.13 32);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.28 0.006 60);
-  --input: oklch(0.3 0.006 60);
-  --ring: oklch(0.6 0.01 60);
+  --border: oklch(0.26 0.007 300); /* #262429 */
+  --input: oklch(0.33 0.008 300);
+  --ring: oklch(0.94 0.009 80);
   --record: oklch(0.7 0.2 35);
-  --success: oklch(0.7 0.15 150);
-  --sidebar: oklch(0.14 0.004 60);
+  --success: oklch(0.8 0.1 155);
+  --sidebar: oklch(0.155 0.005 300);
 }
 
 @theme inline {
   --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  /* Paper does not cast shadows. Only floating layers (dialogs, popovers, the pill) keep theirs. */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -191,6 +218,25 @@
   }
 }
 
+/* Tracked uppercase label that introduces a group. */
+@utility overline {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Editorial serif for headlines and large numerals. */
+@utility serif-display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  font-feature-settings: normal;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -205,6 +251,9 @@
     font-feature-settings: 'cv11', 'ss01';
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--record) 28%, transparent);
   }
   ::-webkit-scrollbar {
     width: 10px;
@@ -228,6 +277,6 @@
     -webkit-app-region: no-drag;
   }
   kbd {
-    @apply inline-flex items-center justify-center rounded-md border bg-card px-1.5 min-w-6 h-6 text-[11px] font-medium text-foreground shadow-[inset_0_-1px_0_0_var(--border)];
+    @apply inline-flex items-center justify-center rounded-md border border-input bg-card px-1.5 min-w-6 h-6 text-[11px] font-medium text-foreground;
   }
 }

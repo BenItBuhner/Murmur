@@ -55,12 +55,12 @@ export function Section({
     <section className="space-y-3">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
-          {description && <p className="mt-0.5 text-[13px] text-muted-foreground">{description}</p>}
+          <h2 className="overline">{title}</h2>
+          {description && <p className="mt-2 text-[13px] text-muted-foreground">{description}</p>}
         </div>
         {actions}
       </div>
-      <div className="rounded-xl border bg-card px-5 py-4 shadow-xs divide-y">{children}</div>
+      <div className="rounded-2xl border bg-card px-5 py-4 divide-y">{children}</div>
     </section>
   )
 }
@@ -75,10 +75,14 @@ export function PageHeader({
   actions?: React.ReactNode
 }): React.JSX.Element {
   return (
-    <div className="mb-7 flex items-start justify-between gap-6">
+    <div className="mb-9 flex items-start justify-between gap-6">
       <div>
-        <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
-        {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+        <h1 className="serif-display text-[36px]">{title}</h1>
+        {description && (
+          <p className="mt-2.5 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
+            {description}
+          </p>
+        )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
@@ -97,9 +101,13 @@ export function Empty({
   action?: React.ReactNode
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-14 text-center">
-      {icon && <div className="mb-1 text-muted-foreground [&>svg]:size-7">{icon}</div>}
-      <div className="text-sm font-medium">{title}</div>
+    <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border px-6 py-16 text-center">
+      {icon && (
+        <div className="mb-2 text-muted-foreground/70 [&>svg]:size-7 [&>svg]:stroke-[1.5]">
+          {icon}
+        </div>
+      )}
+      <div className="serif-display text-[22px]">{title}</div>
       {description && <p className="max-w-sm text-[13px] text-muted-foreground">{description}</p>}
       {action && <div className="mt-3">{action}</div>}
     </div>

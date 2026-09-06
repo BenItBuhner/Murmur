@@ -202,30 +202,31 @@ export function clerkAppearance(dark: boolean): {
   variables: Record<string, string>
   elements: Record<string, string | Record<string, string>>
 } {
+  // Same paper and ink as globals.css.
   return {
     variables: {
-      colorPrimary: dark ? '#ECEAE6' : '#262321',
-      colorBackground: dark ? '#1F1E1D' : '#FFFFFF',
-      colorText: dark ? '#ECEAE6' : '#2B2724',
-      colorTextSecondary: dark ? '#A8A29E' : '#78716C',
-      colorInputBackground: dark ? '#262524' : '#FFFFFF',
-      colorInputText: dark ? '#ECEAE6' : '#2B2724',
-      colorNeutral: dark ? '#ECEAE6' : '#262321',
-      colorDanger: '#DC4B3B',
-      colorSuccess: '#3BAA6C',
-      borderRadius: '0.75rem',
+      colorPrimary: dark ? '#F1EDE6' : '#17151A',
+      colorBackground: dark ? '#18171B' : '#FCFBF8',
+      colorText: dark ? '#F1EDE6' : '#17151A',
+      colorTextSecondary: dark ? '#9B968E' : '#6F6A64',
+      colorInputBackground: dark ? '#0F0E10' : '#FCFBF8',
+      colorInputText: dark ? '#F1EDE6' : '#17151A',
+      colorNeutral: dark ? '#F1EDE6' : '#17151A',
+      colorDanger: dark ? '#E98B76' : '#B9463C',
+      colorSuccess: dark ? '#86D3A3' : '#3F8F63',
+      borderRadius: '0.875rem',
       fontFamily: 'var(--font-sans)',
       fontSize: '14px'
     },
     elements: {
       rootBox: 'w-full',
-      cardBox: 'w-full shadow-none border border-border rounded-xl',
+      cardBox: 'w-full shadow-none border border-border rounded-2xl',
       card: 'shadow-none bg-card px-6 py-6 gap-5',
-      headerTitle: 'text-lg font-semibold tracking-tight',
+      headerTitle: 'serif-display text-[26px]',
       headerSubtitle: 'text-[13px]',
-      formButtonPrimary: 'h-9 rounded-lg text-sm font-medium shadow-none',
-      formFieldInput: 'h-9 rounded-lg',
-      socialButtonsBlockButton: 'h-9 rounded-lg',
+      formButtonPrimary: 'h-9 rounded-full text-sm font-medium shadow-none',
+      formFieldInput: 'h-9 rounded-xl shadow-none',
+      socialButtonsBlockButton: 'h-9 rounded-full shadow-none',
       // Murmur switches between sign in and sign up with its own tabs.
       footerAction: { display: 'none' }
     }

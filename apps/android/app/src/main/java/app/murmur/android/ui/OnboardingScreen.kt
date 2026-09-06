@@ -1,13 +1,5 @@
 package app.murmur.android.ui
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -98,16 +90,15 @@ fun OnboardingScreen(
             StepIndicator(steps.size, index, Modifier.width(88.dp))
         }
 
-        AnimatedContent(
-            targetState = index,
+        // The steps are a back stack of their own: the system back gesture scrubs back to the
+        // previous step, and only leaves the app from the first one.
+        BackStackHost(
+            current = index,
+            previous = (index - 1).takeIf { it >= 0 },
+            depth = { it },
+            onBack = { if (index > 0) index-- },
             modifier = Modifier.weight(1f),
-            transitionSpec = {
-                val forward = targetState >= initialState
-                val spec = tween<Float>(320, easing = FastOutSlowInEasing)
-                (slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { if (forward) it / 6 else -it / 6 } + fadeIn(spec))
-                    .togetherWith(slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { if (forward) -it / 6 else it / 6 } + fadeOut(spec))
-            },
-            label = "onboarding"
+            motion = BackMotion.PAGE
         ) { i ->
             Column(
                 Modifier

@@ -10,6 +10,9 @@ import app.murmur.android.service.EditableTarget
  * `TextView.onInitializeAccessibilityNodeInfo` reports it (the hint doubles as the text while the
  * field is empty) and actions go through `View.performAccessibilityAction`, the framework entry
  * point an accessibility service's `AccessibilityNodeInfo.performAction` ends up in.
+ *
+ * A plain native field: not web content, and editability is carried by [isEditable] alone (tests
+ * that model fields advertising individual actions override [supportsAction]).
  */
 open class EditTextTarget(val view: EditText) : EditableTarget {
     override fun refresh(): Boolean = true
@@ -20,8 +23,10 @@ open class EditTextTarget(val view: EditText) : EditableTarget {
     override val isPassword: Boolean
         get() = view.transformationMethod is PasswordTransformationMethod
     override val isEditable: Boolean get() = true
+    override val isWebContent: Boolean get() = false
     override val selectionStart: Int get() = view.selectionStart
     override val selectionEnd: Int get() = view.selectionEnd
+    override fun supportsAction(action: Int): Boolean = false
     override fun performAction(action: Int, arguments: Bundle?): Boolean =
         view.performAccessibilityAction(action, arguments)
 }

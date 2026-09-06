@@ -126,6 +126,82 @@ class TextInserterTest {
     }
 
     @Test
+    fun `web content is pasted into and never rewritten with SET_TEXT`() {
+        field.setText("Hello ")
+        field.setSelection(6)
+        val performed = ArrayList<Int>()
+        // Chromium reports a page's contenteditable editor as an editable EditText whose text is
+        // the placeholder-laden subtree; SET_TEXT would "succeed" and wipe the editor's state.
+        val web = object : EditTextTarget(field) {
+            override val isWebContent: Boolean get() = true
+            override fun performAction(action: Int, arguments: Bundle?): Boolean {
+                performed.add(action)
+                return super.performAction(action, arguments)
+            }
+        }
+
+        val outcome = TextInserter.insert(web, "world", pressEnter = false, ::toClipboard)
+
+        assertEquals(InsertOutcome.Inserted("paste"), outcome)
+        assertEquals(listOf("world"), clipboard)
+        assertEquals("Hello world", field.text.toString())
+        assertEquals(listOf(AccessibilityNodeInfo.ACTION_PASTE), performed)
+    }
+
+    @Test
+    fun `web content whose engine refuses to paste is written with SET_TEXT`() {
+        field.setText("Hello ")
+        field.setSelection(6)
+        val noPaste = object : EditTextTarget(field) {
+            override val isWebContent: Boolean get() = true
+            override fun performAction(action: Int, arguments: Bundle?): Boolean =
+                if (action == AccessibilityNodeInfo.ACTION_PASTE) false
+                else super.performAction(action, arguments)
+        }
+
+        val outcome = TextInserter.insert(noPaste, "world", pressEnter = false, ::toClipboard)
+
+        assertEquals(InsertOutcome.Inserted("set-text"), outcome)
+        assertEquals("Hello world", field.text.toString())
+        assertEquals(11, field.selectionStart)
+    }
+
+    @Test
+    fun `a field that only advertises PASTE is pasted into`() {
+        field.setText("Hello ")
+        field.setSelection(6)
+        val performed = ArrayList<Int>()
+        val pasteOnly = object : EditTextTarget(field) {
+            override val isEditable: Boolean get() = false
+            override fun supportsAction(action: Int): Boolean = action == AccessibilityNodeInfo.ACTION_PASTE
+            override fun performAction(action: Int, arguments: Bundle?): Boolean {
+                performed.add(action)
+                return super.performAction(action, arguments)
+            }
+        }
+
+        val outcome = TextInserter.insert(pasteOnly, "world", pressEnter = false, ::toClipboard)
+
+        assertEquals(InsertOutcome.Inserted("paste"), outcome)
+        assertEquals("Hello world", field.text.toString())
+        assertEquals(listOf(AccessibilityNodeInfo.ACTION_PASTE), performed)
+    }
+
+    @Test
+    fun `a field that only advertises SET_TEXT is written with SET_TEXT`() {
+        val setTextOnly = object : EditTextTarget(field) {
+            override val isEditable: Boolean get() = false
+            override fun supportsAction(action: Int): Boolean = action == AccessibilityNodeInfo.ACTION_SET_TEXT
+        }
+
+        val outcome = TextInserter.insert(setTextOnly, "Hello world ", pressEnter = false, ::toClipboard)
+
+        assertEquals(InsertOutcome.Inserted("set-text"), outcome)
+        assertEquals("Hello world ", field.text.toString())
+        assertTrue(clipboard.isEmpty())
+    }
+
+    @Test
     fun `password fields are pasted into, never rewritten from their masked text`() {
         field.transformationMethod = PasswordTransformationMethod.getInstance()
         field.setText("secret")

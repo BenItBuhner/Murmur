@@ -1,6 +1,6 @@
 {
   "name": "murmur-monorepo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Murmur monorepo - Wispr Flow-style voice dictation for Windows, Linux, macOS (desktop) and Android.",
   "private": true,
   "license": "MIT",

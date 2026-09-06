@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Murmur - hold a key, speak, and clean text lands wherever your cursor is. Wispr Flow-style voice dictation for Windows and Linux.",
   "main": "./out/main/index.js",
   "author": "Murmur contributors",

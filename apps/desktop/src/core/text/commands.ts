@@ -106,7 +106,7 @@ export function applySpokenQuotes(text: string): string {
       // A quotation that follows a pause or opens a sentence starts with a capital.
       quoted = !before || /[,:.!?\n]$/.test(before) ? capitalizeQuote(inner) : inner
     }
-    const gap = before && !/[\s(\[\n]$/.test(before) ? ' ' : ''
+    const gap = before && !/[\s([\n]$/.test(before) ? ' ' : ''
     out += `${before}${gap}"${quoted}"`
     // Punctuation spoken right after the command attaches to the closing mark.
     const rest = text.slice(restStart)

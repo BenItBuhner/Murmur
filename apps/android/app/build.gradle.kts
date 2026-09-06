@@ -102,6 +102,8 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Robolectric (TextInserterTest) needs the merged manifest and resources.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -129,4 +131,9 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    // Runs the text-insertion strategy against a real EditText (TextInserterTest) and the whole
+    // sample-clip dictation against an in-process STT endpoint (DictationFlowTest).
+    testImplementation("org.robolectric:robolectric:4.15.1")
+    // Must match the OkHttp the Clerk/Convex SDKs pull in (5.x), or MockWebServer fails to load.
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
 }

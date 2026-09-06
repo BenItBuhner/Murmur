@@ -23,7 +23,7 @@ import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
 import app.murmur.android.text.finalizeAfterLlm
 import app.murmur.android.text.maxTokensFor
-import app.murmur.android.text.resolveTone
+import app.murmur.android.text.resolveStyle
 import app.murmur.android.text.runPipeline
 import app.murmur.android.text.sanitizeLlmOutput
 import kotlinx.coroutines.CoroutineScope
@@ -189,16 +189,24 @@ object DictationController {
             return
         }
 
-        // 2. Deterministic pipeline
+        // 2. Deterministic pipeline (the destination decides lists/numbers: never lists in code or terminals)
         val app: AppContext = classifyPackage(sink?.focusedPackage() ?: "")
+        val style = resolveStyle(s, app)
         val pipelineOpts = PipelineOptions(
             removeFillers = s.removeFillers,
+            hesitations = s.hesitations,
+            hesitationPhrases = s.hesitationPhrases,
             collapseRepeats = s.collapseRepeats,
+            repetitionScope = s.repetitionScope,
             spokenCommands = s.spokenCommands,
             selfCorrections = s.selfCorrections,
             autoCapitalize = s.autoCapitalize,
             trailingSpace = s.trailingSpace,
             pressEnterCommand = s.spokenCommands,
+            lists = style.lists,
+            listStyle = s.listStyle,
+            bulletMarker = s.bulletMarker,
+            numbers = style.numbers,
             dictionary = s.dictionaryEntries
         )
         val light = runPipeline(raw, pipelineOpts)
@@ -215,9 +223,7 @@ object DictationController {
             try {
                 val res = LlmClient.chatComplete(
                     LlmConfig(llmBase, llmKey, llmModel, s.llmTimeoutMs),
-                    buildFormatMessages(
-                        light.text.trim(), s.dictionaryTerms, resolveTone(s.tone, app), app
-                    ),
+                    buildFormatMessages(light.text.trim(), s.dictionaryTerms, style, app, light.hints),
                     maxTokens = maxTokensFor(light.text)
                 )
                 val guard = sanitizeLlmOutput(res.text, light.text)

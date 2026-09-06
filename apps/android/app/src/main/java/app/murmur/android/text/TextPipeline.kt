@@ -1,5 +1,10 @@
 package app.murmur.android.text
 
+import app.murmur.android.settings.BulletMarker
+import app.murmur.android.settings.ListStyle
+import app.murmur.android.settings.ListsMode
+import app.murmur.android.settings.NumbersMode
+
 /**
  * Kotlin port of the desktop deterministic cleanup pipeline
  * (apps/desktop/src/core/text/{format,fillers,commands,corrections,pipeline,util}.ts).
@@ -34,7 +39,8 @@ fun normalizeWhitespace(text: String): String = text
 
 fun fixPunctuationSpacing(text: String): String = text
     .replace(Regex("\\s+([,.!?;:%])"), "$1")
-    .replace(Regex("([,;:])(?=[\\p{L}\\p{N}])"), "$1 ")
+    // A comma between digits is a thousands separator ("25,000"), a colon a time ("5:30").
+    .replace(Regex("(?<!\\d)([,;:])(?=[\\p{L}\\p{N}])|([,;:])(?=\\p{L})")) { m -> "${m.groupValues[1]}${m.groupValues[2]} " }
     .replace(Regex("([.!?])(?=[\\p{Lu}])"), "$1 ")
     .replace(Regex(",{2,}"), ",")
     .replace(Regex("(?<!\\.)\\.{2}(?!\\.)"), ".")
@@ -75,6 +81,20 @@ fun applyTrailing(text: String, trailingSpace: Boolean): String {
 
 /** Reject obviously broken results (only punctuation / whitespace). */
 fun isMeaningful(text: String): Boolean = Regex("[\\p{L}\\p{N}]").containsMatchIn(text)
+
+val QUESTION_START = Regex(
+    "^(?:what|who|whom|whose|when|where|why|how|which|is|are|was|were|do|does|did|can|could|will|would|should|shall|may|might|am|have|has|had|isn't|aren't|don't|doesn't|didn't|can't|couldn't|won't|wouldn't|shouldn't)\\b",
+    RegexOption.IGNORE_CASE
+)
+
+/** A dictation that is a question: it ends with one or starts like one. */
+fun isQuestion(text: String): Boolean {
+    val t = text.trim()
+    if (t.isEmpty()) return false
+    if (Regex("\\?\\s*$").containsMatchIn(t)) return true
+    val firstSentence = t.split(Regex("(?<=[.!?])\\s+")).firstOrNull() ?: t
+    return QUESTION_START.containsMatchIn(firstSentence) && !Regex("[.!]$").containsMatchIn(firstSentence) && countWords(firstSentence) >= 3
+}
 
 // ---- fillers ---------------------------------------------------------------------------------
 
@@ -127,12 +147,7 @@ fun removeFillers(text: String, fillers: List<String> = DEFAULT_FILLERS): String
             lead.trim() == "," -> {
                 // "think, um, that" -> "think that" ; "So, uh, can you" -> "So, can you"
                 if (sentenceEnding) trail.replace(",", "") + space.ifEmpty { " " }
-                else {
-                    val clause = lastClause(before)
-                    val keepComma = OPENERS.containsMatchIn(clause) ||
-                        (GREETING.containsMatchIn(clause) && clause.split(Regex("\\s+")).size <= 4)
-                    if (keepComma) ", " else " "
-                }
+                else if (isOpenerClause(lastClause(before))) ", " else " "
             }
             sentenceEnding -> trail.replace(",", "") + space.ifEmpty { " " }
             else -> if (space.isNotEmpty()) " " else ""
@@ -147,15 +162,16 @@ fun removeFillers(text: String, fillers: List<String> = DEFAULT_FILLERS): String
         .replace(Regex("(?m)^[ \\t]+|[ \\t]+$"), "")
 }
 
-private fun lastClause(before: String): String {
+/** The current sentence up to `before`, without a trailing comma. */
+fun lastClause(before: String): String {
     val parts = before.split(Regex("[.!?\\n]"))
     val sentence = parts.lastOrNull() ?: ""
     return sentence.trim().replace(Regex(",\\s*$"), "").trim()
 }
 
-/** "the the" -> "the"; "I I think" -> "I think". Only identical consecutive words. */
-fun collapseRepeats(text: String): String =
-    Regex("\\b([\\p{L}\\p{N}']+)(?:[ \\t]+\\1\\b)+", RegexOption.IGNORE_CASE).replace(text, "$1")
+/** True when the clause is just an opener ("So") or a short greeting ("Hey Sarah") that keeps its comma. */
+fun isOpenerClause(clause: String): Boolean =
+    OPENERS.containsMatchIn(clause) || (GREETING.containsMatchIn(clause) && clause.split(Regex("\\s+")).size <= 4)
 
 // ---- spoken commands -------------------------------------------------------------------------
 
@@ -247,6 +263,11 @@ private val STOP_WORDS = setOf(
     "and", "but", "or", "then", "so", "because", "with", "at", "on", "in",
     "to", "for", "of", "by", "from"
 )
+private val UNFINISHED_TAIL = STOP_WORDS + setOf(
+    "the", "a", "an", "my", "your", "our", "their", "his", "her", "its", "this", "these", "those", "some",
+    "any", "is", "are", "was", "were", "be", "i", "we", "you", "they", "he", "she", "it", "that", "about",
+    "into", "onto", "like"
+)
 private val MARKER_RE = Regex(
     ",\\s*(?:${CORRECTION_MARKERS.joinToString("|") { it.replace(" ", "\\s+") }})\\s*,\\s*",
     RegexOption.IGNORE_CASE
@@ -270,7 +291,11 @@ fun applySelfCorrections(text: String): String {
 
         val afterAll = leadingTokens(after, 6)
         val beforeAll = trailingTokensInSentence(before, 6)
-        if (afterAll.isEmpty() || beforeAll.isEmpty()) {
+        val lastBefore = beforeAll.lastOrNull()
+        // After an unfinished phrase ("the flights for, I mean, ...") the marker is hesitation.
+        if (afterAll.isEmpty() || beforeAll.isEmpty() ||
+            (lastBefore != null && lastBefore.text.lowercase() in UNFINISHED_TAIL)
+        ) {
             out = "${before.trimEnd()} $after"
             continue
         }
@@ -360,14 +385,29 @@ private fun boundedRun(tokens: List<Tok>): List<Tok> {
 data class PipelineOptions(
     val removeFillers: Boolean = true,
     val fillerWords: List<String> = DEFAULT_FILLERS,
+    val hesitations: app.murmur.android.settings.HesitationLevel = app.murmur.android.settings.HesitationLevel.LIGHT,
+    val hesitationPhrases: List<String> = emptyList(),
     val collapseRepeats: Boolean = true,
+    val repetitionScope: app.murmur.android.settings.RepetitionScope = app.murmur.android.settings.RepetitionScope.PHRASES,
     val spokenCommands: Boolean = true,
     val selfCorrections: Boolean = true,
     val autoCapitalize: Boolean = true,
     val trailingSpace: Boolean = true,
     val pressEnterCommand: Boolean = true,
+    val lists: ListsMode = ListsMode.AUTO,
+    val listStyle: ListStyle = ListStyle.AUTO,
+    val bulletMarker: BulletMarker = BulletMarker.DASH,
+    val numbers: NumbersMode = NumbersMode.SMART,
     /** Spellings to enforce, same stage order as the desktop pipeline. */
     val dictionary: List<app.murmur.android.settings.DictionaryEntry> = emptyList()
+)
+
+/** What the deterministic pass learned about the text; the smart-formatting prompt uses it. */
+data class TextHints(
+    val list: ListIntent = ListIntent(null, false, false, 0),
+    val listApplied: Boolean = false,
+    val isQuestion: Boolean = false,
+    val hasLineBreaks: Boolean = false
 )
 
 data class PipelineResult(
@@ -375,10 +415,15 @@ data class PipelineResult(
     val pressEnter: Boolean,
     val wordCount: Int,
     val stages: List<String>,
-    val empty: Boolean
+    val empty: Boolean,
+    val hints: TextHints = TextHints()
 )
 
-/** Deterministic cleanup that runs on every dictation, with or without the LLM stage. */
+/**
+ * Deterministic cleanup that runs on every dictation, with or without the LLM stage. Same order
+ * as the desktop pipeline: commands, fillers, self-corrections, hesitation, repeats, dictionary,
+ * lists, numbers, then presentation.
+ */
 fun runPipeline(raw: String, opts: PipelineOptions): PipelineResult {
     val stages = ArrayList<String>()
     var text = normalizeWhitespace(raw)
@@ -404,9 +449,20 @@ fun runPipeline(raw: String, opts: PipelineOptions): PipelineResult {
         step("literal-punctuation", ::applyLiteralPunctuation)
     }
     if (opts.removeFillers) step("fillers") { removeFillers(it, opts.fillerWords) }
-    if (opts.collapseRepeats) step("repeats", ::collapseRepeats)
     if (opts.selfCorrections) step("self-corrections", ::applySelfCorrections)
+    if (opts.hesitations != app.murmur.android.settings.HesitationLevel.OFF) {
+        step("hesitations") { removeHesitations(it, opts.hesitations, opts.hesitationPhrases) }
+    }
+    if (opts.collapseRepeats) step("repeats") { collapseRepeats(it, opts.repetitionScope) }
     step("dictionary") { applyDictionary(it, opts.dictionary) }
+
+    val list = formatLists(text, ListOptions(opts.lists, opts.listStyle, opts.bulletMarker, opts.autoCapitalize))
+    if (list.text != text) {
+        stages.add(if (list.applied) "lists" else "list-request")
+        text = list.text
+    }
+
+    if (opts.numbers != NumbersMode.OFF) step("numbers") { convertNumbers(it, opts.numbers) }
     step("punctuation", ::fixPunctuationSpacing)
     if (opts.autoCapitalize) step("capitalize", ::capitalizeSentences)
     text = normalizeWhitespace(text)
@@ -419,13 +475,20 @@ fun runPipeline(raw: String, opts: PipelineOptions): PipelineResult {
         pressEnter = pressEnter,
         wordCount = countWords(text),
         stages = stages,
-        empty = empty
+        empty = empty,
+        hints = TextHints(
+            list = list.intent,
+            listApplied = list.applied,
+            isQuestion = isQuestion(text),
+            hasLineBreaks = text.contains('\n')
+        )
     )
 }
 
-/** Second pass after the LLM: re-assert layout rules only. */
+/** Second pass after the LLM: re-assert dictionary spellings and layout rules only. */
 fun finalizeAfterLlm(llmText: String, opts: PipelineOptions): PipelineResult {
     var text = normalizeWhitespace(llmText)
+    text = normalizeListMarkers(text, opts.bulletMarker)
     text = applyDictionary(text, opts.dictionary)
     text = fixPunctuationSpacing(text)
     val empty = !isMeaningful(text)
@@ -435,6 +498,12 @@ fun finalizeAfterLlm(llmText: String, opts: PipelineOptions): PipelineResult {
         pressEnter = false,
         wordCount = countWords(text),
         stages = listOf("llm"),
-        empty = empty
+        empty = empty,
+        hints = TextHints(
+            list = detectListIntent(text),
+            listApplied = Regex("(?:^|\\n)(?:[-•*]|\\d+\\.)\\s").containsMatchIn(text),
+            isQuestion = isQuestion(text),
+            hasLineBreaks = text.contains('\n')
+        )
     )
 }

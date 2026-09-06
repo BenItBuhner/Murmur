@@ -37,6 +37,71 @@ enum class Tone(val id: String) {
     }
 }
 
+/** Mirrors of the desktop style enums (apps/desktop/src/shared/settings.ts); ids are the wire values. */
+enum class HesitationLevel(val id: String) {
+    OFF("off"), LIGHT("light"), THOROUGH("thorough");
+
+    companion object {
+        fun from(id: String?): HesitationLevel = entries.firstOrNull { it.id == id } ?: LIGHT
+    }
+}
+
+enum class RepetitionScope(val id: String) {
+    WORDS("words"), PHRASES("phrases"), THOROUGH("thorough");
+
+    companion object {
+        fun from(id: String?): RepetitionScope = entries.firstOrNull { it.id == id } ?: PHRASES
+    }
+}
+
+enum class ListsMode(val id: String) {
+    OFF("off"), SPOKEN("spoken"), AUTO("auto");
+
+    companion object {
+        fun from(id: String?): ListsMode = entries.firstOrNull { it.id == id } ?: AUTO
+    }
+}
+
+enum class ListStyle(val id: String) {
+    AUTO("auto"), BULLETS("bullets"), NUMBERS("numbers");
+
+    companion object {
+        fun from(id: String?): ListStyle = entries.firstOrNull { it.id == id } ?: AUTO
+    }
+}
+
+enum class BulletMarker(val id: String, val symbol: String) {
+    DASH("-", "-"), DOT("•", "•"), STAR("*", "*");
+
+    companion object {
+        fun from(id: String?): BulletMarker = entries.firstOrNull { it.id == id } ?: DASH
+    }
+}
+
+enum class NumbersMode(val id: String) {
+    OFF("off"), SMART("smart"), ALL("all");
+
+    companion object {
+        fun from(id: String?): NumbersMode = entries.firstOrNull { it.id == id } ?: SMART
+    }
+}
+
+enum class LlmFreedom(val id: String) {
+    STRICT("strict"), BALANCED("balanced"), NATURAL("natural");
+
+    companion object {
+        fun from(id: String?): LlmFreedom = entries.firstOrNull { it.id == id } ?: BALANCED
+    }
+}
+
+enum class LlmStructure(val id: String) {
+    KEEP("keep"), ASSIST("assist");
+
+    companion object {
+        fun from(id: String?): LlmStructure = entries.firstOrNull { it.id == id } ?: ASSIST
+    }
+}
+
 /** Resting shape of the floating dictation button. */
 enum class OverlayShape(val id: String) {
     /** The classic wide pill (64 x 36 dp). */
@@ -66,15 +131,25 @@ data class MurmurSettings(
     val formattingMode: FormattingMode = FormattingMode.SMART,
     val tone: Tone = Tone.AUTO,
     val removeFillers: Boolean = true,
+    val hesitations: HesitationLevel = HesitationLevel.LIGHT,
+    val hesitationPhrases: List<String> = emptyList(),
     val collapseRepeats: Boolean = true,
+    val repetitionScope: RepetitionScope = RepetitionScope.PHRASES,
     val spokenCommands: Boolean = true,
     val selfCorrections: Boolean = true,
     val autoCapitalize: Boolean = true,
     val trailingSpace: Boolean = true,
+    val lists: ListsMode = ListsMode.AUTO,
+    val listStyle: ListStyle = ListStyle.AUTO,
+    val bulletMarker: BulletMarker = BulletMarker.DASH,
+    val numbers: NumbersMode = NumbersMode.SMART,
     val llmSameAsStt: Boolean = true,
     val llmBaseUrl: String = "",
     val llmApiKey: String = "",
     val llmModel: String = BuildConfig.DEFAULT_LLM_MODEL,
+    val llmFreedom: LlmFreedom = LlmFreedom.BALANCED,
+    val llmStructure: LlmStructure = LlmStructure.ASSIST,
+    val llmInstructions: String = "",
     val llmMinWords: Int = 4,
     // More generous than desktop (8 s): mobile networks and reasoning models need headroom,
     // and the deterministic pipeline still covers any timeout.
@@ -188,15 +263,25 @@ class SettingsStore(context: Context) {
             formattingMode = FormattingMode.from(prefs.getString("formattingMode", d.formattingMode.id)),
             tone = Tone.from(prefs.getString("tone", d.tone.id)),
             removeFillers = prefs.getBoolean("removeFillers", d.removeFillers),
+            hesitations = HesitationLevel.from(prefs.getString("hesitations", d.hesitations.id)),
+            hesitationPhrases = decodeList(prefs.getString("hesitationPhrases", null)),
             collapseRepeats = prefs.getBoolean("collapseRepeats", d.collapseRepeats),
+            repetitionScope = RepetitionScope.from(prefs.getString("repetitionScope", d.repetitionScope.id)),
             spokenCommands = prefs.getBoolean("spokenCommands", d.spokenCommands),
             selfCorrections = prefs.getBoolean("selfCorrections", d.selfCorrections),
             autoCapitalize = prefs.getBoolean("autoCapitalize", d.autoCapitalize),
             trailingSpace = prefs.getBoolean("trailingSpace", d.trailingSpace),
+            lists = ListsMode.from(prefs.getString("lists", d.lists.id)),
+            listStyle = ListStyle.from(prefs.getString("listStyle", d.listStyle.id)),
+            bulletMarker = BulletMarker.from(prefs.getString("bulletMarker", d.bulletMarker.id)),
+            numbers = NumbersMode.from(prefs.getString("numbers", d.numbers.id)),
             llmSameAsStt = prefs.getBoolean("llmSameAsStt", d.llmSameAsStt),
             llmBaseUrl = prefs.getString("llmBaseUrl", d.llmBaseUrl) ?: "",
             llmApiKey = prefs.getString("llmApiKey", d.llmApiKey) ?: "",
             llmModel = prefs.getString("llmModel", d.llmModel) ?: d.llmModel,
+            llmFreedom = LlmFreedom.from(prefs.getString("llmFreedom", d.llmFreedom.id)),
+            llmStructure = LlmStructure.from(prefs.getString("llmStructure", d.llmStructure.id)),
+            llmInstructions = prefs.getString("llmInstructions", d.llmInstructions) ?: "",
             llmMinWords = prefs.getInt("llmMinWords", d.llmMinWords),
             llmTimeoutMs = prefs.getInt("llmTimeoutMs", d.llmTimeoutMs),
             maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec),
@@ -225,15 +310,25 @@ class SettingsStore(context: Context) {
             .putString("formattingMode", s.formattingMode.id)
             .putString("tone", s.tone.id)
             .putBoolean("removeFillers", s.removeFillers)
+            .putString("hesitations", s.hesitations.id)
+            .putString("hesitationPhrases", encodeList(s.hesitationPhrases))
             .putBoolean("collapseRepeats", s.collapseRepeats)
+            .putString("repetitionScope", s.repetitionScope.id)
             .putBoolean("spokenCommands", s.spokenCommands)
             .putBoolean("selfCorrections", s.selfCorrections)
             .putBoolean("autoCapitalize", s.autoCapitalize)
             .putBoolean("trailingSpace", s.trailingSpace)
+            .putString("lists", s.lists.id)
+            .putString("listStyle", s.listStyle.id)
+            .putString("bulletMarker", s.bulletMarker.id)
+            .putString("numbers", s.numbers.id)
             .putBoolean("llmSameAsStt", s.llmSameAsStt)
             .putString("llmBaseUrl", s.llmBaseUrl)
             .putString("llmApiKey", s.llmApiKey)
             .putString("llmModel", s.llmModel)
+            .putString("llmFreedom", s.llmFreedom.id)
+            .putString("llmStructure", s.llmStructure.id)
+            .putString("llmInstructions", s.llmInstructions)
             .putInt("llmMinWords", s.llmMinWords)
             .putInt("llmTimeoutMs", s.llmTimeoutMs)
             .putInt("maxDurationSec", s.maxDurationSec)
@@ -253,6 +348,11 @@ class SettingsStore(context: Context) {
     companion object {
         @Volatile
         private var instance: SettingsStore? = null
+
+        /** Newline-separated string list; phrases never contain newlines. */
+        internal fun encodeList(items: List<String>): String = items.joinToString("\n")
+        internal fun decodeList(raw: String?): List<String> =
+            raw?.split('\n')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
 
         fun get(context: Context): SettingsStore =
             instance ?: synchronized(this) {

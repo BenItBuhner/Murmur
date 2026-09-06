@@ -8,6 +8,7 @@ import { TooltipProvider } from './components/ui/misc'
 import { CloudProvider, useCloud } from './hooks/useCloud'
 import { SettingsProvider, useSettingsMaybe } from './hooks/useSettings'
 import { ThemeProvider } from './hooks/useTheme'
+import { UpdatesProvider } from './hooks/useUpdates'
 import { AccountPage } from './pages/Account'
 import { AccountGate } from './pages/AccountGate'
 import { AudioPage } from './pages/Audio'
@@ -39,15 +40,17 @@ export default function App(): React.JSX.Element {
     <SettingsProvider>
       <ThemeProvider>
         <CloudProvider>
-          <TooltipProvider delayDuration={300}>
-            <Root />
-            <Toaster
-              position="bottom-right"
-              richColors
-              closeButton
-              toastOptions={{ className: 'text-sm' }}
-            />
-          </TooltipProvider>
+          <UpdatesProvider>
+            <TooltipProvider delayDuration={300}>
+              <Root />
+              <Toaster
+                position="bottom-right"
+                richColors
+                closeButton
+                toastOptions={{ className: 'text-sm' }}
+              />
+            </TooltipProvider>
+          </UpdatesProvider>
         </CloudProvider>
       </ThemeProvider>
     </SettingsProvider>

@@ -1,3 +1,5 @@
+import type { InstallKind } from './updates'
+
 export type DictationMode = 'hold' | 'hands-free' | 'command'
 
 export type OverlayPhase = 'idle' | 'listening' | 'processing' | 'success' | 'error' | 'disabled'
@@ -74,6 +76,8 @@ export interface AppInfo {
   hookBackend: 'uiohook' | 'globalShortcut' | 'none'
   injectionBackend: string
   sessionType?: string
+  /** How this copy was installed; decides which release file updates use. */
+  installKind: InstallKind
   userDataPath: string
   logPath: string
 }

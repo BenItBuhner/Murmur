@@ -3,6 +3,7 @@ package app.murmur.android.service
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
@@ -11,6 +12,8 @@ import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -61,8 +64,8 @@ private const val WINDOW_SCAN_MIN_INTERVAL_MS = 120L
  * cleaned text is inserted into the focused text field via accessibility actions.
  *
  * The pill view owns its geometry and animations and asks this service (its [OverlayPillView.Host])
- * to move or resize the overlay window; that only happens before a morph starts and after it
- * settles, never frame by frame.
+ * for two windows: a canvas it draws in, which is never touchable and never moves while the mic
+ * turns on or off, and an invisible touch window that hugs the pill and relays taps to it.
  *
  * This service is also the injection backend ([TextSink]); see [TextInserter] for the
  * ACTION_SET_TEXT / ACTION_SET_SELECTION / ACTION_PASTE strategy.
@@ -71,8 +74,12 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
 
     private var windowManager: WindowManager? = null
     private var pill: OverlayPillView? = null
-    private var pillParams: WindowManager.LayoutParams? = null
-    private var pillAttached = false
+
+    /** Draws the pill. Never touchable, and only ever grows, so state changes never move it. */
+    private var canvasWindow: OverlayWindow? = null
+
+    /** Invisible; hugs the pill and relays its touches. Free to follow the pill, nothing is drawn in it. */
+    private var touchWindow: OverlayWindow? = null
     private var keyboardVisible = false
 
     /** Top edge of the keyboard the last time it was on screen; kept while a dictation is in flight. */
@@ -186,7 +193,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     }
 
     private fun showPill() {
-        if (windowManager == null) return
+        val wm = windowManager ?: return
         val (screenW, screenH) = screenSize()
         val existing = pill
         if (existing != null) {
@@ -205,68 +212,36 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                 settings.update { it.copy(overlayAnchorX = OverlayAnchor.DEFAULT.xFraction, overlayOffsetDp = OverlayAnchor.DEFAULT.offsetDp) }
             }
         }
-        val params = WindowManager.LayoutParams(
-            1,
-            1,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 0
-            y = 0
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
+        // Raw coordinates are display coordinates, which is the pill's own frame of reference, so
+        // the relay does not depend on where the touch window happens to be at that instant.
+        val relay = TouchRelayView(this) { ev -> view.onScreenTouch(ev, ev.rawX, ev.rawY) }
         pill = view
-        pillParams = params
-        pillAttached = false
+        canvasWindow = OverlayWindow(wm, view, touchable = false)
+        touchWindow = OverlayWindow(wm, relay, touchable = true)
         val s = settings.get()
         view.setPalette(PillTheme.resolve(this, s))
         view.configure(s.overlayShape, s.overlayAnchor())
         view.setEditing(OverlayEditor.editing.value)
-        // Computes the first window frame and, through applyWindowFrame, adds the window.
+        // Computes the first frames and, through the Host callbacks, adds both windows.
         view.setScreen(screenW, screenH, keyboardReference())
         view.render(DictationController.state.value)
-        if (!pillAttached) removePill()
+        if (canvasWindow?.attached != true || touchWindow?.attached != true) removePill()
     }
 
-    override fun applyWindowFrame(frame: Box) {
-        val wm = windowManager ?: return
-        val view = pill ?: return
-        val params = pillParams ?: return
-        params.x = frame.left.roundToInt()
-        params.y = frame.top.roundToInt()
-        params.width = max(1, frame.width.roundToInt())
-        params.height = max(1, frame.height.roundToInt())
-        try {
-            if (!pillAttached) {
-                wm.addView(view, params)
-                pillAttached = true
-            } else {
-                wm.updateViewLayout(view, params)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "failed to place overlay", e)
-        }
+    override fun applyCanvasFrame(frame: Box) {
+        canvasWindow?.place(frame)
+    }
+
+    override fun applyTouchFrame(frame: Box) {
+        touchWindow?.place(frame)
     }
 
     private fun removePill() {
-        val wm = windowManager ?: return
-        pill?.let {
-            if (pillAttached) {
-                try {
-                    wm.removeView(it)
-                } catch (_: Exception) {
-                }
-            }
-        }
+        touchWindow?.remove()
+        canvasWindow?.remove()
+        touchWindow = null
+        canvasWindow = null
         pill = null
-        pillParams = null
-        pillAttached = false
     }
 
     private fun screenSize(): Pair<Int, Int> {
@@ -382,5 +357,69 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             private set
 
         val isRunning: Boolean get() = instance != null
+    }
+}
+
+/**
+ * One accessibility-overlay window placed in screen coordinates. A non-touchable window is skipped
+ * by input dispatch entirely, so the pill's canvas can be as large as it likes without stealing
+ * taps from the keyboard underneath it.
+ */
+private class OverlayWindow(private val wm: WindowManager, private val view: View, touchable: Boolean) {
+    private val params = WindowManager.LayoutParams(
+        1,
+        1,
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            (if (touchable) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE),
+        PixelFormat.TRANSLUCENT
+    ).apply {
+        gravity = Gravity.TOP or Gravity.START
+        x = 0
+        y = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+    }
+
+    var attached = false
+        private set
+
+    fun place(frame: Box) {
+        params.x = frame.left.roundToInt()
+        params.y = frame.top.roundToInt()
+        params.width = max(1, frame.width.roundToInt())
+        params.height = max(1, frame.height.roundToInt())
+        try {
+            if (!attached) {
+                wm.addView(view, params)
+                attached = true
+            } else {
+                wm.updateViewLayout(view, params)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to place overlay window", e)
+        }
+    }
+
+    fun remove() {
+        if (!attached) return
+        attached = false
+        try {
+            wm.removeView(view)
+        } catch (_: Exception) {
+        }
+    }
+}
+
+/** Draws nothing; hands every touch to the pill, which does its own hit-testing in screen space. */
+private class TouchRelayView(context: Context, private val relay: (MotionEvent) -> Boolean) : View(context) {
+    override fun onTouchEvent(event: MotionEvent): Boolean = relay(event)
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 }

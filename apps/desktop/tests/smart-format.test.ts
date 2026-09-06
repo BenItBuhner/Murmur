@@ -75,7 +75,8 @@ describe('buildFormatMessages', () => {
     expect(system).toContain('Do not rephrase')
     expect(system).not.toContain('Grammar slips')
     expect(system).toContain('lay the items out as a list')
-    expect(system).toContain('kubectl')
+    expect(system).toContain('Personal dictionary: kubectl (heard as "cube control")')
+    expect(system).toContain('Never insert a dictionary term where nothing similar was said')
     expect(system).toContain('It must stay a question')
     expect(system).toContain('Use British spelling.')
     expect(system).toContain('a chat message')
@@ -181,5 +182,48 @@ describe('smartFormat', () => {
     expect(policy.protectedTerms.has('kubectl')).toBe(true)
     expect(policy.allowNewLines).toBe(true)
     expect(policy.preserveLayout).toBe(true)
+  })
+  it('protects every word of a multi-word term, but not the glue inside a name', () => {
+    const policy = reviewPolicyFor(
+      input('hello', {
+        dictionary: [
+          { id: '1', word: 'Wispr Flow', aliases: ['whisper flow'], fuzzy: false, createdAt: 0 },
+          { id: '2', word: 'Bank of America', aliases: [], fuzzy: false, createdAt: 0 }
+        ]
+      })
+    )
+    expect(policy.protectedTerms.has('wispr')).toBe(true)
+    expect(policy.protectedTerms.has('flow')).toBe(true)
+    expect(policy.protectedTerms.has('bank')).toBe(true)
+    expect(policy.protectedTerms.has('of')).toBe(false)
+    expect(policy.dictionaryPhrases?.has('wispr flow')).toBe(true)
+    expect(policy.dictionaryPhrases?.has('bank of america')).toBe(true)
+  })
+  it('lets the model repair a mangled multi-word term end to end', async () => {
+    const dict = [{ id: '1', word: 'Wispr Flow', aliases: [], fuzzy: false, createdAt: 0 }]
+    // "wasp or flow" does not sound like the term (different vowel), so the rules leave it; the
+    // model hears it and the review must let the correction through.
+    const raw = 'please implement this in a clean manner like wasp or flow does'
+    const light = runPipeline(raw, { ...pipelineOpts, dictionary: dict })
+    expect(light.text).toBe('Please implement this in a clean manner like wasp or flow does ')
+    const r = await smartFormat(
+      input(raw, { light, dictionary: dict, pipelineOpts: { ...pipelineOpts, dictionary: dict } }),
+      reply('Please implement this in a clean manner, like Wispr Flow does.')
+    )
+    expect(r.status.outcome).toBe('used')
+    expect(r.result.text).toBe('Please implement this in a clean manner, like Wispr Flow does. ')
+  })
+  it('rejects an answer the model could not finish', async () => {
+    const r = await smartFormat(
+      input('hello there my friend how are you doing today and tomorrow'),
+      async () => ({
+        text: 'Hello there, my friend. How are you doing today',
+        latencyMs: 5,
+        model: 'test-model',
+        finishReason: 'length'
+      })
+    )
+    expect(r.status).toEqual({ outcome: 'rejected', detail: 'truncated' })
+    expect(r.result.text).toBe('Hello there my friend how are you doing today and tomorrow ')
   })
 })

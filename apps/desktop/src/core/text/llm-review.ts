@@ -248,8 +248,13 @@ export interface ReviewPolicy {
   freedom: LlmFreedom
   /** Words the deterministic stage would drop as noise; their deletion is always fine. */
   droppable: ReadonlySet<string>
-  /** Dictionary terms (lower-cased); they must survive unless the model spelled them canonically. */
+  /**
+   * Every word of every dictionary term (lower-cased); they must survive unless the model spelled
+   * them canonically.
+   */
   protectedTerms: ReadonlySet<string>
+  /** Whole dictionary terms (lower-cased, single-spaced); a span rewritten into one is a correction. */
+  dictionaryPhrases?: ReadonlySet<string>
   /** The model may add line breaks and list markers. */
   allowNewLines: boolean
   /** Line breaks in the deterministic text are final. */
@@ -747,7 +752,9 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
   if (aNum !== null && bNum !== null && aNum === bNum) return { accept: true, why: 'number' }
   if (aNum !== null && bNum !== null && aNum !== bNum)
     return { accept: false, why: 'number-changed' }
-  // "cube control" -> "kubectl": the model applied the user's dictionary.
+  // "cube control" -> "kubectl", "whisper flow" -> "Wispr Flow": the model applied the dictionary.
+  if (policy.dictionaryPhrases?.has(bJoined) && aWords.length <= bWords.length + 2)
+    return { accept: true, why: 'dictionary' }
   if (bKeys.every((k) => policy.protectedTerms.has(k)) && aWords.length <= 4)
     return { accept: true, why: 'dictionary' }
 

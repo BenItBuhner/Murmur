@@ -11,6 +11,7 @@ const base: ReviewPolicy = {
   freedom: 'balanced',
   droppable: new Set(['um', 'uh', 'you', 'know', 'mean', 'like']),
   protectedTerms: new Set(['kubectl', 'wispr', 'flow']),
+  dictionaryPhrases: new Set(['kubectl', 'wispr flow']),
   allowNewLines: true,
   preserveLayout: false
 }
@@ -129,8 +130,27 @@ describe('reviewLlmEdits', () => {
     ],
     // dictionary canonical spelling accepted
     ['run cube control get pods', 'Run kubectl get pods.', 'Run kubectl get pods.', strict, 0],
+    // a multi-word term the recognizer mangled, fixed by the model, survives the review
+    ['I use whisper flow daily', 'I use Wispr Flow daily.', 'I use Wispr Flow daily.', strict, 0],
+    [
+      'install whisperflow today',
+      'Install Wispr Flow today.',
+      'Install Wispr Flow today.',
+      strict,
+      0
+    ],
+    ['try the whisper floh app', 'Try the Wispr Flow app.', 'Try the Wispr Flow app.', strict, 0],
+    // ...but the model may not conjure a dictionary term the speaker never said
+    [
+      'send the report today',
+      'Send the Wispr Flow report today.',
+      'Send the report today.',
+      base,
+      1
+    ],
     // protected term deletion reverted
     ['run kubectl get pods now', 'Run get pods now.', 'Run kubectl get pods now.', natural, 1],
+    ['and Wispr Flow too', 'And too.', 'And Wispr Flow too.', natural, 1],
     // list creation accepted when allowed
     [
       'first finish the deck second email the vendor',

@@ -58,12 +58,27 @@ function languageLines(language: string | undefined, style: ResolvedStyle): stri
     : ['- Write the output in the language the speaker used; never translate it.']
 }
 
-function dictionaryLine(dictionary: readonly DictionaryEntry[]): string {
-  const terms = dictionary
-    .map((d) => d.word.trim())
-    .filter(Boolean)
-    .slice(0, 80)
-  return terms.length ? `Spell these exactly as written: ${terms.join(', ')}.` : ''
+/**
+ * The user's dictionary, with the mis-hearings they recorded as aliases. The recognizer has no
+ * idea "Wispr Flow" exists and writes "whisper flow"; the model is the stage that can hear the
+ * resemblance, so it is told to, and told just as clearly not to invent occurrences.
+ */
+export function dictionaryLine(dictionary: readonly DictionaryEntry[]): string {
+  const items: string[] = []
+  const seen = new Set<string>()
+  for (const d of dictionary) {
+    const w = d.word.trim()
+    if (!w || seen.has(w.toLowerCase())) continue
+    seen.add(w.toLowerCase())
+    const heard = d.aliases
+      .map((a) => a.trim())
+      .filter((a) => a && a.toLowerCase() !== w.toLowerCase())
+      .slice(0, 2)
+    items.push(heard.length ? `${w} (heard as "${heard.join('", "')}")` : w)
+    if (items.length >= 80) break
+  }
+  if (!items.length) return ''
+  return `Personal dictionary: ${items.join('; ')}. The recognizer often renders these names and terms as similar-sounding ordinary words or a slightly different spelling; where the text has something that sounds like one of them, write the dictionary spelling exactly as given. Never insert a dictionary term where nothing similar was said.`
 }
 
 /** Rules that depend on how much freedom the user granted. */

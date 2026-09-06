@@ -70,18 +70,27 @@ export function reviewPolicyFor(
   }))
     droppable.add(w)
   const protectedTerms = new Set<string>()
+  const dictionaryPhrases = new Set<string>()
   for (const d of input.dictionary) {
-    const w = d.word.trim().toLowerCase()
-    if (w && !/\s/.test(w)) protectedTerms.add(w)
+    const w = d.word.trim().toLowerCase().replace(/\s+/g, ' ')
+    if (!w) continue
+    dictionaryPhrases.add(w)
+    // Every word of a term is protected ("Wispr" and "Flow"), except the glue inside a name
+    // ("Bank of America"): protecting "of" would block ordinary edits everywhere.
+    for (const part of w.split(/[\s-]+/))
+      if (part.length > 2 && !TERM_GLUE.has(part)) protectedTerms.add(part)
   }
   return {
     freedom: input.style.freedom,
     droppable,
     protectedTerms,
+    dictionaryPhrases,
     allowNewLines: input.style.structure === 'assist' && input.style.lists !== 'off',
     preserveLayout: input.light.hints.listApplied || input.light.hints.hasLineBreaks
   }
 }
+
+const TERM_GLUE = new Set(['the', 'and', 'for', 'von', 'van', 'der', 'del', 'des', 'und'])
 
 /**
  * The smart-formatting stage: decide, ask, verify. Never throws; every failure mode degrades to
@@ -121,6 +130,16 @@ export async function smartFormat(
     }
   }
   const llmMs = Math.round(performance.now() - started)
+  // The model ran out of tokens mid-answer: whatever came back is missing the speaker's ending.
+  if (res.finishReason === 'length') {
+    return {
+      result: input.light,
+      status: { outcome: 'rejected', detail: 'truncated' },
+      llmMs,
+      modelText: res.text,
+      finishReason: res.finishReason
+    }
+  }
   const review = reviewLlmOutput(res.text, lightText, reviewPolicyFor(input))
   if (review.outcome === 'rejected') {
     return {

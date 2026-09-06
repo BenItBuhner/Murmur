@@ -42,11 +42,24 @@ export class ElevenLabsStt implements SttProvider {
           res.status
         )
       }
-      const json = (await res.json()) as { text?: string; language_code?: string }
+      const json = (await res.json()) as {
+        text?: string
+        language_code?: string
+        words?: Array<{ type?: string; start?: number; end?: number }>
+      }
+      const spans = (json.words ?? [])
+        .filter(
+          (w) =>
+            (w.type ?? 'word') === 'word' &&
+            typeof w.start === 'number' &&
+            typeof w.end === 'number'
+        )
+        .map((w) => ({ start: w.start as number, end: w.end as number }))
       return {
         text: (json.text ?? '').trim(),
         language: json.language_code,
         latencyMs: Math.round(performance.now() - started),
+        spans: spans.length ? spans : undefined,
         raw: json
       }
     } catch (err) {

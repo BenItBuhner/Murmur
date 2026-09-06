@@ -16,7 +16,11 @@ interface DeepgramResponse {
   results?: {
     channels?: Array<{
       detected_language?: string
-      alternatives?: Array<{ transcript?: string; confidence?: number }>
+      alternatives?: Array<{
+        transcript?: string
+        confidence?: number
+        words?: Array<{ start?: number; end?: number }>
+      }>
     }>
   }
 }
@@ -59,12 +63,17 @@ export class DeepgramStt implements SttProvider {
       }
       const json = (await res.json()) as DeepgramResponse
       const channel = json.results?.channels?.[0]
-      const text = channel?.alternatives?.[0]?.transcript ?? ''
+      const alternative = channel?.alternatives?.[0]
+      const text = alternative?.transcript ?? ''
+      const spans = (alternative?.words ?? [])
+        .filter((w) => typeof w.start === 'number' && typeof w.end === 'number')
+        .map((w) => ({ start: w.start as number, end: w.end as number }))
       return {
         text: text.trim(),
         language: channel?.detected_language,
         durationSec: json.metadata?.duration,
         latencyMs: Math.round(performance.now() - started),
+        spans: spans.length ? spans : undefined,
         raw: json
       }
     } catch (err) {

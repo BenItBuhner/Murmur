@@ -8,6 +8,7 @@ import {
   toSttError,
   type SttConfig,
   type SttProvider,
+  type TimedSpan,
   type TranscribeInput,
   type TranscribeOutput
 } from './types'
@@ -16,11 +17,33 @@ interface VerboseJson {
   text?: string
   language?: string
   duration?: number
-  segments?: Array<{ no_speech_prob?: number; avg_logprob?: number }>
+  segments?: Array<{ start?: number; end?: number; no_speech_prob?: number; avg_logprob?: number }>
+  words?: Array<{ word?: string; start?: number; end?: number }>
 }
 
 /** Servers that rejected verbose_json once are remembered so we do not pay a failed round-trip again. */
 const verboseUnsupported = new Set<string>()
+/** Servers that rejected word-level timestamps; they still get verbose_json for segment timings. */
+const wordTimestampsUnsupported = new Set<string>()
+
+/**
+ * Timed spans from a verbose response. Word timings win: they come from alignment and stay right
+ * even when the decoder stopped early, whereas a segment that was never closed with a timestamp
+ * is reported as running to the end of its 30-second window.
+ */
+export function spansFromVerbose(json: VerboseJson | undefined): TimedSpan[] | undefined {
+  if (!json) return undefined
+  const valid = (s: { start?: number; end?: number }): s is TimedSpan =>
+    typeof s.start === 'number' &&
+    typeof s.end === 'number' &&
+    Number.isFinite(s.start) &&
+    Number.isFinite(s.end) &&
+    s.end >= 0
+  const words = (json.words ?? []).filter(valid).map((w) => ({ start: w.start, end: w.end }))
+  if (words.length) return words
+  const segments = (json.segments ?? []).filter(valid).map((s) => ({ start: s.start, end: s.end }))
+  return segments.length ? segments : undefined
+}
 
 /**
  * Works with OpenAI, Groq, Mistral, whisper.cpp `server`, faster-whisper-server/Speaches,
@@ -37,12 +60,16 @@ export class OpenAiCompatibleStt implements SttProvider {
     const wantVerbose = !verboseUnsupported.has(base)
     const started = performance.now()
 
-    const attempt = async (verbose: boolean): Promise<Response> => {
+    const attempt = async (verbose: boolean, wordTimestamps: boolean): Promise<Response> => {
       const form = new FormData()
       form.append('file', new Blob([input.wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
       form.append('model', cfg.model)
       form.append('response_format', verbose ? 'verbose_json' : 'json')
       form.append('temperature', '0')
+      if (verbose && wordTimestamps) {
+        form.append('timestamp_granularities[]', 'word')
+        form.append('timestamp_granularities[]', 'segment')
+      }
       if (cfg.language && cfg.language !== 'auto') form.append('language', cfg.language)
       if (input.prompt) form.append('prompt', input.prompt)
       const headers: Record<string, string> = {}
@@ -56,12 +83,30 @@ export class OpenAiCompatibleStt implements SttProvider {
     }
 
     try {
-      let res = await attempt(wantVerbose)
+      let res = await attempt(wantVerbose, !wordTimestampsUnsupported.has(base))
       if (!res.ok && wantVerbose && res.status === 400) {
         const body = await res.text()
-        if (/response_format|verbose/i.test(body)) {
+        if (/timestamp_granularities|granularit/i.test(body)) {
+          wordTimestampsUnsupported.add(base)
+          res = await attempt(true, false)
+          if (!res.ok && res.status === 400) {
+            const retryBody = await res.text()
+            if (/response_format|verbose/i.test(retryBody)) {
+              verboseUnsupported.add(base)
+              res = await attempt(false, false)
+            } else {
+              const { message, suggestedModels } = parseErrorBody(retryBody)
+              throw new SttError(
+                message,
+                classifyStatus(res.status, message),
+                res.status,
+                suggestedModels
+              )
+            }
+          }
+        } else if (/response_format|verbose/i.test(body)) {
           verboseUnsupported.add(base)
-          res = await attempt(false)
+          res = await attempt(false, false)
         } else {
           const { message, suggestedModels } = parseErrorBody(body)
           throw new SttError(
@@ -100,6 +145,7 @@ export class OpenAiCompatibleStt implements SttProvider {
         durationSec: json?.duration,
         noSpeechProb: noSpeech,
         latencyMs: Math.round(performance.now() - started),
+        spans: spansFromVerbose(json),
         raw: json
       }
     } catch (err) {

@@ -16,3 +16,4 @@ export function getSttProvider(kind: SttProviderKind): SttProvider {
 
 export * from './types'
 export * from './presets'
+export * from './coverage'

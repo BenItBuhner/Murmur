@@ -5,6 +5,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/input'
 import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
+import { UpdateBanner } from '@renderer/components/Updates'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
@@ -95,6 +96,8 @@ export function HomePage({
           </CardContent>
         </Card>
       )}
+
+      <UpdateBanner onNavigate={onNavigate} />
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
         <Card>

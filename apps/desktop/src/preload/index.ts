@@ -16,6 +16,7 @@ import type {
   HotkeyCapture,
   ProviderTestResult
 } from '@shared/types'
+import type { UpdateStatus } from '@shared/updates'
 
 type Unsub = () => void
 const on = <T>(channel: string, cb: (payload: T) => void): Unsub => {
@@ -94,6 +95,18 @@ const api = {
     setHistorySync: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC.cloudSetHistorySync, enabled),
     skipAccount: (): Promise<boolean> => ipcRenderer.invoke(IPC.cloudSkipAccount)
+  },
+  updates: {
+    status: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesStatus),
+    onStatus: (cb: (s: UpdateStatus) => void): Unsub => on(IPC.updatesStatusChanged, cb),
+    check: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesCheck),
+    download: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesDownload),
+    cancelDownload: (): Promise<void> => ipcRenderer.invoke(IPC.updatesCancelDownload),
+    install: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesInstall),
+    skip: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesSkip),
+    reveal: (): Promise<void> => ipcRenderer.invoke(IPC.updatesReveal),
+    openReleases: (): Promise<void> => ipcRenderer.invoke(IPC.updatesOpenReleases),
+    ackUpdated: (): Promise<void> => ipcRenderer.invoke(IPC.updatesAckUpdated)
   },
   stt: {
     listModels: (override?: SttOverride): Promise<ModelListResult> =>

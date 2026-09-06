@@ -1,5 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme, protocol, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, net, protocol, shell } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import type { ClerkBridge } from '@clerk/electron'
 import { chordLabel } from '@core/hotkey/keys'
@@ -27,6 +28,10 @@ import { HistoryStore } from './store/history'
 import { SettingsStore } from './store/settings'
 import { AppTray } from './tray'
 import { SystemAccent } from './theme/system-accent'
+import { detectInstallKind } from './update/install-kind'
+import { applyUpdate, UPDATED_FLAG } from './update/installers'
+import { UpdateService } from './update/service'
+import { buildTimeUpdateRepo, resolveUpdateSource } from './update/source'
 import {
   createMainWindow,
   defaultChrome,
@@ -111,6 +116,64 @@ async function main(): Promise<void> {
 
   const settings = new SettingsStore(userData)
   const history = new HistoryStore(userData)
+
+  // Updates: follow the GitHub Releases of the repository this build came from.
+  const updateSource = resolveUpdateSource(process.env, {
+    repo: buildTimeUpdateRepo(),
+    packageRepositoryUrl: packageRepositoryUrl()
+  })
+  for (const warning of updateSource.warnings) log.warn(warning)
+  const installKind = detectInstallKind({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    env: process.env,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+    exists: existsSync,
+    readText: (path) => (existsSync(path) ? readFileSync(path, 'utf8') : null)
+  })
+  const updatesDir = join(userData, 'updates')
+  const updateLog = createLogger('updates')
+  const updates = new UpdateService({
+    settings,
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    installKind,
+    source: updateSource.source,
+    downloadDir: updatesDir,
+    stateFile: join(userData, 'updater.json'),
+    fetch: (url, init) => net.fetch(url, init),
+    apply: (kind, file) =>
+      applyUpdate(kind, file, {
+        log: updateLog,
+        platform: process.platform,
+        env: process.env,
+        execPath: process.execPath,
+        resourcesPath: process.resourcesPath,
+        pid: process.pid,
+        currentVersion: app.getVersion(),
+        workDir: updatesDir
+      }),
+    isIdle: () => {
+      const phase = overlay.getState().phase
+      return phase !== 'listening' && phase !== 'processing'
+    },
+    isMainWindowVisible: () => getMainWindow()?.isVisible() ?? false,
+    beforeInstall: () => {
+      // installer.nsh kills Murmur.exe as soon as the installer starts: persist everything now.
+      settings.flush()
+      history.flush()
+    },
+    quit: () => quit(),
+    log: updateLog,
+    initialDelayMs: envMs('MURMUR_UPDATE_CHECK_DELAY_MS'),
+    checkIntervalMs: envMs('MURMUR_UPDATE_CHECK_INTERVAL_MS')
+  })
+  log.info(
+    `updates: ${installKind} install, following ${updateSource.source.repo} (${updateSource.source.apiBase})`
+  )
+
   const overlay = new OverlayWindow()
   const recorder = new Recorder(overlay)
   const hook = new HookService(settings.get())
@@ -198,8 +261,16 @@ async function main(): Promise<void> {
   // Follow the OS setting from the very first paint so a system-themed window never flashes.
   nativeTheme.themeSource = s0.general.theme
   await systemAccent.start()
-  const hidden = process.argv.includes('--hidden')
-  setShowOnReady(!(hidden || (s0.general.startMinimized && s0.onboardingComplete)))
+  // After a self-update the app comes back the way it was left: hidden in the tray unless the
+  // settings window was open when the update started.
+  const relaunchedByUpdate = process.argv.includes(UPDATED_FLAG)
+  const hidden =
+    process.argv.includes('--hidden') ||
+    (relaunchedByUpdate && !updates.shouldShowWindowAfterUpdate)
+  setShowOnReady(
+    updates.shouldShowWindowAfterUpdate ||
+      !(hidden || (s0.general.startMinimized && s0.onboardingComplete))
+  )
   createMainWindow(defaultChrome(resolvedTheme(s0)))
 
   tray = new AppTray({
@@ -207,8 +278,14 @@ async function main(): Promise<void> {
     setEnabled,
     openApp: (route) => showMainWindow(route),
     openLogs: () => shell.showItemInFolder(logPath),
+    checkForUpdates: () => {
+      showMainWindow('general')
+      void updates.check({ manual: true })
+    },
+    installUpdate: () => void updates.install(),
     quit
   })
+  updates.on('status', (status) => tray?.setUpdate(status))
 
   registerIpc({
     settings,
@@ -217,15 +294,21 @@ async function main(): Promise<void> {
     hook,
     cloudConfig,
     cloud: cloudSync,
+    updates,
+    updateSource: updateSource.source,
     systemAccent: () => systemAccent.get(),
     onEnabledChange: setEnabled,
     quit
   })
   cloudSync.start()
+  updates.start()
 
   hook.on('action', (a) => controller.handle(a))
   hook.start()
-  controller.on('state', (phase: 'idle' | 'listening' | 'processing') => tray?.setPhase(phase))
+  controller.on('state', (phase: 'idle' | 'listening' | 'processing') => {
+    tray?.setPhase(phase)
+    if (phase === 'idle') updates.notifyIdle()
+  })
   controller.on('entry', (entry) => cloudSync.recordSession(entry))
   settings.on('change', (s: Settings) => applySettings(s))
   applySettings(s0)
@@ -273,6 +356,7 @@ async function main(): Promise<void> {
     quitting = true
     setQuitting(true)
     hook.stop()
+    updates.dispose()
     cloudSync.dispose()
     tokenBridge.dispose()
     systemAccent.dispose()
@@ -285,4 +369,22 @@ async function main(): Promise<void> {
     overlay.destroy()
   })
   void quitting
+}
+
+/** `repository.url` of the app's own package.json (inside the asar when packaged). */
+function packageRepositoryUrl(): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')) as {
+      repository?: string | { url?: string }
+    }
+    return typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
+  } catch {
+    return undefined
+  }
+}
+
+/** Positive integer milliseconds from the environment (developer knobs), else undefined. */
+function envMs(name: string): number | undefined {
+  const value = Number(process.env[name])
+  return Number.isFinite(value) && value > 0 ? value : undefined
 }

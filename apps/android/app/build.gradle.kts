@@ -63,6 +63,13 @@ android {
             "String", "CLERK_PUBLISHABLE_KEY", "\"${envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY")}\""
         )
         buildConfigField("String", "ACCOUNT_MODE", "\"${envOrProp("MURMUR_ACCOUNT_MODE")}\"")
+
+        // GitHub repository (owner/name) whose Releases the in-app updater follows. CI passes the
+        // building repository so forks update from their own releases.
+        buildConfigField(
+            "String", "UPDATE_REPO",
+            "\"${envOrProp("MURMUR_UPDATE_REPO").ifBlank { "BenItBuhner/voxflow" }}\""
+        )
     }
 
     signingConfigs {

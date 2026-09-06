@@ -225,7 +225,7 @@ object DictationController {
                 val res = LlmClient.chatComplete(
                     LlmConfig(llmBase, llmKey, llmModel, s.llmTimeoutMs),
                     buildFormatMessages(
-                        light.text.trim(), s.dictionaryTerms, resolveTone(s.tone, app), app
+                        light.text.trim(), s.dictionaryTerms, resolveTone(s.tone, app), app, s.language
                     ),
                     maxTokens = maxTokensFor(light.text)
                 )

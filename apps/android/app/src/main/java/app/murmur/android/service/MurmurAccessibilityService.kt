@@ -34,6 +34,16 @@ import kotlin.math.roundToInt
 private const val TAG = "MurmurA11y"
 
 /**
+ * How long to keep looking for the focused field before giving up. Chromium hands the framework no
+ * node provider for a page until the renderer has delivered the accessibility tree, which it only
+ * builds once something asks for it, so the first lookup into a PWA or browser tab that just came to
+ * the front can come back empty while a field is plainly focused; One UI likewise reports no active
+ * window for a moment after an overlay was touched. A few short retries cover both.
+ */
+private const val TARGET_LOOKUP_ATTEMPTS = 5
+private const val TARGET_LOOKUP_RETRY_MS = 90L
+
+/**
  * The Wispr Flow pattern on Android: whenever the keyboard comes up, a floating dictation
  * button appears next to it (by default centred just above it; the user can park it anywhere,
  * including on the keyboard's own toolbar). Tap to dictate, tap again to stop; the transcribed,
@@ -103,7 +113,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
                 val source = event.source ?: return
-                if (source.isEditable) {
+                if (source.acceptsText()) {
                     lastEditable = source
                     lastPackage = event.packageName?.toString() ?: lastPackage
                 }
@@ -264,15 +274,20 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      */
     override suspend fun insert(text: String, pressEnter: Boolean): String? =
         withContext(Dispatchers.Main.immediate) {
-            val node = findEditableTarget()
+            val node = awaitEditableTarget()
             if (node == null) {
                 Log.w(TAG, "no focused editable field; copied to clipboard")
                 copyToClipboard(text)
                 return@withContext COPIED_NO_FIELD
             }
-            when (val outcome = TextInserter.insert(NodeTarget(node), text, pressEnter, ::copyToClipboard)) {
+            val target = NodeTarget(node)
+            when (val outcome = TextInserter.insert(target, text, pressEnter, ::copyToClipboard)) {
                 is InsertOutcome.Inserted -> {
-                    Log.i(TAG, "inserted ${text.length} chars via ${outcome.method} into ${node.packageName}")
+                    Log.i(
+                        TAG,
+                        "inserted ${text.length} chars via ${outcome.method} into ${node.packageName}" +
+                            if (target.isWebContent) " (web content)" else ""
+                    )
                     null
                 }
                 is InsertOutcome.Failed -> {
@@ -282,11 +297,22 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             }
         }
 
+    private suspend fun awaitEditableTarget(): AccessibilityNodeInfo? =
+        retryLookup(TARGET_LOOKUP_ATTEMPTS, TARGET_LOOKUP_RETRY_MS) { attempt ->
+            findEditableTarget().also {
+                if (it == null && attempt < TARGET_LOOKUP_ATTEMPTS - 1) {
+                    Log.d(TAG, "no focused field yet (attempt ${attempt + 1}); retrying")
+                }
+            }
+        }
+
     /**
      * The field the dictation belongs in. The input-focused node of the active window is the
      * normal answer; when the system has no active window for a moment (One UI does this right
      * after an overlay was touched) every application window is checked, and the field that most
-     * recently reported focus is the last resort.
+     * recently reported focus is the last resort, provided it belongs to the app in front: a
+     * remembered field from an app that is still alive in the background must not swallow a
+     * dictation meant for the one the user is looking at.
      */
     private fun findEditableTarget(): AccessibilityNodeInfo? {
         focusedEditable(rootInActiveWindow)?.let { return it }
@@ -296,16 +322,28 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             Log.w(TAG, "window scan failed", e)
             emptyList()
         }
+        // Windows come top-most first; the focused application window, or failing that the one on
+        // top, is the app the user is looking at. (The active window itself may be the keyboard.)
+        var frontPackage: String? = null
         for (w in visible.sortedByDescending { it.isFocused }) {
             if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
-            focusedEditable(runCatching { w.root }.getOrNull())?.let { return it }
+            val root = runCatching { w.root }.getOrNull() ?: continue
+            if (frontPackage == null) frontPackage = root.packageName?.toString()
+            focusedEditable(root)?.let { return it }
         }
-        return lastEditable?.takeIf { runCatching { it.refresh() }.getOrDefault(false) && it.isEditable }
+        val remembered = lastEditable ?: return null
+        if (!runCatching { remembered.refresh() }.getOrDefault(false) || !remembered.acceptsText()) return null
+        val rememberedPackage = remembered.packageName?.toString()
+        if (frontPackage != null && rememberedPackage != frontPackage) {
+            Log.d(TAG, "ignoring remembered field of $rememberedPackage; $frontPackage is in front")
+            return null
+        }
+        return remembered
     }
 
     private fun focusedEditable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         val focus = runCatching { root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: return null
-        return if (focus.isEditable) focus else null
+        return if (focus.acceptsText()) focus else null
     }
 
     private fun copyToClipboard(text: String) {

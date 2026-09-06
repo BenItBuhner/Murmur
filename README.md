@@ -81,7 +81,9 @@ npm run dev
 
 ## Android (`apps/android`)
 
-The same Wispr Flow pattern on your phone: a floating dictation pill above the keyboard.
+The same Wispr Flow pattern on your phone: a floating dictation pill above the keyboard. Material
+You throughout: light, dark or system, wallpaper colours on Android 12+ (or one of the accent
+presets on older devices), and the pill takes the same palette.
 
 ```bash
 cd apps/android

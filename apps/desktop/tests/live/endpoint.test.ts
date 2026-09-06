@@ -16,7 +16,8 @@ import { analyze, trimSilence } from '@core/audio/vad'
 import { buildSttPrompt } from '@core/text/dictionary'
 import { buildFormatMessages, maxTokensFor, sanitizeLlmOutput } from '@core/text/llm-prompt'
 import { runPipeline } from '@core/text/pipeline'
-import { classifyApp } from '@core/text/app-context'
+import { classifyApp, resolveStyle } from '@core/text/app-context'
+import { defaultSettings } from '@shared/settings'
 
 const baseUrl = process.env.MURMUR_BASE_URL ?? ''
 const apiKey = process.env.MURMUR_API_KEY ?? ''
@@ -124,20 +125,29 @@ describe.skipIf(!enabled)('live endpoint', () => {
       const light = runPipeline(raw, {
         removeFillers: true,
         fillerWords: ['um', 'uh'],
+        hesitations: 'light',
+        hesitationPhrases: [],
         collapseRepeats: true,
+        repetitionScope: 'phrases',
         spokenCommands: true,
         selfCorrections: true,
         autoCapitalize: true,
         trailingSpace: false,
         pressEnterCommand: true,
+        lists: 'auto',
+        listStyle: 'auto',
+        bulletMarker: '-',
+        numbers: 'smart',
         dictionary: [],
         snippets: []
       })
+      const app = classifyApp('slack.exe', 'general - Slack')
       const messages = buildFormatMessages({
         raw: light.text,
         dictionary: [{ id: '1', word: 'Sarah', aliases: [], fuzzy: false, createdAt: 0 }],
-        style: { tone: 'casual' },
-        app: classifyApp('slack.exe', 'general - Slack')
+        style: resolveStyle({ ...defaultSettings().formatting, tone: 'casual' }, app),
+        app,
+        hints: light.hints
       })
       const res = await chatComplete(
         { baseUrl, apiKey, model: llmModel, timeoutMs: 30000 },

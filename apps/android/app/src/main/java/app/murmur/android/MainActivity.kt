@@ -66,8 +66,16 @@ import app.murmur.android.llm.LlmClient
 import app.murmur.android.llm.LlmConfig
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.service.MurmurAccessibilityService
+import app.murmur.android.settings.BulletMarker
 import app.murmur.android.settings.FormattingMode
+import app.murmur.android.settings.HesitationLevel
+import app.murmur.android.settings.ListStyle
+import app.murmur.android.settings.ListsMode
+import app.murmur.android.settings.LlmFreedom
+import app.murmur.android.settings.LlmStructure
 import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.NumbersMode
+import app.murmur.android.settings.RepetitionScope
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
 import app.murmur.android.settings.ThemeMode
@@ -80,6 +88,7 @@ import app.murmur.android.text.AppContext
 import app.murmur.android.text.PipelineOptions
 import app.murmur.android.text.buildFormatMessages
 import app.murmur.android.text.maxTokensFor
+import app.murmur.android.text.resolveStyle
 import app.murmur.android.text.runPipeline
 import app.murmur.android.text.sanitizeLlmOutput
 import app.murmur.android.ui.AccountGateScreen
@@ -226,28 +235,78 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
 
         SectionCard("Speech to text") { ProviderFields(store, settings, showDiscover = true) }
 
-        SectionCard("Smart formatting") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Mode", Modifier.width(90.dp), fontSize = 13.sp, color = muted)
-                for (mode in FormattingMode.entries) {
-                    FilterChip(
-                        selected = settings.formattingMode == mode,
-                        onClick = { store.update { s -> s.copy(formattingMode = mode) } },
-                        label = { Text(mode.id) },
-                        modifier = Modifier.padding(end = 6.dp)
-                    )
+        SectionCard("Cleanup") {
+            Text(
+                "Rule-based, instant, and still applied when the model is off or unavailable.",
+                fontSize = 12.sp, color = muted
+            )
+            ChipRow("Hesitation", HesitationLevel.entries, settings.hesitations, { it.id }) { v ->
+                store.update { s -> s.copy(hesitations = v) }
+            }
+            Text(
+                when (settings.hesitations) {
+                    HesitationLevel.OFF -> "“you know”, “I mean” and friends stay as spoken."
+                    HesitationLevel.LIGHT -> "Pure hesitation goes where the transcript marks a pause: “you know”, “I mean”, a pause-“like”, “let me think”, “so yeah”."
+                    HesitationLevel.THOROUGH -> "Also hedges and openers: “sort of”, “basically”, “I guess”, “Okay, so, …”, trailing “, yeah”."
+                },
+                fontSize = 11.sp, color = muted
+            )
+            ChipRow("Repeats", listOf(null) + RepetitionScope.entries, if (settings.collapseRepeats) settings.repetitionScope else null, { it?.id ?: "off" }) { v ->
+                store.update { s -> if (v == null) s.copy(collapseRepeats = false) else s.copy(collapseRepeats = true, repetitionScope = v) }
+            }
+            Text(
+                when {
+                    !settings.collapseRepeats -> "Repeated words stay as spoken."
+                    settings.repetitionScope == RepetitionScope.WORDS -> "“the the report”, “I, I think”, part-word stutters (“th- the”)."
+                    settings.repetitionScope == RepetitionScope.PHRASES -> "Also repeated phrases: “I think, I think we should”."
+                    else -> "Also restarts: “I want to, I need to go” becomes “I need to go”."
+                },
+                fontSize = 11.sp, color = muted
+            )
+        }
+
+        SectionCard("Structure") {
+            ChipRow("Lists", ListsMode.entries, settings.lists, { it.id }) { v -> store.update { s -> s.copy(lists = v) } }
+            Text(
+                when (settings.lists) {
+                    ListsMode.OFF -> "Never turned into a list."
+                    ListsMode.SPOKEN -> "Only when you ask: “bullet point …”, “number one …”, “make this a numbered list”."
+                    ListsMode.AUTO -> "Also when you enumerate: “first…, second…”, “here are three things: a, b and c”. Never in code or terminals."
+                },
+                fontSize = 11.sp, color = muted
+            )
+            if (settings.lists != ListsMode.OFF) {
+                ChipRow("Style", ListStyle.entries, settings.listStyle, { it.id }) { v -> store.update { s -> s.copy(listStyle = v) } }
+                if (settings.listStyle != ListStyle.NUMBERS) {
+                    ChipRow("Marker", BulletMarker.entries, settings.bulletMarker, { it.symbol }) { v -> store.update { s -> s.copy(bulletMarker = v) } }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Tone", Modifier.width(90.dp), fontSize = 13.sp, color = muted)
-                for (tone in Tone.entries) {
-                    FilterChip(
-                        selected = settings.tone == tone,
-                        onClick = { store.update { s -> s.copy(tone = tone) } },
-                        label = { Text(tone.id) },
-                        modifier = Modifier.padding(end = 6.dp)
-                    )
-                }
+            ChipRow("Numbers", NumbersMode.entries, settings.numbers, { it.id }) { v -> store.update { s -> s.copy(numbers = v) } }
+            Text(
+                when (settings.numbers) {
+                    NumbersMode.OFF -> "Numbers stay as spoken."
+                    NumbersMode.SMART -> "Digits from ten up and with units: “five pm” → “5 pm”, “twenty three percent” → “23%”, “ten dollars” → “\$10”."
+                    NumbersMode.ALL -> "Every number becomes digits (“five apples” → “5 apples”)."
+                },
+                fontSize = 11.sp, color = muted
+            )
+        }
+
+        SectionCard("Smart formatting") {
+            ChipRow("Mode", FormattingMode.entries, settings.formattingMode, { it.id }) { v -> store.update { s -> s.copy(formattingMode = v) } }
+            ChipRow("Tone", Tone.entries, settings.tone, { it.id }) { v -> store.update { s -> s.copy(tone = v) } }
+            ChipRow("Freedom", LlmFreedom.entries, settings.llmFreedom, { it.id }) { v -> store.update { s -> s.copy(llmFreedom = v) } }
+            Text(
+                when (settings.llmFreedom) {
+                    LlmFreedom.STRICT -> "Punctuation, casing, spelling, mis-hearings, hesitation and self-corrections only."
+                    LlmFreedom.BALANCED -> "Also grammar slips and missing articles; no rephrasing or politeness changes."
+                    LlmFreedom.NATURAL -> "May smooth awkward phrasing; names, numbers and every point stay."
+                },
+                fontSize = 11.sp, color = muted
+            )
+            ChipRow("Layout", LlmStructure.entries, settings.llmStructure, { it.id }) { v -> store.update { s -> s.copy(llmStructure = v) } }
+            LabeledField("Your instructions", settings.llmInstructions, placeholder = "Use British spelling. Dates as 2026-09-06.") {
+                store.update { s -> s.copy(llmInstructions = it.take(2000)) }
             }
             LabeledField("LLM model", settings.llmModel, placeholder = "llama-3.1-8b-instant") {
                 store.update { s -> s.copy(llmModel = it) }
@@ -458,12 +517,11 @@ private suspend fun runSampleTest(context: android.content.Context, s: MurmurSet
     var out = "STT ${stt.latencyMs}ms: ${light.text.trim()}"
     val (base, key, model) = s.llmConnection()
     if (s.formattingMode == FormattingMode.SMART && base.isNotEmpty() && model.isNotEmpty()) {
+        val app = AppContext("test", AppCategory.UNKNOWN)
         val res = LlmClient.chatComplete(
             LlmConfig(base, key, model, s.llmTimeoutMs),
-            buildFormatMessages(
-                light.text.trim(), s.dictionaryTerms, Tone.NEUTRAL,
-                AppContext("test", AppCategory.UNKNOWN), "en"
-            ),
+            // The bundled sample clip is English regardless of the dictation language setting.
+            buildFormatMessages(light.text.trim(), s.dictionaryTerms, resolveStyle(s, app), app, light.hints, "en"),
             maxTokens = maxTokensFor(light.text)
         )
         val guard = sanitizeLlmOutput(res.text, light.text)
@@ -521,6 +579,23 @@ private fun LabeledField(
         },
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+/** One labelled row of mutually exclusive chips (a segmented control). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> ChipRow(label: String, options: List<T>, selected: T, text: (T) -> String, onSelect: (T) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.width(90.dp), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        for (option in options) {
+            FilterChip(
+                selected = option == selected,
+                onClick = { onSelect(option) },
+                label = { Text(text(option), fontSize = 12.sp) },
+                modifier = Modifier.padding(end = 6.dp)
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

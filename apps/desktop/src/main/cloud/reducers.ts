@@ -26,20 +26,44 @@ export interface AppRuleInput {
   tone: AppRule['tone']
   formatting?: AppRule['formatting']
   trailingSpace?: boolean
+  lists?: AppRule['lists']
+  numbers?: AppRule['numbers']
+  freedom?: AppRule['freedom']
+  instructions?: string
   createdAt: number
 }
+
+/** The optional per-app overrides, copied only when set so `undefined` never reaches the wire. */
+const APP_RULE_OPTIONALS = [
+  'formatting',
+  'trailingSpace',
+  'lists',
+  'numbers',
+  'freedom',
+  'instructions'
+] as const
 
 export interface SyncedFormatting {
   mode: Settings['formatting']['mode']
   tone: Settings['formatting']['tone']
   removeFillers: boolean
   fillerWords: string[]
+  hesitations: Settings['formatting']['hesitations']
+  hesitationPhrases: string[]
   collapseRepeats: boolean
+  repetitionScope: Settings['formatting']['repetitionScope']
   spokenCommands: boolean
   selfCorrections: boolean
   autoCapitalize: boolean
   trailingSpace: boolean
   pressEnterCommand: boolean
+  lists: Settings['formatting']['lists']
+  listStyle: Settings['formatting']['listStyle']
+  bulletMarker: Settings['formatting']['bulletMarker']
+  numbers: Settings['formatting']['numbers']
+  llmFreedom: Settings['formatting']['llm']['freedom']
+  llmStructure: Settings['formatting']['llm']['structure']
+  llmInstructions: string
 }
 
 export interface SyncedPreferences {
@@ -160,11 +184,19 @@ export function snippetFromRemote(remote: RemoteSnippet): Snippet {
   }
 }
 
+type AppRuleOverrides = Partial<Pick<AppRule, (typeof APP_RULE_OPTIONALS)[number]>>
+
+function copyOptionals<T extends object>(from: AppRuleOverrides, to: T): T & AppRuleOverrides {
+  const out: T & AppRuleOverrides = { ...to }
+  for (const key of APP_RULE_OPTIONALS) {
+    const value = from[key]
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value
+  }
+  return out
+}
+
 export function appRuleFromRemote(remote: RemoteAppRule): AppRule {
-  const rule: AppRule = { id: remote.id, match: remote.match, tone: remote.tone }
-  if (remote.formatting !== undefined) rule.formatting = remote.formatting
-  if (remote.trailingSpace !== undefined) rule.trailingSpace = remote.trailingSpace
-  return rule
+  return copyOptionals(remote, { id: remote.id, match: remote.match, tone: remote.tone })
 }
 
 export function dictionaryToInput(entry: DictionaryEntry): DictionaryInput {
@@ -185,10 +217,7 @@ export function snippetToInput(snippet: Snippet): SnippetInput {
 }
 
 export function appRuleToInput(rule: AppRule, createdAt: number): AppRuleInput {
-  const input: AppRuleInput = { match: rule.match, tone: rule.tone, createdAt }
-  if (rule.formatting !== undefined) input.formatting = rule.formatting
-  if (rule.trailingSpace !== undefined) input.trailingSpace = rule.trailingSpace
-  return input
+  return copyOptionals(rule, { match: rule.match, tone: rule.tone, createdAt })
 }
 
 export type RemoveKind = 'dictionary.remove' | 'snippets.remove' | 'appRules.remove'
@@ -231,10 +260,7 @@ export const appRulesSpec: CollectionSpec<AppRule, RemoteAppRule> = {
   fromRemote: appRuleFromRemote,
   fromOp: (op, id) => {
     if (op.kind !== 'appRules.upsert') throw new Error('wrong op')
-    const rule: AppRule = { id, match: op.rule.match, tone: op.rule.tone }
-    if (op.rule.formatting !== undefined) rule.formatting = op.rule.formatting
-    if (op.rule.trailingSpace !== undefined) rule.trailingSpace = op.rule.trailingSpace
-    return rule
+    return copyOptionals(op.rule, { id, match: op.rule.match, tone: op.rule.tone })
   }
 }
 
@@ -308,10 +334,7 @@ export const sameSnippet = (a: Snippet, b: Snippet): boolean =>
   a.trigger === b.trigger && a.content === b.content
 
 export const sameAppRule = (a: AppRule, b: AppRule): boolean =>
-  a.match === b.match &&
-  a.tone === b.tone &&
-  a.formatting === b.formatting &&
-  a.trailingSpace === b.trailingSpace
+  a.match === b.match && a.tone === b.tone && APP_RULE_OPTIONALS.every((key) => a[key] === b[key])
 
 /**
  * Add an upsert for `localId`, replacing any unsent upsert for the same item. `remoteId` is the
@@ -377,12 +400,22 @@ export function extractPreferences(s: Settings): SyncedPreferences {
       tone: f.tone,
       removeFillers: f.removeFillers,
       fillerWords: [...f.fillerWords],
+      hesitations: f.hesitations,
+      hesitationPhrases: [...f.hesitationPhrases],
       collapseRepeats: f.collapseRepeats,
+      repetitionScope: f.repetitionScope,
       spokenCommands: f.spokenCommands,
       selfCorrections: f.selfCorrections,
       autoCapitalize: f.autoCapitalize,
       trailingSpace: f.trailingSpace,
-      pressEnterCommand: f.pressEnterCommand
+      pressEnterCommand: f.pressEnterCommand,
+      lists: f.lists,
+      listStyle: f.listStyle,
+      bulletMarker: f.bulletMarker,
+      numbers: f.numbers,
+      llmFreedom: f.llm.freedom,
+      llmStructure: f.llm.structure,
+      llmInstructions: f.llm.instructions
     },
     language: s.stt.language,
     sync: { history: s.cloud.historySync }
@@ -423,6 +456,33 @@ export function mergePreferencePatches(
   }
 }
 
+/** A settings patch for the `formatting` section, with the model fields back in their nested home. */
+export type FormattingPatch = Partial<
+  Omit<SyncedFormatting, 'llmFreedom' | 'llmStructure' | 'llmInstructions'>
+> & {
+  llm?: Partial<Pick<Settings['formatting']['llm'], 'freedom' | 'structure' | 'instructions'>>
+}
+
+const LLM_FIELDS = {
+  llmFreedom: 'freedom',
+  llmStructure: 'structure',
+  llmInstructions: 'instructions'
+} as const
+
+/** Wire shape (flat) -> settings shape (nested `llm`). */
+export function toFormattingPatch(flat: Partial<SyncedFormatting>): FormattingPatch {
+  const out: FormattingPatch = {}
+  for (const [key, value] of Object.entries(flat) as Array<[keyof SyncedFormatting, unknown]>) {
+    if (value === undefined) continue
+    if (key in LLM_FIELDS) {
+      out.llm = { ...(out.llm ?? {}), [LLM_FIELDS[key as keyof typeof LLM_FIELDS]]: value }
+    } else {
+      ;(out as Record<string, unknown>)[key] = value
+    }
+  }
+  return out
+}
+
 /**
  * Remote preferences (plus any unsent local patch) applied over the current settings. Fields the
  * server has never seen keep their local value.
@@ -432,19 +492,19 @@ export function applyRemotePreferences(
   remote: RemotePreferences | null,
   pending: RemotePreferences | null
 ): {
-  formatting: Partial<SyncedFormatting>
+  formatting: FormattingPatch
   stt: { language: string }
   cloud: { historySync: boolean }
 } {
   const merged = mergePreferencePatches(remote ?? {}, pending ?? {})
   const current = extractPreferences(s)
-  const formatting: Partial<SyncedFormatting> = {}
+  const flat: Partial<SyncedFormatting> = {}
   for (const key of Object.keys(current.formatting) as Array<keyof SyncedFormatting>) {
     const value = merged.formatting?.[key]
-    if (value !== undefined) (formatting as Record<string, unknown>)[key] = value
+    if (value !== undefined) (flat as Record<string, unknown>)[key] = value
   }
   return {
-    formatting,
+    formatting: toFormattingPatch(flat),
     stt: { language: merged.language ?? current.language },
     cloud: { historySync: merged.sync?.history ?? current.sync.history }
   }

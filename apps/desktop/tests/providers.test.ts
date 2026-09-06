@@ -13,7 +13,8 @@ import {
   maxTokensFor,
   sanitizeLlmOutput
 } from '@core/text/llm-prompt'
-import { classifyApp, resolveStyle } from '@core/text/app-context'
+import { classifyApp, resolveStyle, type ResolvedStyle } from '@core/text/app-context'
+import { defaultSettings } from '@shared/settings'
 import { LANGUAGE_OPTIONS, LANGUAGES, languageLabel, languageName } from '@shared/languages'
 
 describe('STT error parsing', () => {
@@ -63,11 +64,13 @@ describe('STT error parsing', () => {
 
 describe('LLM prompt and output guard', () => {
   it('builds a system prompt that carries dictionary, tone and app context', () => {
+    const formatting = { ...defaultSettings().formatting, tone: 'casual' as const }
+    const app = classifyApp('Slack', 'general - Slack')
     const msgs = buildFormatMessages({
       raw: 'hello there',
       dictionary: [{ id: '1', word: 'Wispr Flow', aliases: [], fuzzy: false, createdAt: 0 }],
-      style: { tone: 'casual' },
-      app: classifyApp('Slack', 'general - Slack')
+      style: resolveStyle(formatting, app),
+      app
     })
     expect(msgs[0].role).toBe('system')
     expect(msgs[0].content).toContain('Wispr Flow')
@@ -75,11 +78,13 @@ describe('LLM prompt and output guard', () => {
     expect(msgs[0].content).toContain('chat message')
     expect(msgs[msgs.length - 1]).toEqual({ role: 'user', content: 'hello there' })
   })
+  const neutral = (app = classifyApp('Slack', 'general - Slack')): ResolvedStyle =>
+    resolveStyle({ ...defaultSettings().formatting, tone: 'neutral' as const }, app)
   it('keeps the auto-detect language rule when no language is fixed', () => {
     const base = {
       raw: 'hello there',
       dictionary: [],
-      style: { tone: 'neutral' as const },
+      style: neutral(),
       app: classifyApp('Slack', 'general - Slack')
     }
     for (const language of [undefined, 'auto', '', 'xx']) {
@@ -93,7 +98,7 @@ describe('LLM prompt and output guard', () => {
     const system = buildFormatMessages({
       raw: 'hallo zusammen',
       dictionary: [],
-      style: { tone: 'neutral' },
+      style: neutral(),
       app: classifyApp('Slack', 'general - Slack'),
       language: 'de'
     })[0].content
@@ -112,11 +117,31 @@ describe('LLM prompt and output guard', () => {
       buildFormatMessages({
         raw: 'oi',
         dictionary: [],
-        style: { tone: 'neutral' },
+        style: neutral(classifyApp('', '')),
         app: classifyApp('', ''),
         language: 'pt-BR'
       })[0].content
     ).toContain('dictates in Portuguese')
+  })
+  it('keeps the language pinned at natural freedom without contradicting the smoothing rule', () => {
+    const style = { ...neutral(), freedom: 'natural' as const }
+    const fixed = buildFormatMessages({
+      raw: 'hallo',
+      dictionary: [],
+      style,
+      app: classifyApp('', ''),
+      language: 'de'
+    })[0].content
+    expect(fixed).toContain('The speaker dictates in German.')
+    expect(fixed).not.toContain("- Preserve the speaker's words, meaning, and order.")
+    const auto = buildFormatMessages({
+      raw: 'hallo',
+      dictionary: [],
+      style,
+      app: classifyApp('', '')
+    })[0].content
+    expect(auto).toContain('Write the output in the language the speaker used; never translate it.')
+    expect(auto).toContain('Awkward or tangled phrasing')
   })
   it('tells command mode which language the instruction was spoken in', () => {
     const input = {
@@ -184,11 +209,14 @@ describe('app context', () => {
     expect(classifyApp('Code.exe', 'main.ts - project').category).toBe('code')
     expect(classifyApp('chrome.exe', 'Inbox - Gmail').category).toBe('email')
     expect(classifyApp('notepad.exe').category).toBe('unknown')
-    expect(resolveStyle('auto', [], classifyApp('outlook.exe')).tone).toBe('professional')
-    expect(resolveStyle('auto', [], classifyApp('discord.exe')).tone).toBe('casual')
-    expect(resolveStyle('professional', [], classifyApp('discord.exe')).tone).toBe('professional')
-    const rules = [{ id: 'r', match: 'discord', tone: 'neutral' as const }]
-    expect(resolveStyle('auto', rules, classifyApp('Discord.exe')).tone).toBe('neutral')
+    const f = defaultSettings().formatting
+    expect(resolveStyle(f, classifyApp('outlook.exe')).tone).toBe('professional')
+    expect(resolveStyle(f, classifyApp('discord.exe')).tone).toBe('casual')
+    expect(resolveStyle({ ...f, tone: 'professional' }, classifyApp('discord.exe')).tone).toBe(
+      'professional'
+    )
+    const appRules = [{ id: 'r', match: 'discord', tone: 'neutral' as const }]
+    expect(resolveStyle({ ...f, appRules }, classifyApp('Discord.exe')).tone).toBe('neutral')
   })
 })
 

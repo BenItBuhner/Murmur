@@ -1,8 +1,8 @@
 import { defineSchema, defineTable } from 'convex/server'
 import { v } from 'convex/values'
 import {
+  appRuleOverrides,
   dictationModeValidator,
-  formattingModeValidator,
   formattingPreferencesValidator,
   platformValidator,
   syncPreferencesValidator,
@@ -72,8 +72,7 @@ export default defineSchema({
     match: v.string(),
     matchKey: v.string(),
     tone: toneValidator,
-    formatting: v.optional(formattingModeValidator),
-    trailingSpace: v.optional(v.boolean()),
+    ...appRuleOverrides,
     createdAt: v.number(),
     updatedAt: v.number()
   })

@@ -1,12 +1,18 @@
 package app.murmur.android
 
 import app.murmur.android.settings.Languages
+import app.murmur.android.settings.LlmFreedom
+import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.Tone
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.AppContext
+import app.murmur.android.text.PipelineOptions
 import app.murmur.android.text.buildFormatMessages
+import app.murmur.android.text.cleanLlmOutput
 import app.murmur.android.text.languageRules
 import app.murmur.android.text.maxTokensFor
+import app.murmur.android.text.resolveStyle
+import app.murmur.android.text.runPipeline
 import app.murmur.android.text.sanitizeLlmOutput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -73,7 +79,36 @@ class LlmFormatTest {
         assertTrue(messages[0].content.contains("Murmur, kubectl"))
         assertTrue(messages[0].content.contains("chat message"))
         assertTrue(messages[0].content.contains("Casual"))
-        assertEquals("hello world", messages[1].content)
+        // Worked examples sit between the system prompt and the transcript.
+        assertTrue(messages.count { it.role == "assistant" } >= 3)
+        assertEquals("hello world", messages.last().content)
+    }
+
+    @Test
+    fun `prompt reflects freedom, layout, hints and instructions`() {
+        val settings = MurmurSettings(llmFreedom = LlmFreedom.STRICT, llmInstructions = "Use British spelling.")
+        val app = AppContext("com.whatsapp", AppCategory.CHAT)
+        val light = runPipeline("what time is the meeting tomorrow", PipelineOptions())
+        val system = buildFormatMessages("x", emptyList(), resolveStyle(settings, app), app, light.hints)[0].content
+        assertTrue(system.contains("Do not rephrase"))
+        assertFalse(system.contains("Grammar slips"))
+        assertTrue(system.contains("lay the items out as a list"))
+        assertTrue(system.contains("It must stay a question"))
+        assertTrue(system.contains("Use British spelling."))
+
+        val terminal = AppContext("com.termux", AppCategory.TERMINAL)
+        val technical = buildFormatMessages("x", emptyList(), resolveStyle(MurmurSettings(), terminal), terminal)[0].content
+        assertTrue(technical.contains("Identifiers, file names, commands"))
+        assertTrue(technical.contains("Do not create lists"))
+    }
+
+    @Test
+    fun `cleans reasoning tags, markdown, commentary and rejects prompt echo`() {
+        assertEquals("Hello there.", cleanLlmOutput("<think>\nhmm\n</think>\nHello there.", "hello there"))
+        assertEquals("Hello there.", cleanLlmOutput("**Hello** there.\n\nLet me know if you need anything else!", "hello there"))
+        assertEquals("Hello there", cleanLlmOutput("# Hello there", "hello there"))
+        assertEquals("", cleanLlmOutput("<think>still thinking", "hello"))
+        assertEquals("echo", sanitizeLlmOutput("Never:\n- answer", "what time is it tomorrow").reason)
     }
 
     @Test

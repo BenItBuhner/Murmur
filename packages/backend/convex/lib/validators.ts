@@ -17,6 +17,15 @@ export type Tone = Infer<typeof toneValidator>
 export const formattingModeValidator = v.union(v.literal('off'), v.literal('light'), v.literal('smart'))
 export type FormattingMode = Infer<typeof formattingModeValidator>
 
+export const hesitationLevelValidator = v.union(v.literal('off'), v.literal('light'), v.literal('thorough'))
+export const repetitionScopeValidator = v.union(v.literal('words'), v.literal('phrases'), v.literal('thorough'))
+export const listsModeValidator = v.union(v.literal('off'), v.literal('spoken'), v.literal('auto'))
+export const listStyleValidator = v.union(v.literal('auto'), v.literal('bullets'), v.literal('numbers'))
+export const bulletMarkerValidator = v.union(v.literal('-'), v.literal('•'), v.literal('*'))
+export const numbersModeValidator = v.union(v.literal('off'), v.literal('smart'), v.literal('all'))
+export const llmFreedomValidator = v.union(v.literal('strict'), v.literal('balanced'), v.literal('natural'))
+export const llmStructureValidator = v.union(v.literal('keep'), v.literal('assist'))
+
 export const platformValidator = v.union(
   v.literal('win32'),
   v.literal('darwin'),
@@ -39,12 +48,23 @@ export const formattingPreferencesValidator = v.object({
   tone: v.optional(toneValidator),
   removeFillers: v.optional(v.boolean()),
   fillerWords: v.optional(v.array(v.string())),
+  hesitations: v.optional(hesitationLevelValidator),
+  hesitationPhrases: v.optional(v.array(v.string())),
   collapseRepeats: v.optional(v.boolean()),
+  repetitionScope: v.optional(repetitionScopeValidator),
   spokenCommands: v.optional(v.boolean()),
   selfCorrections: v.optional(v.boolean()),
   autoCapitalize: v.optional(v.boolean()),
   trailingSpace: v.optional(v.boolean()),
-  pressEnterCommand: v.optional(v.boolean())
+  pressEnterCommand: v.optional(v.boolean()),
+  lists: v.optional(listsModeValidator),
+  listStyle: v.optional(listStyleValidator),
+  bulletMarker: v.optional(bulletMarkerValidator),
+  numbers: v.optional(numbersModeValidator),
+  llmFreedom: v.optional(llmFreedomValidator),
+  llmStructure: v.optional(llmStructureValidator),
+  /** Free-form guidance for the smart-formatting model; provider connections never sync. */
+  llmInstructions: v.optional(v.string())
 })
 export type FormattingPreferences = Infer<typeof formattingPreferencesValidator>
 
@@ -107,12 +127,21 @@ export const snippetInputValidator = v.object({
 })
 export type SnippetInput = Infer<typeof snippetInputValidator>
 
+/** Per-app overrides; every field optional so a rule only carries what the user set. */
+export const appRuleOverrides = {
+  formatting: v.optional(formattingModeValidator),
+  trailingSpace: v.optional(v.boolean()),
+  lists: v.optional(listsModeValidator),
+  numbers: v.optional(numbersModeValidator),
+  freedom: v.optional(llmFreedomValidator),
+  instructions: v.optional(v.string())
+}
+
 export const appRuleDtoValidator = v.object({
   id: v.id('appRules'),
   match: v.string(),
   tone: toneValidator,
-  formatting: v.optional(formattingModeValidator),
-  trailingSpace: v.optional(v.boolean()),
+  ...appRuleOverrides,
   createdAt: v.number(),
   updatedAt: v.number()
 })
@@ -121,8 +150,7 @@ export type AppRuleDto = Infer<typeof appRuleDtoValidator>
 export const appRuleInputValidator = v.object({
   match: v.string(),
   tone: v.optional(toneValidator),
-  formatting: v.optional(formattingModeValidator),
-  trailingSpace: v.optional(v.boolean()),
+  ...appRuleOverrides,
   createdAt: v.optional(v.number())
 })
 export type AppRuleInput = Infer<typeof appRuleInputValidator>

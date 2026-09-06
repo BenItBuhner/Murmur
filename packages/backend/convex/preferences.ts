@@ -22,6 +22,12 @@ function cleanFormatting(input: FormattingPreferences | undefined): FormattingPr
       ...new Set(out.fillerWords.map((w) => w.trim().toLowerCase()).filter(Boolean))
     ].slice(0, LIMITS.fillerWords)
   }
+  if (out.hesitationPhrases) {
+    out.hesitationPhrases = [
+      ...new Set(out.hesitationPhrases.map((w) => w.trim().toLowerCase()).filter(Boolean))
+    ].slice(0, LIMITS.hesitationPhrases)
+  }
+  if (out.llmInstructions !== undefined) out.llmInstructions = out.llmInstructions.trim().slice(0, LIMITS.instructionsLength)
   return out
 }
 

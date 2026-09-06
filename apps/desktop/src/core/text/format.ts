@@ -12,17 +12,20 @@ export function normalizeWhitespace(text: string): string {
 }
 
 export function fixPunctuationSpacing(text: string): string {
-  return text
-    .replace(/\s+([,.!?;:%])/g, '$1')
-    .replace(/([,;:])(?=[\p{L}\p{N}])/gu, '$1 ')
-    .replace(/([.!?])(?=[\p{Lu}])/gu, '$1 ')
-    .replace(/,{2,}/g, ',')
-    .replace(/(?<!\.)\.{2}(?!\.)/g, '.')
-    .replace(/([!?])\1{2,}/g, '$1')
-    .replace(/,\s*([.!?])/g, '$1')
-    .replace(/\(\s+/g, '(')
-    .replace(/\s+\)/g, ')')
-    .replace(/[ \t]{2,}/g, ' ')
+  return (
+    text
+      .replace(/\s+([,.!?;:%])/g, '$1')
+      // A comma between digits is a thousands separator ("25,000"), a colon a time ("5:30").
+      .replace(/(?<!\d)([,;:])(?=[\p{L}\p{N}])|([,;:])(?=\p{L})/gu, '$1$2 ')
+      .replace(/([.!?])(?=[\p{Lu}])/gu, '$1 ')
+      .replace(/,{2,}/g, ',')
+      .replace(/(?<!\.)\.{2}(?!\.)/g, '.')
+      .replace(/([!?])\1{2,}/g, '$1')
+      .replace(/,\s*([.!?])/g, '$1')
+      .replace(/\(\s+/g, '(')
+      .replace(/\s+\)/g, ')')
+      .replace(/[ \t]{2,}/g, ' ')
+  )
 }
 
 const ABBREVIATION =

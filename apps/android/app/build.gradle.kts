@@ -142,6 +142,11 @@ dependencies {
     // Runs the text-insertion strategy against a real EditText (TextInserterTest) and the whole
     // sample-clip dictation against an in-process STT endpoint (DictationFlowTest).
     testImplementation("org.robolectric:robolectric:4.15.1")
+    // Compose UI tests under Robolectric (BackStackHostTest drives the predictive back gesture).
+    // ui-test-manifest declares the bare ComponentActivity createComposeRule() launches; it only
+    // ends up in debug builds.
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     // Must match the OkHttp the Clerk/Convex SDKs pull in (5.x), or MockWebServer fails to load.
     testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
 }

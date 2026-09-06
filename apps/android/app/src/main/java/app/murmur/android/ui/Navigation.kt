@@ -1,14 +1,5 @@
 package app.murmur.android.ui
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,13 +9,19 @@ import androidx.compose.runtime.setValue
 
 enum class Route { HOME, BUTTON, MODEL, LANGUAGE, STYLE, DICTIONARY, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT, ACCOUNT }
 
-/** A plain back stack held in Compose state; the system back gesture pops it. */
+/**
+ * A plain back stack held in Compose state. [NavHost] shows its top and pops it on the system back
+ * gesture; the screens' own back arrows call [back].
+ */
 class Navigator(initial: List<Route>) {
     var stack: List<Route> by mutableStateOf(initial)
         private set
 
     val current: Route get() = stack.last()
     val depth: Int get() = stack.size
+
+    /** The screen back returns to, or null at the root, where back leaves the app. */
+    val previous: Route? get() = stack.getOrNull(stack.size - 2)
 
     fun open(route: Route) {
         if (current != route) stack = stack + route
@@ -45,23 +42,21 @@ class Navigator(initial: List<Route>) {
 }
 
 @Composable
-fun rememberNavigator(): Navigator {
-    val navigator = rememberSaveable(saver = Navigator.Saver) { Navigator(listOf(Route.HOME)) }
-    BackHandler(enabled = navigator.depth > 1) { navigator.back() }
-    return navigator
-}
+fun rememberNavigator(): Navigator = rememberSaveable(saver = Navigator.Saver) { Navigator(listOf(Route.HOME)) }
 
-/** Slides new screens in from the right and slides them back out on the way home. */
+/** One position in the stack: the same route at another depth is another screen. */
+private data class NavEntry(val route: Route, val depth: Int)
+
+/**
+ * Shows the top of the stack. New screens slide in from the right; going back, by arrow or by the
+ * system's back gesture, the screen lifts off and reveals the one below (see [BackStackHost]).
+ */
 @Composable
 fun NavHost(navigator: Navigator, content: @Composable (Route) -> Unit) {
-    val spec = tween<Float>(300, easing = FastOutSlowInEasing)
-    AnimatedContent(
-        targetState = navigator.current to navigator.depth,
-        transitionSpec = {
-            val forward = targetState.second >= initialState.second
-            (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { if (forward) it / 5 else -it / 5 } + fadeIn(spec))
-                .togetherWith(slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { if (forward) -it / 5 else it / 5 } + fadeOut(spec))
-        },
-        label = "route"
-    ) { (route, _) -> content(route) }
+    BackStackHost(
+        current = NavEntry(navigator.current, navigator.depth),
+        previous = navigator.previous?.let { NavEntry(it, navigator.depth - 1) },
+        depth = NavEntry::depth,
+        onBack = { navigator.back() }
+    ) { entry -> content(entry.route) }
 }

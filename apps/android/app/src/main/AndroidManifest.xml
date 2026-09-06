@@ -18,10 +18,14 @@
 
     <!-- usesCleartextTraffic: a self-hosted whisper server on the LAN (http://192.168.x.x:8000/v1)
          is a first-class provider, and Android otherwise refuses every plain-http base URL. Hosted
-         providers keep using https. -->
+         providers keep using https.
+         enableOnBackInvokedCallback: predictive back. The system previews going home (Android 13+,
+         on by default from 15) and streams the gesture's progress to the app, which ui/BackStackHost
+         turns into the in-app preview. Nothing here handles KEYCODE_BACK, so the switch is safe. -->
     <application
         android:name=".MurmurApplication"
         android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"

@@ -3,6 +3,7 @@ import { removeHesitations } from '@core/text/hesitations'
 import { collapseRepeats } from '@core/text/repeats'
 import { convertNumbers } from '@core/text/numbers'
 import { formatLists, detectListIntent } from '@core/text/lists'
+import { applySelfCorrections } from '@core/text/corrections'
 
 const light = { level: 'light' as const }
 const thorough = { level: 'thorough' as const }
@@ -239,5 +240,17 @@ describe('lists scratch', () => {
     expect(detectListIntent('put this in bullet points: a, b, c').requested).toBe('bullets')
     expect(detectListIntent('as a numbered list please').requested).toBe('numbers')
     expect(detectListIntent('hello there').requested).toBe(null)
+  })
+})
+
+describe('self-corrections after an unfinished phrase', () => {
+  it('treats a marker after a preposition or article as hesitation', () => {
+    expect(
+      applySelfCorrections(
+        'book the flights for, I mean, twenty five people at five pm, no, six pm'
+      )
+    ).toBe('book the flights for twenty five people at six pm')
+    expect(applySelfCorrections("I'll be there at, sorry, 6 pm.")).toBe("I'll be there at 6 pm.")
+    expect(applySelfCorrections('Send it to John, I mean, Jane.')).toBe('Send it to Jane.')
   })
 })

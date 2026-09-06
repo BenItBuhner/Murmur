@@ -12,6 +12,7 @@ import {
   applyLineCommands,
   applyLiteralPunctuation,
   applyScratchThat,
+  applySpokenQuotes,
   extractPressEnter
 } from './commands'
 import { applySelfCorrections } from './corrections'
@@ -113,6 +114,7 @@ export function runPipeline(raw: string, opts: PipelineOptions): PipelineResult 
     step('scratch-that', applyScratchThat)
     step('line-commands', applyLineCommands)
     step('literal-punctuation', applyLiteralPunctuation)
+    step('quotes', applySpokenQuotes)
   }
   if (opts.removeFillers) step('fillers', (s) => removeFillers(s, opts.fillerWords))
   if (opts.selfCorrections) step('self-corrections', applySelfCorrections)

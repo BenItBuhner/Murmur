@@ -3,6 +3,7 @@
  *   "new line" / "newline"        -> line break
  *   "new paragraph"               -> blank line
  *   "question mark" / "exclamation point|mark" at a clause end -> punctuation
+ *   "quote ... end quote|unquote|close quote"    -> "..." (and "quote unquote X" -> "X")
  *   "scratch that" / "delete that" / "strike that" / "undo that" -> remove the last phrase
  *   "press enter" / "hit enter" / "send it" (only at the very end) -> insert text then press Enter
  */
@@ -42,6 +43,83 @@ export function applyLiteralPunctuation(text: string): string {
     .replace(/[,.]?\s*\bquestion\s+mark\b[.,!?]*/giu, '?')
     .replace(/[,.]?\s*\bexclamation\s+(?:point|mark)\b[.,!?]*/giu, '!')
     .replace(/([?!])\s*([?!])/g, '$1')
+}
+
+const QUOTE_CMD =
+  /(?<![\p{L}\p{N}])(?:(?:open|begin|start)\s+quote|(?:end|close)\s+(?:of\s+)?quote|unquote|quote)(?![\p{L}\p{N}])/giu
+
+interface QuoteCmd {
+  start: number
+  end: number
+  kind: 'open' | 'close'
+}
+
+/**
+ * Spoken quotation marks:
+ *   "he said quote I will be late end quote"     -> he said "I will be late"
+ *   "she told me, quote, hands off, end quote."  -> she told me, "Hands off".
+ *   "the quote unquote expert"                   -> the "expert"
+ * Only a "quote" with a matching "end quote" / "unquote" / "close quote" is a command, so
+ * "I got a quote from the plumber" keeps its noun. Straight marks: they are right everywhere,
+ * code editors included.
+ */
+export function applySpokenQuotes(text: string): string {
+  const cmds: QuoteCmd[] = []
+  for (const m of text.matchAll(QUOTE_CMD)) {
+    cmds.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      kind: /^(?:end|close|unquote)/i.test(m[0]) ? 'close' : 'open'
+    })
+  }
+  if (cmds.length < 2) return text
+  let out = ''
+  let pos = 0
+  let i = 0
+  while (i < cmds.length - 1) {
+    const open = cmds[i]
+    const close = cmds[i + 1]
+    // A stray "end quote", or a "quote" followed by another "quote" (the noun, most likely):
+    // leave the word and look at the next pair.
+    if (open.kind !== 'open' || close.kind !== 'close') {
+      i++
+      continue
+    }
+    const before = text.slice(pos, open.start).replace(/\s+$/, '')
+    // The pauses around the commands ("quote, hands off, end quote") are not part of the quote.
+    const inner = text
+      .slice(open.end, close.start)
+      .replace(/^\s*[,:;]?\s*/, '')
+      .replace(/\s*[,;:]?\s*$/, '')
+    let restStart = close.end
+    let quoted: string
+    if (!/[\p{L}\p{N}]/u.test(inner)) {
+      // "quote unquote expert": the marks go around the word that follows.
+      const m = /^[\s,]*([\p{L}\p{N}'’-]+)/u.exec(text.slice(close.end))
+      if (!m) {
+        i += 2
+        continue
+      }
+      quoted = m[1]
+      restStart = close.end + m[0].length
+    } else {
+      // A quotation that follows a pause or opens a sentence starts with a capital.
+      quoted = !before || /[,:.!?\n]$/.test(before) ? capitalizeQuote(inner) : inner
+    }
+    const gap = before && !/[\s(\[\n]$/.test(before) ? ' ' : ''
+    out += `${before}${gap}"${quoted}"`
+    // Punctuation spoken right after the command attaches to the closing mark.
+    const rest = text.slice(restStart)
+    const punct = /^\s*[.,!?;:)\]]/.test(rest)
+    pos = punct ? restStart + rest.search(/\S/) : restStart
+    i += 2
+  }
+  return out + text.slice(pos)
+}
+
+function capitalizeQuote(s: string): string {
+  const i = s.search(/\p{L}/u)
+  return i < 0 ? s : s.slice(0, i) + s[i].toUpperCase() + s.slice(i + 1)
 }
 
 const SCRATCH_RE = /(?:^|[,.;:]?\s*)(?:scratch|delete|strike|undo|erase)\s+that\b[.,!?;:]*\s*/giu

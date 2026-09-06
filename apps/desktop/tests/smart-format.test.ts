@@ -77,6 +77,8 @@ describe('buildFormatMessages', () => {
     expect(system).toContain('lay the items out as a list')
     expect(system).toContain('Personal dictionary: kubectl (heard as "cube control")')
     expect(system).toContain('Never insert a dictionary term where nothing similar was said')
+    expect(system).toContain('Flatten deliberate repetition or soften strong language')
+    expect(system).toContain('Spoken quotation marks')
     expect(system).toContain('It must stay a question')
     expect(system).toContain('Use British spelling.')
     expect(system).toContain('a chat message')

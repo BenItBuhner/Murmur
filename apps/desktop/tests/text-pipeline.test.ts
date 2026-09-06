@@ -5,6 +5,7 @@ import {
   applyLineCommands,
   applyLiteralPunctuation,
   applyScratchThat,
+  applySpokenQuotes,
   extractPressEnter
 } from '@core/text/commands'
 import { applySelfCorrections } from '@core/text/corrections'
@@ -130,6 +131,34 @@ describe('spoken commands', () => {
     expect(applyLiteralPunctuation('Are you coming question mark')).toBe('Are you coming?')
     expect(applyLiteralPunctuation('Do it now, exclamation point.')).toBe('Do it now!')
   })
+  it('turns spoken quote commands into quotation marks', () => {
+    expect(applySpokenQuotes('he said quote I will be late end quote and left')).toBe(
+      'he said "I will be late" and left'
+    )
+    expect(applySpokenQuotes('She told me, quote, do not touch that, end quote.')).toBe(
+      'She told me, "Do not touch that".'
+    )
+    expect(applySpokenQuotes('the subject is quote weekly update unquote, then the body')).toBe(
+      'the subject is "weekly update", then the body'
+    )
+    expect(applySpokenQuotes('open quote yes close quote')).toBe('"Yes"')
+    expect(applySpokenQuotes('reply with quote sounds good? end quote only')).toBe(
+      'reply with "sounds good?" only'
+    )
+    // "quote unquote X" is the spoken way of putting X in scare quotes.
+    expect(applySpokenQuotes('the quote unquote expert showed up')).toBe('the "expert" showed up')
+  })
+  it('leaves the noun quote alone', () => {
+    expect(applySpokenQuotes('I got a quote from the plumber')).toBe(
+      'I got a quote from the plumber'
+    )
+    expect(applySpokenQuotes('end quote')).toBe('end quote')
+    expect(applySpokenQuotes('quote unquote')).toBe('quote unquote')
+    // The noun and then a real quotation: only the pair converts.
+    expect(applySpokenQuotes('a quote. quote no way end quote was the answer')).toBe(
+      'a quote. "No way" was the answer'
+    )
+  })
 })
 
 describe('self corrections', () => {
@@ -158,6 +187,14 @@ describe('self corrections', () => {
     expect(applySelfCorrections('Send it Tuesday, not Wednesday.')).toBe(
       'Send it Tuesday, not Wednesday.'
     )
+  })
+  it('does not read a repeated no as a correction', () => {
+    expect(applySelfCorrections('No, no, no, that is wrong.')).toBe('No, no, no, that is wrong.')
+    expect(applySelfCorrections('Oh no, no, no, no, not again')).toBe(
+      'Oh no, no, no, no, not again'
+    )
+    // ...but a genuine correction right after one still works.
+    expect(applySelfCorrections('No, no, Tuesday, no, Wednesday.')).toBe('No, no, Wednesday.')
   })
 })
 
@@ -377,6 +414,25 @@ describe('full pipeline', () => {
     )
     const q = runPipeline('what time is the meeting tomorrow', opts)
     expect(q.hints.isQuestion).toBe(true)
+  })
+  it('keeps emphasis and feeling through the whole pipeline', () => {
+    expect(runPipeline('fuck, fuck, fuck. this is so broken', opts).text).toBe(
+      'Fuck, fuck, fuck. This is so broken '
+    )
+    expect(runPipeline('no, no, no, that is wrong', opts).text).toBe('No, no, no, that is wrong ')
+    expect(runPipeline('go go go go', opts).text).toBe('Go go go go ')
+    expect(runPipeline('I, I think it was very, very slow', opts).text).toBe(
+      'I think it was very, very slow '
+    )
+  })
+  it('writes spoken quotations with quotation marks', () => {
+    expect(runPipeline('she said quote I will be late end quote and left', opts).text).toBe(
+      'She said "I will be late" and left '
+    )
+    expect(
+      runPipeline('the subject line should be quote weekly update question mark end quote', opts)
+        .text
+    ).toBe('The subject line should be "weekly update?" ')
   })
   it('thorough levels catch false starts and openers', () => {
     const r = runPipeline('okay so, I want to, I need to go to the store', {

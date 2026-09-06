@@ -3,7 +3,9 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
   --radius: 0.75rem;
 
   --background: oklch(0.985 0.002 90);
@@ -119,6 +121,73 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Overlay pill: one element morphs between states; contents cross-fade on top of it. */
+.overlay-pill {
+  --overlay-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    width 340ms var(--overlay-ease),
+    height 340ms var(--overlay-ease),
+    background-color 300ms ease,
+    box-shadow 300ms ease;
+  will-change: width, height;
+}
+.overlay-layer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  will-change: opacity, transform;
+}
+.overlay-layer-in {
+  animation: overlay-layer-in 260ms cubic-bezier(0.22, 1, 0.36, 1) 90ms both;
+}
+.overlay-layer-out {
+  pointer-events: none;
+  animation: overlay-layer-out 200ms ease-out both;
+}
+@keyframes overlay-layer-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes overlay-layer-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+}
+/* The tick draws itself in once the pill has taken its new shape. */
+.overlay-check path {
+  stroke-dasharray: 26;
+  stroke-dashoffset: 26;
+  animation: overlay-draw 320ms ease-out 220ms forwards;
+}
+@keyframes overlay-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay-pill {
+    transition-duration: 1ms;
+  }
+  .overlay-layer-in,
+  .overlay-layer-out,
+  .overlay-check path {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
   }
 }
 

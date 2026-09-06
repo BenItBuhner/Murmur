@@ -6,16 +6,17 @@ on:
   pull_request:
     branches: [main]
 
-# Cloud builds: set the repository variables CONVEX_URL, CLERK_PUBLISHABLE_KEY (and optionally
-# MURMUR_ACCOUNT_MODE) to bake the production instance into the desktop and Android builds.
-# Without them every artifact is a local-only build.
+# Cloud builds stay opt-in. MURMUR_CLOUD_RELEASE must be the literal "true" before CONVEX_URL /
+# CLERK_PUBLISHABLE_KEY are baked into desktop or Android artifacts. Unset (the current default)
+# keeps every CI artifact local-only — there is no production instance yet.
 env:
-  VITE_CONVEX_URL: ${{ vars.CONVEX_URL }}
-  VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
-  VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
-  MURMUR_CONVEX_URL: ${{ vars.CONVEX_URL }}
-  MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
-  MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_ACCOUNT_MODE }}
+  MURMUR_CLOUD_RELEASE: ${{ vars.MURMUR_CLOUD_RELEASE }}
+  VITE_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
+  VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
+  VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
+  MURMUR_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
+  MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
+  MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
 
 jobs:
   versions:

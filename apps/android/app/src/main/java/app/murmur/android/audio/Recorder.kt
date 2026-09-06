@@ -25,6 +25,10 @@ class Recorder {
 
     val isRecording: Boolean get() = running
 
+    /**
+     * @throws IllegalStateException when the microphone cannot be opened or started (in use by a
+     *   call or another app, or the audio server refused the stream).
+     */
     @SuppressLint("MissingPermission")
     fun start(maxDurationSec: Int, onAutoStop: () -> Unit) {
         if (running) return
@@ -38,27 +42,43 @@ class Recorder {
             AudioFormat.ENCODING_PCM_16BIT,
             maxOf(minBuf, SAMPLE_RATE) // >= 0.5 s of headroom
         )
-        check(rec.state == AudioRecord.STATE_INITIALIZED) { "Microphone unavailable" }
+        if (rec.state != AudioRecord.STATE_INITIALIZED) {
+            rec.release()
+            throw IllegalStateException("Microphone unavailable")
+        }
+        try {
+            rec.startRecording()
+            // Some devices (One UI in particular) do not throw when the mic is held by a call or
+            // another app: startRecording() simply leaves the state at STOPPED.
+            check(rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Microphone is busy" }
+        } catch (e: Exception) {
+            runCatching { rec.stop() }
+            rec.release()
+            throw IllegalStateException("Microphone is busy or unavailable", e)
+        }
+
         synchronized(chunks) { chunks.clear() }
         record = rec
         running = true
-        rec.startRecording()
         val maxSamples = maxDurationSec.toLong() * SAMPLE_RATE
         thread = Thread {
             val buf = ShortArray(SAMPLE_RATE / 20) // 50 ms
             var total = 0L
+            var autoStop = false
             while (running) {
                 val n = rec.read(buf, 0, buf.size)
-                if (n <= 0) continue
+                if (n < 0) break // ERROR_INVALID_OPERATION / ERROR_DEAD_OBJECT: the stream is gone
+                if (n == 0) continue
                 val copy = buf.copyOf(n)
                 synchronized(chunks) { chunks.add(copy) }
                 total += n
                 level = perceptualLevel(copy)
                 if (total >= maxSamples) {
-                    onAutoStop()
+                    autoStop = true
                     break
                 }
             }
+            if (autoStop && running) onAutoStop()
         }.apply {
             name = "murmur-recorder"
             start()
@@ -86,7 +106,9 @@ class Recorder {
     private fun stopInternal() {
         running = false
         level = 0f
-        thread?.join(500)
+        val t = thread
+        // The auto-stop callback runs on the capture thread itself; a thread cannot join itself.
+        if (t != null && t !== Thread.currentThread()) t.join(500)
         thread = null
         record?.let {
             runCatching { it.stop() }

@@ -335,7 +335,8 @@ export class DictationController extends EventEmitter {
             selection: sel.text,
             instruction: raw,
             app,
-            dictionary: s.dictionary
+            dictionary: s.dictionary,
+            language: s.stt.language
           }),
           {
             maxTokens: Math.min(4096, Math.max(1024, countWords(sel.text) * 4 + 512))
@@ -382,7 +383,13 @@ export class DictationController extends EventEmitter {
         try {
           const res = await chatComplete(
             llm,
-            buildFormatMessages({ raw: light.text.trim(), dictionary: s.dictionary, style, app }),
+            buildFormatMessages({
+              raw: light.text.trim(),
+              dictionary: s.dictionary,
+              style,
+              app,
+              language: s.stt.language
+            }),
             {
               maxTokens: maxTokensFor(light.text, s.formatting.llm.maxTokensMultiplier)
             }

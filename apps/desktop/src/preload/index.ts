@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { exposeClerkBridge } from '@clerk/electron/preload'
-import { IPC } from '@shared/ipc'
+import { IPC, type ThemeReport } from '@shared/ipc'
 import type { Settings, SttProviderKind } from '@shared/settings'
 import type {
   CloudConfig,
@@ -62,6 +62,12 @@ const api = {
     set: (slot: 'stt' | 'llm', value: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC.secretSet, slot, value),
     has: (slot: 'stt' | 'llm'): Promise<boolean> => ipcRenderer.invoke(IPC.secretHas, slot)
+  },
+  theme: {
+    systemAccent: (): Promise<string | null> => ipcRenderer.invoke(IPC.themeSystemAccent),
+    onSystemAccentChanged: (cb: (hex: string | null) => void): Unsub =>
+      on(IPC.themeSystemAccentChanged, cb),
+    report: (report: ThemeReport): Promise<void> => ipcRenderer.invoke(IPC.themeReport, report)
   },
   history: {
     list: (limit?: number, offset?: number): Promise<{ entries: HistoryEntry[]; total: number }> =>

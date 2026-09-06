@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Following the system, at night. -->
+    <style name="Theme.Murmur" parent="Theme.Murmur.Dark" />
+</resources>

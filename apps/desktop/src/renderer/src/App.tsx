@@ -7,6 +7,7 @@ import { Logo } from './components/Shell'
 import { TooltipProvider } from './components/ui/misc'
 import { CloudProvider, useCloud } from './hooks/useCloud'
 import { SettingsProvider, useSettingsMaybe } from './hooks/useSettings'
+import { ThemeProvider } from './hooks/useTheme'
 import { AccountPage } from './pages/Account'
 import { AccountGate } from './pages/AccountGate'
 import { AudioPage } from './pages/Audio'
@@ -36,17 +37,19 @@ const ROUTES = new Set<Route>([
 export default function App(): React.JSX.Element {
   return (
     <SettingsProvider>
-      <CloudProvider>
-        <TooltipProvider delayDuration={300}>
-          <Root />
-          <Toaster
-            position="bottom-right"
-            richColors
-            closeButton
-            toastOptions={{ className: 'text-sm' }}
-          />
-        </TooltipProvider>
-      </CloudProvider>
+      <ThemeProvider>
+        <CloudProvider>
+          <TooltipProvider delayDuration={300}>
+            <Root />
+            <Toaster
+              position="bottom-right"
+              richColors
+              closeButton
+              toastOptions={{ className: 'text-sm' }}
+            />
+          </TooltipProvider>
+        </CloudProvider>
+      </ThemeProvider>
     </SettingsProvider>
   )
 }
@@ -57,7 +60,6 @@ function Root(): React.JSX.Element | null {
   const [route, setRoute] = useState<Route>('home')
   const [state, setState] = useState<OverlayState>({ phase: 'idle' })
   const [enabled, setEnabled] = useState(true)
-  const [dark, setDark] = useState(false)
 
   useEffect(() => {
     const unsubs = [
@@ -67,21 +69,6 @@ function Root(): React.JSX.Element | null {
     ]
     return () => unsubs.forEach((u) => u())
   }, [])
-
-  // Theme: follow the setting, or the OS when set to system.
-  useEffect(() => {
-    if (!settings) return
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const apply = (): void => {
-      const isDark =
-        settings.general.theme === 'dark' || (settings.general.theme === 'system' && mq.matches)
-      document.documentElement.classList.toggle('dark', isDark)
-      setDark(isDark)
-    }
-    apply()
-    mq.addEventListener('change', apply)
-    return () => mq.removeEventListener('change', apply)
-  }, [settings])
 
   if (!settings || !cloud.config) return null
 
@@ -98,7 +85,6 @@ function Root(): React.JSX.Element | null {
           mode={mode}
           clerk={cloud.clerk}
           platform={info?.platform}
-          dark={dark}
           onSkip={mode === 'optional' ? () => void window.murmur.cloud.skipAccount() : undefined}
         />
       )

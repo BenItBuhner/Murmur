@@ -15,28 +15,8 @@ import {
 import { Badge } from '@renderer/components/ui/misc'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { ModelField, SecretInput, TestResult } from '@renderer/components/ProviderForm'
+import { LanguageSelect } from '@renderer/components/LanguageSelect'
 import { useSettings } from '@renderer/hooks/useSettings'
-
-const LANGUAGES: Array<[string, string]> = [
-  ['auto', 'Auto-detect'],
-  ['en', 'English'],
-  ['es', 'Spanish'],
-  ['fr', 'French'],
-  ['de', 'German'],
-  ['it', 'Italian'],
-  ['pt', 'Portuguese'],
-  ['nl', 'Dutch'],
-  ['sv', 'Swedish'],
-  ['pl', 'Polish'],
-  ['tr', 'Turkish'],
-  ['ru', 'Russian'],
-  ['uk', 'Ukrainian'],
-  ['ar', 'Arabic'],
-  ['hi', 'Hindi'],
-  ['ja', 'Japanese'],
-  ['ko', 'Korean'],
-  ['zh', 'Chinese']
-]
 
 export function ProvidersPage({
   embedded,
@@ -216,20 +196,9 @@ export function ProvidersPage({
       <Section title="Recognition">
         <SettingRow
           title="Language"
-          description="Auto-detect handles code-switching; forcing a language is faster and more accurate for single-language use."
+          description="Locks the speech model to one language: faster, more accurate, and no surprise switches on unclear words. The formatting model is told the same language. Auto-detect handles code-switching."
         >
-          <Select value={stt.language} onValueChange={(v) => void patch({ stt: { language: v } })}>
-            <SelectTrigger className="w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map(([code, name]) => (
-                <SelectItem key={code} value={code}>
-                  {name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <LanguageSelect />
         </SettingRow>
         <SettingRow
           title="Bias with dictionary"

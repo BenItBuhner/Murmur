@@ -33,9 +33,21 @@ function loadRenderer(target: BrowserWindow): void {
   }
 }
 
-export function createMainWindow(theme: 'light' | 'dark'): BrowserWindow {
+/** Native chrome colours: the window background before first paint and the Windows caption buttons. */
+export interface ChromeColors {
+  background: string
+  foreground: string
+}
+
+/** Neutral defaults used until the renderer reports the palette it actually resolved. */
+export function defaultChrome(theme: 'light' | 'dark'): ChromeColors {
+  return theme === 'dark'
+    ? { background: '#0f0f10', foreground: '#e7e5e4' }
+    : { background: '#fafaf9', foreground: '#1c1917' }
+}
+
+export function createMainWindow(chrome: ChromeColors): BrowserWindow {
   if (win) return win
-  const dark = theme === 'dark'
   win = new BrowserWindow({
     width: 1060,
     height: 720,
@@ -43,15 +55,15 @@ export function createMainWindow(theme: 'light' | 'dark'): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: dark ? '#0f0f10' : '#fafaf9',
+    backgroundColor: chrome.background,
     title: 'Murmur',
     icon: nativeImage.createFromPath(icon),
     ...(process.platform === 'win32'
       ? {
           titleBarStyle: 'hidden' as const,
           titleBarOverlay: {
-            color: dark ? '#0f0f10' : '#fafaf9',
-            symbolColor: dark ? '#e7e5e4' : '#1c1917',
+            color: chrome.background,
+            symbolColor: chrome.foreground,
             height: 40
           }
         }
@@ -107,16 +119,17 @@ export function showMainWindow(route?: string): void {
   if (route) win.webContents.send(IPC.navigate, route)
 }
 
-export function updateTitleBar(theme: 'light' | 'dark'): void {
-  if (!win || process.platform !== 'win32') return
-  const dark = theme === 'dark'
+export function updateChrome(chrome: ChromeColors): void {
+  if (!win) return
   try {
-    win.setTitleBarOverlay({
-      color: dark ? '#0f0f10' : '#fafaf9',
-      symbolColor: dark ? '#e7e5e4' : '#1c1917',
-      height: 40
-    })
-    win.setBackgroundColor(dark ? '#0f0f10' : '#fafaf9')
+    win.setBackgroundColor(chrome.background)
+    if (process.platform === 'win32') {
+      win.setTitleBarOverlay({
+        color: chrome.background,
+        symbolColor: chrome.foreground,
+        height: 40
+      })
+    }
   } catch {
     // ignore
   }

@@ -19,6 +19,7 @@ import app.murmur.android.overlay.OverlayMotion.easeOutCubic
 import app.murmur.android.overlay.OverlayMotion.lerp
 import app.murmur.android.overlay.OverlayMotion.smoothstep
 import app.murmur.android.settings.OverlayShape
+import app.murmur.android.ui.theme.Oklch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -33,12 +34,8 @@ private const val SHADOW_PAD_DP = 12f
 /** Vertical travel of a label while it hands over to the next one. */
 private const val TEXT_SWAP_SHIFT_DP = 6f
 
-private const val ACCENT = 0xFFFF5A36.toInt()
-private const val BG_DARK = 0xF2141414.toInt()
-private const val BG_SUCCESS = 0xF20F2A1C.toInt()
-private const val BG_ERROR = 0xF23A1512.toInt()
-private const val GREEN = 0xFF7EE2A8.toInt()
-private const val RED = 0xFFFF8A70.toInt()
+/** The pulsing "recording" dot: a fixed red-orange, whatever the theme, because that is what it means. */
+private const val RECORD = 0xFFFF5A36.toInt()
 
 /**
  * The floating dictation pill, drawn to match the desktop overlay: a dark rounded pill with a
@@ -105,6 +102,7 @@ class OverlayPillView(context: Context) : View(context) {
     private var state: DictationState = DictationState.Idle
     private var shape = OverlayShape.PILL
     private var anchor = OverlayAnchor.DEFAULT
+    private var palette = PillPalette.DEFAULT
     private var editing = false
     private var screenW = 0f
     private var screenH = 0f
@@ -120,14 +118,14 @@ class OverlayPillView(context: Context) : View(context) {
     /** Where the running morph started: a snapshot of wherever the outline was at that moment. */
     private var fromW = 0f
     private var fromH = 0f
-    private var fromBg = BG_DARK
+    private var fromBg = palette.background
     private var fromAx = 0f
     private var fromAy = 0f
 
     /** The outline as drawn this frame. */
     private var curW = 0f
     private var curH = 0f
-    private var curBg = BG_DARK
+    private var curBg = palette.background
     private var curAx = 0f
     private var curAy = 0f
 
@@ -213,6 +211,14 @@ class OverlayPillView(context: Context) : View(context) {
         if (changed) retarget()
     }
 
+    /** Theme colours; the body colour morphs to the new value like any other look change. */
+    fun setPalette(palette: PillPalette) {
+        if (palette == this.palette) return
+        this.palette = palette
+        retarget()
+        invalidate()
+    }
+
     fun setEditing(editing: Boolean) {
         if (this.editing == editing) return
         this.editing = editing
@@ -239,21 +245,21 @@ class OverlayPillView(context: Context) : View(context) {
     // ---- looks ----------------------------------------------------------------------------------
 
     private fun idleLook(): Look = when (shape) {
-        OverlayShape.PILL -> Look(Kind.IDLE, dp(64f), dp(36f), BG_DARK)
-        OverlayShape.CIRCLE -> Look(Kind.IDLE, dp(36f), dp(36f), BG_DARK)
+        OverlayShape.PILL -> Look(Kind.IDLE, dp(64f), dp(36f), palette.background)
+        OverlayShape.CIRCLE -> Look(Kind.IDLE, dp(36f), dp(36f), palette.background)
     }
 
     private fun listeningLook(): Look {
         val maxW = if (screenW > 0f) screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP) else Float.MAX_VALUE
-        return Look(Kind.LISTENING, min(dp(232f), maxW), dp(46f), BG_DARK)
+        return Look(Kind.LISTENING, min(dp(232f), maxW), dp(46f), palette.background)
     }
 
     private fun lookFor(s: DictationState): Look = when (s) {
         is DictationState.Idle -> idleLook()
         is DictationState.Listening -> listeningLook()
-        is DictationState.Processing -> Look(Kind.PROCESSING, textPaint.measureText(s.label) + dp(64f), dp(46f), BG_DARK, s.label)
-        is DictationState.Success -> Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(46f), BG_SUCCESS, s.message)
-        is DictationState.Error -> Look(Kind.ERROR, min(dp(300f), textPaint.measureText(s.message) + dp(56f)), dp(46f), BG_ERROR, s.message)
+        is DictationState.Processing -> Look(Kind.PROCESSING, textPaint.measureText(s.label) + dp(64f), dp(46f), palette.background, s.label)
+        is DictationState.Success -> Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(46f), palette.successBackground, s.message)
+        is DictationState.Error -> Look(Kind.ERROR, min(dp(300f), textPaint.measureText(s.message) + dp(56f)), dp(46f), palette.errorBackground, s.message)
     }
 
     /** Screen-space centre of the resting button (the point every state grows out of). */
@@ -487,8 +493,8 @@ class OverlayPillView(context: Context) : View(context) {
             Kind.IDLE -> drawIdle(canvas, box)
             Kind.LISTENING -> drawListening(canvas, box, now, dt)
             Kind.PROCESSING -> drawProcessingLabel(canvas, box, look.text)
-            Kind.SUCCESS -> drawMessage(canvas, box, look, GREEN, true, now - layer.shownSince)
-            Kind.ERROR -> drawMessage(canvas, box, look, RED, false, 0L)
+            Kind.SUCCESS -> drawMessage(canvas, box, look, palette.successForeground, true, now - layer.shownSince)
+            Kind.ERROR -> drawMessage(canvas, box, look, palette.errorForeground, false, 0L)
         }
         if (!full) canvas.restore()
     }
@@ -500,7 +506,7 @@ class OverlayPillView(context: Context) : View(context) {
         strokePaint.strokeWidth = dp(1.8f)
         val mw = dp(4.4f)
         val mh = dp(7.5f)
-        paint.color = ACCENT
+        paint.color = palette.accent
         canvas.drawRoundRect(cx - mw / 2, cy - mh + dp(1f), cx + mw / 2, cy + dp(2.4f), mw / 2, mw / 2, paint)
         canvas.drawArc(cx - dp(7f), cy - dp(4.5f), cx + dp(7f), cy + dp(6.5f), 15f, 150f, false, strokePaint)
         canvas.drawLine(cx, cy + dp(6.5f), cx, cy + dp(9f), strokePaint)
@@ -521,7 +527,7 @@ class OverlayPillView(context: Context) : View(context) {
 
         val dotCx = box.left + dp(52f)
         val pulse = 1f + 0.18f * sin(2.0 * PI * (now % 1200L) / 1200.0).toFloat()
-        paint.color = ACCENT
+        paint.color = RECORD
         canvas.drawCircle(dotCx, cy, dp(3.6f) * pulse, paint)
 
         // Conveyor-belt waveform: bars slide left continuously between level samples. Advanced once
@@ -558,9 +564,10 @@ class OverlayPillView(context: Context) : View(context) {
 
         val confirmCx = box.right - dp(24f)
         confirmBox = Box.centered(confirmCx, cy, btnR * 2, btnR * 2)
-        paint.color = ACCENT
+        paint.color = palette.accent
         canvas.drawCircle(confirmCx, cy, btnR - dp(2f), paint)
-        strokePaint.color = Color.WHITE
+        // Light accents (Material You tone 80) need a dark tick to stay legible.
+        strokePaint.color = if (Oklch.fromArgb(palette.accent).l > 0.7) 0xE6000000.toInt() else Color.WHITE
         strokePaint.strokeWidth = dp(2.2f)
         canvas.drawLine(confirmCx - dp(4.6f), cy + dp(0.5f), confirmCx - dp(1f), cy + dp(4f), strokePaint)
         canvas.drawLine(confirmCx - dp(1f), cy + dp(4f), confirmCx + dp(5f), cy - dp(3.5f), strokePaint)
@@ -679,7 +686,7 @@ class OverlayPillView(context: Context) : View(context) {
 
         // Snapped to the middle: a thin guide line.
         if (abs(curAx - screenW / 2f) < 0.5f) {
-            dashPaint.color = 0x80FF5A36.toInt()
+            dashPaint.color = ColorUtils.setAlphaComponent(palette.accent, 0x80)
             canvas.drawLine(screenW / 2f, button.top - dp(48f), screenW / 2f, button.bottom + dp(48f), dashPaint)
         }
 
@@ -687,7 +694,7 @@ class OverlayPillView(context: Context) : View(context) {
         val pulse = sin(2.0 * PI * (now % 1600L) / 1600.0).toFloat()
         val pad = dp(7f) + dp(2.5f) * pulse
         val halo = button.inflate(pad)
-        strokePaint.color = ColorUtils.setAlphaComponent(ACCENT, (150 + 60 * pulse).toInt().coerceIn(0, 255))
+        strokePaint.color = ColorUtils.setAlphaComponent(palette.accent, (150 + 60 * pulse).toInt().coerceIn(0, 255))
         strokePaint.strokeWidth = dp(2f)
         scratchRect.set(halo.left, halo.top, halo.right, halo.bottom)
         canvas.drawRoundRect(scratchRect, halo.height / 2f, halo.height / 2f, strokePaint)
@@ -703,8 +710,9 @@ class OverlayPillView(context: Context) : View(context) {
         val left = (screenW - total) / 2f
         resetBox = Box(left, chipY, left + resetW, chipY + chipH)
         doneBox = Box(left + resetW + dp(10f), chipY, left + total, chipY + chipH)
-        drawChip(canvas, resetBox, "Reset", BG_DARK, Color.WHITE, pressedChip == Chip.RESET)
-        drawChip(canvas, doneBox, "Done", ACCENT, Color.WHITE, pressedChip == Chip.DONE)
+        drawChip(canvas, resetBox, "Reset", palette.background, Color.WHITE, pressedChip == Chip.RESET)
+        val onAccent = if (Oklch.fromArgb(palette.accent).l > 0.7) 0xE6000000.toInt() else Color.WHITE
+        drawChip(canvas, doneBox, "Done", palette.accent, onAccent, pressedChip == Chip.DONE)
 
         // Hint label near the button.
         val hint = if (dragging) "Release to place" else "Drag to move"

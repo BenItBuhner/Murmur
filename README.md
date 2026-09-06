@@ -67,6 +67,9 @@ Windows SmartScreen and macOS Gatekeeper will ask you to confirm the first launc
   answers/commentary so the model can never “reply” to your dictation.
 - **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”; the
   selection is rewritten in place.
+- **Your colours.** Light, dark or follow the system; keep the neutral look or pick an accent — your
+  OS accent colour (Windows, macOS, GNOME 47+, KDE), a preset, or any hex — and optionally Material
+  You style tinted surfaces. The whole window and the dictation pill follow, live.
 
 ### Quick start
 

@@ -55,7 +55,7 @@ export function Section({
     <section className="space-y-3">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h2 className="overline">{title}</h2>
+          <h2 className="eyebrow">{title}</h2>
           {description && <p className="mt-2 text-[13px] text-muted-foreground">{description}</p>}
         </div>
         {actions}

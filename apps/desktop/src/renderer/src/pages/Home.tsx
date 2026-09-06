@@ -173,7 +173,7 @@ export function HomePage({
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="overline">Recent</h2>
+          <h2 className="eyebrow">Recent</h2>
           <Button variant="ghost" size="sm" onClick={() => onNavigate('history')}>
             View all <ArrowRight />
           </Button>
@@ -207,7 +207,7 @@ export function HomePage({
 
       {lastLatency && settings.general.showLatencyInHistory && (
         <section className="space-y-3">
-          <h2 className="overline">Last dictation, where the time went</h2>
+          <h2 className="eyebrow">Last dictation, where the time went</h2>
           <LatencyBar t={lastLatency} />
         </section>
       )}

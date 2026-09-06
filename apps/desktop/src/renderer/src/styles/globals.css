@@ -219,7 +219,7 @@
 }
 
 /* Tracked uppercase label that introduces a group. */
-@utility overline {
+@utility eyebrow {
   font-size: 11px;
   line-height: 1;
   font-weight: 500;

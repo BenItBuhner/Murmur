@@ -77,7 +77,7 @@ export function Shell({
         <nav className="flex-1 space-y-px px-3 pt-3">
           {nav.map((item) => (
             <React.Fragment key={item.id}>
-              {item.group && <div className="overline px-3 pb-2 pt-6">{item.group}</div>}
+              {item.group && <div className="eyebrow px-3 pb-2 pt-6">{item.group}</div>}
               <button
                 onClick={() => onNavigate(item.id)}
                 className={cn(

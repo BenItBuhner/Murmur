@@ -40,6 +40,47 @@ const STOP_WORDS = new Set([
   'from'
 ])
 
+/**
+ * A pause right after one of these means the speaker had not said the thing yet ("the flights
+ * for, I mean, twenty people"): the marker is hesitation, not a correction, and nothing before
+ * it should be replaced.
+ */
+const UNFINISHED_TAIL = new Set([
+  ...STOP_WORDS,
+  'the',
+  'a',
+  'an',
+  'my',
+  'your',
+  'our',
+  'their',
+  'his',
+  'her',
+  'its',
+  'this',
+  'these',
+  'those',
+  'some',
+  'any',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'i',
+  'we',
+  'you',
+  'they',
+  'he',
+  'she',
+  'it',
+  'that',
+  'about',
+  'into',
+  'onto',
+  'like'
+])
+
 const markerRe = new RegExp(
   `,\\s*(?:${MARKERS.map((m) => m.replace(/\s+/g, '\\s+')).join('|')})\\s*,\\s*`,
   'giu'
@@ -64,7 +105,12 @@ export function applySelfCorrections(text: string): string {
 
     const afterAll = leadingTokens(after, 6)
     const beforeAll = trailingTokensInSentence(before, 6)
-    if (!afterAll.length || !beforeAll.length) {
+    const lastBefore = beforeAll[beforeAll.length - 1]
+    if (
+      !afterAll.length ||
+      !beforeAll.length ||
+      (lastBefore && UNFINISHED_TAIL.has(lastBefore.text.toLowerCase()))
+    ) {
       out = `${before.replace(/\s+$/, '')} ${after}`
       continue
     }

@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
 import { FolderOpen, Loader2, Power, RotateCcw, Type } from 'lucide-react'
 import { toast } from 'sonner'
-import type { InjectionMethod, OverlayPosition, Theme } from '@shared/settings'
+import type { InjectionMethod, OverlayPosition } from '@shared/settings'
+import { languageName } from '@shared/languages'
+import { AppearanceSettings } from '@renderer/components/AppearanceSettings'
 import { Button } from '@renderer/components/ui/button'
 import { Input, Textarea } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
@@ -23,15 +25,23 @@ import {
   DialogTitle
 } from '@renderer/components/ui/dialog'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
+import { LanguageSelect } from '@renderer/components/LanguageSelect'
+import { UpdatesSection } from '@renderer/components/Updates'
+import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
+import { describeInstallKind } from '@shared/updates'
 
 export function GeneralPage(): React.JSX.Element {
   const { settings, patch, info } = useSettings()
+  const { status } = useCloud()
   const g = settings.general
   const inj = settings.injection
   const [testing, setTesting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const isWin = info?.platform === 'win32'
+  // Same predicate the prompt builder uses, so the description never promises a lock it does not apply.
+  const autoLanguage = !languageName(settings.stt.language)
+  const synced = !!status?.signedIn
 
   const testInsert = async (): Promise<void> => {
     setTesting(true)
@@ -44,6 +54,20 @@ export function GeneralPage(): React.JSX.Element {
   return (
     <div className="space-y-8">
       <PageHeader title="General" />
+
+      <Section title="Language">
+        <SettingRow
+          title="Dictation language"
+          description={
+            (autoLanguage
+              ? 'The speech model guesses the language of each dictation. Fine if you switch languages mid-sentence; pick your language if unclear speech sometimes comes back in the wrong one.'
+              : 'The speech model is locked to this language and the formatting model is told to stay in it, so mumbled words are fixed instead of guessed as another language.') +
+            (synced ? ' Saved to your account and shared with every device you sign in on.' : '')
+          }
+        >
+          <LanguageSelect />
+        </SettingRow>
+      </Section>
 
       <Section title="Startup">
         <SettingRow
@@ -67,17 +91,7 @@ export function GeneralPage(): React.JSX.Element {
       </Section>
 
       <Section title="Appearance">
-        <SettingRow title="Theme">
-          <Segmented<Theme>
-            value={g.theme}
-            onChange={(v) => void patch({ general: { theme: v } })}
-            options={[
-              { value: 'system', label: 'System' },
-              { value: 'light', label: 'Light' },
-              { value: 'dark', label: 'Dark' }
-            ]}
-          />
-        </SettingRow>
+        <AppearanceSettings />
         <SettingRow
           title="Overlay position"
           description="Where the listening pill appears on the screen with your cursor."
@@ -212,12 +226,15 @@ export function GeneralPage(): React.JSX.Element {
         </SettingRow>
       </Section>
 
+      <UpdatesSection />
+
       <Section title="About">
         <SettingRow
           title={`Murmur ${info?.version ?? ''}`}
           description={info ? `Electron ${info.electron} · ${info.platform}/${info.arch}` : ''}
         >
           <div className="flex flex-wrap gap-1.5">
+            {info && <Badge variant="outline">{describeInstallKind(info.installKind)}</Badge>}
             <Badge variant="outline">hook: {info?.hookBackend ?? '…'}</Badge>
             {info?.sessionType && <Badge variant="outline">{info.sessionType}</Badge>}
           </div>

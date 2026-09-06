@@ -18,6 +18,7 @@ import android.view.animation.AnimationUtils
 import androidx.core.graphics.ColorUtils
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.settings.OverlayShape
+import app.murmur.android.ui.theme.Oklch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -37,12 +38,19 @@ private const val NUDGE_REPEAT_MS = 45L
 /** Fastest finger velocity (dp/s) handed to the landing spring; wilder flings still pick the spot, they just do not overshoot more. */
 private const val MAX_SPRING_VELOCITY_DP = 900f
 
-private const val ACCENT = 0xFFFF5A36.toInt()
-private const val BG_DARK = 0xF2141414.toInt()
-private const val BG_SUCCESS = 0xF20F2A1C.toInt()
-private const val BG_ERROR = 0xF23A1512.toInt()
-private const val GREEN = 0xFF7EE2A8.toInt()
-private const val RED = 0xFFFF8A70.toInt()
+/** Height of every state except the resting button. */
+private const val TALL_DP = 46f
+
+/** Widest a message pill gets (long error texts are ellipsized to fit). */
+private const val MESSAGE_MAX_W_DP = 300f
+
+/** How far outside the pill a touch still counts; the touch window is padded by this. */
+private const val TOUCH_PAD_DP = 6f
+
+/** The pulsing "recording" dot: a fixed red-orange, whatever the theme, because that is what it means. */
+private const val RECORD = 0xFFFF5A36.toInt()
+
+// The edit-mode toolbar is a dark control surface over the keyboard, whatever the pill's theme.
 private const val CHIP_DARK = 0xFF2A2A31.toInt()
 private const val PANEL_BG = 0xF5151519.toInt()
 private const val MUTED = 0xFF9A9AA2.toInt()
@@ -62,15 +70,27 @@ private const val MUTED = 0xFF9A9AA2.toInt()
  *
  * Every state grows out of the same anchor point and all transitions are one continuous,
  * time-based morph: size, corner radius and colour interpolate while the old and new contents
- * cross-fade. The window that hosts the view is only ever resized *before* a morph starts (to the
- * union of both shapes) and tightened *after* it settles, so the pixels of the pill never jump
- * when the window changes. Without a [host] the view is a self-contained preview.
+ * cross-fade.
+ *
+ * The view lives in a *canvas* window that is never touchable and is sized for every state the
+ * pill can take at its resting spot, so turning the mic on or off never moves or resizes it.
+ * While the button is being dragged or edited both windows cover the whole screen (that is where
+ * the ghost spots, guides and editor toolbar are drawn and touched). Taps at rest arrive through a
+ * separate, invisible *touch* window that hugs the pill. Without a [host] the view is a
+ * self-contained preview that handles its own touches.
  */
 class OverlayPillView(context: Context) : View(context) {
 
-    /** Owner of the window this view lives in; asked to move and resize it (screen coordinates). */
-    fun interface Host {
-        fun applyWindowFrame(frame: Box)
+    /** Owner of the two overlay windows this view drives (all frames in screen coordinates). */
+    interface Host {
+        /**
+         * The window the pill is drawn in. At rest it only grows and never moves while the mic
+         * turns on or off; it covers the screen while dragging or editing. Must not be touchable.
+         */
+        fun applyCanvasFrame(frame: Box)
+
+        /** The window that receives touches and relays them via [onScreenTouch]; hugs the pill at rest. */
+        fun applyTouchFrame(frame: Box)
     }
 
     var host: Host? = null
@@ -123,6 +143,7 @@ class OverlayPillView(context: Context) : View(context) {
     private var state: DictationState = DictationState.Idle
     private var shape = OverlayShape.PILL
     private var layout = OverlayLayout.DEFAULT
+    private var palette = PillPalette.DEFAULT
     private var editing = false
     private var screenW = 0f
     private var screenH = 0f
@@ -138,7 +159,7 @@ class OverlayPillView(context: Context) : View(context) {
     private var fromAy = 0f
     private var curW = 0f
     private var curH = 0f
-    private var curBg = BG_DARK
+    private var curBg = palette.background
     private var curAx = 0f
     private var curAy = 0f
     private var curIncomingAlpha = 1f
@@ -150,9 +171,16 @@ class OverlayPillView(context: Context) : View(context) {
     private var contentSince = 0L
     private var hasDrawn = false
     private var lastFrameAt = 0L
-    private var windowFrame = Box.EMPTY
-    private var frameApplied = false
     private var pillBox = Box.EMPTY
+
+    // ---- host windows ---------------------------------------------------------------------------
+
+    /** The canvas window's frame; everything is drawn translated by its origin. */
+    private var windowFrame = Box.EMPTY
+    private var canvasApplied = false
+    private var canvasIsScreen = false
+    private var touchFrame = Box.EMPTY
+    private var touchApplied = false
 
     /** Landing on a spot after a drag: the anchor follows these instead of the timed morph. */
     private var springX: Spring? = null
@@ -263,6 +291,14 @@ class OverlayPillView(context: Context) : View(context) {
         if (shapeChanged || layoutChanged) retarget()
     }
 
+    /** Theme colours; the body colour morphs to the new value like any other look change. */
+    fun setPalette(palette: PillPalette) {
+        if (palette == this.palette) return
+        this.palette = palette
+        retarget()
+        invalidate()
+    }
+
     fun setEditing(editing: Boolean) {
         if (this.editing == editing) return
         this.editing = editing
@@ -272,6 +308,10 @@ class OverlayPillView(context: Context) : View(context) {
         hits.clear()
         panelBottom = 0f
         retarget()
+        // The look and anchor rarely change here (idle button, same spot), so retarget() may have
+        // nothing to morph; the windows still have to switch between the screen and the pill.
+        requestFrames()
+        invalidate()
     }
 
     fun render(next: DictationState) {
@@ -290,21 +330,21 @@ class OverlayPillView(context: Context) : View(context) {
     // ---- looks ----------------------------------------------------------------------------------
 
     private fun idleLook(): Look = when (shape) {
-        OverlayShape.PILL -> Look(Kind.IDLE, dp(64f), dp(36f), BG_DARK)
-        OverlayShape.CIRCLE -> Look(Kind.IDLE, dp(36f), dp(36f), BG_DARK)
+        OverlayShape.PILL -> Look(Kind.IDLE, dp(64f), dp(36f), palette.background)
+        OverlayShape.CIRCLE -> Look(Kind.IDLE, dp(36f), dp(36f), palette.background)
     }
 
     private fun listeningLook(): Look {
         val maxW = if (screenW > 0f) screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP) else Float.MAX_VALUE
-        return Look(Kind.LISTENING, min(dp(232f), maxW), dp(46f), BG_DARK)
+        return Look(Kind.LISTENING, min(dp(232f), maxW), dp(TALL_DP), palette.background)
     }
 
     private fun lookFor(s: DictationState): Look = when (s) {
         is DictationState.Idle -> idleLook()
         is DictationState.Listening -> listeningLook()
-        is DictationState.Processing -> Look(Kind.PROCESSING, textPaint.measureText(s.label) + dp(64f), dp(46f), BG_DARK, s.label)
-        is DictationState.Success -> Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(46f), BG_SUCCESS, s.message)
-        is DictationState.Error -> Look(Kind.ERROR, min(dp(300f), textPaint.measureText(s.message) + dp(56f)), dp(46f), BG_ERROR, s.message)
+        is DictationState.Processing -> Look(Kind.PROCESSING, textPaint.measureText(s.label) + dp(64f), dp(TALL_DP), palette.background, s.label)
+        is DictationState.Success -> Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(TALL_DP), palette.successBackground, s.message)
+        is DictationState.Error -> Look(Kind.ERROR, min(dp(MESSAGE_MAX_W_DP), textPaint.measureText(s.message) + dp(56f)), dp(TALL_DP), palette.errorBackground, s.message)
     }
 
     /** Screen-space centre of the resting button on [spot]. */
@@ -362,37 +402,77 @@ class OverlayPillView(context: Context) : View(context) {
             morphDuration = if (lookChanged) MORPH_MS else MOVE_MS
             if (lookChanged) contentSince = now
         }
-        requestFrame()
+        requestFrames()
         invalidate()
     }
 
-    /** Window frame covering both ends of the morph (or the whole screen while editing or dragging). */
-    private fun requestFrame() {
+    /** The pill covers the whole screen while it is being dragged, edited, or springing to a spot. */
+    private fun fullScreenFrames(): Boolean = editing || dragging || springX != null
+
+    /**
+     * Every box the pill can occupy at this spot: the resting button, the listening bar and the
+     * widest message (plus whatever the outline is actually doing, should a look exceed the cap).
+     */
+    private fun statesUnion(ax: Float, ay: Float): Box {
+        val wide = min(dp(MESSAGE_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)).coerceAtLeast(1f)
+        return boxFor(idleLook(), ax, ay)
+            .union(OverlayGeometry.place(ax, ay, wide, dp(TALL_DP), screenW, screenH, density))
+            .union(boxFor(fromLook, fromAx, fromAy))
+            .union(boxFor(toLook, toAx, toAy))
+    }
+
+    /** Ask the host for the windows this morph needs (or the whole screen while dragging or editing). */
+    private fun requestFrames() {
         if (previewMode || host == null) {
             windowFrame = Box(0f, 0f, width.toFloat(), height.toFloat())
             return
         }
+        if (screenW <= 0f || screenH <= 0f) return
         val screen = Box(0f, 0f, screenW, screenH)
-        val frame = if (editing || dragging) screen else {
-            // A landing spring may overshoot its spot a little; leave it room.
-            val pad = dp(SHADOW_PAD_DP) + if (springX != null) dp(20f) else 0f
-            boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy)).inflate(pad).intersect(screen)
+        if (fullScreenFrames()) {
+            requestCanvas(screen)
+            requestTouch(screen)
+            return
         }
-        applyFrame(frame)
+        requestCanvas(
+            statesUnion(fromAx, fromAy).union(statesUnion(toAx, toAy)).inflate(dp(SHADOW_PAD_DP)).intersect(screen)
+        )
+        requestTouch(
+            boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy)).inflate(dp(TOUCH_PAD_DP)).intersect(screen)
+        )
     }
 
-    private fun applyFrame(frame: Box) {
-        if (frameApplied && frame.approximately(windowFrame)) return
-        windowFrame = frame
-        frameApplied = true
-        host?.applyWindowFrame(frame)
+    /**
+     * The canvas only ever grows while resting (an anchor that wobbles as a suggestion strip comes
+     * and goes settles on a window covering both), and is rebuilt from scratch when it switches
+     * between hugging the states and covering the screen. Shrinking or moving it at rest would
+     * change its origin, and an origin change is precisely the jump this design exists to avoid.
+     */
+    private fun requestCanvas(required: Box) {
+        val screenMode = fullScreenFrames()
+        val next = when {
+            !canvasApplied || canvasIsScreen != screenMode -> required
+            windowFrame.encloses(required) -> return
+            else -> windowFrame.union(required)
+        }
+        canvasApplied = true
+        canvasIsScreen = screenMode
+        windowFrame = next
+        host?.applyCanvasFrame(next)
     }
 
-    /** After a morph settles, shrink the window back around the pill. */
-    private fun tightenFrame() {
+    private fun requestTouch(frame: Box) {
+        if (touchApplied && frame.approximately(touchFrame)) return
+        touchFrame = frame
+        touchApplied = true
+        host?.applyTouchFrame(frame)
+    }
+
+    /** After a morph settles, pull the touch window back in around the pill. */
+    private fun tightenTouchFrame() {
         if (previewMode || host == null || editing || dragging || morphStart >= 0L || springX != null) return
         val screen = Box(0f, 0f, screenW, screenH)
-        applyFrame(boxFor(toLook, toAx, toAy).inflate(dp(SHADOW_PAD_DP)).intersect(screen))
+        requestTouch(boxFor(toLook, toAx, toAy).inflate(dp(TOUCH_PAD_DP)).intersect(screen))
     }
 
     // ---- measure / layout -----------------------------------------------------------------------
@@ -434,7 +514,7 @@ class OverlayPillView(context: Context) : View(context) {
             t = ((now - morphStart).toFloat() / morphDuration).coerceIn(0f, 1f)
             if (t >= 1f) {
                 morphStart = -1L
-                post { tightenFrame() }
+                post { tightenTouchFrame() }
             }
         }
         val e = easeOutCubic(t)
@@ -451,7 +531,8 @@ class OverlayPillView(context: Context) : View(context) {
             if (sx.settled && sy.settled) {
                 springX = null
                 springY = null
-                post { tightenFrame() }
+                // The spring covered the screen; shrink both windows back around the landed pill.
+                post { requestFrames() }
             }
         } else {
             curAx = lerp(fromAx, toAx, e)
@@ -525,8 +606,8 @@ class OverlayPillView(context: Context) : View(context) {
             Kind.IDLE -> drawIdle(canvas, box)
             Kind.LISTENING -> drawListening(canvas, box, now, dt)
             Kind.PROCESSING -> drawProcessing(canvas, box, look.text, now)
-            Kind.SUCCESS -> drawMessage(canvas, box, look, GREEN, true, now)
-            Kind.ERROR -> drawMessage(canvas, box, look, RED, false, now)
+            Kind.SUCCESS -> drawMessage(canvas, box, look, palette.successForeground, true, now)
+            Kind.ERROR -> drawMessage(canvas, box, look, palette.errorForeground, false, now)
         }
         if (!full) canvas.restore()
         canvas.restore()
@@ -539,7 +620,7 @@ class OverlayPillView(context: Context) : View(context) {
         strokePaint.strokeWidth = dp(1.8f)
         val mw = dp(4.4f)
         val mh = dp(7.5f)
-        paint.color = ACCENT
+        paint.color = palette.accent
         canvas.drawRoundRect(cx - mw / 2, cy - mh + dp(1f), cx + mw / 2, cy + dp(2.4f), mw / 2, mw / 2, paint)
         canvas.drawArc(cx - dp(7f), cy - dp(4.5f), cx + dp(7f), cy + dp(6.5f), 15f, 150f, false, strokePaint)
         canvas.drawLine(cx, cy + dp(6.5f), cx, cy + dp(9f), strokePaint)
@@ -560,7 +641,7 @@ class OverlayPillView(context: Context) : View(context) {
 
         val dotCx = box.left + dp(52f)
         val pulse = 1f + 0.18f * sin(2.0 * PI * (now % 1200L) / 1200.0).toFloat()
-        paint.color = ACCENT
+        paint.color = RECORD
         canvas.drawCircle(dotCx, cy, dp(3.6f) * pulse, paint)
 
         // Conveyor-belt waveform: bars slide left continuously between level samples.
@@ -593,9 +674,10 @@ class OverlayPillView(context: Context) : View(context) {
 
         val confirmCx = box.right - dp(24f)
         confirmBox = Box.centered(confirmCx, cy, btnR * 2, btnR * 2)
-        paint.color = ACCENT
+        paint.color = palette.accent
         canvas.drawCircle(confirmCx, cy, btnR - dp(2f), paint)
-        strokePaint.color = Color.WHITE
+        // Light accents (Material You tone 80) need a dark tick to stay legible.
+        strokePaint.color = onAccent()
         strokePaint.strokeWidth = dp(2.2f)
         canvas.drawLine(confirmCx - dp(4.6f), cy + dp(0.5f), confirmCx - dp(1f), cy + dp(4f), strokePaint)
         canvas.drawLine(confirmCx - dp(1f), cy + dp(4f), confirmCx + dp(5f), cy - dp(3.5f), strokePaint)
@@ -711,9 +793,9 @@ class OverlayPillView(context: Context) : View(context) {
             val r = box.height / 2f
             scratchRect.set(box.left, box.top, box.right, box.bottom)
             if (i == candidate) {
-                paint.color = ColorUtils.setAlphaComponent(ACCENT, (0x48 * alpha).toInt())
+                paint.color = ColorUtils.setAlphaComponent(palette.accent, (0x48 * alpha).toInt())
                 canvas.drawRoundRect(scratchRect, r, r, paint)
-                strokePaint.color = ColorUtils.setAlphaComponent(ACCENT, (0xE6 * alpha).toInt())
+                strokePaint.color = ColorUtils.setAlphaComponent(palette.accent, (0xE6 * alpha).toInt())
                 strokePaint.strokeWidth = dp(2f)
                 canvas.drawRoundRect(scratchRect, r, r, strokePaint)
             } else {
@@ -736,7 +818,7 @@ class OverlayPillView(context: Context) : View(context) {
         springX = null
         springY = null
         morphStart = -1L
-        requestFrame()
+        requestFrames()
         dragFree(x, y)
     }
 
@@ -778,7 +860,7 @@ class OverlayPillView(context: Context) : View(context) {
         toAy = ty
         morphStart = -1L
         performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-        requestFrame()
+        requestFrames()
         invalidate()
     }
 
@@ -808,12 +890,14 @@ class OverlayPillView(context: Context) : View(context) {
         val r = dp(8f)
         val cx = box.right - dp(3f)
         val cy = box.top + dp(3f)
-        paint.color = if (active) ACCENT else 0xFF3C3C45.toInt()
+        paint.color = if (active) palette.accent else 0xFF3C3C45.toInt()
         canvas.drawCircle(cx, cy, r, paint)
         strokePaint.color = 0x33000000
         strokePaint.strokeWidth = dp(1f)
         canvas.drawCircle(cx, cy, r, strokePaint)
+        badgeTextPaint.color = if (active) onAccent() else Color.WHITE
         canvas.drawText(number.toString(), cx, cy + badgeTextPaint.textSize / 2.8f, badgeTextPaint)
+        badgeTextPaint.color = Color.WHITE
     }
 
     private fun drawEditGuides(canvas: Canvas, now: Long, button: Box) {
@@ -827,7 +911,7 @@ class OverlayPillView(context: Context) : View(context) {
         canvas.drawPath(scratchPath, dashPaint)
 
         // Alignment guides the drag is snapped to: the middle of the screen or another spot's row/column.
-        dashPaint.color = 0xB3FF5A36.toInt()
+        dashPaint.color = ColorUtils.setAlphaComponent(palette.accent, 0xB3)
         guideX?.let { gx -> canvas.drawLine(gx, guideXSpan.first, gx, guideXSpan.second, dashPaint) }
         guideY?.let { gy -> canvas.drawLine(guideYSpan.first, gy, guideYSpan.second, gy, dashPaint) }
 
@@ -835,7 +919,7 @@ class OverlayPillView(context: Context) : View(context) {
         val pulse = sin(2.0 * PI * (now % 1600L) / 1600.0).toFloat()
         val pad = dp(7f) + dp(2.5f) * pulse
         val halo = button.inflate(pad)
-        strokePaint.color = ColorUtils.setAlphaComponent(ACCENT, (150 + 60 * pulse).toInt().coerceIn(0, 255))
+        strokePaint.color = ColorUtils.setAlphaComponent(palette.accent, (150 + 60 * pulse).toInt().coerceIn(0, 255))
         strokePaint.strokeWidth = dp(2f)
         scratchRect.set(halo.left, halo.top, halo.right, halo.bottom)
         canvas.drawRoundRect(scratchRect, halo.height / 2f, halo.height / 2f, strokePaint)
@@ -916,7 +1000,7 @@ class OverlayPillView(context: Context) : View(context) {
         val w = if (square) h else smallTextPaint.measureText(label) + dp(28f)
         val box = Box(x, y, x + w, y + h)
         hits += Hit(control, box)
-        drawChip(canvas, box, label, if (selected) ACCENT else CHIP_DARK, Color.WHITE, pressedControl == control)
+        drawChip(canvas, box, label, if (selected) palette.accent else CHIP_DARK, if (selected) onAccent() else Color.WHITE, pressedControl == control)
         return box.right
     }
 
@@ -924,7 +1008,7 @@ class OverlayPillView(context: Context) : View(context) {
         val w = smallTextPaint.measureText(label) + dp(32f)
         val box = Box(right - w, y, right, y + h)
         hits += Hit(control, box)
-        drawChip(canvas, box, label, if (accent) ACCENT else CHIP_DARK, Color.WHITE, pressedControl == control)
+        drawChip(canvas, box, label, if (accent) palette.accent else CHIP_DARK, if (accent) onAccent() else Color.WHITE, pressedControl == control)
     }
 
     private fun drawNudgeControl(canvas: Canvas, x: Float, y: Float, h: Float, dx: Int, dy: Int): Float {
@@ -981,6 +1065,9 @@ class OverlayPillView(context: Context) : View(context) {
         return "$s…"
     }
 
+    /** Text/icon colour that stays legible on the accent (dark ink on light Material You tones). */
+    private fun onAccent(): Int = if (Oklch.fromArgb(palette.accent).l > 0.7) 0xE6000000.toInt() else Color.WHITE
+
     private fun statusBarInset(): Float {
         val insets = rootWindowInsets ?: return dp(24f)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1023,10 +1110,16 @@ class OverlayPillView(context: Context) : View(context) {
 
     // ---- touch ----------------------------------------------------------------------------------
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        // Screen coordinates: the window moves and grows underneath a drag, view coordinates would jump with it.
-        val x = event.rawX
-        val y = event.rawY
+    /** Preview / hostless mode: this view is its own touch surface. */
+    override fun onTouchEvent(event: MotionEvent): Boolean =
+        onScreenTouch(event, event.x + windowFrame.left, event.y + windowFrame.top)
+
+    /**
+     * A touch relayed by the host's touch window, the pointer given in screen coordinates. Screen
+     * space is the pill's own frame of reference: the touch window moves and grows underneath a
+     * drag, so window-relative coordinates would jump with it.
+     */
+    fun onScreenTouch(event: MotionEvent, x: Float, y: Float): Boolean {
         if (editing) return onEditTouch(event, x, y)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {

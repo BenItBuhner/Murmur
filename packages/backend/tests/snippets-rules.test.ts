@@ -81,6 +81,34 @@ describe('appRules', () => {
     expect(rule.trailingSpace).toBeUndefined()
   })
 
+  it('stores per-app structure and model overrides, trimming instructions', async () => {
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const id = await asAda.mutation(api.appRules.upsert, {
+      match: 'Code.exe',
+      lists: 'off',
+      numbers: 'all',
+      freedom: 'strict',
+      instructions: '  Keep identifiers exactly as spoken.  '
+    })
+    const [rule] = await asAda.query(api.appRules.list, {})
+    expect(rule.id).toBe(id)
+    expect(rule).toMatchObject({
+      lists: 'off',
+      numbers: 'all',
+      freedom: 'strict',
+      instructions: 'Keep identifiers exactly as spoken.'
+    })
+    // Re-upserting without the overrides clears them; blank instructions are dropped.
+    await asAda.mutation(api.appRules.upsert, { id, match: 'Code.exe', instructions: '   ' })
+    const [again] = await asAda.query(api.appRules.list, {})
+    expect(again.lists).toBeUndefined()
+    expect(again.instructions).toBeUndefined()
+    await expect(
+      asAda.mutation(api.appRules.upsert, { match: 'x', instructions: 'a'.repeat(2001) })
+    ).rejects.toThrow(/instructions/)
+  })
+
   it('defaults tone to auto, lists oldest first, isolates and imports', async () => {
     const t = setup()
     const asAda = t.withIdentity(ada)

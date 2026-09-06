@@ -1,5 +1,10 @@
 package app.murmur.android.text
 
+import app.murmur.android.settings.ListsMode
+import app.murmur.android.settings.LlmFreedom
+import app.murmur.android.settings.LlmStructure
+import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.NumbersMode
 import app.murmur.android.settings.Tone
 
 /**
@@ -48,6 +53,33 @@ fun autoTone(category: AppCategory): Tone = when (category) {
 
 fun resolveTone(globalTone: Tone, ctx: AppContext): Tone =
     if (globalTone != Tone.AUTO) globalTone else autoTone(ctx.category)
+
+/** Everything the text stages need to know about the destination, already merged (desktop: ResolvedStyle). */
+data class FormatStyle(
+    val tone: Tone,
+    val mode: app.murmur.android.settings.FormattingMode,
+    val lists: ListsMode,
+    val numbers: NumbersMode,
+    val freedom: LlmFreedom,
+    val structure: LlmStructure,
+    val instructions: String,
+    val technical: Boolean
+)
+
+/** Code editors and terminals never get lists, always get digits and a strict model that keeps the layout. */
+fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
+    val technical = ctx.category == AppCategory.CODE || ctx.category == AppCategory.TERMINAL
+    return FormatStyle(
+        tone = resolveTone(s.tone, ctx),
+        mode = s.formattingMode,
+        lists = if (technical) ListsMode.OFF else s.lists,
+        numbers = if (technical) NumbersMode.ALL else s.numbers,
+        freedom = if (technical) LlmFreedom.STRICT else s.llmFreedom,
+        structure = if (technical) LlmStructure.KEEP else s.llmStructure,
+        instructions = s.llmInstructions.trim(),
+        technical = technical
+    )
+}
 
 fun toneDescription(tone: Tone): String = when (tone) {
     Tone.CASUAL ->

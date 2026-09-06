@@ -5,6 +5,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/input'
 import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
+import { UpdateBanner } from '@renderer/components/Updates'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
@@ -48,14 +49,14 @@ export function HomePage({
   const lastLatency = useMemo(() => recent.find((e) => !e.error)?.timings, [recent])
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-9">
       <div className="flex items-start justify-between gap-6">
         <div>
-          <h1 className="text-[26px] font-semibold tracking-tight">
+          <h1 className="serif-display text-[40px]">
             {greeting}
             {firstName ? `, ${firstName}` : ''}.
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-2.5 text-[15px] text-muted-foreground">
             Click into any text field, hold your shortcut, speak, let go.
           </p>
         </div>
@@ -67,7 +68,7 @@ export function HomePage({
                 ? 'secondary'
                 : 'success'
           }
-          className="mt-2 h-6 px-2.5 text-xs"
+          className="mt-3 h-6 px-2.5 text-xs"
         >
           {state.phase === 'listening'
             ? 'Listening'
@@ -95,6 +96,8 @@ export function HomePage({
           </CardContent>
         </Card>
       )}
+
+      <UpdateBanner onNavigate={onNavigate} />
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
         <Card>
@@ -173,21 +176,21 @@ export function HomePage({
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold tracking-tight">Recent</h2>
+          <h2 className="eyebrow">Recent</h2>
           <Button variant="ghost" size="sm" onClick={() => onNavigate('history')}>
             View all <ArrowRight />
           </Button>
         </div>
         {recent.length === 0 ? (
-          <div className="rounded-xl border border-dashed px-6 py-10 text-center text-[13px] text-muted-foreground">
+          <div className="rounded-2xl border px-6 py-12 text-center text-[13px] text-muted-foreground">
             Nothing yet. Your dictations show up here with their timing breakdown.
           </div>
         ) : (
-          <div className="rounded-xl border bg-card shadow-xs divide-y">
+          <div className="rounded-2xl border bg-card divide-y">
             {recent.map((e) => (
-              <div key={e.id} className="flex items-start gap-4 px-5 py-3.5">
+              <div key={e.id} className="flex items-start gap-4 px-5 py-4">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm">
+                  <div className="truncate text-[15px]">
                     {e.error ? <span className="text-destructive">{e.error}</span> : e.finalText}
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -207,9 +210,7 @@ export function HomePage({
 
       {lastLatency && settings.general.showLatencyInHistory && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold tracking-tight">
-            Last dictation, where the time went
-          </h2>
+          <h2 className="eyebrow">Last dictation, where the time went</h2>
           <LatencyBar t={lastLatency} />
         </section>
       )}
@@ -230,13 +231,13 @@ function Stat({
 }): React.JSX.Element {
   return (
     <Card>
-      <CardContent className="pt-4">
-        <div className="flex items-center gap-2 text-[12px] text-muted-foreground [&>svg]:size-3.5">
+      <CardContent className="pt-5">
+        <div className="flex items-center gap-2 text-[12px] text-muted-foreground [&>svg]:size-3.5 [&>svg]:stroke-[1.75]">
           {icon}
           {label}
         </div>
-        <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
-        {hint && <div className="text-[11px] text-muted-foreground">{hint}</div>}
+        <div className="serif-display mt-3 text-[34px] tabular-nums">{value}</div>
+        {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
       </CardContent>
     </Card>
   )
@@ -244,16 +245,16 @@ function Stat({
 
 export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Element {
   const parts = [
-    { label: 'Silence trim', ms: t.vadMs, color: 'bg-stone-400' },
-    { label: 'Speech to text', ms: t.sttMs, color: 'bg-blue-500' },
-    { label: 'Cleanup', ms: t.formatMs, color: 'bg-emerald-500' },
-    { label: 'Smart format', ms: t.llmMs, color: 'bg-violet-500' },
-    { label: 'Insert', ms: t.injectMs, color: 'bg-amber-500' }
+    { label: 'Silence trim', ms: t.vadMs, color: 'bg-chart-1' },
+    { label: 'Speech to text', ms: t.sttMs, color: 'bg-chart-2' },
+    { label: 'Cleanup', ms: t.formatMs, color: 'bg-chart-3' },
+    { label: 'Smart format', ms: t.llmMs, color: 'bg-chart-4' },
+    { label: 'Insert', ms: t.injectMs, color: 'bg-chart-5' }
   ].filter((p) => p.ms > 0)
   const total = Math.max(1, t.totalMs)
   return (
-    <div className="rounded-xl border bg-card p-5 shadow-xs">
-      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+    <div className="rounded-2xl border bg-card p-5">
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
         {parts.map((p) => (
           <div
             key={p.label}

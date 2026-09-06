@@ -13,7 +13,7 @@ function Card({ className, ...props }: React.ComponentProps<'div'>): React.JSX.E
   return (
     <div
       data-slot="card"
-      className={cn('rounded-xl border bg-card text-card-foreground shadow-xs', className)}
+      className={cn('rounded-2xl border bg-card text-card-foreground', className)}
       {...props}
     />
   )
@@ -39,16 +39,16 @@ function CardContent({ className, ...props }: React.ComponentProps<'div'>): Reac
 // ---- Badge ----------------------------------------------------------------------------------
 
 const badgeVariants = cva(
-  'inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-[11px] font-medium w-fit whitespace-nowrap gap-1 [&>svg]:size-3',
+  'inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium w-fit whitespace-nowrap gap-1.5 [&>svg]:size-3',
   {
     variants: {
       variant: {
         default: 'border-transparent bg-primary text-primary-foreground',
         secondary: 'border-transparent bg-secondary text-secondary-foreground',
-        outline: 'text-foreground',
-        success: 'border-transparent bg-success/15 text-success',
-        destructive: 'border-transparent bg-destructive/15 text-destructive',
-        record: 'border-transparent bg-record/15 text-record'
+        outline: 'border-input text-muted-foreground',
+        success: 'border-transparent bg-success/12 text-success',
+        destructive: 'border-transparent bg-destructive/12 text-destructive',
+        record: 'border-transparent bg-record/12 text-record'
       }
     },
     defaultVariants: { variant: 'default' }
@@ -99,7 +99,7 @@ function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          'z-50 w-fit max-w-xs rounded-md bg-primary px-2.5 py-1.5 text-xs text-primary-foreground shadow-md animate-fade-in text-balance',
+          'z-50 w-fit max-w-xs rounded-lg bg-foreground px-2.5 py-1.5 text-xs text-background shadow-md animate-fade-in text-balance',
           className
         )}
         {...props}
@@ -120,7 +120,7 @@ function TabsList({
   return (
     <TabsPrimitive.List
       className={cn(
-        'inline-flex h-9 w-fit items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground',
+        'inline-flex h-9 w-fit items-center justify-center rounded-full border bg-card p-[3px] text-muted-foreground',
         className
       )}
       {...props}
@@ -134,7 +134,7 @@ function TabsTrigger({
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-3 text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs',
+        'inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-full border border-transparent px-3.5 text-[13px] font-medium whitespace-nowrap transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground',
         className
       )}
       {...props}
@@ -165,7 +165,10 @@ function Segmented<T extends string>({
   return (
     <div
       role="radiogroup"
-      className={cn('inline-flex h-9 items-center rounded-lg bg-muted p-1 text-sm', className)}
+      className={cn(
+        'inline-flex h-9 items-center rounded-full border bg-card p-[3px] text-[13px]',
+        className
+      )}
     >
       {options.map((o) => (
         <button
@@ -176,8 +179,8 @@ function Segmented<T extends string>({
           title={o.hint}
           onClick={() => onChange(o.value)}
           className={cn(
-            'h-7 rounded-md px-3 font-medium text-muted-foreground transition-all',
-            value === o.value && 'bg-card text-foreground shadow-xs'
+            'h-7 rounded-full px-3.5 font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground',
+            value === o.value && 'bg-primary text-primary-foreground hover:text-primary-foreground'
           )}
         >
           {o.label}

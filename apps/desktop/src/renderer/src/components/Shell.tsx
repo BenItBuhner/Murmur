@@ -30,7 +30,7 @@ export type Route =
 const NAV: Array<{
   id: Route
   label: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
   group?: string
   /** Only shown when the build talks to a Murmur cloud instance. */
   cloud?: boolean
@@ -71,26 +71,21 @@ export function Shell({
   return (
     <div className="flex h-full">
       <aside className="flex w-56 shrink-0 flex-col border-r bg-sidebar">
-        <div className={cn('flex items-center gap-2.5 px-5', isWin ? 'h-10 drag-region' : 'h-14')}>
-          <Logo />
-          <span className="text-[15px] font-semibold tracking-tight">Murmur</span>
+        <div className={cn('flex items-center px-6', isWin ? 'h-10 drag-region' : 'h-16')}>
+          <Wordmark />
         </div>
-        <nav className="flex-1 space-y-0.5 px-3 pt-2">
+        <nav className="flex-1 space-y-px px-3 pt-3">
           {nav.map((item) => (
             <React.Fragment key={item.id}>
-              {item.group && (
-                <div className="px-2 pb-1.5 pt-4 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-                  {item.group}
-                </div>
-              )}
+              {item.group && <div className="eyebrow px-3 pb-2 pt-6">{item.group}</div>}
               <button
                 onClick={() => onNavigate(item.id)}
                 className={cn(
-                  'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-                  route === item.id && 'bg-card text-foreground shadow-xs'
+                  'flex w-full items-center gap-2.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground',
+                  route === item.id && 'bg-accent text-foreground [&>svg]:text-primary'
                 )}
               >
-                <item.icon className="size-4" />
+                <item.icon className="size-4 opacity-80" strokeWidth={1.75} />
                 {item.label}
               </button>
             </React.Fragment>
@@ -103,7 +98,7 @@ export function Shell({
       </aside>
       <main className="relative flex-1 min-w-0 overflow-hidden">
         {isWin && <div className="drag-region absolute inset-x-0 top-0 h-10" />}
-        <div className={cn('h-full overflow-y-auto px-10 pb-12', isWin ? 'pt-12' : 'pt-10')}>
+        <div className={cn('h-full overflow-y-auto px-12 pb-14', isWin ? 'pt-12' : 'pt-12')}>
           <div className="mx-auto max-w-3xl animate-fade-in" key={route}>
             {children}
           </div>
@@ -134,22 +129,22 @@ function StatusCard({
       onClick={() =>
         enabled ? void window.murmur.dictation.toggle() : void window.murmur.app.setEnabled(true)
       }
-      className="flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-2 text-left shadow-xs transition-colors hover:bg-accent"
+      className="flex w-full items-center gap-2.5 rounded-xl border bg-card px-3.5 py-2.5 text-left transition-colors duration-200 hover:bg-accent"
       title={listening ? 'Stop and insert' : 'Start hands-free dictation'}
     >
-      <span className="relative flex size-2.5">
+      <span className="relative flex size-2">
         {listening && (
           <span className="absolute inline-flex size-full rounded-full bg-record opacity-70 animate-pulse-soft" />
         )}
         <span
           className={cn(
-            'relative inline-flex size-2.5 rounded-full',
+            'relative inline-flex size-2 rounded-full',
             !enabled
               ? 'bg-muted-foreground/40'
               : listening
                 ? 'bg-record'
                 : processing
-                  ? 'bg-blue-400'
+                  ? 'bg-info'
                   : 'bg-success'
           )}
         />
@@ -160,6 +155,11 @@ function StatusCard({
       </span>
     </button>
   )
+}
+
+/** The name, set in the display serif. */
+export function Wordmark({ className }: { className?: string }): React.JSX.Element {
+  return <span className={cn('serif-display text-[23px] leading-none', className)}>Murmur</span>
 }
 
 export function Logo({ className }: { className?: string }): React.JSX.Element {

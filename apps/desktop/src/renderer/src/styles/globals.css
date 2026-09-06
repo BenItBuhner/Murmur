@@ -2,11 +2,37 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Instrument Serif (OFL, see fonts/OFL-InstrumentSerif.txt): the display face shared with the
+   Android app. Headlines, the wordmark and large numerals; everything else stays in the sans. */
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/InstrumentSerif-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/InstrumentSerif-Italic.ttf') format('truetype');
+}
+
+/*
+ * Colour tokens. The values below are the neutral palette and only cover the first frame: as soon
+ * as the renderer mounts, ThemeProvider (hooks/useTheme.tsx) sets every token inline on <html>
+ * from the user's appearance settings via shared/theme.ts. Add a token here, in @theme inline,
+ * and in THEME_TOKENS so all three stay in step. Structure comes from hairlines and whitespace
+ * rather than shadows and boxes, whatever the palette.
+ */
 :root {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif;
-  --radius: 0.75rem;
+  --font-serif: 'Instrument Serif', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --radius: 0.875rem;
+  color-scheme: light;
 
   --background: oklch(0.985 0.002 90);
   --foreground: oklch(0.2 0.01 60);
@@ -29,10 +55,27 @@
   --ring: oklch(0.55 0.02 60);
   --record: oklch(0.68 0.21 35);
   --success: oklch(0.65 0.16 150);
+  --warning: oklch(0.75 0.16 75);
+  --info: oklch(0.62 0.16 250);
   --sidebar: oklch(0.965 0.003 85);
+  --chart-1: oklch(0.71 0.01 56);
+  --chart-2: oklch(0.62 0.21 260);
+  --chart-3: oklch(0.7 0.15 162);
+  --chart-4: oklch(0.61 0.22 293);
+  --chart-5: oklch(0.77 0.16 70);
+  --overlay: oklch(0.18 0 0);
+  --overlay-foreground: oklch(1 0 0);
+  --overlay-command: oklch(0.24 0.06 290);
+  --overlay-command-foreground: oklch(0.72 0.16 293);
+  --overlay-success: oklch(0.25 0.05 150);
+  --overlay-success-foreground: oklch(0.84 0.12 155);
+  --overlay-error: oklch(0.26 0.07 25);
+  --overlay-error-foreground: oklch(0.78 0.13 30);
+  --overlay-disabled: oklch(0.3 0 0);
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.16 0.004 60);
   --foreground: oklch(0.93 0.004 80);
   --card: oklch(0.2 0.005 60);
@@ -54,11 +97,18 @@
   --ring: oklch(0.6 0.01 60);
   --record: oklch(0.7 0.2 35);
   --success: oklch(0.7 0.15 150);
+  --warning: oklch(0.8 0.15 75);
+  --info: oklch(0.7 0.14 250);
   --sidebar: oklch(0.14 0.004 60);
 }
 
 @theme inline {
   --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  /* Paper does not cast shadows. Only floating layers (dialogs, popovers, the pill) keep theirs. */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -80,7 +130,23 @@
   --color-ring: var(--ring);
   --color-record: var(--record);
   --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-sidebar: var(--sidebar);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-overlay: var(--overlay);
+  --color-overlay-foreground: var(--overlay-foreground);
+  --color-overlay-command: var(--overlay-command);
+  --color-overlay-command-foreground: var(--overlay-command-foreground);
+  --color-overlay-success: var(--overlay-success);
+  --color-overlay-success-foreground: var(--overlay-success-foreground);
+  --color-overlay-error: var(--overlay-error);
+  --color-overlay-error-foreground: var(--overlay-error-foreground);
+  --color-overlay-disabled: var(--overlay-disabled);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -133,6 +199,21 @@
     background-color 300ms ease,
     box-shadow 300ms ease;
   will-change: width, height;
+}
+
+/* Theme changes glide instead of snapping; motion-sensitive users get the instant switch. */
+.theme-transition,
+.theme-transition * {
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease,
+    color 160ms ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-transition,
+  .theme-transition * {
+    transition-duration: 1ms !important;
+  }
 }
 .overlay-layer {
   position: absolute;
@@ -191,6 +272,25 @@
   }
 }
 
+/* Tracked uppercase label that introduces a group. */
+@utility eyebrow {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Editorial serif for headlines and large numerals. */
+@utility serif-display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  font-feature-settings: normal;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -205,6 +305,9 @@
     font-feature-settings: 'cv11', 'ss01';
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--record) 28%, transparent);
   }
   ::-webkit-scrollbar {
     width: 10px;
@@ -228,6 +331,6 @@
     -webkit-app-region: no-drag;
   }
   kbd {
-    @apply inline-flex items-center justify-center rounded-md border bg-card px-1.5 min-w-6 h-6 text-[11px] font-medium text-foreground shadow-[inset_0_-1px_0_0_var(--border)];
+    @apply inline-flex items-center justify-center rounded-md border border-input bg-card px-1.5 min-w-6 h-6 text-[11px] font-medium text-foreground;
   }
 }

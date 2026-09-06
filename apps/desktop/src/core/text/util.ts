@@ -26,6 +26,22 @@ export function isCapitalized(word: string): boolean {
   return /^\p{Lu}/u.test(word)
 }
 
+export const QUESTION_START =
+  /^(?:what|who|whom|whose|when|where|why|how|which|is|are|was|were|do|does|did|can|could|will|would|should|shall|may|might|am|have|has|had|isn't|aren't|don't|doesn't|didn't|can't|couldn't|won't|wouldn't|shouldn't)\b/i
+
+/** A dictation that is a question: it ends with one or starts like one. */
+export function isQuestion(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (/\?\s*$/.test(t)) return true
+  const firstSentence = t.split(/(?<=[.!?])\s+/)[0] ?? t
+  return (
+    QUESTION_START.test(firstSentence) &&
+    !/[.!]$/.test(firstSentence) &&
+    countWords(firstSentence) >= 3
+  )
+}
+
 /** Damerau-Levenshtein distance (optimal string alignment) with early cutoff. */
 export function editDistance(a: string, b: string, max = Infinity): number {
   if (a === b) return 0

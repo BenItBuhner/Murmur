@@ -6,25 +6,22 @@ import { encodeWavPcm16 } from '@core/audio/wav'
 import { getSttProvider, SttError, type SttConfig, type TranscribeOutput } from '@core/stt'
 import { chatComplete } from '@core/llm/client'
 import { buildSttPrompt } from '@core/text/dictionary'
+import { runPipeline, type PipelineOptions, type PipelineResult } from '@core/text/pipeline'
+import { buildCommandMessages, sanitizeLlmOutput } from '@core/text/llm-prompt'
+import { smartFormat } from '@core/text/smart-format'
 import {
-  finalizeAfterLlm,
-  runPipeline,
-  type PipelineOptions,
-  type PipelineResult
-} from '@core/text/pipeline'
-import {
-  buildCommandMessages,
-  buildFormatMessages,
-  maxTokensFor,
-  sanitizeLlmOutput
-} from '@core/text/llm-prompt'
-import { classifyApp, resolveStyle, type AppContext } from '@core/text/app-context'
+  classifyApp,
+  resolveStyle,
+  type AppContext,
+  type ResolvedStyle
+} from '@core/text/app-context'
 import { countWords } from '@core/text/util'
 import type { Settings } from '@shared/settings'
 import type {
   ActiveWindowInfo,
   DictationMode,
   HistoryEntry,
+  LlmStatus,
   OverlayState,
   StageTimings
 } from '@shared/types'
@@ -301,9 +298,11 @@ export class DictationController extends EventEmitter {
     }
 
     // 3. Text
-    const pipelineOpts = this.pipelineOptions(s)
+    const style = resolveStyle(s.formatting, app)
+    const pipelineOpts = this.pipelineOptions(s, style)
     let final: PipelineResult
     let llmUsed = false
+    let llmStatus: LlmStatus | undefined
     let pressEnter = false
     let replaceSelection = false
     let selectionRestore: (() => void) | null = null
@@ -335,7 +334,8 @@ export class DictationController extends EventEmitter {
             selection: sel.text,
             instruction: raw,
             app,
-            dictionary: s.dictionary
+            dictionary: s.dictionary,
+            language: s.stt.language
           }),
           {
             maxTokens: Math.min(4096, Math.max(1024, countWords(sel.text) * 4 + 512))
@@ -350,9 +350,16 @@ export class DictationController extends EventEmitter {
           wordCount: countWords(guard.text),
           snippetsExpanded: [],
           stages: ['command'],
-          empty: false
+          empty: false,
+          hints: {
+            list: { requested: null, explicit: false, markers: 0 },
+            listApplied: false,
+            isQuestion: false,
+            hasLineBreaks: guard.text.includes('\n')
+          }
         }
         llmUsed = true
+        llmStatus = { outcome: 'used' }
         replaceSelection = true
       } catch (err) {
         timings.llmMs = Math.round(performance.now() - t)
@@ -367,47 +374,33 @@ export class DictationController extends EventEmitter {
       timings.formatMs = Math.round(performance.now() - t)
       final = light
       pressEnter = light.pressEnter
-      const style = resolveStyle(s.formatting.tone, s.formatting.appRules, app)
-      const mode = style.rule?.formatting ?? s.formatting.mode
-      const llm = this.deps.settings.llmConnection()
-      const wantLlm =
-        mode === 'smart' &&
-        !light.empty &&
-        light.wordCount >= s.formatting.llm.minWords &&
-        !!llm.baseUrl &&
-        !!llm.model &&
-        light.snippetsExpanded.length === 0
-      if (wantLlm) {
-        t = performance.now()
-        try {
-          const res = await chatComplete(
-            llm,
-            buildFormatMessages({ raw: light.text.trim(), dictionary: s.dictionary, style, app }),
-            {
-              maxTokens: maxTokensFor(light.text, s.formatting.llm.maxTokensMultiplier)
-            }
-          )
-          timings.llmMs = Math.round(performance.now() - t)
-          const guard = sanitizeLlmOutput(res.text, light.text)
-          if (guard.ok) {
-            final = finalizeAfterLlm(guard.text, {
-              ...pipelineOpts,
-              trailingSpace: style.rule?.trailingSpace ?? pipelineOpts.trailingSpace
-            })
-            final.pressEnter = pressEnter
-            llmUsed = true
-          } else {
-            log.warn(
-              `LLM output rejected (${guard.reason}; finish=${res.finishReason ?? '?'}); using deterministic text`
-            )
-          }
-        } catch (err) {
-          timings.llmMs = Math.round(performance.now() - t)
-          log.warn(`LLM formatting failed, using deterministic text: ${friendlyError(err)}`)
-        }
-      }
-      if (mode === 'off') {
-        final = { ...light, text: raw + (pipelineOpts.trailingSpace ? ' ' : ''), stages: [] }
+      const smart = await smartFormat({
+        light,
+        formatting: s.formatting,
+        dictionary: s.dictionary,
+        style,
+        app,
+        llm: this.deps.settings.llmConnection(),
+        pipelineOpts,
+        language: s.stt.language
+      })
+      timings.llmMs = smart.llmMs
+      llmStatus = smart.status
+      final = smart.result
+      final.pressEnter = pressEnter
+      llmUsed = smart.status.outcome === 'used' || smart.status.outcome === 'partial'
+      if (smart.status.outcome === 'rejected')
+        log.warn(
+          `LLM output rejected (${smart.status.detail}; finish=${smart.finishReason ?? '?'}); using deterministic text`
+        )
+      else if (smart.status.outcome === 'failed')
+        log.warn(`LLM formatting failed, using deterministic text: ${smart.status.detail}`)
+      else if (smart.status.outcome === 'partial')
+        log.info(
+          `LLM review reverted ${smart.status.reverted} of ${(smart.status.accepted ?? 0) + (smart.status.reverted ?? 0)} edits`
+        )
+      if (style.mode === 'off') {
+        final = { ...light, text: raw + (style.trailingSpace ? ' ' : ''), stages: [] }
       }
     }
 
@@ -439,6 +432,8 @@ export class DictationController extends EventEmitter {
       injected: injectResult.ok && injectResult.method !== 'clipboard',
       injectionMethod: injectResult.method,
       llmUsed,
+      llm: llmStatus,
+      stages: final.stages,
       timings,
       error: injectResult.ok ? undefined : injectResult.error
     }
@@ -516,16 +511,25 @@ export class DictationController extends EventEmitter {
     return result
   }
 
-  pipelineOptions(s: Settings): PipelineOptions {
+  /** Rule-based options for a destination; `style` carries the per-app and category overrides. */
+  pipelineOptions(s: Settings, style?: ResolvedStyle): PipelineOptions {
+    const f = s.formatting
     return {
-      removeFillers: s.formatting.removeFillers,
-      fillerWords: s.formatting.fillerWords,
-      collapseRepeats: s.formatting.collapseRepeats,
-      spokenCommands: s.formatting.spokenCommands,
-      selfCorrections: s.formatting.selfCorrections,
-      autoCapitalize: s.formatting.autoCapitalize,
-      trailingSpace: s.formatting.trailingSpace,
-      pressEnterCommand: s.formatting.pressEnterCommand,
+      removeFillers: f.removeFillers,
+      fillerWords: f.fillerWords,
+      hesitations: f.hesitations,
+      hesitationPhrases: f.hesitationPhrases,
+      collapseRepeats: f.collapseRepeats,
+      repetitionScope: f.repetitionScope,
+      spokenCommands: f.spokenCommands,
+      selfCorrections: f.selfCorrections,
+      autoCapitalize: f.autoCapitalize,
+      trailingSpace: style?.trailingSpace ?? f.trailingSpace,
+      pressEnterCommand: f.pressEnterCommand,
+      lists: style?.lists ?? f.lists,
+      listStyle: f.listStyle,
+      bulletMarker: f.bulletMarker,
+      numbers: style?.numbers ?? f.numbers,
       dictionary: s.dictionary,
       snippets: s.snippets,
       snippetContext: { now: new Date() }

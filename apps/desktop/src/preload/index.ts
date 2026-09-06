@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { exposeClerkBridge } from '@clerk/electron/preload'
-import { IPC } from '@shared/ipc'
+import { IPC, type ThemeReport } from '@shared/ipc'
 import type { Settings, SttProviderKind } from '@shared/settings'
 import type {
   CloudConfig,
@@ -14,8 +14,11 @@ import type {
   DictationEvent,
   HistoryEntry,
   HotkeyCapture,
+  PreviewRequest,
+  PreviewResult,
   ProviderTestResult
 } from '@shared/types'
+import type { UpdateStatus } from '@shared/updates'
 
 type Unsub = () => void
 const on = <T>(channel: string, cb: (payload: T) => void): Unsub => {
@@ -63,6 +66,12 @@ const api = {
       ipcRenderer.invoke(IPC.secretSet, slot, value),
     has: (slot: 'stt' | 'llm'): Promise<boolean> => ipcRenderer.invoke(IPC.secretHas, slot)
   },
+  theme: {
+    systemAccent: (): Promise<string | null> => ipcRenderer.invoke(IPC.themeSystemAccent),
+    onSystemAccentChanged: (cb: (hex: string | null) => void): Unsub =>
+      on(IPC.themeSystemAccentChanged, cb),
+    report: (report: ThemeReport): Promise<void> => ipcRenderer.invoke(IPC.themeReport, report)
+  },
   history: {
     list: (limit?: number, offset?: number): Promise<{ entries: HistoryEntry[]; total: number }> =>
       ipcRenderer.invoke(IPC.historyList, limit, offset),
@@ -88,6 +97,18 @@ const api = {
     setHistorySync: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC.cloudSetHistorySync, enabled),
     skipAccount: (): Promise<boolean> => ipcRenderer.invoke(IPC.cloudSkipAccount)
+  },
+  updates: {
+    status: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesStatus),
+    onStatus: (cb: (s: UpdateStatus) => void): Unsub => on(IPC.updatesStatusChanged, cb),
+    check: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesCheck),
+    download: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesDownload),
+    cancelDownload: (): Promise<void> => ipcRenderer.invoke(IPC.updatesCancelDownload),
+    install: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesInstall),
+    skip: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updatesSkip),
+    reveal: (): Promise<void> => ipcRenderer.invoke(IPC.updatesReveal),
+    openReleases: (): Promise<void> => ipcRenderer.invoke(IPC.updatesOpenReleases),
+    ackUpdated: (): Promise<void> => ipcRenderer.invoke(IPC.updatesAckUpdated)
   },
   stt: {
     listModels: (override?: SttOverride): Promise<ModelListResult> =>
@@ -128,10 +149,8 @@ const api = {
     test: (text: string): Promise<InjectResultDto> => ipcRenderer.invoke(IPC.injectTest, text)
   },
   pipeline: {
-    preview: (
-      raw: string
-    ): Promise<{ text: string; pressEnter: boolean; stages: string[]; wordCount: number }> =>
-      ipcRenderer.invoke(IPC.pipelinePreview, raw)
+    preview: (req: PreviewRequest): Promise<PreviewResult> =>
+      ipcRenderer.invoke(IPC.pipelinePreview, req)
   }
 }
 

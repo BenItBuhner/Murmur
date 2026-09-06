@@ -18,6 +18,9 @@ export const LIMITS = {
   snippetContentLength: 20_000,
   appRuleMatchLength: 200,
   fillerWords: 100,
+  hesitationPhrases: 100,
+  /** Free-form model instructions (global or per app rule). */
+  instructionsLength: 2000,
   historyTextLength: 20_000,
   deviceNameLength: 120
 } as const

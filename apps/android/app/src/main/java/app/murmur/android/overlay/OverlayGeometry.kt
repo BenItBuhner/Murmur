@@ -33,6 +33,11 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
         abs(left - other.left) < epsilon && abs(top - other.top) < epsilon &&
             abs(right - other.right) < epsilon && abs(bottom - other.bottom) < epsilon
 
+    /** True when [other] lies within this box (allowing [epsilon] of slack on every edge). */
+    fun encloses(other: Box, epsilon: Float = 0.5f): Boolean =
+        other.left >= left - epsilon && other.top >= top - epsilon &&
+            other.right <= right + epsilon && other.bottom <= bottom + epsilon
+
     companion object {
         val EMPTY = Box(0f, 0f, 0f, 0f)
 

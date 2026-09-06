@@ -13,7 +13,7 @@ fun envOrProp(name: String): String =
 
 // Single source of truth for the Android version. Bump it with `npm run release -- <version>` from
 // the repo root, which keeps it in sync with the desktop app and the README download links.
-val murmurVersion = "0.1.0"
+val murmurVersion = "0.2.0"
 
 // Android needs a monotonically increasing integer versionCode. Derive it from the semver so nothing
 // has to be bumped by hand: 1.2.3 -> 1_020_399, 1.2.3-beta.4 -> 1_020_304. Pre-releases sort below
@@ -63,6 +63,13 @@ android {
             "String", "CLERK_PUBLISHABLE_KEY", "\"${envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY")}\""
         )
         buildConfigField("String", "ACCOUNT_MODE", "\"${envOrProp("MURMUR_ACCOUNT_MODE")}\"")
+
+        // GitHub repository (owner/name) whose Releases the in-app updater follows. CI passes the
+        // building repository so forks update from their own releases.
+        buildConfigField(
+            "String", "UPDATE_REPO",
+            "\"${envOrProp("MURMUR_UPDATE_REPO").ifBlank { "BenItBuhner/voxflow" }}\""
+        )
     }
 
     signingConfigs {
@@ -102,6 +109,8 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Robolectric (TextInserterTest) needs the merged manifest and resources.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -109,6 +118,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
@@ -129,4 +139,9 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    // Runs the text-insertion strategy against a real EditText (TextInserterTest) and the whole
+    // sample-clip dictation against an in-process STT endpoint (DictationFlowTest).
+    testImplementation("org.robolectric:robolectric:4.15.1")
+    // Must match the OkHttp the Clerk/Convex SDKs pull in (5.x), or MockWebServer fails to load.
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
 }

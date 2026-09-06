@@ -1,7 +1,9 @@
 package app.murmur.android.dictation
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
+import app.murmur.android.BuildConfig
 import app.murmur.android.audio.Recorder
 import app.murmur.android.audio.SAMPLE_RATE
 import app.murmur.android.audio.Wav
@@ -23,7 +25,7 @@ import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
 import app.murmur.android.text.finalizeAfterLlm
 import app.murmur.android.text.maxTokensFor
-import app.murmur.android.text.resolveTone
+import app.murmur.android.text.resolveStyle
 import app.murmur.android.text.runPipeline
 import app.murmur.android.text.sanitizeLlmOutput
 import kotlinx.coroutines.CoroutineScope
@@ -50,7 +52,7 @@ sealed class DictationState {
 /** Where the final text should go. */
 interface TextSink {
     /** @return null on success, or a user-facing error message. */
-    fun insert(text: String, pressEnter: Boolean): String?
+    suspend fun insert(text: String, pressEnter: Boolean): String?
 
     /** Package name of the app owning the focused field, for tone/context rules. */
     fun focusedPackage(): String
@@ -85,6 +87,13 @@ object DictationController {
         }
     }
 
+    /**
+     * The bundled sample clip only ever replaces the microphone in debug builds. A release install
+     * on a phone must never end up dictating the same canned sentence because a debugging switch
+     * was left on.
+     */
+    private fun fixtureMode(settings: MurmurSettings): Boolean = settings.useFixtureAudio && BuildConfig.DEBUG
+
     fun start(context: Context) {
         if (isListening || isBusy) return
         resetJob?.cancel()
@@ -92,7 +101,7 @@ object DictationController {
         val settings = SettingsStore.get(appContext).get()
         startedAt = System.currentTimeMillis()
 
-        if (settings.useFixtureAudio) {
+        if (fixtureMode(settings)) {
             // Debug aid for emulators without a microphone: "listen" briefly, then dictate
             // the bundled fixture clip through the real provider pipeline.
             _state.value = DictationState.Listening(0, 0.4f)
@@ -112,7 +121,7 @@ object DictationController {
         } catch (e: Exception) {
             Log.e(TAG, "recorder start failed", e)
             RecordingService.stop(appContext)
-            showTransient(DictationState.Error(e.message ?: "Microphone unavailable"))
+            showTransient(DictationState.Error(friendlyError(e)))
             return
         }
         _state.value = DictationState.Listening(0, 0f)
@@ -144,7 +153,7 @@ object DictationController {
 
         scope.launch {
             try {
-                val wav: ByteArray = if (settings.useFixtureAudio) {
+                val wav: ByteArray = if (fixtureMode(settings)) {
                     loadFixture(appContext)
                 } else {
                     val pcm = recorder.stop()
@@ -189,16 +198,24 @@ object DictationController {
             return
         }
 
-        // 2. Deterministic pipeline
+        // 2. Deterministic pipeline (the destination decides lists/numbers: never lists in code or terminals)
         val app: AppContext = classifyPackage(sink?.focusedPackage() ?: "")
+        val style = resolveStyle(s, app)
         val pipelineOpts = PipelineOptions(
             removeFillers = s.removeFillers,
+            hesitations = s.hesitations,
+            hesitationPhrases = s.hesitationPhrases,
             collapseRepeats = s.collapseRepeats,
+            repetitionScope = s.repetitionScope,
             spokenCommands = s.spokenCommands,
             selfCorrections = s.selfCorrections,
             autoCapitalize = s.autoCapitalize,
             trailingSpace = s.trailingSpace,
             pressEnterCommand = s.spokenCommands,
+            lists = style.lists,
+            listStyle = s.listStyle,
+            bulletMarker = s.bulletMarker,
+            numbers = style.numbers,
             dictionary = s.dictionaryEntries
         )
         val light = runPipeline(raw, pipelineOpts)
@@ -216,7 +233,7 @@ object DictationController {
                 val res = LlmClient.chatComplete(
                     LlmConfig(llmBase, llmKey, llmModel, s.llmTimeoutMs),
                     buildFormatMessages(
-                        light.text.trim(), s.dictionaryTerms, resolveTone(s.tone, app), app
+                        light.text.trim(), s.dictionaryTerms, style, app, light.hints, s.language
                     ),
                     maxTokens = maxTokensFor(light.text)
                 )
@@ -246,8 +263,10 @@ object DictationController {
             showTransient(DictationState.Error("Accessibility service not running"))
             return
         }
+        _state.value = DictationState.Processing("Inserting…")
         val error = currentSink.insert(final.text, final.pressEnter)
         if (error == null) {
+            Log.i(TAG, "inserted ${final.wordCount} words")
             showTransient(DictationState.Success("Inserted"), 1500)
             CloudSync.get()?.recordSession(
                 sessionId = UUID.randomUUID().toString(),
@@ -275,6 +294,12 @@ object DictationController {
         return Wav.encodePcm16(resampled, SAMPLE_RATE)
     }
 
-    fun friendlyError(err: Throwable): String =
-        if (err is SttException) err.friendly() else err.message ?: "Something went wrong"
+    fun friendlyError(err: Throwable): String = when {
+        err is SttException -> err.friendly()
+        err is SecurityException -> "Microphone permission missing — grant it in Murmur"
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            err is android.app.ForegroundServiceStartNotAllowedException ->
+            "Android blocked background recording — open Murmur once and try again"
+        else -> err.message ?: "Something went wrong"
+    }
 }

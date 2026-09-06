@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { FolderOpen, Loader2, Power, RotateCcw, Type } from 'lucide-react'
 import { toast } from 'sonner'
 import type { InjectionMethod, OverlayPosition, Theme } from '@shared/settings'
+import { languageName } from '@shared/languages'
 import { Button } from '@renderer/components/ui/button'
 import { Input, Textarea } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
@@ -35,7 +36,8 @@ export function GeneralPage(): React.JSX.Element {
   const [testing, setTesting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const isWin = info?.platform === 'win32'
-  const autoLanguage = settings.stt.language === 'auto'
+  // Same predicate the prompt builder uses, so the description never promises a lock it does not apply.
+  const autoLanguage = !languageName(settings.stt.language)
   const synced = !!status?.signedIn
 
   const testInsert = async (): Promise<void> => {

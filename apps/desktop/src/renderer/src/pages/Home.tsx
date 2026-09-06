@@ -5,6 +5,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/input'
 import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
+import { UpdateBanner } from '@renderer/components/Updates'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
@@ -95,6 +96,8 @@ export function HomePage({
           </CardContent>
         </Card>
       )}
+
+      <UpdateBanner onNavigate={onNavigate} />
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
         <Card>
@@ -244,11 +247,11 @@ function Stat({
 
 export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Element {
   const parts = [
-    { label: 'Silence trim', ms: t.vadMs, color: 'bg-stone-400' },
-    { label: 'Speech to text', ms: t.sttMs, color: 'bg-blue-500' },
-    { label: 'Cleanup', ms: t.formatMs, color: 'bg-emerald-500' },
-    { label: 'Smart format', ms: t.llmMs, color: 'bg-violet-500' },
-    { label: 'Insert', ms: t.injectMs, color: 'bg-amber-500' }
+    { label: 'Silence trim', ms: t.vadMs, color: 'bg-chart-1' },
+    { label: 'Speech to text', ms: t.sttMs, color: 'bg-chart-2' },
+    { label: 'Cleanup', ms: t.formatMs, color: 'bg-chart-3' },
+    { label: 'Smart format', ms: t.llmMs, color: 'bg-chart-4' },
+    { label: 'Insert', ms: t.injectMs, color: 'bg-chart-5' }
   ].filter((p) => p.ms > 0)
   const total = Math.max(1, t.totalMs)
   return (

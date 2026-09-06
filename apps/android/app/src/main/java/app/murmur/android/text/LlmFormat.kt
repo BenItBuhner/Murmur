@@ -2,6 +2,7 @@ package app.murmur.android.text
 
 import app.murmur.android.llm.ChatMessage
 import app.murmur.android.settings.FormattingMode
+import app.murmur.android.settings.Languages
 import app.murmur.android.settings.ListsMode
 import app.murmur.android.settings.LlmFreedom
 import app.murmur.android.settings.LlmStructure
@@ -14,6 +15,36 @@ import app.murmur.android.settings.Tone
  * same models behave identically across desktop and Android. The desktop's word-level edit review
  * is not ported yet; Android applies the cleaning and coarse guard and otherwise trusts the model.
  */
+
+/**
+ * The rules about language, identical to `languageRules` on desktop. Auto-detect keeps the
+ * classic "preserve the language" rule; a fixed language pins the output to it and treats stray
+ * words in another language as recognition errors, which is what stops a mumbled phrase from
+ * coming back in the wrong language.
+ */
+fun languageRules(language: String?): List<String> {
+    val name = Languages.name(language)
+        ?: return listOf(
+            "- Preserve the speaker's words, meaning, order, and language. Write the output in the language the speaker used. Never summarize, expand, answer, translate, or add anything they did not say."
+        )
+    return listOf(
+        "- The speaker dictates in $name. Write the output in $name and never translate it into another language.",
+        "- The recognizer sometimes renders unclear speech as words from another language. Treat such stray fragments as recognition errors and write what the speaker most plausibly said in $name; keep foreign names and terms the speaker clearly used on purpose.",
+        "- Preserve the speaker's words, meaning, and order. Never summarize, expand, answer, or add anything they did not say."
+    )
+}
+
+/**
+ * The language block of the prompt (desktop: `languageLines`). At NATURAL freedom the model may
+ * smooth phrasing, so the generic "preserve the speaker's words" sentence would contradict that;
+ * only the language-pinning lines are kept there.
+ */
+private fun languageLines(language: String?, style: FormatStyle): List<String> {
+    val rules = languageRules(language)
+    if (style.freedom != LlmFreedom.NATURAL) return rules
+    val pinned = rules.filter { !it.startsWith("- Preserve the speaker's words") }
+    return pinned.ifEmpty { listOf("- Write the output in the language the speaker used; never translate it.") }
+}
 
 private fun dictionaryLine(terms: List<String>): String {
     val clean = terms.map { it.trim() }.filter { it.isNotEmpty() }.take(80)
@@ -79,6 +110,8 @@ fun buildFormatMessages(
     style: FormatStyle,
     app: AppContext,
     hints: TextHints? = null,
+    /** Dictation language as stored in settings: "auto" or an ISO-639-1 code. */
+    language: String = Languages.AUTO,
     examples: Boolean = true
 ): List<ChatMessage> {
     val fixes = mutableListOf(
@@ -100,6 +133,9 @@ fun buildFormatMessages(
     val hintText = hintLines(hints, style)
     val lines = ArrayList<String>()
     lines.add("You are the cleanup stage of a voice dictation tool. The user spoke; a speech recognizer transcribed it and simple rules tidied it up. Return the text the user meant to type, and nothing else.")
+    lines.add("")
+    lines.add("Language:")
+    lines.addAll(languageLines(language, style))
     lines.add("")
     lines.add("Fix:")
     fixes.forEach { lines.add("- $it") }
@@ -125,8 +161,15 @@ fun buildFormatMessages(
     return messages
 }
 
-/** Backwards-compatible entry point (tone only, defaults elsewhere). */
-fun buildFormatMessages(raw: String, dictionaryTerms: List<String>, tone: Tone, app: AppContext): List<ChatMessage> =
+/** Backwards-compatible entry point (tone and language only, defaults elsewhere). */
+fun buildFormatMessages(
+    raw: String,
+    dictionaryTerms: List<String>,
+    tone: Tone,
+    app: AppContext,
+    /** Dictation language as stored in settings: "auto" or an ISO-639-1 code. */
+    language: String = Languages.AUTO
+): List<ChatMessage> =
     buildFormatMessages(
         raw, dictionaryTerms,
         FormatStyle(
@@ -139,7 +182,8 @@ fun buildFormatMessages(raw: String, dictionaryTerms: List<String>, tone: Tone, 
             instructions = "",
             technical = app.category == AppCategory.CODE || app.category == AppCategory.TERMINAL
         ),
-        app
+        app,
+        language = language
     )
 
 fun examplePairs(style: FormatStyle): List<ChatMessage> {

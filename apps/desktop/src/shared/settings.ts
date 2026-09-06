@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ACCENT_PRESET_IDS } from './theme'
 
 export const SETTINGS_VERSION = 1
 
@@ -72,6 +73,15 @@ export type OverlayPosition = z.infer<typeof overlayPositionSchema>
 export const themeSchema = z.enum(['system', 'light', 'dark'])
 export type Theme = z.infer<typeof themeSchema>
 
+/**
+ * Where the accent colour comes from: nothing (Murmur's monochrome look), the operating system's
+ * accent colour, one of the built-in presets, or a colour the user picked.
+ */
+export const accentSchema = z.enum(['neutral', 'system', ...ACCENT_PRESET_IDS, 'custom'])
+export type Accent = z.infer<typeof accentSchema>
+
+export const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Expected #rrggbb')
+
 export const sttProviderKindSchema = z.enum(['openai-compatible', 'deepgram', 'elevenlabs'])
 export type SttProviderKind = z.infer<typeof sttProviderKindSchema>
 
@@ -116,6 +126,11 @@ export const settingsSchema = z.object({
       launchAtLogin: z.boolean().default(false),
       startMinimized: z.boolean().default(true),
       theme: themeSchema.default('system'),
+      accent: accentSchema.default('neutral'),
+      /** Seed colour for the `custom` accent. */
+      accentColor: hexColorSchema.catch('#ff5a36').default('#ff5a36'),
+      /** Material You style tonal surfaces: backgrounds and cards take a soft tint of the accent. */
+      tintedSurfaces: z.boolean().default(false),
       sounds: z.boolean().default(true),
       soundVolume: z.number().min(0).max(1).default(0.35),
       overlayPosition: overlayPositionSchema.default('bottom-center'),
@@ -238,6 +253,22 @@ export const settingsSchema = z.object({
       importedForUserId: z.string().default(''),
       /** Mirror of the account preference; history stays local unless the user opts in. */
       historySync: z.boolean().default(false)
+    })
+    .prefault({}),
+  /** Device-local update preferences (never synced; each install decides for itself). */
+  updates: z
+    .object({
+      /** Look for new releases on start and every few hours. */
+      autoCheck: z.boolean().default(true),
+      /**
+       * Download updates in the background and install them without asking once no dictation is
+       * running. Installs that cannot update themselves (portable, unknown layouts) only download.
+       */
+      autoInstall: z.boolean().default(true),
+      /** Offer pre-releases (vX.Y.Z-beta.N). Always on while running a pre-release build. */
+      includePrereleases: z.boolean().default(false),
+      /** Version the user chose to skip; ignored until a newer one appears or they check manually. */
+      skippedVersion: z.string().default('')
     })
     .prefault({})
 })

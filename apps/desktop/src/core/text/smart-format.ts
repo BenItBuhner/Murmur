@@ -28,6 +28,8 @@ export interface SmartFormatInput {
   app: AppContext
   llm: LlmConfig
   pipelineOpts: PipelineOptions
+  /** Dictation language ('auto' or an ISO-639-1 code); pins the model's output language. */
+  language?: string
   precedingText?: string
 }
 
@@ -105,6 +107,7 @@ export async function smartFormat(
         style: input.style,
         app: input.app,
         hints: input.light.hints,
+        language: input.language,
         precedingText: input.precedingText,
         examples: input.formatting.llm.examples
       }),

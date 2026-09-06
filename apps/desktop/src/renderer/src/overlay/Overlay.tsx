@@ -155,17 +155,17 @@ export function Overlay({ state, level, micError }: Props): React.JSX.Element {
         title={idle ? micError : undefined}
         style={{ width, height }}
         className={cn(
-          'overlay-pill relative overflow-hidden rounded-full text-[13px] font-medium text-white',
+          'overlay-pill relative overflow-hidden rounded-full text-[13px] font-medium text-overlay-foreground',
           idle
             ? micError
-              ? 'bg-red-500/70 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
-              : 'bg-black/55 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
+              ? 'bg-destructive/70 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
+              : 'bg-overlay/60 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
             : 'shadow-[0_6px_24px_rgba(0,0,0,0.35),0_0_0_1px_rgba(255,255,255,0.08)_inset]',
-          !idle && 'bg-[#141414]/95',
-          phase === 'error' && 'bg-[#3a1512]/95',
-          phase === 'success' && 'bg-[#0f2a1c]/95',
-          phase === 'disabled' && 'bg-[#2a2a2a]/90 text-white/70',
-          state.mode === 'command' && listening && 'bg-[#1b1633]/95'
+          !idle && 'bg-overlay/95',
+          phase === 'error' && 'bg-overlay-error/95',
+          phase === 'success' && 'bg-overlay-success/95',
+          phase === 'disabled' && 'bg-overlay-disabled/90 text-overlay-foreground/70',
+          state.mode === 'command' && listening && 'bg-overlay-command/95'
         )}
       >
         {stack.layers.map((layer) => (
@@ -211,13 +211,13 @@ function Contents({
             <span
               className={cn(
                 'absolute inline-flex size-full rounded-full opacity-70 animate-pulse-soft',
-                command ? 'bg-violet-400' : 'bg-[#ff5a36]'
+                command ? 'bg-overlay-command-foreground' : 'bg-record'
               )}
             />
             <span
               className={cn(
                 'relative inline-flex size-2.5 rounded-full',
-                command ? 'bg-violet-400' : 'bg-[#ff5a36]'
+                command ? 'bg-overlay-command-foreground' : 'bg-record'
               )}
             />
           </span>
@@ -227,15 +227,15 @@ function Contents({
                 key={i}
                 className={cn(
                   'block w-[3px] rounded-full transition-[height] duration-75',
-                  command ? 'bg-violet-300' : 'bg-white'
+                  command ? 'bg-overlay-command-foreground/90' : 'bg-overlay-foreground'
                 )}
                 style={{ height: `${Math.max(3, Math.round(v * 22))}px`, opacity: 0.55 + v * 0.45 }}
               />
             ))}
           </div>
-          <span className="tabular-nums text-white/70">{elapsedLabel}</span>
+          <span className="tabular-nums text-overlay-foreground/70">{elapsedLabel}</span>
           {label && (
-            <span className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-white/85 animate-fade-in">
+            <span className="flex items-center gap-1 rounded-full bg-overlay-foreground/10 px-2 py-0.5 text-[11px] text-overlay-foreground/85 animate-fade-in">
               {state.locked && !command && <LockIcon />}
               {label}
             </span>
@@ -250,12 +250,12 @@ function Contents({
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
-                className="block size-1.5 rounded-full bg-white animate-bounce-dot"
+                className="block size-1.5 rounded-full bg-overlay-foreground animate-bounce-dot"
                 style={{ animationDelay: `${i * 140}ms` }}
               />
             ))}
           </span>
-          <span className="text-white/85">{label}</span>
+          <span className="text-overlay-foreground/85">{label}</span>
         </>
       )
     case 'success':
@@ -304,12 +304,12 @@ function LockIcon(): React.JSX.Element {
 function CheckIcon(): React.JSX.Element {
   return (
     <svg
-      className="overlay-check"
+      className="overlay-check text-overlay-success-foreground"
       width="16"
       height="16"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#7ee2a8"
+      stroke="currentColor"
       strokeWidth="3"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -321,11 +321,12 @@ function CheckIcon(): React.JSX.Element {
 function WarnIcon(): React.JSX.Element {
   return (
     <svg
+      className="text-overlay-error-foreground"
       width="16"
       height="16"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#ff8a70"
+      stroke="currentColor"
       strokeWidth="2.5"
       strokeLinecap="round"
       strokeLinejoin="round"

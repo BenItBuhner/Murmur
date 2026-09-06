@@ -28,7 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,7 +39,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -51,7 +49,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +78,7 @@ import app.murmur.android.settings.NumbersMode
 import app.murmur.android.settings.RepetitionScope
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
+import app.murmur.android.settings.ThemeMode
 import app.murmur.android.settings.Tone
 import app.murmur.android.stt.SttClient
 import app.murmur.android.stt.SttConfig
@@ -95,36 +93,51 @@ import app.murmur.android.text.runPipeline
 import app.murmur.android.text.sanitizeLlmOutput
 import app.murmur.android.ui.AccountGateScreen
 import app.murmur.android.ui.AccountSection
-import app.murmur.android.ui.Accent
+import app.murmur.android.ui.AppearanceSection
 import app.murmur.android.ui.DictationButtonSection
 import app.murmur.android.ui.DictionaryEditor
+import app.murmur.android.ui.LanguagePicker
 import app.murmur.android.ui.OnboardingScreen
-import app.murmur.android.ui.fieldColors
+import app.murmur.android.ui.UpdatesSection
+import app.murmur.android.ui.theme.MurmurTheme
+import app.murmur.android.update.UpdateManager
 import com.clerk.api.Clerk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
-private val DarkScheme = darkColorScheme(
-    primary = Accent,
-    background = Color(0xFF0E0E10),
-    surface = Color(0xFF17171A),
-    surfaceVariant = Color(0xFF1E1E22),
-    onBackground = Color(0xFFEDEDEF),
-    onSurface = Color(0xFFEDEDEF)
-)
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val store = SettingsStore.get(this)
+        // A forced light/dark choice picks the window theme too, so the frame before Compose draws
+        // (and the window background behind the keyboard) already has the right brightness.
+        when (store.get().themeMode) {
+            ThemeMode.LIGHT -> setTheme(R.style.Theme_Murmur_Light)
+            ThemeMode.DARK -> setTheme(R.style.Theme_Murmur_Dark)
+            ThemeMode.SYSTEM -> Unit
+        }
         enableEdgeToEdge()
         val config = (application as? MurmurApplication)?.cloudConfig ?: CloudConfig.OFF
         setContent {
-            MaterialTheme(colorScheme = DarkScheme) {
+            val settings by store.flow.collectAsState()
+            MurmurTheme(settings) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Root(config)
+                    Root(config, store, settings)
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val updates = UpdateManager.get(this)
+        updates.foreground = true
+        updates.onAppVisible()
+    }
+
+    override fun onPause() {
+        UpdateManager.get(this).foreground = false
+        super.onPause()
     }
 
     override fun onStop() {
@@ -139,11 +152,7 @@ class MainActivity : ComponentActivity() {
  * A device that signed in before keeps working from its local mirror when Clerk cannot be reached.
  */
 @Composable
-private fun Root(config: CloudConfig) {
-    val context = LocalContext.current
-    val store = remember { SettingsStore.get(context) }
-    val settings by store.flow.collectAsState()
-
+private fun Root(config: CloudConfig, store: SettingsStore, settings: MurmurSettings) {
     val clerkReady by (if (config.enabled) Clerk.isInitialized else remember { MutableStateFlow(true) }).collectAsState()
     val clerkUser by (if (config.enabled) Clerk.userFlow else remember { MutableStateFlow(null) }).collectAsState()
     val syncStatus = CloudSync.get()?.status?.collectAsState()?.value
@@ -166,7 +175,10 @@ private fun Root(config: CloudConfig) {
             accountOnboarded = syncStatus?.user?.onboardingCompletedAt != null,
             firstName = clerkUser?.firstName ?: syncStatus?.user?.name?.substringBefore(' '),
             permissions = { PermissionRows() },
-            provider = { ProviderFields(store, settings, showDiscover = true) },
+            provider = {
+                ProviderFields(store, settings, showDiscover = true)
+                LanguagePicker(store, settings)
+            },
             onFinish = {
                 store.update { it.copy(onboardingComplete = true) }
                 CloudSync.get()?.completeOnboarding()
@@ -186,6 +198,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
     var testResult by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     var testPad by remember { mutableStateOf("") }
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(
         Modifier
@@ -200,7 +213,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
         Text("Murmur", fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Text(
             "Tap the button next to your keyboard, speak, and clean text lands in the focused field.",
-            color = Color(0xFF9A9AA2),
+            color = muted,
             fontSize = 13.sp
         )
 
@@ -212,14 +225,20 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
 
         SectionCard("Setup") { PermissionRows() }
 
+        SectionCard("Appearance") { AppearanceSection(store, settings) }
+
+        SectionCard("Updates") { UpdatesSection(store, settings) }
+
         SectionCard("Dictation button") { DictationButtonSection(store, settings) }
+
+        SectionCard(if (signedIn) "Language (synced)" else "Language") { LanguagePicker(store, settings) }
 
         SectionCard("Speech to text") { ProviderFields(store, settings, showDiscover = true) }
 
         SectionCard("Cleanup") {
             Text(
                 "Rule-based, instant, and still applied when the model is off or unavailable.",
-                fontSize = 12.sp, color = Color(0xFF9A9AA2)
+                fontSize = 12.sp, color = muted
             )
             ChipRow("Hesitation", HesitationLevel.entries, settings.hesitations, { it.id }) { v ->
                 store.update { s -> s.copy(hesitations = v) }
@@ -230,7 +249,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
                     HesitationLevel.LIGHT -> "Pure hesitation goes where the transcript marks a pause: “you know”, “I mean”, a pause-“like”, “let me think”, “so yeah”."
                     HesitationLevel.THOROUGH -> "Also hedges and openers: “sort of”, “basically”, “I guess”, “Okay, so, …”, trailing “, yeah”."
                 },
-                fontSize = 11.sp, color = Color(0xFF9A9AA2)
+                fontSize = 11.sp, color = muted
             )
             ChipRow("Repeats", listOf(null) + RepetitionScope.entries, if (settings.collapseRepeats) settings.repetitionScope else null, { it?.id ?: "off" }) { v ->
                 store.update { s -> if (v == null) s.copy(collapseRepeats = false) else s.copy(collapseRepeats = true, repetitionScope = v) }
@@ -242,7 +261,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
                     settings.repetitionScope == RepetitionScope.PHRASES -> "Also repeated phrases: “I think, I think we should”."
                     else -> "Also restarts: “I want to, I need to go” becomes “I need to go”."
                 },
-                fontSize = 11.sp, color = Color(0xFF9A9AA2)
+                fontSize = 11.sp, color = muted
             )
         }
 
@@ -254,7 +273,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
                     ListsMode.SPOKEN -> "Only when you ask: “bullet point …”, “number one …”, “make this a numbered list”."
                     ListsMode.AUTO -> "Also when you enumerate: “first…, second…”, “here are three things: a, b and c”. Never in code or terminals."
                 },
-                fontSize = 11.sp, color = Color(0xFF9A9AA2)
+                fontSize = 11.sp, color = muted
             )
             if (settings.lists != ListsMode.OFF) {
                 ChipRow("Style", ListStyle.entries, settings.listStyle, { it.id }) { v -> store.update { s -> s.copy(listStyle = v) } }
@@ -269,7 +288,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
                     NumbersMode.SMART -> "Digits from ten up and with units: “five pm” → “5 pm”, “twenty three percent” → “23%”, “ten dollars” → “\$10”."
                     NumbersMode.ALL -> "Every number becomes digits (“five apples” → “5 apples”)."
                 },
-                fontSize = 11.sp, color = Color(0xFF9A9AA2)
+                fontSize = 11.sp, color = muted
             )
         }
 
@@ -283,7 +302,7 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
                     LlmFreedom.BALANCED -> "Also grammar slips and missing articles; no rephrasing or politeness changes."
                     LlmFreedom.NATURAL -> "May smooth awkward phrasing; names, numbers and every point stay."
                 },
-                fontSize = 11.sp, color = Color(0xFF9A9AA2)
+                fontSize = 11.sp, color = muted
             )
             ChipRow("Layout", LlmStructure.entries, settings.llmStructure, { it.id }) { v -> store.update { s -> s.copy(llmStructure = v) } }
             LabeledField("Your instructions", settings.llmInstructions, placeholder = "Use British spelling. Dates as 2026-09-06.") {
@@ -319,14 +338,13 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
         SectionCard("Try it") {
             Text(
                 "Test pad: focus the field and the dictation button appears next to the keyboard.",
-                fontSize = 12.sp, color = Color(0xFF9A9AA2)
+                fontSize = 12.sp, color = muted
             )
             OutlinedTextField(
                 value = testPad,
                 onValueChange = { testPad = it },
                 modifier = Modifier.fillMaxWidth().height(120.dp),
-                placeholder = { Text("Dictate into me…") },
-                colors = fieldColors()
+                placeholder = { Text("Dictate into me…") }
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -342,26 +360,32 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
                             testing = false
                         }
                     },
-                    enabled = !testing && settings.sttBaseUrl.isNotEmpty(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                    enabled = !testing && settings.sttBaseUrl.isNotEmpty()
                 ) { Text(if (testing) "Testing…" else "Test with sample clip") }
                 if (testing) CircularProgressIndicator(Modifier.width(20.dp).height(20.dp), strokeWidth = 2.dp)
             }
             testResult?.let {
-                Text(it, fontSize = 12.sp, color = Color(0xFFB8E0C2))
+                Text(
+                    it, fontSize = 12.sp,
+                    color = if (it.startsWith("Failed")) MaterialTheme.colorScheme.error else MurmurTheme.colors.success
+                )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Use sample clip instead of microphone", fontSize = 13.sp)
-                    Text(
-                        "For emulators without a mic: the pill dictates the bundled JFK clip.",
-                        fontSize = 11.sp, color = Color(0xFF9A9AA2)
+            // Debug builds only: release installs always record from the microphone, so a phone
+            // can never be stuck dictating the sample sentence because this was left on.
+            if (BuildConfig.DEBUG) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use sample clip instead of microphone", fontSize = 13.sp)
+                        Text(
+                            "For emulators without a mic: the pill dictates the bundled JFK clip (debug builds only).",
+                            fontSize = 11.sp, color = muted
+                        )
+                    }
+                    Switch(
+                        checked = settings.useFixtureAudio,
+                        onCheckedChange = { store.update { s -> s.copy(useFixtureAudio = it) } }
                     )
                 }
-                Switch(
-                    checked = settings.useFixtureAudio,
-                    onCheckedChange = { store.update { s -> s.copy(useFixtureAudio = it) } }
-                )
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -461,7 +485,7 @@ fun ProviderFields(store: SettingsStore, settings: MurmurSettings, showDiscover:
             },
             enabled = !discovering && settings.sttBaseUrl.isNotEmpty()
         ) { Text(if (discovering) "Discovering…" else "Discover models") }
-        error?.let { Text(it, fontSize = 12.sp, color = Color(0xFFE08A8A)) }
+        error?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
     }
 }
 
@@ -477,12 +501,18 @@ private fun sttConfig(s: MurmurSettings) = SttConfig(
 private fun friendly(e: Exception): String =
     if (e is SttException) e.friendly() else e.message ?: "Unknown error"
 
-/** Full STT -> pipeline -> LLM round-trip on the bundled fixture, reporting real latencies. */
+/**
+ * Full STT -> pipeline -> LLM round-trip on the bundled fixture, reporting real latencies. The clip
+ * is English, so the test pins the language to English regardless of the user's dictation language
+ * (as the desktop connection test does) rather than forcing, say, German onto JFK.
+ */
 private suspend fun runSampleTest(context: android.content.Context, s: MurmurSettings): String {
     val bytes = context.assets.open("fixtures/jfk.wav").use { it.readBytes() }
     val (pcm, rate) = Wav.decodePcm16(bytes)
     val wav = Wav.encodePcm16(Wav.resample(pcm, rate, SAMPLE_RATE), SAMPLE_RATE)
-    val stt = SttClient.transcribeWithFallback(wav, null, sttConfig(s), s.sttFallbackModel)
+    val stt = SttClient.transcribeWithFallback(
+        wav, null, sttConfig(s).copy(language = "en"), s.sttFallbackModel
+    )
     val light = runPipeline(stt.text, PipelineOptions(dictionary = s.dictionaryEntries))
     var out = "STT ${stt.latencyMs}ms: ${light.text.trim()}"
     val (base, key, model) = s.llmConnection()
@@ -490,7 +520,8 @@ private suspend fun runSampleTest(context: android.content.Context, s: MurmurSet
         val app = AppContext("test", AppCategory.UNKNOWN)
         val res = LlmClient.chatComplete(
             LlmConfig(base, key, model, s.llmTimeoutMs),
-            buildFormatMessages(light.text.trim(), s.dictionaryTerms, resolveStyle(s, app), app, light.hints),
+            // The bundled sample clip is English regardless of the dictation language setting.
+            buildFormatMessages(light.text.trim(), s.dictionaryTerms, resolveStyle(s, app), app, light.hints, "en"),
             maxTokens = maxTokensFor(light.text)
         )
         val guard = sanitizeLlmOutput(res.text, light.text)
@@ -503,7 +534,7 @@ private suspend fun runSampleTest(context: android.content.Context, s: MurmurSet
 @Composable
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -520,7 +551,7 @@ private fun PermissionRow(label: String, granted: Boolean, onGrant: () -> Unit) 
             Text(label, fontSize = 14.sp)
         }
         if (granted) {
-            Text("Granted", color = Color(0xFF7EE2A8), fontSize = 13.sp)
+            Text("Granted", color = MurmurTheme.colors.success, fontSize = 13.sp)
         } else {
             OutlinedButton(onClick = onGrant) { Text("Grant") }
         }
@@ -539,15 +570,14 @@ private fun LabeledField(
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
-        placeholder = { Text(placeholder, color = Color(0xFF6A6A72)) },
+        placeholder = { Text(placeholder) },
         singleLine = true,
         visualTransformation = if (password) {
             androidx.compose.ui.text.input.PasswordVisualTransformation()
         } else {
             androidx.compose.ui.text.input.VisualTransformation.None
         },
-        modifier = Modifier.fillMaxWidth(),
-        colors = fieldColors()
+        modifier = Modifier.fillMaxWidth()
     )
 }
 
@@ -556,7 +586,7 @@ private fun LabeledField(
 @Composable
 private fun <T> ChipRow(label: String, options: List<T>, selected: T, text: (T) -> String, onSelect: (T) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.width(90.dp), fontSize = 13.sp, color = Color(0xFF9A9AA2))
+        Text(label, Modifier.width(90.dp), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         for (option in options) {
             FilterChip(
                 selected = option == selected,

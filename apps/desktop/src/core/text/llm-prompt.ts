@@ -1,4 +1,5 @@
 import type { DictionaryEntry } from '@shared/settings'
+import { languageName } from '@shared/languages'
 import type { ChatMessage } from '@core/llm/client'
 import { categoryHint, toneDescription, type AppContext, type ResolvedStyle } from './app-context'
 import type { TextHints } from './pipeline'
@@ -13,10 +14,48 @@ export interface FormatPromptInput {
   style: ResolvedStyle
   app: AppContext
   hints?: TextHints
+  /**
+   * Dictation language as stored in settings: 'auto' or an ISO-639-1 code. With a fixed language
+   * the model is told to write in it and to treat stray words in another language as recognition
+   * errors, which is what stops a mumbled phrase from coming back in the wrong language.
+   */
+  language?: string
   /** Text immediately before the cursor, when known (e.g. from command-mode selection). */
   precedingText?: string
   /** Include short worked examples; small models follow them far better than rules. */
   examples?: boolean
+}
+
+/**
+ * The rules about language, shared by the format prompt on desktop and Android. Auto-detect keeps
+ * the classic "preserve the language" rule; a fixed language pins the output to it.
+ */
+export function languageRules(language: string | undefined): string[] {
+  const name = languageName(language)
+  if (!name) {
+    return [
+      "- Preserve the speaker's words, meaning, order, and language. Write the output in the language the speaker used. Never summarize, expand, answer, translate, or add anything they did not say."
+    ]
+  }
+  return [
+    `- The speaker dictates in ${name}. Write the output in ${name} and never translate it into another language.`,
+    `- The recognizer sometimes renders unclear speech as words from another language. Treat such stray fragments as recognition errors and write what the speaker most plausibly said in ${name}; keep foreign names and terms the speaker clearly used on purpose.`,
+    "- Preserve the speaker's words, meaning, and order. Never summarize, expand, answer, or add anything they did not say."
+  ]
+}
+
+/**
+ * The language block of the prompt. At `natural` freedom the model is explicitly allowed to smooth
+ * phrasing, so the generic "preserve the speaker's words" sentence would contradict that; only the
+ * language-pinning lines are kept there and the guarantee moves to the Never section.
+ */
+function languageLines(language: string | undefined, style: ResolvedStyle): string[] {
+  const rules = languageRules(language)
+  if (style.freedom !== 'natural') return rules
+  const pinned = rules.filter((r) => !r.startsWith("- Preserve the speaker's words"))
+  return pinned.length
+    ? pinned
+    : ['- Write the output in the language the speaker used; never translate it.']
 }
 
 function dictionaryLine(dictionary: readonly DictionaryEntry[]): string {
@@ -125,6 +164,9 @@ export function buildFormatMessages(input: FormatPromptInput): ChatMessage[] {
   const lines = [
     'You are the cleanup stage of a voice dictation tool. The user spoke; a speech recognizer transcribed it and simple rules tidied it up. Return the text the user meant to type, and nothing else.',
     '',
+    'Language:',
+    ...languageLines(input.language, style),
+    '',
     'Fix:',
     ...fixes.map((f) => `- ${f}`),
     '',
@@ -198,12 +240,17 @@ export interface CommandPromptInput {
   instruction: string
   app: AppContext
   dictionary: readonly DictionaryEntry[]
+  /** Dictation language ('auto' or an ISO-639-1 code): the language the instruction was spoken in. */
+  language?: string
 }
 
 export function buildCommandMessages(input: CommandPromptInput): ChatMessage[] {
+  const spoken = languageName(input.language)
   const system = [
     'You are an in-place text editor driven by voice. The user highlighted some text and spoke an instruction. Apply the instruction to the text and return only the edited text.',
-    '- Keep the original language unless asked to translate.',
+    spoken
+      ? `- The user speaks ${spoken}, so the instruction is in ${spoken}. Keep the text in its original language unless the instruction asks to translate.`
+      : '- Keep the original language unless asked to translate.',
     '- Preserve formatting (line breaks, lists, markdown) unless the instruction changes it.',
     '- Never add commentary, notes, quotes, or code fences around the result. Never explain what you changed.',
     '- If the instruction cannot be applied, return the text unchanged.',

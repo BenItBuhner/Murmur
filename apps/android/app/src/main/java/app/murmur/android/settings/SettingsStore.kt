@@ -114,11 +114,41 @@ enum class OverlayShape(val id: String) {
     }
 }
 
+/** Light, dark, or whatever the system is using. */
+enum class ThemeMode(val id: String) {
+    SYSTEM("system"),
+    LIGHT("light"),
+    DARK("dark");
+
+    companion object {
+        fun from(id: String?): ThemeMode = entries.firstOrNull { it.id == id } ?: SYSTEM
+    }
+}
+
+/**
+ * Seed colours for the app's own Material 3 palette, used when wallpaper (Material You) colours are
+ * unavailable (Android 8 to 11) or turned off. Same seeds as the desktop presets.
+ */
+enum class AccentPreset(val id: String, val label: String, val seed: Int) {
+    CORAL("coral", "Coral", 0xFFFF5A36.toInt()),
+    AMBER("amber", "Amber", 0xFFF59E0B.toInt()),
+    GREEN("green", "Green", 0xFF2FA84F.toInt()),
+    TEAL("teal", "Teal", 0xFF14B8A6.toInt()),
+    BLUE("blue", "Blue", 0xFF3B82F6.toInt()),
+    INDIGO("indigo", "Indigo", 0xFF6366F1.toInt()),
+    VIOLET("violet", "Violet", 0xFF8B5CF6.toInt()),
+    PINK("pink", "Pink", 0xFFEC4899.toInt());
+
+    companion object {
+        fun from(id: String?): AccentPreset = entries.firstOrNull { it.id == id } ?: CORAL
+    }
+}
+
 /**
  * Mirror of the desktop settings that matter on Android. Same defaults as the desktop
  * schema in apps/desktop/src/shared/settings.ts, minus desktop-only concerns (hotkeys,
- * injection strategies). The overlay button's shape and position are device settings
- * (screens and keyboards differ) and are never synced.
+ * injection strategies). The overlay button's shape and position, and the appearance
+ * (theme, wallpaper colours, accent) are device settings and are never synced.
  */
 data class MurmurSettings(
     val sttKind: SttKind = SttKind.OPENAI_COMPATIBLE,
@@ -171,6 +201,12 @@ data class MurmurSettings(
      * Positive floats above the keyboard; negative sits over it (for example on its toolbar row).
      */
     val overlayOffsetDp: Float = DEFAULT_OVERLAY_OFFSET_DP,
+    /** Light, dark or follow the system. */
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** Material You: take the palette from the wallpaper (Android 12+). Ignored on older devices. */
+    val dynamicColor: Boolean = true,
+    /** Seed for Murmur's own palette when wallpaper colours are off or unavailable. */
+    val accent: AccentPreset = AccentPreset.CORAL,
     /** Device-level first-run flow finished (permissions, provider). */
     val onboardingComplete: Boolean = false,
     /** `optional` account mode: the user chose to keep using Murmur without an account. */
@@ -180,7 +216,16 @@ data class MurmurSettings(
     /** Clerk user id of the last signed-in account (lets the app open offline). */
     val lastSignedInUserId: String = "",
     /** Account whose cloud data absorbed this device's pre-account local dictionary. */
-    val importedForUserId: String = ""
+    val importedForUserId: String = "",
+    // Device-local update preferences (never synced), same defaults as the desktop app.
+    /** Look for new releases when the app opens and daily from the accessibility service. */
+    val updateAutoCheck: Boolean = true,
+    /** Download new versions and install them once nothing is being dictated. */
+    val updateAutoInstall: Boolean = true,
+    /** Offer pre-releases (vX.Y.Z-beta.N); always on while running a pre-release build. */
+    val updateIncludePrereleases: Boolean = false,
+    /** Version the user dismissed; withheld until a newer one appears. */
+    val updateSkippedVersion: String = ""
 ) {
     val dictionaryTerms: List<String>
         get() = dictionaryEntries.map { it.word.trim() }.filter { it.isNotEmpty() }
@@ -290,11 +335,18 @@ class SettingsStore(context: Context) {
             overlayShape = OverlayShape.from(prefs.getString("overlayShape", d.overlayShape.id)),
             overlayAnchorX = prefs.getFloat("overlayAnchorX", d.overlayAnchorX).coerceIn(0f, 1f),
             overlayOffsetDp = prefs.getFloat("overlayOffsetDp", d.overlayOffsetDp),
+            themeMode = ThemeMode.from(prefs.getString("themeMode", d.themeMode.id)),
+            dynamicColor = prefs.getBoolean("dynamicColor", d.dynamicColor),
+            accent = AccentPreset.from(prefs.getString("accent", d.accent.id)),
             onboardingComplete = prefs.getBoolean("onboardingComplete", d.onboardingComplete),
             accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
             deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
             lastSignedInUserId = prefs.getString("lastSignedInUserId", d.lastSignedInUserId) ?: "",
-            importedForUserId = prefs.getString("importedForUserId", d.importedForUserId) ?: ""
+            importedForUserId = prefs.getString("importedForUserId", d.importedForUserId) ?: "",
+            updateAutoCheck = prefs.getBoolean("updateAutoCheck", d.updateAutoCheck),
+            updateAutoInstall = prefs.getBoolean("updateAutoInstall", d.updateAutoInstall),
+            updateIncludePrereleases = prefs.getBoolean("updateIncludePrereleases", d.updateIncludePrereleases),
+            updateSkippedVersion = prefs.getString("updateSkippedVersion", d.updateSkippedVersion) ?: ""
         )
     }
 
@@ -337,11 +389,18 @@ class SettingsStore(context: Context) {
             .putString("overlayShape", s.overlayShape.id)
             .putFloat("overlayAnchorX", s.overlayAnchorX)
             .putFloat("overlayOffsetDp", s.overlayOffsetDp)
+            .putString("themeMode", s.themeMode.id)
+            .putBoolean("dynamicColor", s.dynamicColor)
+            .putString("accent", s.accent.id)
             .putBoolean("onboardingComplete", s.onboardingComplete)
             .putBoolean("accountSkipped", s.accountSkipped)
             .putString("deviceId", s.deviceId)
             .putString("lastSignedInUserId", s.lastSignedInUserId)
             .putString("importedForUserId", s.importedForUserId)
+            .putBoolean("updateAutoCheck", s.updateAutoCheck)
+            .putBoolean("updateAutoInstall", s.updateAutoInstall)
+            .putBoolean("updateIncludePrereleases", s.updateIncludePrereleases)
+            .putString("updateSkippedVersion", s.updateSkippedVersion)
             .apply()
     }
 

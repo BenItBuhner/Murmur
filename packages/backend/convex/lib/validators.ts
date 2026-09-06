@@ -76,7 +76,10 @@ export type SyncPreferences = Infer<typeof syncPreferencesValidator>
 
 export const preferencesPatchValidator = v.object({
   formatting: v.optional(formattingPreferencesValidator),
-  /** Spoken language hint for the speech model ("auto" or a BCP-47 code). */
+  /**
+   * Dictation language ("auto" or an ISO-639-1 code). Both apps lock the speech model to it and
+   * tell the formatting model to write in it, so unclear speech is not guessed as another language.
+   */
   language: v.optional(v.string()),
   sync: v.optional(syncPreferencesValidator)
 })

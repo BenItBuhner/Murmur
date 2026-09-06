@@ -334,7 +334,8 @@ export class DictationController extends EventEmitter {
             selection: sel.text,
             instruction: raw,
             app,
-            dictionary: s.dictionary
+            dictionary: s.dictionary,
+            language: s.stt.language
           }),
           {
             maxTokens: Math.min(4096, Math.max(1024, countWords(sel.text) * 4 + 512))
@@ -380,7 +381,8 @@ export class DictationController extends EventEmitter {
         style,
         app,
         llm: this.deps.settings.llmConnection(),
-        pipelineOpts
+        pipelineOpts,
+        language: s.stt.language
       })
       timings.llmMs = smart.llmMs
       llmStatus = smart.status

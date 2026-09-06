@@ -10,7 +10,10 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import app.murmur.android.R
+
+private const val TAG = "MurmurRecordingSvc"
 
 /**
  * Foreground service with the `microphone` type: modern Android only allows mic capture
@@ -32,11 +35,10 @@ class RecordingService : Service() {
                 )
             )
         }
-        val contentIntent = PendingIntent.getActivity(
-            this, 0,
-            packageManager.getLaunchIntentForPackage(packageName),
-            PendingIntent.FLAG_IMMUTABLE
-        )
+        val launch = packageManager.getLaunchIntentForPackage(packageName)
+        val contentIntent = launch?.let {
+            PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE)
+        }
         val notification: Notification =
             (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(this, channelId)
@@ -46,13 +48,22 @@ class RecordingService : Service() {
                 .setSmallIcon(R.drawable.ic_mic_notification)
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getString(R.string.notification_recording))
-                .setContentIntent(contentIntent)
+                .apply { if (contentIntent != null) setContentIntent(contentIntent) }
                 .setOngoing(true)
                 .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Android 14+ throws (SecurityException / ForegroundServiceStartNotAllowedException) when
+            // the mic permission was revoked or the start is not allowed from the background. An
+            // uncaught exception here would kill the whole process, accessibility service included;
+            // the recorder reports the problem on the pill instead.
+            Log.e(TAG, "startForeground failed; recording continues without the foreground service", e)
+            stopSelf(startId)
         }
         return START_NOT_STICKY
     }

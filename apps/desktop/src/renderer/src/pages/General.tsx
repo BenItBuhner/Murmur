@@ -23,15 +23,20 @@ import {
   DialogTitle
 } from '@renderer/components/ui/dialog'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
+import { LanguageSelect } from '@renderer/components/LanguageSelect'
+import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 
 export function GeneralPage(): React.JSX.Element {
   const { settings, patch, info } = useSettings()
+  const { status } = useCloud()
   const g = settings.general
   const inj = settings.injection
   const [testing, setTesting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const isWin = info?.platform === 'win32'
+  const autoLanguage = settings.stt.language === 'auto'
+  const synced = !!status?.signedIn
 
   const testInsert = async (): Promise<void> => {
     setTesting(true)
@@ -44,6 +49,20 @@ export function GeneralPage(): React.JSX.Element {
   return (
     <div className="space-y-8">
       <PageHeader title="General" />
+
+      <Section title="Language">
+        <SettingRow
+          title="Dictation language"
+          description={
+            (autoLanguage
+              ? 'The speech model guesses the language of each dictation. Fine if you switch languages mid-sentence; pick your language if unclear speech sometimes comes back in the wrong one.'
+              : 'The speech model is locked to this language and the formatting model is told to stay in it, so mumbled words are fixed instead of guessed as another language.') +
+            (synced ? ' Saved to your account and shared with every device you sign in on.' : '')
+          }
+        >
+          <LanguageSelect />
+        </SettingRow>
+      </Section>
 
       <Section title="Startup">
         <SettingRow

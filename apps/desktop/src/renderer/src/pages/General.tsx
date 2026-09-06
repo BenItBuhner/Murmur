@@ -23,7 +23,9 @@ import {
   DialogTitle
 } from '@renderer/components/ui/dialog'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
+import { UpdatesSection } from '@renderer/components/Updates'
 import { useSettings } from '@renderer/hooks/useSettings'
+import { describeInstallKind } from '@shared/updates'
 
 export function GeneralPage(): React.JSX.Element {
   const { settings, patch, info } = useSettings()
@@ -212,12 +214,15 @@ export function GeneralPage(): React.JSX.Element {
         </SettingRow>
       </Section>
 
+      <UpdatesSection />
+
       <Section title="About">
         <SettingRow
           title={`Murmur ${info?.version ?? ''}`}
           description={info ? `Electron ${info.electron} · ${info.platform}/${info.arch}` : ''}
         >
           <div className="flex flex-wrap gap-1.5">
+            {info && <Badge variant="outline">{describeInstallKind(info.installKind)}</Badge>}
             <Badge variant="outline">hook: {info?.hookBackend ?? '…'}</Badge>
             {info?.sessionType && <Badge variant="outline">{info.sessionType}</Badge>}
           </div>

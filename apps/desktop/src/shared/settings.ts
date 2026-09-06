@@ -168,6 +168,22 @@ export const settingsSchema = z.object({
       /** Mirror of the account preference; history stays local unless the user opts in. */
       historySync: z.boolean().default(false)
     })
+    .prefault({}),
+  /** Device-local update preferences (never synced; each install decides for itself). */
+  updates: z
+    .object({
+      /** Look for new releases on start and every few hours. */
+      autoCheck: z.boolean().default(true),
+      /**
+       * Download updates in the background and install them without asking once no dictation is
+       * running. Installs that cannot update themselves (portable, unknown layouts) only download.
+       */
+      autoInstall: z.boolean().default(true),
+      /** Offer pre-releases (vX.Y.Z-beta.N). Always on while running a pre-release build. */
+      includePrereleases: z.boolean().default(false),
+      /** Version the user chose to skip; ignored until a newer one appears or they check manually. */
+      skippedVersion: z.string().default('')
+    })
     .prefault({})
 })
 

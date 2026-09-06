@@ -39,6 +39,15 @@ export const IPC = {
   cloudSetHistorySync: 'cloud:set-history-sync',
   cloudSkipAccount: 'cloud:skip-account',
   cloudSignedOut: 'cloud:signed-out',
+  updatesStatus: 'updates:status',
+  updatesCheck: 'updates:check',
+  updatesDownload: 'updates:download',
+  updatesCancelDownload: 'updates:cancel-download',
+  updatesInstall: 'updates:install',
+  updatesSkip: 'updates:skip',
+  updatesReveal: 'updates:reveal',
+  updatesOpenReleases: 'updates:open-releases',
+  updatesAckUpdated: 'updates:ack-updated',
 
   // main -> renderer (send)
   settingsChanged: 'settings:changed',
@@ -49,6 +58,7 @@ export const IPC = {
   enabledChanged: 'app:enabled-changed',
   navigate: 'app:navigate',
   cloudStatusChanged: 'cloud:status-changed',
+  updatesStatusChanged: 'updates:status-changed',
   cloudTokenRequest: 'cloud:token-request',
   // renderer -> main (send)
   cloudTokenResponse: 'cloud:token-response',

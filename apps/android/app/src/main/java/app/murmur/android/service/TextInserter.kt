@@ -22,6 +22,15 @@ const val WEB_VIEW_CLASS_NAME = "android.webkit.WebView"
 private const val MAX_ANCESTOR_WALK = 64
 
 /**
+ * Pause between the activation click and the paste into web content. Chromium answers the click as
+ * soon as it has forwarded it to the renderer, where the frame is granted its user activation and
+ * the field refocused; the paste reaches the renderer over a different pipe, so nothing orders the
+ * two. Anything well inside the five-second activation window works; this also lets the page's own
+ * blur/focus handlers finish before the paste lands, and is invisible next to the transcription.
+ */
+internal const val WEB_ACTIVATION_SETTLE_MS = 150L
+
+/**
  * The slice of [AccessibilityNodeInfo] the insertion strategy needs. Kept behind an interface so
  * the exact action sequence the service sends can be exercised against a real `EditText` in unit
  * tests: `View.performAccessibilityAction` takes the same action ids and argument bundles.
@@ -86,6 +95,20 @@ const val COPIED_FIELD_BLOCKED = "Copied — this field blocks insertion, paste 
  * caret, in every kind of field, so web content is pasted into first and `ACTION_SET_TEXT` is only
  * a fallback for engines that refuse to paste.
  *
+ * Pasting into Chrome has one more requirement. Chrome only lets a page read the clipboard while
+ * the page has *transient user activation*: a real gesture inside the page within the last five
+ * seconds (`ChromeContentBrowserClient::IsClipboardPasteAllowed` → `HasTransientUserActivation`,
+ * `kActivationLifespan`). Without it the renderer's clipboard read comes back empty, Blink pastes
+ * an empty string, and Chrome still answers `ACTION_PASTE` with `true` because it only forwards the
+ * command (`WebContentsAccessibilityImpl.performAction` → `WebContents.paste()`). Tapping the pill
+ * happens in Murmur's own overlay window, not in the page, so the last in-page gesture is the tap
+ * that focused the field: a short dictation squeezes inside the window, a long one — more speech,
+ * transcription, the formatting pass — does not, and "Inserted" lands nothing. The fix is the same
+ * thing a TalkBack double-tap does: `ACTION_CLICK` on the field, which Blink implements as
+ * `NotifyUserActivation` followed by refocusing the field with its selection restored
+ * (`AXObject::OnNativeClickAction`), so the caret does not move and the paste is allowed again.
+ * The WebView uses the permissive default and never needed this; the click is harmless there.
+ *
  * Password fields are always pasted into as well: their accessibility text is the masked rendering
  * and must never be written back. Fields that refuse `ACTION_SET_TEXT` (some rich editors) fall
  * back to the clipboard too.
@@ -95,7 +118,7 @@ const val COPIED_FIELD_BLOCKED = "Copied — this field blocks insertion, paste 
  * to vanish right after it appeared.
  */
 object TextInserter {
-    fun insert(
+    suspend fun insert(
         target: EditableTarget,
         text: String,
         pressEnter: Boolean,
@@ -155,9 +178,25 @@ object TextInserter {
         return true
     }
 
-    private fun paste(target: EditableTarget, text: String, toClipboard: (String) -> Unit): Boolean {
+    private suspend fun paste(target: EditableTarget, text: String, toClipboard: (String) -> Unit): Boolean {
+        // Clipboard first: the engine hears about the new clip through an asynchronous listener,
+        // and everything that follows gives that notification time to arrive before the paste reads.
         toClipboard(text)
+        if (target.isWebContent) activateWebContent(target)
         return target.performAction(AccessibilityNodeInfo.ACTION_PASTE, null)
+    }
+
+    /**
+     * Hand the page a fresh user activation so Chrome lets the paste read the clipboard (see the
+     * class comment). Best effort: a refused click is logged and the paste still goes ahead, since
+     * the field may have been tapped recently enough anyway.
+     */
+    private suspend fun activateWebContent(target: EditableTarget) {
+        if (!target.performAction(AccessibilityNodeInfo.ACTION_CLICK, null)) {
+            Log.w(TAG, "web content refused ACTION_CLICK; pasting without fresh user activation")
+            return
+        }
+        delay(WEB_ACTIVATION_SETTLE_MS)
     }
 }
 

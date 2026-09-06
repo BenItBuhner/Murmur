@@ -1,15 +1,19 @@
 package app.murmur.android
 
+import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import app.murmur.android.service.EXTRA_CHROME_ROLE
+import app.murmur.android.service.EditableTarget
 import app.murmur.android.service.InsertOutcome
 import app.murmur.android.service.NodeTarget
 import app.murmur.android.service.TextInserter
+import app.murmur.android.service.WEB_ACTIVATION_SETTLE_MS
 import app.murmur.android.service.WEB_VIEW_CLASS_NAME
 import app.murmur.android.service.acceptsText
 import app.murmur.android.service.isWebContent
 import app.murmur.android.service.retryLookup
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,7 +28,8 @@ import org.robolectric.annotation.Config
 /**
  * The node-level side of insertion: recognising fields that belong to a web page (a browser tab, an
  * installed PWA, a WebView) from what their [AccessibilityNodeInfo] looks like, and routing them to
- * the clipboard instead of `ACTION_SET_TEXT`. Nodes are built the way the engines build them.
+ * the clipboard instead of `ACTION_SET_TEXT`, with the user-activation click Chrome needs before it
+ * lets the page read that clipboard. Nodes are built the way the engines build them.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -38,12 +43,15 @@ class WebContentInsertionTest {
         isEditable = true
         isFocused = true
         isMultiLine = true
+        // Every focusable node is clickable to Chromium; the click is what TalkBack's double-tap sends.
+        isClickable = true
         // The role stays the DOM role; only the class name is promoted to EditText.
         extras.putCharSequence(EXTRA_CHROME_ROLE, "genericContainer")
         extras.putCharSequence("AccessibilityNodeInfo.hint", "")
         // For a rich editor the node text is the rendered subtree, placeholder included.
         text = "Message #general"
         setTextSelection(0, 0)
+        addAction(AccessibilityAction.ACTION_CLICK)
         addAction(AccessibilityAction.ACTION_SET_TEXT)
         addAction(AccessibilityAction.ACTION_PASTE)
         addAction(AccessibilityAction.ACTION_IME_ENTER)
@@ -94,7 +102,7 @@ class WebContentInsertionTest {
     }
 
     @Test
-    fun `a page editor is pasted into and SET_TEXT is never sent`() {
+    fun `a page editor is clicked for user activation and pasted into, and SET_TEXT is never sent`() = runTest {
         val node = chromiumComposer()
         val clipboard = ArrayList<String>()
 
@@ -102,23 +110,49 @@ class WebContentInsertionTest {
 
         assertEquals(InsertOutcome.Inserted("paste"), outcome)
         assertEquals(listOf("Hello world "), clipboard)
-        assertEquals(listOf(AccessibilityNodeInfo.ACTION_PASTE), shadowOf(node).performedActions)
+        // Chrome pastes an empty string (and still reports success) unless the page had a gesture
+        // in the last five seconds; ACTION_CLICK is NotifyUserActivation + refocus in Blink.
+        assertEquals(
+            listOf(AccessibilityNodeInfo.ACTION_CLICK, AccessibilityNodeInfo.ACTION_PASTE),
+            shadowOf(node).performedActions
+        )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `the paste waits for the page to settle after the activation click`() = runTest {
+        val node = chromiumComposer()
+        val pastedAt = ArrayList<Long>()
+        val target = object : EditableTarget by NodeTarget(node) {
+            override fun performAction(action: Int, arguments: Bundle?): Boolean {
+                if (action == AccessibilityNodeInfo.ACTION_PASTE) pastedAt.add(testScheduler.currentTime)
+                return node.performAction(action, arguments)
+            }
+        }
+
+        TextInserter.insert(target, "Hello world ", pressEnter = false) { }
+
+        assertEquals(listOf(WEB_ACTIVATION_SETTLE_MS), pastedAt)
     }
 
     @Test
-    fun `press enter on a page editor uses the IME action Chromium implements`() {
+    fun `press enter on a page editor uses the IME action Chromium implements`() = runTest {
         val node = chromiumComposer()
 
         TextInserter.insert(NodeTarget(node), "Hello world", pressEnter = true) { }
 
         assertEquals(
-            listOf(AccessibilityNodeInfo.ACTION_PASTE, AccessibilityAction.ACTION_IME_ENTER.id),
+            listOf(
+                AccessibilityNodeInfo.ACTION_CLICK,
+                AccessibilityNodeInfo.ACTION_PASTE,
+                AccessibilityAction.ACTION_IME_ENTER.id
+            ),
             shadowOf(node).performedActions
         )
     }
 
     @Test
-    fun `a native field is still written with SET_TEXT and leaves the clipboard alone`() {
+    fun `a native field is still written with SET_TEXT and leaves the clipboard alone`() = runTest {
         val node = nativeField()
         val clipboard = ArrayList<String>()
 
@@ -135,7 +169,7 @@ class WebContentInsertionTest {
     }
 
     @Test
-    fun `a node that cannot be refreshed is treated as a missing field`() {
+    fun `a node that cannot be refreshed is treated as a missing field`() = runTest {
         val node = chromiumComposer()
         shadowOf(node).setRefreshReturnValue(false)
         val clipboard = ArrayList<String>()

@@ -87,6 +87,7 @@ import app.murmur.android.ui.AccountSection
 import app.murmur.android.ui.AppearanceSection
 import app.murmur.android.ui.DictationButtonSection
 import app.murmur.android.ui.DictionaryEditor
+import app.murmur.android.ui.LanguagePicker
 import app.murmur.android.ui.OnboardingScreen
 import app.murmur.android.ui.theme.MurmurTheme
 import com.clerk.api.Clerk
@@ -151,7 +152,10 @@ private fun Root(config: CloudConfig, store: SettingsStore, settings: MurmurSett
             accountOnboarded = syncStatus?.user?.onboardingCompletedAt != null,
             firstName = clerkUser?.firstName ?: syncStatus?.user?.name?.substringBefore(' '),
             permissions = { PermissionRows() },
-            provider = { ProviderFields(store, settings, showDiscover = true) },
+            provider = {
+                ProviderFields(store, settings, showDiscover = true)
+                LanguagePicker(store, settings)
+            },
             onFinish = {
                 store.update { it.copy(onboardingComplete = true) }
                 CloudSync.get()?.completeOnboarding()
@@ -201,6 +205,8 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
         SectionCard("Appearance") { AppearanceSection(store, settings) }
 
         SectionCard("Dictation button") { DictationButtonSection(store, settings) }
+
+        SectionCard(if (signedIn) "Language (synced)" else "Language") { LanguagePicker(store, settings) }
 
         SectionCard("Speech to text") { ProviderFields(store, settings, showDiscover = true) }
 
@@ -289,18 +295,22 @@ fun SettingsScreen(config: CloudConfig, store: SettingsStore, settings: MurmurSe
                     color = if (it.startsWith("Failed")) MaterialTheme.colorScheme.error else MurmurTheme.colors.success
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Use sample clip instead of microphone", fontSize = 13.sp)
-                    Text(
-                        "For emulators without a mic: the pill dictates the bundled JFK clip.",
-                        fontSize = 11.sp, color = muted
+            // Debug builds only: release installs always record from the microphone, so a phone
+            // can never be stuck dictating the sample sentence because this was left on.
+            if (BuildConfig.DEBUG) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use sample clip instead of microphone", fontSize = 13.sp)
+                        Text(
+                            "For emulators without a mic: the pill dictates the bundled JFK clip (debug builds only).",
+                            fontSize = 11.sp, color = muted
+                        )
+                    }
+                    Switch(
+                        checked = settings.useFixtureAudio,
+                        onCheckedChange = { store.update { s -> s.copy(useFixtureAudio = it) } }
                     )
                 }
-                Switch(
-                    checked = settings.useFixtureAudio,
-                    onCheckedChange = { store.update { s -> s.copy(useFixtureAudio = it) } }
-                )
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -416,12 +426,18 @@ private fun sttConfig(s: MurmurSettings) = SttConfig(
 private fun friendly(e: Exception): String =
     if (e is SttException) e.friendly() else e.message ?: "Unknown error"
 
-/** Full STT -> pipeline -> LLM round-trip on the bundled fixture, reporting real latencies. */
+/**
+ * Full STT -> pipeline -> LLM round-trip on the bundled fixture, reporting real latencies. The clip
+ * is English, so the test pins the language to English regardless of the user's dictation language
+ * (as the desktop connection test does) rather than forcing, say, German onto JFK.
+ */
 private suspend fun runSampleTest(context: android.content.Context, s: MurmurSettings): String {
     val bytes = context.assets.open("fixtures/jfk.wav").use { it.readBytes() }
     val (pcm, rate) = Wav.decodePcm16(bytes)
     val wav = Wav.encodePcm16(Wav.resample(pcm, rate, SAMPLE_RATE), SAMPLE_RATE)
-    val stt = SttClient.transcribeWithFallback(wav, null, sttConfig(s), s.sttFallbackModel)
+    val stt = SttClient.transcribeWithFallback(
+        wav, null, sttConfig(s).copy(language = "en"), s.sttFallbackModel
+    )
     val light = runPipeline(stt.text, PipelineOptions(dictionary = s.dictionaryEntries))
     var out = "STT ${stt.latencyMs}ms: ${light.text.trim()}"
     val (base, key, model) = s.llmConnection()
@@ -430,7 +446,7 @@ private suspend fun runSampleTest(context: android.content.Context, s: MurmurSet
             LlmConfig(base, key, model, s.llmTimeoutMs),
             buildFormatMessages(
                 light.text.trim(), s.dictionaryTerms, Tone.NEUTRAL,
-                AppContext("test", AppCategory.UNKNOWN)
+                AppContext("test", AppCategory.UNKNOWN), "en"
             ),
             maxTokens = maxTokensFor(light.text)
         )

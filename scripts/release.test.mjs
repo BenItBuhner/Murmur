@@ -9,6 +9,7 @@ import {
   CHECKSUMS_FILE,
   INSTALL_HELPERS,
   downloadTable,
+  isCloudRelease,
   knownReleaseFiles,
   latestDownloadBase,
   readmeBlock,
@@ -110,14 +111,52 @@ test('aliases copies stable names and install helpers', () => {
   })
 })
 
-test('check agrees on 0.1.0 and rejects a mismatched tag', () => {
-  const ok = run(['check', '--tag', 'v0.1.0'])
+test('check agrees on the current version and rejects a mismatched tag', () => {
+  const ok = run(['check'])
   assert.equal(ok.status, 0, ok.stderr + ok.stdout)
-  assert.match(ok.stdout, /ok: all version files agree on 0\.1\.0/)
+  const match = /ok: all version files agree on (\S+)/.exec(ok.stdout)
+  assert.ok(match, ok.stdout)
+  const version = match[1]
+
+  const tagged = run(['check', '--tag', `v${version}`])
+  assert.equal(tagged.status, 0, tagged.stderr + tagged.stdout)
 
   const bad = run(['check', '--tag', 'v9.9.9'])
   assert.notEqual(bad.status, 0)
   assert.match(bad.stderr, /does not match/)
+})
+
+test('release notes default to a local-only callout', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'Murmur-0.1.0-setup.exe'), 'win')
+    const previous = process.env.MURMUR_CLOUD_RELEASE
+    delete process.env.MURMUR_CLOUD_RELEASE
+    try {
+      assert.equal(isCloudRelease(), false)
+      const md = releaseNotes(REPO, '0.1.0', dir)
+      assert.match(md, /## Local-only build/)
+      assert.match(md, /no production Convex or Clerk instance/)
+    } finally {
+      if (previous === undefined) delete process.env.MURMUR_CLOUD_RELEASE
+      else process.env.MURMUR_CLOUD_RELEASE = previous
+    }
+  })
+})
+
+test('release notes omit the local-only callout when MURMUR_CLOUD_RELEASE=true', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'Murmur-0.1.0-setup.exe'), 'win')
+    const previous = process.env.MURMUR_CLOUD_RELEASE
+    process.env.MURMUR_CLOUD_RELEASE = 'true'
+    try {
+      assert.equal(isCloudRelease(), true)
+      const md = releaseNotes(REPO, '0.1.0', dir)
+      assert.doesNotMatch(md, /## Local-only build/)
+    } finally {
+      if (previous === undefined) delete process.env.MURMUR_CLOUD_RELEASE
+      else process.env.MURMUR_CLOUD_RELEASE = previous
+    }
+  })
 })
 
 test('invalid versions are rejected', () => {
@@ -155,6 +194,7 @@ test('aliases + notes with a full asset set produce no missing-file warnings', (
     const notes = run(['notes', '0.1.0', dir])
     assert.equal(notes.status, 0, notes.stderr)
     assert.doesNotMatch(notes.stderr, /expected release asset is missing/)
+    assert.match(notes.stdout, /## Local-only build/)
     assert.match(notes.stdout, /## Downloads/)
     assert.match(notes.stdout, /Always latest/)
     assert.match(notes.stdout, /Install in one command/)

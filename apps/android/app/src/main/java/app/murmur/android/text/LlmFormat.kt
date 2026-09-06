@@ -1,6 +1,7 @@
 package app.murmur.android.text
 
 import app.murmur.android.llm.ChatMessage
+import app.murmur.android.settings.Languages
 import app.murmur.android.settings.Tone
 
 /**
@@ -9,24 +10,48 @@ import app.murmur.android.settings.Tone
  * models behave identically across desktop and Android.
  */
 
+/**
+ * The rules about language, identical to `languageRules` on desktop. Auto-detect keeps the
+ * classic "preserve the language" rule; a fixed language pins the output to it and treats stray
+ * words in another language as recognition errors, which is what stops a mumbled phrase from
+ * coming back in the wrong language.
+ */
+fun languageRules(language: String?): List<String> {
+    val name = Languages.name(language)
+        ?: return listOf(
+            "- Preserve the speaker's words, meaning, order, and language. Write the output in the language the speaker used. Never summarize, expand, answer, translate, or add anything they did not say."
+        )
+    return listOf(
+        "- The speaker dictates in $name. Write the output in $name and never translate it into another language.",
+        "- The recognizer sometimes renders unclear speech as words from another language. Treat such stray fragments as recognition errors and write what the speaker most plausibly said in $name; keep foreign names and terms the speaker clearly used on purpose.",
+        "- Preserve the speaker's words, meaning, and order. Never summarize, expand, answer, or add anything they did not say."
+    )
+}
+
 fun buildFormatMessages(
     raw: String,
     dictionaryTerms: List<String>,
     tone: Tone,
-    app: AppContext
+    app: AppContext,
+    /** Dictation language as stored in settings: "auto" or an ISO-639-1 code. */
+    language: String = Languages.AUTO
 ): List<ChatMessage> {
     val terms = dictionaryTerms.map { it.trim() }.filter { it.isNotEmpty() }.take(80)
     val lines = mutableListOf(
         "You are the cleanup stage inside a voice dictation tool. The user spoke the text below and a speech recognizer transcribed it. Rewrite it as the polished text they intended to type.",
         "",
-        "Rules:",
-        "- Preserve the speaker's words, meaning, order, and language. Never summarize, expand, answer, translate, or add anything they did not say.",
-        "- Fix punctuation, capitalization, and obvious transcription errors.",
-        "- Remove filler sounds (um, uh, er, hmm) and verbal tics used as filler (like, you know, sort of, I mean); collapse stutters and repeated words. Keep every word that carries meaning, including greetings and openers such as \"hey\", \"so\", \"okay\", \"thanks\".",
-        "- Apply self-corrections: \"Tuesday, no, Wednesday\" becomes \"Wednesday\"; \"scratch that\" removes the phrase before it.",
-        "- Format an enumeration (\"first... second...\" or \"one... two...\") as a list with \"- \" bullets or \"1.\" numbering, one item per line. Otherwise keep the speaker's paragraphs.",
-        "- Use digits for quantities, times, dates, money, and versions (\"five pm\" -> \"5 pm\", \"version two point three\" -> \"version 2.3\").",
-        "- Spoken \"new line\" means a line break and \"new paragraph\" means a blank line."
+        "Rules:"
+    )
+    lines.addAll(languageRules(language))
+    lines.addAll(
+        listOf(
+            "- Fix punctuation, capitalization, and obvious transcription errors.",
+            "- Remove filler sounds (um, uh, er, hmm) and verbal tics used as filler (like, you know, sort of, I mean); collapse stutters and repeated words. Keep every word that carries meaning, including greetings and openers such as \"hey\", \"so\", \"okay\", \"thanks\".",
+            "- Apply self-corrections: \"Tuesday, no, Wednesday\" becomes \"Wednesday\"; \"scratch that\" removes the phrase before it.",
+            "- Format an enumeration (\"first... second...\" or \"one... two...\") as a list with \"- \" bullets or \"1.\" numbering, one item per line. Otherwise keep the speaker's paragraphs.",
+            "- Use digits for quantities, times, dates, money, and versions (\"five pm\" -> \"5 pm\", \"version two point three\" -> \"version 2.3\").",
+            "- Spoken \"new line\" means a line break and \"new paragraph\" means a blank line."
+        )
     )
     if (terms.isNotEmpty()) lines.add("- Spell these terms exactly as written: ${terms.joinToString(", ")}.")
     lines.add("- Tone: ${toneDescription(tone)}")

@@ -7,7 +7,6 @@ import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
-import android.os.Bundle
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
@@ -17,6 +16,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.dictation.TextSink
 import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayEditor
@@ -29,10 +29,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 private const val TAG = "MurmurA11y"
+
+/**
+ * How long to keep looking for the focused field before giving up. Chromium hands the framework no
+ * node provider for a page until the renderer has delivered the accessibility tree, which it only
+ * builds once something asks for it, so the first lookup into a PWA or browser tab that just came to
+ * the front can come back empty while a field is plainly focused; One UI likewise reports no active
+ * window for a moment after an overlay was touched. A few short retries cover both.
+ */
+private const val TARGET_LOOKUP_ATTEMPTS = 5
+private const val TARGET_LOOKUP_RETRY_MS = 90L
 
 /**
  * The Wispr Flow pattern on Android: whenever the keyboard comes up, a floating dictation
@@ -44,10 +55,10 @@ private const val TAG = "MurmurA11y"
  * to move or resize the overlay window; that only happens before a morph starts and after it
  * settles, never frame by frame.
  *
- * This service is also the injection backend ("TextSink"): ACTION_SET_TEXT at the cursor,
- * with a clipboard fallback when a field refuses direct writes.
+ * This service is also the injection backend ([TextSink]); see [TextInserter] for the
+ * ACTION_SET_TEXT / ACTION_SET_SELECTION / ACTION_PASTE strategy.
  */
-class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.dictation.TextSink, OverlayPillView.Host {
+class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPillView.Host {
 
     private var windowManager: WindowManager? = null
     private var pill: OverlayPillView? = null
@@ -113,7 +124,7 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
                 val source = event.source ?: return
-                if (source.isEditable) {
+                if (source.acceptsText()) {
                     lastEditable = source
                     lastPackage = event.packageName?.toString() ?: lastPackage
                 }
@@ -268,47 +279,83 @@ class MurmurAccessibilityService : AccessibilityService(), app.murmur.android.di
         return root?.packageName?.toString() ?: lastPackage
     }
 
-    override fun insert(text: String, pressEnter: Boolean): String? {
-        var node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (node == null || !node.isEditable) {
-            node = lastEditable?.takeIf {
-                runCatching { it.refresh() }.getOrDefault(false) && it.isEditable
+    /**
+     * Accessibility node calls are plain binder IPC and work from any thread, but the framework
+     * caches node state per thread and same-process interrogation (our own test pad) is only
+     * short-circuited on the main thread, so the whole insertion runs there.
+     */
+    override suspend fun insert(text: String, pressEnter: Boolean): String? =
+        withContext(Dispatchers.Main.immediate) {
+            val node = awaitEditableTarget()
+            if (node == null) {
+                Log.w(TAG, "no focused editable field; copied to clipboard")
+                copyToClipboard(text)
+                return@withContext COPIED_NO_FIELD
+            }
+            val target = NodeTarget(node)
+            when (val outcome = TextInserter.insert(target, text, pressEnter, ::copyToClipboard)) {
+                is InsertOutcome.Inserted -> {
+                    Log.i(
+                        TAG,
+                        "inserted ${text.length} chars via ${outcome.method} into ${node.packageName}" +
+                            if (target.isWebContent) " (web content)" else ""
+                    )
+                    null
+                }
+                is InsertOutcome.Failed -> {
+                    Log.w(TAG, "insertion failed: ${outcome.message}")
+                    outcome.message
+                }
             }
         }
-        if (node == null) {
-            copyToClipboard(text)
-            return "Copied — tap a text field and paste"
-        }
 
-        val existing = if (node.isShowingHintText) "" else node.text?.toString() ?: ""
-        var selStart = node.textSelectionStart
-        var selEnd = node.textSelectionEnd
-        if (selStart < 0 || selStart > existing.length) selStart = existing.length
-        if (selEnd < 0 || selEnd > existing.length) selEnd = selStart
-        if (selEnd < selStart) selStart = selEnd.also { selEnd = selStart }
-
-        val newText = existing.substring(0, selStart) + text + existing.substring(selEnd)
-        val args = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, newText)
-        }
-        var ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        if (ok) {
-            val cursor = selStart + text.length
-            val sel = Bundle().apply {
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+    private suspend fun awaitEditableTarget(): AccessibilityNodeInfo? =
+        retryLookup(TARGET_LOOKUP_ATTEMPTS, TARGET_LOOKUP_RETRY_MS) { attempt ->
+            findEditableTarget().also {
+                if (it == null && attempt < TARGET_LOOKUP_ATTEMPTS - 1) {
+                    Log.d(TAG, "no focused field yet (attempt ${attempt + 1}); retrying")
+                }
             }
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, sel)
-        } else {
-            // Some fields (rich editors, web views) refuse SET_TEXT; paste instead.
-            copyToClipboard(text)
-            ok = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            if (!ok) return "Copied — this field blocks insertion, paste manually"
         }
-        if (pressEnter && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+
+    /**
+     * The field the dictation belongs in. The input-focused node of the active window is the
+     * normal answer; when the system has no active window for a moment (One UI does this right
+     * after an overlay was touched) every application window is checked, and the field that most
+     * recently reported focus is the last resort, provided it belongs to the app in front: a
+     * remembered field from an app that is still alive in the background must not swallow a
+     * dictation meant for the one the user is looking at.
+     */
+    private fun findEditableTarget(): AccessibilityNodeInfo? {
+        focusedEditable(rootInActiveWindow)?.let { return it }
+        val visible = try {
+            windows
+        } catch (e: Exception) {
+            Log.w(TAG, "window scan failed", e)
+            emptyList()
         }
-        return null
+        // Windows come top-most first; the focused application window, or failing that the one on
+        // top, is the app the user is looking at. (The active window itself may be the keyboard.)
+        var frontPackage: String? = null
+        for (w in visible.sortedByDescending { it.isFocused }) {
+            if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+            val root = runCatching { w.root }.getOrNull() ?: continue
+            if (frontPackage == null) frontPackage = root.packageName?.toString()
+            focusedEditable(root)?.let { return it }
+        }
+        val remembered = lastEditable ?: return null
+        if (!runCatching { remembered.refresh() }.getOrDefault(false) || !remembered.acceptsText()) return null
+        val rememberedPackage = remembered.packageName?.toString()
+        if (frontPackage != null && rememberedPackage != frontPackage) {
+            Log.d(TAG, "ignoring remembered field of $rememberedPackage; $frontPackage is in front")
+            return null
+        }
+        return remembered
+    }
+
+    private fun focusedEditable(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        val focus = runCatching { root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: return null
+        return if (focus.acceptsText()) focus else null
     }
 
     private fun copyToClipboard(text: String) {

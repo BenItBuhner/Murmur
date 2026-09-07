@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Dp
@@ -176,15 +177,21 @@ private fun SpotRow(index: Int, spot: String, active: Boolean) {
 }
 
 /**
- * The real overlay view in preview mode on a dark stage. Tap it and it plays a whole dictation:
- * listening, transcribing, formatting, inserted.
+ * The real overlay view in preview mode on a keyboard-like stage, in the same colours the
+ * accessibility service gives the real button. Tap it and it plays a whole dictation: listening,
+ * transcribing, formatting, inserted.
  */
 @Composable
 fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modifier) {
     var previewState by remember { mutableStateOf<DictationState>(DictationState.Idle) }
     var playing by remember { mutableStateOf(false) }
-    // The same colours the accessibility service gives the real button.
-    val palette = PillTheme.resolve(LocalContext.current, settings)
+    // The same colours the accessibility service gives the real button; a dark-mode flip or a new
+    // wallpaper arrives as a configuration change.
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val palette = remember(settings.themeMode, settings.dynamicColor, settings.accent, configuration) {
+        PillTheme.resolve(context, settings)
+    }
 
     Stage(modifier.height(height)) {
         AndroidView(

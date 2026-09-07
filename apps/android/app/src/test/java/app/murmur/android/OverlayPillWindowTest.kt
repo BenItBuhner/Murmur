@@ -10,7 +10,9 @@ import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
+import app.murmur.android.settings.AccentPreset
 import app.murmur.android.settings.OverlayShape
+import app.murmur.android.ui.theme.schemeFromSeed
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -114,7 +116,10 @@ class OverlayPillWindowTest {
 
     @Test
     fun `a theme change does not move the canvas either`() {
-        view.setPalette(PillTheme.fromAccent(0xFF6699FF.toInt(), 0xFF101418.toInt()))
+        // A new tint morphs in; a flip to light snaps. Neither touches the window.
+        view.setPalette(PillTheme.fromScheme(schemeFromSeed(AccentPreset.BLUE.seed, dark = true), dark = true))
+        settle()
+        view.setPalette(PillTheme.fromScheme(schemeFromSeed(AccentPreset.BLUE.seed, dark = false), dark = false))
         settle()
         assertEquals(1, host.canvas.size)
     }

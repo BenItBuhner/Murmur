@@ -7,6 +7,7 @@ import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { UpdateBanner } from '@renderer/components/Updates'
 import { useCloud } from '@renderer/hooks/useCloud'
+import { useInference } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
 import type { Route } from '@renderer/components/Shell'
@@ -22,6 +23,7 @@ export function HomePage({
 }): React.JSX.Element {
   const { settings, info } = useSettings()
   const { clerk, status } = useCloud()
+  const inference = useInference()
   const [recent, setRecent] = useState<HistoryEntry[]>([])
   const platform = platformFor(info?.platform)
   const firstName = clerk.firstName ?? status?.user?.name?.split(' ')[0]
@@ -44,7 +46,8 @@ export function HomePage({
   const savedMs = Math.max(0, (stats.totalWords / TYPING_WPM) * 60000 - stats.totalSpeechMs)
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
-  const configured = !!settings.stt.baseUrl && !!settings.stt.model
+  const configured = inference.sttReady
+  const murmurModels = inference.routing.stt === 'murmur'
 
   const lastLatency = useMemo(() => recent.find((e) => !e.error)?.timings, [recent])
 
@@ -84,14 +87,19 @@ export function HomePage({
         <Card className="border-record/40 bg-record/5">
           <CardContent className="flex items-center justify-between gap-4 py-4">
             <div>
-              <div className="text-sm font-medium">Connect a speech model to start dictating</div>
+              <div className="text-sm font-medium">
+                {murmurModels
+                  ? 'Sign in to use Murmur’s speech model'
+                  : 'Connect a speech model to start dictating'}
+              </div>
               <div className="text-[13px] text-muted-foreground">
-                Murmur needs a transcription endpoint. OpenAI, Groq, Deepgram, or any local whisper
-                server works.
+                {murmurModels
+                  ? 'Your account includes speech and formatting models. Or connect your own provider under Models.'
+                  : 'Murmur needs a transcription endpoint. OpenAI, Groq, Deepgram, or any local whisper server works.'}
               </div>
             </div>
-            <Button onClick={() => onNavigate('providers')}>
-              Set up <ArrowRight />
+            <Button onClick={() => onNavigate(murmurModels ? 'account' : 'providers')}>
+              {murmurModels ? 'Account' : 'Set up'} <ArrowRight />
             </Button>
           </CardContent>
         </Card>

@@ -14,6 +14,7 @@ import type {
   Tone
 } from '@shared/settings'
 import { LLM_INSTRUCTIONS_MAX } from '@shared/settings'
+import { MURMUR_LLM_MODEL } from '@shared/inference'
 import type { LlmStatus, PreviewResult, ProviderTestResult } from '@shared/types'
 import { LLM_PRESETS } from '@core/stt/presets'
 import { Button } from '@renderer/components/ui/button'
@@ -29,8 +30,12 @@ import {
 import { Badge, Segmented } from '@renderer/components/ui/misc'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { ModelField, SecretInput, TestResult } from '@renderer/components/ProviderForm'
+import { planLabel, useInference } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, uid } from '@renderer/lib/utils'
+
+/** The Murmur entry of the formatting-model server picker; only offered by cloud builds. */
+const MURMUR_LLM_PRESET = { id: 'murmur', name: 'Murmur (included with your account)' }
 
 // ---- option catalogues -----------------------------------------------------------------------
 
@@ -264,14 +269,23 @@ function ListInput({
 
 export function StylePage(): React.JSX.Element {
   const { settings, patch } = useSettings()
+  const inference = useInference()
   const f = settings.formatting
+  const murmurLlm = inference.routing.llm === 'murmur'
   const [discovered, setDiscovered] = useState<string[] | null>(null)
   const [discovering, setDiscovering] = useState(false)
   const [discoverError, setDiscoverError] = useState<string>()
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<ProviderTestResult | null>(null)
-  const [llmPreset, setLlmPreset] = useState(f.llm.sameAsStt ? 'same' : 'custom')
+  const [llmPreset, setLlmPreset] = useState(() =>
+    inference.offersMurmur && f.llm.source === 'murmur'
+      ? MURMUR_LLM_PRESET.id
+      : f.llm.sameAsStt
+        ? 'same'
+        : 'custom'
+  )
   const [instructions, setInstructions] = useSyncedText(f.llm.instructions)
+  const serverOptions = inference.offersMurmur ? [MURMUR_LLM_PRESET, ...LLM_PRESETS] : LLM_PRESETS
 
   const discover = async (): Promise<void> => {
     setDiscovering(true)
@@ -290,12 +304,21 @@ export function StylePage(): React.JSX.Element {
   }
   const choosePreset = (id: string): void => {
     setLlmPreset(id)
+    if (id === MURMUR_LLM_PRESET.id) {
+      void patch({ formatting: { llm: { source: 'murmur' } } })
+      return
+    }
     const p = LLM_PRESETS.find((x) => x.id === id)!
-    if (id === 'same') void patch({ formatting: { llm: { sameAsStt: true } } })
+    if (id === 'same') void patch({ formatting: { llm: { source: 'custom', sameAsStt: true } } })
     else
       void patch({
         formatting: {
-          llm: { sameAsStt: false, baseUrl: p.baseUrl, model: p.defaultModel || f.llm.model }
+          llm: {
+            source: 'custom',
+            sameAsStt: false,
+            baseUrl: p.baseUrl,
+            model: p.defaultModel || f.llm.model
+          }
         }
       })
   }
@@ -326,7 +349,7 @@ export function StylePage(): React.JSX.Element {
   const removeRule = (id: string): void =>
     void patch({ formatting: { appRules: f.appRules.filter((r) => r.id !== id) } })
 
-  const modelReady = !!f.llm.model && (f.llm.sameAsStt ? !!settings.stt.baseUrl : !!f.llm.baseUrl)
+  const modelReady = inference.llmReady
 
   return (
     <div className="space-y-8">
@@ -492,15 +515,26 @@ export function StylePage(): React.JSX.Element {
 
       <Section
         title="Smart formatting model"
-        description="An OpenAI-compatible chat model. Fast small models (Groq Llama 8B, gpt-4o-mini, Cerebras) keep the round-trip under a second. The model receives the rule-based text, not the raw transcript, and its edits are reviewed word by word."
+        description={
+          murmurLlm
+            ? 'The formatting model that comes with your account. It receives the rule-based text, not the raw transcript, and its edits are reviewed word by word before anything is inserted.'
+            : 'An OpenAI-compatible chat model. Fast small models (Groq Llama 8B, gpt-4o-mini, Cerebras) keep the round-trip under a second. The model receives the rule-based text, not the raw transcript, and its edits are reviewed word by word.'
+        }
       >
-        <SettingRow title="Server">
+        <SettingRow
+          title="Server"
+          description={
+            llmPreset === 'same' && murmurLlm
+              ? 'Follows your speech model, which is Murmur’s.'
+              : undefined
+          }
+        >
           <Select value={llmPreset} onValueChange={choosePreset}>
             <SelectTrigger className="w-64">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {LLM_PRESETS.map((p) => (
+              {serverOptions.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.name}
                 </SelectItem>
@@ -508,38 +542,55 @@ export function StylePage(): React.JSX.Element {
             </SelectContent>
           </Select>
         </SettingRow>
-        {!f.llm.sameAsStt && (
+        {murmurLlm ? (
+          <SettingRow
+            title="Model"
+            description={
+              inference.signedIn
+                ? `Provided by this Murmur instance on the ${planLabel(inference.plan)} plan.`
+                : 'Sign in to use Murmur models.'
+            }
+          >
+            <Badge variant="outline" className="font-mono">
+              {inference.status?.models.llm ?? MURMUR_LLM_MODEL}
+            </Badge>
+          </SettingRow>
+        ) : (
           <>
-            <SettingRow title="Base URL" vertical>
-              <Input
-                value={f.llm.baseUrl}
-                onChange={(e) =>
-                  void patch({ formatting: { llm: { baseUrl: e.target.value.trim() } } })
-                }
-                placeholder="https://api.example.com/v1"
-                className="font-mono text-[13px]"
-                spellCheck={false}
-              />
-            </SettingRow>
-            <SettingRow title="API key" vertical>
-              <SecretInput slot="llm" />
+            {!f.llm.sameAsStt && (
+              <>
+                <SettingRow title="Base URL" vertical>
+                  <Input
+                    value={f.llm.baseUrl}
+                    onChange={(e) =>
+                      void patch({ formatting: { llm: { baseUrl: e.target.value.trim() } } })
+                    }
+                    placeholder="https://api.example.com/v1"
+                    className="font-mono text-[13px]"
+                    spellCheck={false}
+                  />
+                </SettingRow>
+                <SettingRow title="API key" vertical>
+                  <SecretInput slot="llm" />
+                </SettingRow>
+              </>
+            )}
+            <SettingRow title="Model" vertical>
+              <div className="w-full">
+                <ModelField
+                  value={f.llm.model}
+                  onChange={(m) => void patch({ formatting: { llm: { model: m } } })}
+                  known={LLM_PRESETS.find((p) => p.id === llmPreset)?.models ?? []}
+                  discovered={discovered}
+                  discovering={discovering}
+                  onDiscover={discover}
+                  discoverError={discoverError}
+                  placeholder="e.g. llama-3.1-8b-instant"
+                />
+              </div>
             </SettingRow>
           </>
         )}
-        <SettingRow title="Model" vertical>
-          <div className="w-full">
-            <ModelField
-              value={f.llm.model}
-              onChange={(m) => void patch({ formatting: { llm: { model: m } } })}
-              known={LLM_PRESETS.find((p) => p.id === llmPreset)?.models ?? []}
-              discovered={discovered}
-              discovering={discovering}
-              onDiscover={discover}
-              discoverError={discoverError}
-              placeholder="e.g. llama-3.1-8b-instant"
-            />
-          </div>
-        </SettingRow>
         <LevelRow
           title="How much may it change"
           intro="Every level fixes punctuation, casing, spelling, mis-hearings, hesitation and self-corrections."
@@ -624,9 +675,14 @@ export function StylePage(): React.JSX.Element {
           vertical
         >
           <div className="flex w-full items-center gap-3">
-            <Button onClick={test} disabled={testing || !f.llm.model}>
+            <Button onClick={test} disabled={testing || !modelReady}>
               {testing ? <Loader2 className="animate-spin" /> : <Play />} Run test
             </Button>
+            {!modelReady && (
+              <span className="text-[13px] text-muted-foreground">
+                {murmurLlm ? 'Sign in first.' : 'Choose a server and model first.'}
+              </span>
+            )}
           </div>
           {result && (
             <div className="w-full">

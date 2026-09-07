@@ -7,10 +7,9 @@ import {
   SttError,
   transcribeComplete,
   type CompleteResult,
-  type SttConfig,
   type TranscribeOutput
 } from '@core/stt'
-import { chatComplete } from '@core/llm/client'
+import type { LlmConfig } from '@core/llm/client'
 import { STT_BASE_PROMPT, buildSttPrompt } from '@core/text/dictionary'
 import { runPipeline, type PipelineOptions, type PipelineResult } from '@core/text/pipeline'
 import { buildCommandMessages, sanitizeLlmOutput } from '@core/text/llm-prompt'
@@ -22,6 +21,7 @@ import {
   type ResolvedStyle
 } from '@core/text/app-context'
 import { countWords } from '@core/text/util'
+import { MURMUR_ERROR_CODES } from '@shared/inference'
 import { sessionDurationLimitMs, type Settings } from '@shared/settings'
 import type {
   ActiveWindowInfo,
@@ -36,6 +36,7 @@ import { createLogger } from '../logger'
 import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
 import type { HookService } from '../hotkeys/hook'
+import type { InferenceRouter, ResolvedStt } from '../inference/router'
 import type { SettingsStore } from '../store/settings'
 import type { HistoryStore } from '../store/history'
 import { injectText, readSelection, type InjectResult } from '../inject'
@@ -58,9 +59,14 @@ export interface SessionDeps {
   history: HistoryStore
   recorder: Recorder
   hook: HookService
+  /** Where speech and formatting requests go (the instance's models or the user's own provider). */
+  inference: InferenceRouter
   overlay: { setState: (s: OverlayState) => void; playSound: (n: SoundName) => void }
   getActiveWindow: () => Promise<ActiveWindowInfo>
 }
+
+/** Placeholder the smart-formatting stage reads as "no model configured". */
+const NO_LLM: LlmConfig = { baseUrl: '', apiKey: '', model: '', timeoutMs: 8000 }
 
 /**
  * Orchestrates one dictation from hotkey to inserted text and records where the time went.
@@ -276,13 +282,15 @@ export class DictationController extends EventEmitter {
 
     // 2. STT
     t = performance.now()
-    const sttCfg: SttConfig = {
-      kind: s.stt.kind,
-      baseUrl: s.stt.baseUrl,
-      apiKey: this.deps.settings.getSecret('stt'),
-      model: s.stt.model,
-      language: s.stt.language,
-      timeoutMs: s.stt.timeoutMs
+    const tag = session.id.slice(0, 8)
+    let resolved: ResolvedStt
+    try {
+      resolved = await this.deps.inference.stt()
+    } catch (err) {
+      timings.sttMs = Math.round(performance.now() - t)
+      this.recordFailure(session, '', app, timings, null, friendlyError(err))
+      this.showError(friendlyError(err))
+      return
     }
     const prompt = s.stt.useDictionaryPrompt
       ? buildSttPrompt(
@@ -291,11 +299,10 @@ export class DictationController extends EventEmitter {
         )
       : undefined
     const keyterms = s.dictionary.map((d) => d.word)
-    const tag = session.id.slice(0, 8)
     let stt: CompleteResult
     try {
       stt = await transcribeComplete(
-        (wav, p) => this.transcribeWithFallback(wav, p, keyterms, sttCfg, s.stt.fallbackModel),
+        (wav, p) => this.transcribeWithFallback(wav, p, keyterms, resolved),
         {
           pcm: audio,
           sampleRate: SAMPLE_RATE,
@@ -310,7 +317,7 @@ export class DictationController extends EventEmitter {
       )
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
-      this.recordFailure(session, '', app, timings, sttCfg, friendlyError(err))
+      this.recordFailure(session, '', app, timings, resolved, friendlyError(err))
       this.showError(friendlyError(err))
       return
     }
@@ -356,14 +363,21 @@ export class DictationController extends EventEmitter {
         return
       }
       t = performance.now()
-      const llm = this.deps.settings.llmConnection()
+      let llm: LlmConfig
+      try {
+        llm = (await this.deps.inference.llm()).cfg
+      } catch (err) {
+        this.showError(friendlyError(err))
+        sel.restore()
+        return
+      }
       if (!llm.baseUrl || !llm.model) {
         this.showError('Command mode needs a formatting model (Style settings)')
         sel.restore()
         return
       }
       try {
-        const res = await chatComplete(
+        const res = await this.deps.inference.complete(
           llm,
           buildCommandMessages({
             selection: sel.text,
@@ -398,7 +412,7 @@ export class DictationController extends EventEmitter {
         replaceSelection = true
       } catch (err) {
         timings.llmMs = Math.round(performance.now() - t)
-        this.recordFailure(session, raw, app, timings, sttCfg, friendlyError(err))
+        this.recordFailure(session, raw, app, timings, resolved, friendlyError(err))
         this.showError(friendlyError(err))
         sel.restore()
         return
@@ -409,18 +423,35 @@ export class DictationController extends EventEmitter {
       timings.formatMs = Math.round(performance.now() - t)
       final = light
       pressEnter = light.pressEnter
-      const smart = await smartFormat({
-        light,
-        formatting: s.formatting,
-        dictionary: s.dictionary,
-        style,
-        app,
-        llm: this.deps.settings.llmConnection(),
-        pipelineOpts,
-        language: s.stt.language
-      })
+      // A formatting model that cannot be reached (signed out of Murmur, no token) is not an
+      // error for the dictation: the rule-based text goes in, and History says why.
+      let llm: LlmConfig = NO_LLM
+      let llmUnavailable: string | undefined
+      if (style.mode === 'smart') {
+        try {
+          llm = (await this.deps.inference.llm()).cfg
+        } catch (err) {
+          llmUnavailable = friendlyError(err)
+        }
+      }
+      const smart = await smartFormat(
+        {
+          light,
+          formatting: s.formatting,
+          dictionary: s.dictionary,
+          style,
+          app,
+          llm,
+          pipelineOpts,
+          language: s.stt.language
+        },
+        this.deps.inference.complete
+      )
       timings.llmMs = smart.llmMs
-      llmStatus = smart.status
+      llmStatus =
+        llmUnavailable && smart.status.outcome === 'skipped'
+          ? { outcome: 'skipped', detail: llmUnavailable }
+          : smart.status
       final = smart.result
       final.pressEnter = pressEnter
       llmUsed = smart.status.outcome === 'used' || smart.status.outcome === 'partial'
@@ -462,8 +493,8 @@ export class DictationController extends EventEmitter {
       wordCount: final.wordCount,
       speechMs: timings.recordMs,
       appName: windowInfo.app || windowInfo.title || undefined,
-      provider: s.stt.kind,
-      model: s.stt.model,
+      provider: resolved.provider,
+      model: resolved.cfg.model,
       injected: injectResult.ok && injectResult.method !== 'clipboard',
       injectionMethod: injectResult.method,
       llmUsed,
@@ -488,18 +519,29 @@ export class DictationController extends EventEmitter {
     this.emit('entry', entry)
   }
 
+  /**
+   * One transcription request with the two recoveries that make sense for it: a Murmur session
+   * token the gateway no longer accepts is refreshed once (`resolved.cfg` is updated so the next
+   * resume round uses it too), and a user's own model that errors falls back to their fallback model.
+   */
   private async transcribeWithFallback(
     wav: Uint8Array,
     prompt: string | undefined,
     keyterms: string[],
-    cfg: SttConfig,
-    fallbackModel: string
+    resolved: ResolvedStt
   ): Promise<TranscribeOutput> {
+    const cfg = resolved.cfg
     const provider = getSttProvider(cfg.kind)
     try {
       return await provider.transcribe({ wav, prompt, keyterms }, cfg)
     } catch (err) {
+      const refreshed = await this.deps.inference.refreshedStt(resolved, err)
+      if (refreshed) {
+        resolved.cfg = refreshed
+        return provider.transcribe({ wav, prompt, keyterms }, refreshed)
+      }
       const e = err instanceof SttError ? err : null
+      const fallbackModel = resolved.fallbackModel
       if (e?.retryable && fallbackModel && fallbackModel !== cfg.model) {
         log.warn(
           `STT ${cfg.model} failed (${e.kind}: ${e.message}); retrying with ${fallbackModel}`
@@ -576,9 +618,10 @@ export class DictationController extends EventEmitter {
     raw: string,
     app: AppContext,
     timings: StageTimings,
-    cfg: SttConfig,
+    resolved: ResolvedStt | null,
     error: string
   ): void {
+    const s = this.deps.settings.get()
     this.deps.history.add({
       id: session.id,
       createdAt: Date.now(),
@@ -588,8 +631,8 @@ export class DictationController extends EventEmitter {
       wordCount: 0,
       speechMs: timings.recordMs,
       appName: app.app || undefined,
-      provider: cfg.kind,
-      model: cfg.model,
+      provider: resolved?.provider ?? s.stt.kind,
+      model: resolved?.cfg.model ?? s.stt.model,
       injected: false,
       llmUsed: false,
       timings,
@@ -627,6 +670,8 @@ export class DictationController extends EventEmitter {
 
 export function friendlyError(err: unknown): string {
   if (err instanceof SttError) {
+    // The Murmur gateway (and the router in front of it) already speak to the user.
+    if (err.code && MURMUR_ERROR_CODES.has(err.code)) return err.message
     switch (err.kind) {
       case 'auth':
         return 'Authentication failed — check your API key'

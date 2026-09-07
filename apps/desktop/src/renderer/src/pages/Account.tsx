@@ -30,8 +30,9 @@ import {
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { SyncBadge, syncLabel } from '@renderer/components/SyncBadge'
 import { useCloud } from '@renderer/hooks/useCloud'
+import { minutesLabel, planLabel, useInference } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
-import { formatRelative } from '@renderer/lib/utils'
+import { formatNumber, formatRelative } from '@renderer/lib/utils'
 
 export function AccountPage(): React.JSX.Element {
   const { clerk } = useCloud()
@@ -101,6 +102,7 @@ function SignedInAccount({
 }): React.JSX.Element {
   const { status, clerk, config } = useCloud()
   const { settings } = useSettings()
+  const inference = useInference()
   const clerkClient = useClerk()
 
   const user = status?.user
@@ -164,6 +166,38 @@ function SignedInAccount({
       </div>
 
       <Section
+        title="Plan"
+        description={
+          inference.managedAvailable
+            ? 'The speech and formatting models that come with your account. Choose your own provider instead under Models and Style; keys for those stay on this device.'
+            : 'This Murmur instance does not provide models of its own; connect your provider under Models.'
+        }
+      >
+        <SettingRow
+          title={`${planLabel(inference.plan)} plan`}
+          description={
+            inference.status
+              ? `${Math.round(inference.status.limits.sttSecondsPerMonth / 60)} minutes of transcription and ${formatNumber(inference.status.limits.llmTokensPerMonth)} formatting tokens a month, up to ${inference.status.limits.requestsPerMinute} requests a minute.`
+              : 'Waiting for your account status…'
+          }
+        >
+          <Badge variant={inference.plan === 'pro' ? 'success' : 'secondary'}>
+            {planLabel(inference.plan)}
+          </Badge>
+        </SettingRow>
+        {inference.status && inference.minutes && (
+          <SettingRow
+            title="Used this month"
+            description={`${inference.routing.stt === 'murmur' ? 'Murmur’s speech model is in use on this device.' : 'This device uses your own speech provider; the allowance is untouched by it.'}`}
+          >
+            <span className="text-[13px] tabular-nums text-muted-foreground">
+              {minutesLabel(inference.minutes)} · {formatNumber(inference.tokensUsed)} tokens
+            </span>
+          </SettingRow>
+        )}
+      </Section>
+
+      <Section
         title="Sync"
         description="Changes made here are saved to your account within seconds and reach your other devices as soon as they connect."
       >
@@ -209,7 +243,8 @@ function SignedInAccount({
             ))}
           </div>
           <p className="mt-2 text-[12px] text-muted-foreground">
-            Speech-model connections and API keys are device settings and are never uploaded.
+            Your choice of speech model and any API keys of your own are device settings and are
+            never uploaded.
           </p>
         </SettingRow>
         <SettingRow

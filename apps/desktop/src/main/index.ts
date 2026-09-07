@@ -21,6 +21,7 @@ import { CloudSync } from './cloud/sync-engine'
 import { TokenBridge } from './cloud/token-bridge'
 import { DictationController } from './dictation/session'
 import { HookService } from './hotkeys/hook'
+import { InferenceRouter } from './inference/router'
 import { registerIpc } from './ipc'
 import { createLogger, initLogger } from './logger'
 import { getActiveWindow } from './active-window'
@@ -98,8 +99,8 @@ async function main(): Promise<void> {
   for (const warning of cloud.warnings) log.warn(warning)
   log.info(
     cloudConfig.accountMode === 'off'
-      ? 'accounts: off (local mode)'
-      : `accounts: ${cloudConfig.accountMode} (convex ${cloudConfig.convexUrl}, clerk ${cloudConfig.clerkFrontendApiHost})`
+      ? "accounts: off (local mode); models: the user's own provider only"
+      : `accounts: ${cloudConfig.accountMode} (convex ${cloudConfig.convexUrl}, clerk ${cloudConfig.clerkFrontendApiHost}); managed models via ${cloudConfig.convexSiteUrl || 'n/a'}`
   )
 
   // The settings window is served from a stable origin in packaged builds (Clerk requires one; it
@@ -190,11 +191,22 @@ async function main(): Promise<void> {
   let tray: AppTray | null = null
   let quitting = false
 
+  // Speech and formatting requests: the instance's managed models (cloud builds, by default) or
+  // the provider the user configured. Session tokens come from the renderer's Clerk session.
+  const inference = new InferenceRouter({
+    config: cloudConfig,
+    settings,
+    token: (forceRefresh) => tokenBridge.request(forceRefresh),
+    signedIn: () => cloudSync.getStatus().signedIn,
+    managedAvailable: () => cloudSync.getStatus().inference?.available
+  })
+
   const controller = new DictationController({
     settings,
     history,
     recorder,
     hook,
+    inference,
     overlay: { setState: (s) => overlay.setState(s), playSound: (n) => overlay.playSound(n) },
     getActiveWindow
   })
@@ -292,6 +304,7 @@ async function main(): Promise<void> {
     history,
     controller,
     hook,
+    inference,
     cloudConfig,
     cloud: cloudSync,
     updates,

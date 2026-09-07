@@ -8,6 +8,7 @@ import {
 /** Runtime overrides (developer convenience, mirrors MURMUR_BASE_URL for providers). */
 export interface CloudEnv {
   MURMUR_CONVEX_URL?: string
+  MURMUR_CONVEX_SITE_URL?: string
   MURMUR_CLERK_PUBLISHABLE_KEY?: string
   MURMUR_ACCOUNT_MODE?: string
   MURMUR_DEEP_LINK_SCHEME?: string
@@ -17,6 +18,7 @@ export interface CloudEnv {
 /** Values baked in at build time through Vite env vars (see .env.example). */
 export interface CloudBuildConfig {
   convexUrl?: string
+  convexSiteUrl?: string
   clerkPublishableKey?: string
   accountMode?: string
   deepLinkScheme?: string
@@ -60,6 +62,32 @@ function isValidScheme(value: string): boolean {
 }
 
 /**
+ * Where a deployment serves HTTP actions, derived from its client URL: Convex Cloud pairs
+ * `<name>.convex.cloud` with `<name>.convex.site`, and the local/self-hosted backend serves them
+ * one port up from the client port (3210 -> 3211). Anything else needs an explicit site URL.
+ */
+export function deriveConvexSiteUrl(convexUrl: string): string | null {
+  let url: URL
+  try {
+    url = new URL(convexUrl)
+  } catch {
+    return null
+  }
+  if (/\.convex\.cloud$/i.test(url.hostname)) {
+    url.hostname = url.hostname.replace(/\.convex\.cloud$/i, '.convex.site')
+    return url.origin
+  }
+  if (url.port) {
+    const port = Number(url.port)
+    if (Number.isFinite(port) && port > 0 && port < 65535) {
+      url.port = String(port + 1)
+      return url.origin
+    }
+  }
+  return null
+}
+
+/**
  * Decide how this build treats accounts. Environment variables win over build-time values so a
  * developer can point a local build at a staging instance, or force local mode with
  * MURMUR_ACCOUNT_MODE=off. Without a valid Convex URL and Clerk key the app is always local.
@@ -86,6 +114,7 @@ export function resolveCloudConfig(env: CloudEnv, build: CloudBuildConfig): Reso
   const off: CloudConfig = {
     accountMode: 'off',
     convexUrl: '',
+    convexSiteUrl: '',
     clerkPublishableKey: '',
     clerkFrontendApiHost: '',
     deepLinkScheme,
@@ -117,10 +146,26 @@ export function resolveCloudConfig(env: CloudEnv, build: CloudBuildConfig): Reso
     else warnings.push(`Unknown account mode "${requestedMode}", defaulting to "required"`)
   }
 
+  const requestedSiteUrl = (env.MURMUR_CONVEX_SITE_URL ?? build.convexSiteUrl ?? '').trim()
+  let convexSiteUrl = ''
+  if (requestedSiteUrl) {
+    if (isHttpUrl(requestedSiteUrl)) convexSiteUrl = requestedSiteUrl.replace(/\/+$/, '')
+    else warnings.push(`Ignoring MURMUR_CONVEX_SITE_URL "${requestedSiteUrl}": not an http(s) URL`)
+  }
+  if (!convexSiteUrl) {
+    const derived = deriveConvexSiteUrl(convexUrl)
+    if (derived) convexSiteUrl = derived
+    else
+      warnings.push(
+        'Managed models disabled: cannot derive the HTTP actions URL from MURMUR_CONVEX_URL; set MURMUR_CONVEX_SITE_URL / VITE_CONVEX_SITE_URL'
+      )
+  }
+
   return {
     config: {
       accountMode,
       convexUrl: convexUrl.replace(/\/+$/, ''),
+      convexSiteUrl,
       clerkPublishableKey,
       clerkFrontendApiHost,
       deepLinkScheme,
@@ -135,6 +180,7 @@ export function buildTimeCloudConfig(): CloudBuildConfig {
   const env = import.meta.env as unknown as Record<string, string | undefined>
   return {
     convexUrl: env.VITE_CONVEX_URL,
+    convexSiteUrl: env.VITE_CONVEX_SITE_URL,
     clerkPublishableKey: env.VITE_CLERK_PUBLISHABLE_KEY,
     accountMode: env.VITE_MURMUR_ACCOUNT_MODE,
     deepLinkScheme: env.VITE_MURMUR_DEEP_LINK_SCHEME

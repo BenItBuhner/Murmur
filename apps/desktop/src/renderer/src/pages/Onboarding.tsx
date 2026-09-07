@@ -10,6 +10,7 @@ import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { HotkeyRecorder } from '@renderer/components/HotkeyRecorder'
 import { Wordmark } from '@renderer/components/Shell'
 import { useCloud } from '@renderer/hooks/useCloud'
+import { useInference } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, uid } from '@renderer/lib/utils'
 import { ProvidersPage } from './Providers'
@@ -42,6 +43,7 @@ const TONES: Array<{ value: Tone; label: string }> = [
 export function Onboarding(): React.JSX.Element {
   const { settings, patch, info } = useSettings()
   const cloud = useCloud()
+  const inference = useInference()
   const [steps, setSteps] = useState<StepId[]>(['welcome'])
   const [index, setIndex] = useState(0)
   const [sttOk, setSttOk] = useState(false)
@@ -54,9 +56,10 @@ export function Onboarding(): React.JSX.Element {
   const accountOnboarded = !!cloud.status?.user?.onboardingCompletedAt
   const returning = signedIn && accountOnboarded
   const firstName = cloud.clerk.firstName ?? cloud.status?.user?.name?.split(' ')[0]
+  const murmurModels = inference.routing.stt === 'murmur'
 
   const step = steps[index]
-  const configured = !!settings.stt.baseUrl && !!settings.stt.model
+  const configured = inference.sttReady
   const canNext = step === 'model' ? configured : true
   const last = index === steps.length - 1
 
@@ -102,8 +105,11 @@ export function Onboarding(): React.JSX.Element {
                   </h1>
                   <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
                     Your account is already set up, so your dictionary, snippets and style are on
-                    this computer now. Three quick device steps and you are dictating: connect a
-                    speech model, check the microphone, pick a shortcut.
+                    this computer now. Three quick device steps and you are dictating:{' '}
+                    {inference.offersMurmur
+                      ? 'confirm your speech model'
+                      : 'connect a speech model'}
+                    , check the microphone, pick a shortcut.
                   </p>
                   <FeatureList
                     items={[
@@ -128,12 +134,14 @@ export function Onboarding(): React.JSX.Element {
                   <FeatureList
                     items={[
                       'Hold to talk, tap for hands-free',
-                      'Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server',
+                      inference.offersMurmur
+                        ? 'Speech and formatting models included with your account, or bring your own'
+                        : 'Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server',
                       signedIn
                         ? 'Your dictionary and snippets sync to every device you sign in on'
                         : 'Personal dictionary and snippets',
                       signedIn
-                        ? 'API keys stay on this device; only your words and settings sync'
+                        ? 'Your own API keys, if you use any, stay on this device'
                         : 'Nothing stored anywhere but this device'
                     ]}
                   />
@@ -147,13 +155,19 @@ export function Onboarding(): React.JSX.Element {
           {step === 'model' && (
             <div className="space-y-6">
               <Header
-                title="Connect a speech model"
-                description="Murmur sends your recording to a transcription API you control. Pick a provider, paste a key, choose a model, and run the test. Keys stay on this computer."
+                title={inference.offersMurmur ? 'Your speech model' : 'Connect a speech model'}
+                description={
+                  inference.offersMurmur
+                    ? 'Your account comes with speech and formatting models, so there is nothing to configure. Prefer your own provider or a local whisper server? Switch below; keys stay on this computer.'
+                    : 'Murmur sends your recording to a transcription API you control. Pick a provider, paste a key, choose a model, and run the test. Keys stay on this computer.'
+                }
               />
               <ProvidersPage embedded onReady={setSttOk} />
               {sttOk && (
                 <p className="text-[13px] text-success">
-                  Working. You can tweak fallback models later under Models.
+                  {murmurModels
+                    ? 'Working. You can switch to your own provider any time under Models.'
+                    : 'Working. You can tweak fallback models later under Models.'}
                 </p>
               )}
             </div>

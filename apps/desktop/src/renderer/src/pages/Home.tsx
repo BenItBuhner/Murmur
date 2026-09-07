@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { ArrowRight, Clock3, Flame, Gauge, Type } from 'lucide-react'
 import type { HistoryEntry, OverlayState } from '@shared/types'
 import { Button } from '@renderer/components/ui/button'
@@ -14,6 +14,16 @@ import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/util
 import type { Route } from '@renderer/components/Shell'
 
 const TYPING_WPM = 40
+
+/** A recent-list row: rises in a beat after the row above it (`custom` is its index). */
+const row: Variants = {
+  initial: { opacity: 0, y: 10 },
+  enter: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.36, ease: arrive, delay: 0.05 + i * 0.045 }
+  })
+}
 
 export function HomePage({
   state,
@@ -196,19 +206,17 @@ export function HomePage({
             Nothing yet. Your dictations show up here with their timing breakdown.
           </div>
         ) : (
-          <motion.div
-            className="overflow-hidden rounded-2xl border bg-card"
-            variants={list}
-            initial="initial"
-            animate="enter"
-          >
-            {/* Entries dictated while this page is open slide in at the top. */}
+          <div className="overflow-hidden rounded-2xl border bg-card">
+            {/* Rows arrive one after another; entries dictated while this page is open slide in at the top. */}
             <AnimatePresence>
-              {recent.map((e) => (
+              {recent.map((e, i) => (
                 <motion.div
                   key={e.id}
                   layout="position"
-                  variants={item}
+                  custom={i}
+                  variants={row}
+                  initial="initial"
+                  animate="enter"
                   exit={{ opacity: 0, height: 0, transition: { duration: 0.18, ease: leave } }}
                   className="overflow-hidden border-b last:border-b-0"
                 >
@@ -234,7 +242,7 @@ export function HomePage({
                 </motion.div>
               ))}
             </AnimatePresence>
-          </motion.div>
+          </div>
         )}
       </section>
 

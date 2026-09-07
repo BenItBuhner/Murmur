@@ -43,10 +43,58 @@ data class UserDto(
     val email: String? = null,
     val name: String? = null,
     val imageUrl: String? = null,
+    /** Account tier (`free` or `pro`), deciding the managed-inference allowance. */
+    val plan: String = "free",
     val onboardingCompletedAt: Double? = null,
     val onboardingVersion: Double? = null,
     val createdAt: Double = 0.0
 )
+
+@Serializable
+data class InferenceModelsDto(val stt: String? = null, val llm: String? = null)
+
+@Serializable
+data class InferenceLimitsDto(
+    val sttSecondsPerMonth: Double = 0.0,
+    val llmTokensPerMonth: Double = 0.0,
+    val requestsPerMinute: Double = 0.0,
+    val maxClipSeconds: Double = 0.0
+)
+
+@Serializable
+data class InferenceUsageDto(
+    /** Newest month with any usage (`YYYY-MM`, UTC); other months count as zero. */
+    val period: String = "",
+    val sttSeconds: Double = 0.0,
+    val sttRequests: Double = 0.0,
+    val llmTokens: Double = 0.0,
+    val llmRequests: Double = 0.0
+)
+
+/** What the instance offers the signed-in account in managed models, and how much is left (`inference:status`). */
+@Serializable
+data class InferenceStatusDto(
+    /** The instance is configured with at least a managed speech model. */
+    val available: Boolean = false,
+    val models: InferenceModelsDto = InferenceModelsDto(),
+    val plan: String = "free",
+    val limits: InferenceLimitsDto = InferenceLimitsDto(),
+    val usage: InferenceUsageDto = InferenceUsageDto()
+) {
+    /** Managed speech seconds used in [period], zero for any other month. */
+    fun sttSecondsIn(period: String): Double = if (usage.period == period) usage.sttSeconds else 0.0
+
+    fun llmTokensIn(period: String): Double = if (usage.period == period) usage.llmTokens else 0.0
+
+    companion object {
+        /** Current UTC month as `YYYY-MM`, the period the gateway bills usage to. */
+        fun currentPeriod(now: Long = System.currentTimeMillis()): String {
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.timeInMillis = now
+            return "%04d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1)
+        }
+    }
+}
 
 @Serializable
 data class DeviceDto(

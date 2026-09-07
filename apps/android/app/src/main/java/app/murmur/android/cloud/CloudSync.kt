@@ -42,7 +42,9 @@ data class SyncStatus(
     val pendingOps: Int,
     val user: UserDto?,
     val devices: List<DeviceDto>,
-    val error: String?
+    val error: String?,
+    /** Managed-model availability and allowance; null until the account is connected. */
+    val inference: InferenceStatusDto? = null
 ) {
     companion object {
         val DISABLED = SyncStatus(SyncPhase.DISABLED, false, false, false, 0, null, emptyList(), null)
@@ -75,6 +77,7 @@ class CloudSync private constructor(
     private var error: String? = null
     private var user: UserDto? = null
     private var devices: List<DeviceDto> = emptyList()
+    private var inference: InferenceStatusDto? = null
     private var serverDictionary: List<DictionaryEntryDto>? = null
     private var serverPreferences: PreferencesDto? = null
     private var preferencesLoaded = false
@@ -153,6 +156,7 @@ class CloudSync private constructor(
         authenticated = false
         user = null
         devices = emptyList()
+        inference = null
         serverDictionary = null
         serverPreferences = null
         preferencesLoaded = false
@@ -258,6 +262,13 @@ class CloudSync private constructor(
                 convex.subscribe<List<DeviceDto>>("devices:list").collect { result ->
                     if (gen != generation) return@collect
                     result.onSuccess { devices = it }
+                    publish()
+                }
+            }
+            launch {
+                convex.subscribe<InferenceStatusDto>("inference:status").collect { result ->
+                    if (gen != generation) return@collect
+                    result.onSuccess { inference = it }.onFailure { Log.w(TAG, "inference status: ${it.message}") }
                     publish()
                 }
             }
@@ -456,7 +467,7 @@ class CloudSync private constructor(
             pending > 0 -> SyncPhase.SYNCING
             else -> SyncPhase.SYNCED
         }
-        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, error)
+        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, error, inference)
     }
 
     companion object {

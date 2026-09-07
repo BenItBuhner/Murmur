@@ -17,14 +17,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import app.murmur.android.inference.Inference
+import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
 import app.murmur.android.stt.SttClient
 import app.murmur.android.ui.components.Chip
 import app.murmur.android.ui.components.ChipRow
+import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
+import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.Notice
 import app.murmur.android.ui.components.NoticeTone
 import app.murmur.android.ui.components.Screen
@@ -35,19 +39,103 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SpeechModelScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
+    val inference = rememberInferenceView(settings)
     Screen(
         title = "Speech model",
-        description = "Recordings go to a transcription service you choose. Keys stay on this phone and are never synced.",
+        description = if (inference.offersMurmur)
+            "The models that come with your account, or a transcription service you choose. Keys for your own service stay on this phone and are never synced."
+        else
+            "Recordings go to a transcription service you choose. Keys stay on this phone and are never synced.",
         onBack = onBack
     ) {
         SpeechModelForm(store, settings)
     }
 }
 
-/** Provider, connection and model. Shared by the settings screen and onboarding. */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Where speech goes. In cloud builds a chooser between the instance's models and the user's own
+ * provider comes first; local builds only ever show the provider form. Shared by the settings
+ * screen and onboarding.
+ */
 @Composable
 fun SpeechModelForm(store: SettingsStore, settings: MurmurSettings, showAdvanced: Boolean = true) {
+    val inference = rememberInferenceView(settings)
+    if (inference.offersMurmur) {
+        SourceChooser(
+            title = "Speech model",
+            selected = settings.sttSource,
+            murmurMeta = listOfNotNull("${inference.planLabel} plan", inference.minutesLabel).joinToString(" · "),
+            onSelect = { source -> store.update { s -> s.copy(sttSource = source) } }
+        )
+        SectionGap()
+    } else if (inference.cloudEnabled && !inference.managedAvailable) {
+        Notice("This Murmur instance does not provide speech models of its own, so Murmur uses the provider you connect here.")
+        SectionGap()
+    }
+    if (inference.routing.murmurStt) MurmurSpeechSummary(inference) else OwnProviderForm(store, settings, showAdvanced)
+}
+
+/** Murmur models vs. the user's own provider. Only rendered in builds that talk to an instance. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SourceChooser(
+    title: String,
+    selected: InferenceSource,
+    murmurMeta: String,
+    onSelect: (InferenceSource) -> Unit,
+    ownLabel: String = "Your own provider"
+) {
+    Group(title) {
+        Spacer(Modifier.height(6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Murmur models", selected = selected == InferenceSource.MURMUR, onClick = { onSelect(InferenceSource.MURMUR) })
+            Chip(ownLabel, selected = selected == InferenceSource.CUSTOM, onClick = { onSelect(InferenceSource.CUSTOM) })
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            when (selected) {
+                InferenceSource.MURMUR ->
+                    "Included with your account ($murmurMeta). Nothing to set up: your recording goes to this Murmur instance, which transcribes it with the models it provides."
+                InferenceSource.CUSTOM ->
+                    "OpenAI, Groq, Deepgram, ElevenLabs or a local whisper server with your own key. Audio goes straight from this phone to that provider and never touches Murmur’s servers."
+            },
+            style = Murmur.type.bodySmall,
+            color = Murmur.colors.inkSoft
+        )
+    }
+}
+
+@Composable
+private fun MurmurSpeechSummary(inference: InferenceView) {
+    val c = Murmur.colors
+    Column {
+        Hairline()
+        ControlRow("Model", description = "Provided by this Murmur instance for your account. Your dictionary still biases recognition.") {
+            Text(inference.status?.models?.stt ?: Inference.STT_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
+        }
+        Hairline()
+        ControlRow(
+            "Plan",
+            description = when {
+                !inference.signedIn -> "Sign in to use Murmur models."
+                inference.minutesLabel != null -> "Transcription minutes reset at the start of every month."
+                else -> "Waiting for your account status…"
+            }
+        ) {
+            Text(
+                listOfNotNull(inference.planLabel, inference.minutesLabel).joinToString(" · "),
+                style = Murmur.type.labelSmall,
+                color = c.inkSoft
+            )
+        }
+        Hairline()
+    }
+}
+
+/** Provider, connection and model for the user's own service. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, showAdvanced: Boolean) {
     val scope = rememberCoroutineScope()
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
     var discovering by remember { mutableStateOf(false) }

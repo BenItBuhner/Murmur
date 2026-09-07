@@ -1,6 +1,7 @@
 package app.murmur.android.cloud
 
 import android.content.Context
+import android.util.Log
 import com.clerk.api.Clerk
 import com.clerk.api.network.serialization.errorMessage
 import com.clerk.api.network.serialization.onFailure
@@ -11,6 +12,19 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 
 data class ClerkCredentials(val userId: String, val email: String?, val name: String?, val token: String)
+
+/** Session tokens for callers outside the Convex client, such as the managed-inference gateway. */
+object ClerkTokens {
+    /** A Convex JWT for the signed-in account, or null when nobody is signed in or Clerk cannot mint one. */
+    suspend fun sessionToken(skipCache: Boolean): String? {
+        if (Clerk.userFlow.value == null) return null
+        var token: String? = null
+        Clerk.auth.getToken(GetTokenOptions(template = CloudConfig.JWT_TEMPLATE, skipCache = skipCache))
+            .onSuccess { token = it }
+            .onFailure { Log.w("MurmurCloud", "could not get a session token: ${it.errorMessage}") }
+        return token
+    }
+}
 
 /**
  * Bridges the Clerk Android SDK into Convex's [AuthProvider]. Sign-in itself happens in the UI

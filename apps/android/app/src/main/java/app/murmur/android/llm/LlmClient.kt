@@ -2,9 +2,8 @@ package app.murmur.android.llm
 
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.SttException
-import app.murmur.android.stt.classifyStatus
+import app.murmur.android.stt.errorFromResponse
 import app.murmur.android.stt.normalizeBaseUrl
-import app.murmur.android.stt.parseErrorBody
 import app.murmur.android.stt.toSttException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -72,13 +71,7 @@ object LlmClient {
         val started = System.nanoTime()
         try {
             client(cfg.timeoutMs).newCall(req).execute().use { r ->
-                if (!r.isSuccessful) {
-                    val (message, suggested) = parseErrorBody(r.body?.string() ?: "")
-                    throw SttException(
-                        message.ifEmpty { "HTTP ${r.code}" },
-                        classifyStatus(r.code, message), r.code, suggested
-                    )
-                }
+                if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
                 val json = JSONObject(r.body?.string() ?: "{}")
                 val choice = json.optJSONArray("choices")?.optJSONObject(0)
                 val content = choice?.optJSONObject("message")?.opt("content")
@@ -110,13 +103,7 @@ object LlmClient {
         }.build()
         try {
             client(15_000).newCall(req).execute().use { r ->
-                if (!r.isSuccessful) {
-                    val (message, _) = parseErrorBody(r.body?.string() ?: "")
-                    throw SttException(
-                        message.ifEmpty { "HTTP ${r.code}" },
-                        classifyStatus(r.code, message), r.code
-                    )
-                }
+                if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
                 val json = JSONObject(r.body?.string() ?: "{}")
                 val ids = ArrayList<String>()
                 val data = json.optJSONArray("data")

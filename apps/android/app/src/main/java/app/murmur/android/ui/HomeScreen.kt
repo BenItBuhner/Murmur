@@ -64,7 +64,8 @@ fun HomeScreen(
     val permissions = rememberPermissionState()
     val dictation by DictationController.state.collectAsState()
     val updateState by UpdateManager.get(context).state.collectAsState()
-    val modelReady = settings.speechModelConfigured
+    val inference = rememberInferenceView(settings)
+    val modelReady = inference.sttReady
     val ready = permissions.allGranted && modelReady
     val greeting = remember { greetingFor() }
 
@@ -82,7 +83,19 @@ fun HomeScreen(
         ) {
             Wordmark()
             Spacer(Modifier.weight(1f))
-            StatusLine(dictation, ready, onClick = { if (!ready) onOpen(if (!permissions.allGranted) Route.PERMISSIONS else Route.MODEL) })
+            StatusLine(
+                dictation, ready,
+                onClick = {
+                    if (!ready) onOpen(
+                        when {
+                            !permissions.allGranted -> Route.PERMISSIONS
+                            // Murmur models only need a signed-in account.
+                            inference.routing.murmurStt -> Route.ACCOUNT
+                            else -> Route.MODEL
+                        }
+                    )
+                }
+            )
         }
 
         Column(Modifier.padding(horizontal = PageMargin)) {
@@ -109,7 +122,7 @@ fun HomeScreen(
             Hairline()
             NavRow(
                 "Speech model",
-                modelSummary(settings),
+                modelSummary(settings, inference),
                 onClick = { onOpen(Route.MODEL) },
                 attention = !modelReady
             )
@@ -215,8 +228,11 @@ private fun updateSummary(state: UpdateState, s: MurmurSettings): String = when 
         if (s.updateAutoInstall) "Up to date, installs automatically" else if (s.updateAutoCheck) "Up to date, checks automatically" else "Manual"
 }
 
-private fun modelSummary(s: MurmurSettings): String {
-    if (!s.speechModelConfigured) return "Not connected"
+private fun modelSummary(s: MurmurSettings, inference: InferenceView): String {
+    if (inference.routing.murmurStt) {
+        return if (inference.sttReady) "Murmur models, ${inference.planLabel.lowercase()} plan" else "Murmur models, sign in to use them"
+    }
+    if (!inference.sttReady) return "Not connected"
     val model = when (s.sttKind) {
         SttKind.OPENAI_COMPATIBLE -> s.sttModel
         SttKind.DEEPGRAM -> s.sttModel.ifBlank { "nova-3" }

@@ -8,14 +8,11 @@ import app.murmur.android.audio.Recorder
 import app.murmur.android.audio.SAMPLE_RATE
 import app.murmur.android.audio.Wav
 import app.murmur.android.cloud.CloudSync
-import app.murmur.android.llm.LlmClient
-import app.murmur.android.llm.LlmConfig
+import app.murmur.android.inference.InferenceRouter
 import app.murmur.android.service.RecordingService
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
-import app.murmur.android.stt.SttClient
-import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttException
 import app.murmur.android.stt.adaptiveThreshold
 import app.murmur.android.stt.lastVoicedSec
@@ -172,7 +169,7 @@ object DictationController {
                     }
                     recorded
                 }
-                process(pcm, settings)
+                process(pcm, settings, InferenceRouter.get(appContext))
             } catch (e: Exception) {
                 Log.e(TAG, "dictation failed", e)
                 RecordingService.stop(appContext)
@@ -181,16 +178,10 @@ object DictationController {
         }
     }
 
-    private suspend fun process(pcm: ShortArray, s: MurmurSettings) {
-        // 1. STT, and make sure the transcript reaches the end of the speech
-        val sttCfg = SttConfig(
-            kind = s.sttKind,
-            baseUrl = s.sttBaseUrl,
-            apiKey = s.sttApiKey,
-            model = s.sttModel,
-            language = s.language,
-            timeoutMs = s.sttTimeoutMs
-        )
+    private suspend fun process(pcm: ShortArray, s: MurmurSettings, router: InferenceRouter) {
+        // 1. STT, and make sure the transcript reaches the end of the speech. The router decides
+        // whether the clip goes to the instance's model or the user's own provider.
+        val resolved = router.stt()
         val prompt = buildSttPrompt(s.dictionaryTerms)
         val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
         val complete = transcribeComplete(
@@ -203,7 +194,7 @@ object DictationController {
             // term the speaker says next is exactly what makes Whisper stop early.
             tailPrompt = STT_BASE_PROMPT,
             log = { Log.w(TAG, it) }
-        ) { wav, p -> SttClient.transcribeWithFallback(wav, p, sttCfg, s.sttFallbackModel) }
+        ) { wav, p -> router.transcribe(resolved, wav, p) }
         val stt = complete.output
         if (complete.resumed > 0) {
             Log.i(TAG, "transcript recovered ${"%.1f".format(complete.recoveredSec)}s of speech in ${complete.resumed} extra request(s)")
@@ -241,16 +232,19 @@ object DictationController {
         var final = light
         val pressEnter = light.pressEnter
 
-        // 3. Optional LLM formatting behind the guard
-        val (llmBase, llmKey, llmModel) = s.llmConnection()
-        val wantLlm = s.formattingMode == FormattingMode.SMART &&
-            !light.empty && light.wordCount >= s.llmMinWords &&
-            llmBase.isNotEmpty() && llmModel.isNotEmpty()
-        if (wantLlm) {
+        // 3. Optional LLM formatting behind the guard. A formatting model that cannot be reached
+        // (signed out of Murmur, no token) is not an error for the dictation: the rule-based text
+        // goes in.
+        val llm = if (s.formattingMode == FormattingMode.SMART && !light.empty && light.wordCount >= s.llmMinWords) {
+            val (resolvedLlm, why) = router.llmOrNull()
+            if (resolvedLlm == null) Log.w(TAG, "formatting model unavailable: $why")
+            resolvedLlm?.cfg?.takeIf { it.baseUrl.isNotEmpty() && it.model.isNotEmpty() }
+        } else null
+        if (llm != null) {
             _state.value = DictationState.Processing("Formatting…")
             try {
-                val res = LlmClient.chatComplete(
-                    LlmConfig(llmBase, llmKey, llmModel, s.llmTimeoutMs),
+                val res = router.complete(
+                    llm,
                     buildFormatMessages(
                         light.text.trim(), s.dictionaryTerms, style, app, light.hints, s.language,
                         dictionaryAliases = s.dictionaryEntries.associate { it.word.trim() to it.aliases }

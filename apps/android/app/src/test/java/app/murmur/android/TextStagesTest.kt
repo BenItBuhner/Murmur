@@ -99,6 +99,30 @@ class TextStagesTest {
     }
 
     @Test
+    fun `numbers and spelled letters are never a stutter`() {
+        for (s in listOf(
+            "call five five five one two one two",
+            "call five five five, one two one two",
+            "the pin is zero zero zero zero",
+            "one zero zero zero one zero zero zero",
+            "version two point zero point zero",
+            "five thousand five thousand",
+            "it costs 1000 1000",
+            "the code is A1 A1 B2 B2",
+            "it is 100% 100% certain",
+            "point five point five",
+            "five to, five three",
+            "spell it A B B Y",
+            "a b a b a b"
+        )) {
+            for (scope in RepetitionScope.entries) assertEquals("$scope: $s", s, collapseRepeats(s, scope))
+        }
+        // The words "a" and "I" still stutter.
+        assertEquals("a report", collapseRepeats("a a report", RepetitionScope.WORDS))
+        assertEquals("I think", collapseRepeats("I I think", RepetitionScope.WORDS))
+    }
+
+    @Test
     fun `numbers in smart mode`() {
         val cases = listOf(
             "meet at five pm" to "meet at 5 pm",
@@ -136,7 +160,25 @@ class TextStagesTest {
             "wait a second" to "wait a second",
             "First, we go" to "First, we go",
             "I saw twenty-three people" to "I saw 23 people",
-            "twelve fifteen am" to "12:15 am"
+            "twelve fifteen am" to "12:15 am",
+            // Digits read out one by one keep every digit, leading zeros included.
+            "the pin is zero zero zero zero" to "the pin is 0000",
+            "zero zero seven" to "007",
+            "agent zero zero seven, zero zero seven" to "agent 007, 007",
+            "the code is zero zero zero seven" to "the code is 0007",
+            "room four oh seven" to "room 407",
+            "dial nine one one" to "dial 911",
+            "one two three" to "123",
+            "four oh" to "four oh",
+            "I have two three apples" to "I have two three apples",
+            "two point zero zero five" to "2.005",
+            // Two numbers in a row stay two numbers.
+            "five thousand five thousand" to "5,000 5,000",
+            "one hundred one hundred" to "100 100",
+            "two thousand five hundred" to "2,500",
+            // Chained "point"s are a version wherever they occur.
+            "two point zero point zero" to "2.0.0",
+            "three point one four one five" to "3.1415"
         )
         for ((input, expected) in cases) assertEquals(input, expected, convertNumbers(input, NumbersMode.SMART))
         assertEquals("I have 5 apples", convertNumbers("I have five apples", NumbersMode.ALL))
@@ -208,6 +250,12 @@ class TextStagesTest {
         assertTrue(r.stages.containsAll(listOf("fillers", "self-corrections", "hesitations", "repeats", "lists", "numbers")))
         val q = runPipeline("what time is the meeting tomorrow", PipelineOptions())
         assertTrue(q.hints.isQuestion)
+        // Numbers are never de-duplicated or shortened on the way through.
+        assertEquals("My number is 5551212 ", runPipeline("my number is five five five one two one two", PipelineOptions()).text)
+        assertEquals("The pin is 0000 ", runPipeline("the pin is zero zero zero zero", PipelineOptions()).text)
+        assertEquals("1000, 1000 ", runPipeline("one zero zero zero, one zero zero zero", PipelineOptions()).text)
+        assertEquals("Version 2.0.0 ", runPipeline("version two point zero point zero", PipelineOptions()).text)
+        assertEquals("The code is A1 A1 B2 B2 ", runPipeline("the code is A1 A1 B2 B2", PipelineOptions()).text)
         val off = runPipeline("make this a bulleted list: milk, eggs and bread", PipelineOptions(lists = ListsMode.OFF))
         assertEquals("Make this a bulleted list: milk, eggs and bread ", off.text)
         assertEquals(ListKind.BULLETS, off.hints.list.requested)

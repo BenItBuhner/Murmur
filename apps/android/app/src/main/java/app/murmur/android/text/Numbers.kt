@@ -91,22 +91,56 @@ data class ParsedNumber(
     val keepScale: String? = null,
     val fraction: String? = null,
     val digitRun: Boolean = false,
+    /**
+     * The digits of a digit run exactly as spoken. "zero zero zero seven" is a code, not the
+     * number seven: leading zeros are part of what was said and `value` cannot hold them.
+     */
+    val literal: String? = null,
     val yearLike: Boolean = false,
-    val blocked: Boolean = false
+    val blocked: Boolean = false,
+    /** The second half of a blocked pair ("fifty" in "seventeen fifty"). */
+    val tail: Long? = null
 )
+
+/**
+ * Digits spoken one by one: three or more single digits in a row ("zero zero seven", "five five
+ * five one two one two"). An "oh" between digits is a zero ("four oh seven"); one at the very end
+ * is an interjection and stays outside the run.
+ */
+private fun parseDigitRun(tokens: List<NTok>, i: Int, contiguous: (Int) -> Boolean): Pair<String, Int>? {
+    if (!isSmallOnes(tokens[i])) return null
+    var k = i
+    val digits = StringBuilder()
+    var next = i
+    while (k < tokens.size && contiguous(k)) {
+        val w = tokens[k].lower
+        if (isSmallOnes(tokens[k])) {
+            digits.append(ONES.getValue(w))
+            k++
+            next = k
+            continue
+        }
+        if ((w == "oh" || w == "o") && digits.isNotEmpty()) {
+            digits.append('0')
+            k++
+            continue
+        }
+        break
+    }
+    // Trailing "oh"s were never counted: `digits` is cut back to the last real digit.
+    if (next < k) digits.setLength(digits.length - (k - next))
+    if (digits.length < 3) return null
+    return digits.toString() to next
+}
 
 private fun parseCardinal(tokens: List<NTok>, text: String, i: Int): ParsedNumber? {
     fun at(k: Int): NTok? = tokens.getOrNull(k)
     fun contiguous(k: Int): Boolean = k == i || (k in 1 until tokens.size && joined(text, tokens[k - 1], tokens[k]))
     val before = text.substring(0, tokens[i].start)
 
-    var k = i
-    val digits = ArrayList<Int>()
-    while (k < tokens.size && contiguous(k) && isSmallOnes(at(k))) {
-        digits.add(ONES.getValue(at(k)!!.lower))
-        k++
+    parseDigitRun(tokens, i) { k -> contiguous(k) }?.let { (literal, next) ->
+        return ParsedNumber(literal.toLong(), next, false, digitRun = true, literal = literal)
     }
-    if (digits.size >= 4) return ParsedNumber(digits.joinToString("").toLong(), k, false, digitRun = true)
 
     var j = i
     var total = 0L
@@ -117,11 +151,21 @@ private fun parseCardinal(tokens: List<NTok>, text: String, i: Int): ParsedNumbe
     var lastScale = Long.MAX_VALUE
     var hasTens = false
     var hasOnes = false
+    // The ones/tens group that follows the last scale word, so "five thousand five thousand" can
+    // give the second "five" back instead of reading it as 5,005 with a stray "thousand".
+    var groupStart = i
+    var group = 0L
 
     fun skipAnd() {
         val a = at(j)
         val n = at(j + 1)
         if (a?.lower == "and" && contiguous(j) && n != null && contiguous(j + 1) && (n.lower in ONES || n.lower in TENS)) j++
+    }
+    fun rollBackGroup() {
+        if (group > 0 && scaled) {
+            current -= group
+            j = groupStart
+        }
     }
 
     if (at(j)?.lower == "a" && at(j + 1) != null && contiguous(j + 1) && at(j + 1)!!.lower in SCALES) {
@@ -136,6 +180,7 @@ private fun parseCardinal(tokens: List<NTok>, text: String, i: Int): ParsedNumbe
             if (hasOnes) break
             if (hasTens && v >= 10) break
             current += v
+            group += v
             hasOnes = true
             sawAny = true
             j++
@@ -144,24 +189,37 @@ private fun parseCardinal(tokens: List<NTok>, text: String, i: Int): ParsedNumbe
         if (w in TENS) {
             if (hasTens || hasOnes) break
             current += TENS.getValue(w)
+            group += TENS.getValue(w)
             hasTens = true
             sawAny = true
             j++
             continue
         }
         if (w == "hundred") {
-            if (!sawAny || current == 0L || current >= 100) break
+            if (!sawAny || current == 0L) break
+            if (current >= 100) {
+                // "one hundred one hundred": two numbers, not "101 hundred".
+                rollBackGroup()
+                break
+            }
             current *= 100
             scaled = true
             hasTens = false
             hasOnes = false
             j++
             skipAnd()
+            groupStart = j
+            group = 0
             continue
         }
         if (w in SCALES) {
             val s = SCALES.getValue(w)
-            if (!sawAny || s >= lastScale) break
+            if (!sawAny) break
+            if (s >= lastScale) {
+                // "five thousand five thousand": the second number starts at its own "five".
+                rollBackGroup()
+                break
+            }
             if (s >= 1_000_000L) {
                 keepScale = w
                 j++
@@ -175,6 +233,8 @@ private fun parseCardinal(tokens: List<NTok>, text: String, i: Int): ParsedNumbe
             hasOnes = false
             j++
             skipAnd()
+            groupStart = j
+            group = 0
             continue
         }
         break
@@ -193,10 +253,11 @@ private fun parseCardinal(tokens: List<NTok>, text: String, i: Int): ParsedNumbe
             j = yr.second
             yearLike = true
         } else if (yr != null) {
-            return ParsedNumber(value, yr.second, false, blocked = true)
+            return ParsedNumber(value, yr.second, false, blocked = true, tail = yr.first)
         }
     } else if (pairFollows && nextTok!!.lower != "hundred" && nextTok.lower != "oh") {
-        return ParsedNumber(value, j + 1, false, blocked = true)
+        val tail = (TENS[nextTok.lower] ?: ONES[nextTok.lower] ?: 0).toLong()
+        return ParsedNumber(value, j + 1, false, blocked = true, tail = tail)
     }
 
     var fraction: String? = null
@@ -306,18 +367,24 @@ fun convertNumbers(text: String, mode: NumbersMode): String {
         val before = text.substring(0, t.start)
 
         val time = parseTime(tokens, text, i)
-        if (time != null) {
-            if (time.text != null) replacements.add(Replacement(t.start, time.end, time.text))
+        if (time != null && time.text != null) {
+            replacements.add(Replacement(t.start, time.end, time.text))
             i = time.next
             continue
         }
-        if (VERSION_BEFORE.containsMatchIn(before)) {
-            val ver = parseVersion(tokens, text, i)
-            if (ver != null) {
-                replacements.add(Replacement(t.start, tokens[ver.second - 1].end, ver.first))
-                i = ver.second
-                continue
-            }
+        // Nothing marks it as a time: "five thirty" stays as spoken, but digits read out one by one
+        // ("four oh seven", "one oh one") are a number.
+        if (time != null && parseCardinal(tokens, text, i)?.digitRun != true) {
+            i = time.next
+            continue
+        }
+        // Versions: "version two point three point one" -> "version 2.3.1". Two or more "point"s are
+        // a version wherever they occur; "two point zero point zero" is never "2.0 point zero".
+        val ver = parseVersion(tokens, text, i)
+        if (ver != null && (VERSION_BEFORE.containsMatchIn(before) || ver.dots >= 2)) {
+            replacements.add(Replacement(t.start, tokens[ver.next - 1].end, ver.text))
+            i = ver.next
+            continue
         }
         val ord = parseOrdinal(tokens, text, i)
         if (ord != null) {
@@ -365,7 +432,7 @@ fun convertNumbers(text: String, mode: NumbersMode): String {
 
         val yearish = num.scaled && value in 1900..2099 && !quantityContext && !hasFraction
         val grouped = num.scaled && !num.yearLike && !num.digitRun && !yearish
-        val digits = formatInteger(value, grouped) + (if (hasFraction) ".${num.fraction}" else "")
+        val digits = (num.literal ?: formatInteger(value, grouped)) + (if (hasFraction) ".${num.fraction}" else "")
         var end = endTok.end
         val out: String
         if (percent != null) {
@@ -469,7 +536,9 @@ private fun parseTime(tokens: List<NTok>, text: String, i: Int): TimeResult? {
     return TimeResult(out, end, next)
 }
 
-private fun parseVersion(tokens: List<NTok>, text: String, i: Int): Pair<String, Int>? {
+private data class VersionResult(val text: String, val next: Int, val dots: Int)
+
+private fun parseVersion(tokens: List<NTok>, text: String, i: Int): VersionResult? {
     val parts = ArrayList<String>()
     var j = i
     while (j < tokens.size && (j == i || joined(text, tokens[j - 1], tokens[j]))) {
@@ -497,5 +566,5 @@ private fun parseVersion(tokens: List<NTok>, text: String, i: Int): Pair<String,
     }
     if (parts.isEmpty()) return null
     if (parts.size == 1 && !(tokens[i].lower in ONES || tokens[i].lower in TENS)) return null
-    return parts.joinToString("") to j
+    return VersionResult(parts.joinToString(""), j, (parts.size - 1) / 2)
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { defaultSettings, parseSettings } from '@shared/settings'
+import { defaultSettings, parseSettings, sessionDurationLimitMs } from '@shared/settings'
 import { Key } from '@core/hotkey/keys'
 
 describe('settings schema', () => {
@@ -8,6 +8,8 @@ describe('settings schema', () => {
     expect(s.hotkeys.pushToTalk).toEqual([Key.Ctrl, Key.Meta])
     expect(s.hotkeys.handsFreeTrigger).toBe('tap')
     expect(s.audio.keepMicWarm).toBe(true)
+    expect(s.audio.limitDuration).toBe(false)
+    expect(sessionDurationLimitMs(s.audio)).toBeNull()
     expect(s.formatting.llm.minWords).toBe(4)
     expect(s.formatting.fillerWords).toContain('um')
     expect(s.stt.kind).toBe('openai-compatible')
@@ -52,6 +54,17 @@ describe('settings schema', () => {
     // Broken hotkeys section falls back to defaults rather than discarding the whole file.
     expect(s.hotkeys.tapThresholdMs).toBe(350)
     expect(s.dictionary[0]).toMatchObject({ word: 'Murmur', aliases: [], fuzzy: false })
+  })
+
+  it('does not apply a duration cap unless the user turns it on', () => {
+    // Existing installs only stored maxDurationSec (default 300). Missing limitDuration
+    // must stay off so those files stop cutting people off at five minutes.
+    const leftover = parseSettings({ audio: { maxDurationSec: 300 } })
+    expect(leftover.audio.limitDuration).toBe(false)
+    expect(sessionDurationLimitMs(leftover.audio)).toBeNull()
+
+    const optedIn = parseSettings({ audio: { limitDuration: true, maxDurationSec: 120 } })
+    expect(sessionDurationLimitMs(optedIn.audio)).toBe(120_000)
   })
 
   it('handles garbage input', () => {

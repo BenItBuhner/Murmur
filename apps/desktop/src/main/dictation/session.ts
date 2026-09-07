@@ -22,7 +22,7 @@ import {
   type ResolvedStyle
 } from '@core/text/app-context'
 import { countWords } from '@core/text/util'
-import type { Settings } from '@shared/settings'
+import { sessionDurationLimitMs, type Settings } from '@shared/settings'
 import type {
   ActiveWindowInfo,
   DictationMode,
@@ -155,13 +155,16 @@ export class DictationController extends EventEmitter {
         elapsedSec: Math.round((performance.now() - session.startedAt) / 1000)
       })
     }, 1000)
-    session.maxTimer = setTimeout(() => {
-      if (this.active === session) {
-        log.info('max duration reached; stopping')
-        this.deps.hook.notifySessionEnded()
-        void this.stop()
-      }
-    }, s.audio.maxDurationSec * 1000)
+    const durationLimitMs = sessionDurationLimitMs(s.audio)
+    if (durationLimitMs !== null) {
+      session.maxTimer = setTimeout(() => {
+        if (this.active === session) {
+          log.info('max duration reached; stopping')
+          this.deps.hook.notifySessionEnded()
+          void this.stop()
+        }
+      }, durationLimitMs)
+    }
     this.emit('state', 'listening')
     log.info(`session ${id.slice(0, 8)} start mode=${mode}`)
   }

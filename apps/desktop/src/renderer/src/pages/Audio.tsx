@@ -137,8 +137,21 @@ export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Eleme
           </div>
         </SettingRow>
         <SettingRow
+          title="Limit session length"
+          description="Off by default. Turn this on only if you want hands-free sessions to stop automatically."
+        >
+          <Switch
+            checked={a.limitDuration}
+            onCheckedChange={(v) => void patch({ audio: { limitDuration: v } })}
+          />
+        </SettingRow>
+        <SettingRow
           title="Maximum length"
-          description="Hands-free sessions stop automatically after this."
+          description={
+            a.limitDuration
+              ? 'Hands-free sessions stop automatically after this.'
+              : 'Unused until you enable the limit above. Sessions run until you stop them.'
+          }
         >
           <div className="flex items-center gap-2">
             <Input
@@ -147,6 +160,7 @@ export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Eleme
               max={1800}
               className="w-20 text-right"
               value={a.maxDurationSec}
+              disabled={!a.limitDuration}
               onChange={(e) =>
                 void patch({ audio: { maxDurationSec: Math.max(5, Number(e.target.value)) } })
               }

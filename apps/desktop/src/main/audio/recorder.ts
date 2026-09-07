@@ -23,7 +23,7 @@ interface Capture {
 /**
  * Main-process side of microphone capture. The overlay renderer streams 16 kHz Int16 PCM chunks
  * over IPC (about 32 KB/s) and we accumulate them per session so a renderer hiccup never loses
- * audio and the max-duration rule can be enforced here.
+ * audio. An optional duration cap, if the user enabled it, is enforced by the session controller.
  */
 export class Recorder extends EventEmitter {
   private captures = new Map<string, Capture>()

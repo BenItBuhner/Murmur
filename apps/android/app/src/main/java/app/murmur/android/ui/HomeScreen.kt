@@ -6,8 +6,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -234,20 +236,23 @@ fun HomeScreen(
 private fun StatsGrid(stats: DictationStats) {
     val wpm = wordsPerMinute(stats)
     val savedSec = (timeSavedMs(stats) / 1000).toInt()
+    // Tiles in a row share the taller one's height, so a wrapped label never leaves a step.
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile(Glyph.WORDS, "Words dictated", Modifier.weight(1f), hint = if (stats.isEmpty) "Nothing yet" else pluralize(stats.totalSessions, "dictation")) {
+        Row(Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val tile = Modifier.weight(1f).fillMaxHeight()
+            StatTile(Glyph.WORDS, "Words dictated", tile, hint = if (stats.isEmpty) "Nothing yet" else pluralize(stats.totalSessions, "dictation")) {
                 CountUp(stats.totalWords, format = ::formatCount)
             }
-            StatTile(Glyph.PACE, "Speaking pace", Modifier.weight(1f), hint = if (wpm > 0) "vs ~$TYPING_WPM typing" else null) {
+            StatTile(Glyph.PACE, "Speaking pace", tile, hint = if (wpm > 0) "vs ~$TYPING_WPM typing" else null) {
                 if (wpm > 0) CountUp(wpm, format = { "$it wpm" }) else EmptyFigure()
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile(Glyph.TIME, "Time saved", Modifier.weight(1f), hint = if (savedSec > 0) "over typing it out" else null) {
+        Row(Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val tile = Modifier.weight(1f).fillMaxHeight()
+            StatTile(Glyph.TIME, "Time saved", tile, hint = if (savedSec > 0) "over typing it out" else null) {
                 if (savedSec > 0) CountUp(savedSec, format = { formatDurationShort(it * 1000L) }) else EmptyFigure()
             }
-            StatTile(Glyph.STREAK, "Day streak", Modifier.weight(1f), hint = if (stats.streakDays > 0) "dictated every day" else null) {
+            StatTile(Glyph.STREAK, "Day streak", tile, hint = if (stats.streakDays > 0) "dictated every day" else null) {
                 if (stats.streakDays > 0) CountUp(stats.streakDays) else EmptyFigure()
             }
         }

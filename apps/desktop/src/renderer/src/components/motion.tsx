@@ -23,7 +23,7 @@ export const arrive = [0.22, 1, 0.36, 1] as const
 export const leave = [0.4, 0, 1, 1] as const
 
 /** Something moving to a new place (the sidebar's active pill, list items reordering). */
-export const settle: Transition = { type: 'spring', stiffness: 520, damping: 42, mass: 0.8 }
+export const settle: Transition = { type: 'spring', stiffness: 380, damping: 34, mass: 0.9 }
 
 /**
  * A page arriving in the shell. The whole page only fades; its blocks rise one after another
@@ -127,12 +127,12 @@ export function Rolling({
 
 /**
  * A number that counts up to `value` the first time it is shown and glides to every new value
- * after that. Large numerals read better arriving than appearing. With reduced motion on, the
- * value is simply shown.
+ * after that. Large numerals read better arriving than appearing. `format` always receives a
+ * whole number. With reduced motion on, the value is simply shown.
  */
 export function CountUp({
   value,
-  format = (n) => String(Math.round(n)),
+  format = String,
   duration = 0.9,
   className
 }: {
@@ -157,7 +157,11 @@ export function CountUp({
     })
     return () => controls.stop()
   }, [value, duration, reduced])
-  return <span className={cn('tabular-nums', className)}>{format(reduced ? value : shown)}</span>
+  return (
+    <span className={cn('tabular-nums', className)}>
+      {format(Math.round(reduced ? value : shown))}
+    </span>
+  )
 }
 
 /** Where a route sits relative to the last one: below (1), above (-1) or the same (0). */

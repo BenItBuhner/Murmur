@@ -183,7 +183,7 @@ export function HomePage({
             label="Speaking pace"
             hint={wpm ? `vs ~${TYPING_WPM} typing` : undefined}
           >
-            {wpm ? <CountUp value={wpm} format={(n) => `${Math.round(n)} wpm`} /> : '—'}
+            {wpm ? <CountUp value={wpm} format={(n) => `${n} wpm`} /> : '—'}
           </Stat>
           <Stat icon={<Clock3 />} label="Time saved">
             {savedMs > 0 ? <CountUp value={savedMs} format={formatDuration} /> : '—'}
@@ -315,14 +315,14 @@ export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Ele
           <span key={p.label} className="inline-flex items-center gap-1.5">
             <span className={`size-2 rounded-full ${p.color}`} /> {p.label}{' '}
             <span className="tabular-nums text-foreground">
-              <CountUp value={p.ms} duration={0.7} format={(n) => `${Math.round(n)} ms`} />
+              <CountUp value={p.ms} duration={0.7} format={(n) => `${n} ms`} />
             </span>
           </span>
         ))}
         <span className="ml-auto">
           Release to inserted:{' '}
           <span className="font-medium tabular-nums text-foreground">
-            <CountUp value={t.totalMs} duration={0.7} format={(n) => `${Math.round(n)} ms`} />
+            <CountUp value={t.totalMs} duration={0.7} format={(n) => `${n} ms`} />
           </span>
         </span>
       </div>

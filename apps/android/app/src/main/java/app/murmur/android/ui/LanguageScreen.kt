@@ -10,7 +10,7 @@ import app.murmur.android.ui.components.Screen
 
 /** The dictation language: one setting for the speech model and the formatting model, synced with the account. */
 @Composable
-fun LanguageScreen(store: SettingsStore, settings: MurmurSettings, synced: Boolean, onBack: () -> Unit) {
+fun LanguageScreen(store: SettingsStore, settings: MurmurSettings, synced: Boolean, nav: TopNav) {
     Screen(
         title = "Language",
         description = if (synced) {
@@ -18,7 +18,7 @@ fun LanguageScreen(store: SettingsStore, settings: MurmurSettings, synced: Boole
         } else {
             "Steers both the speech model and the formatting model."
         },
-        onBack = onBack
+        nav = nav
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             LanguagePicker(store, settings)

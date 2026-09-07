@@ -13,11 +13,11 @@ import app.murmur.android.ui.components.Screen
  * [AppearanceSection]; the screen around them is the live preview.
  */
 @Composable
-fun AppearanceScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
+fun AppearanceScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     Screen(
         title = "Appearance",
         description = "Light or dark, and where the palette comes from: your wallpaper on Android 12 and newer, or an accent of your choice.",
-        onBack = onBack
+        nav = nav
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             AppearanceSection(store, settings)

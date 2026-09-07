@@ -67,7 +67,7 @@ private fun repeatsOf(s: MurmurSettings): Repeats =
     if (!s.collapseRepeats) Repeats.OFF else Repeats.entries.first { it.scope == s.repetitionScope }
 
 @Composable
-fun StyleScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
+fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     val scope = rememberCoroutineScope()
     var llmModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var discovering by remember { mutableStateOf(false) }
@@ -77,7 +77,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Un
     Screen(
         title = "Style",
         description = "How your words are cleaned up and shaped before they land. These choices follow your account.",
-        onBack = onBack
+        nav = nav
     ) {
         Group("Formatting") {
             Spacer(Modifier.height(8.dp))

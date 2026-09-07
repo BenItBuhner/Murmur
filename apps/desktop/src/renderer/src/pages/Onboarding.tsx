@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { ArrowLeft, ArrowRight, BookA, Check, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@renderer/components/ui/button'
@@ -8,6 +9,7 @@ import { Switch } from '@renderer/components/ui/switch'
 import { Badge, Segmented } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { HotkeyRecorder } from '@renderer/components/HotkeyRecorder'
+import { Appear, step as stepMotion } from '@renderer/components/motion'
 import { Wordmark } from '@renderer/components/Shell'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
@@ -56,6 +58,7 @@ export function Onboarding(): React.JSX.Element {
   const firstName = cloud.clerk.firstName ?? cloud.status?.user?.name?.split(' ')[0]
 
   const step = steps[index]
+  const direction = useTravel(index)
   const configured = !!settings.stt.baseUrl && !!settings.stt.model
   const canNext = step === 'model' ? configured : true
   const last = index === steps.length - 1
@@ -91,156 +94,166 @@ export function Onboarding(): React.JSX.Element {
         </ol>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-8 pb-8">
-        <div className="mx-auto max-w-2xl pt-6 animate-fade-in" key={step}>
-          {step === 'welcome' && (
-            <div className="mx-auto max-w-xl space-y-7 pt-12">
-              {returning ? (
-                <>
-                  <h1 className="serif-display text-[56px]">
-                    Welcome back{firstName ? `, ${firstName}` : ''}.
-                  </h1>
-                  <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
-                    Your account is already set up, so your dictionary, snippets and style are on
-                    this computer now. Three quick device steps and you are dictating: connect a
-                    speech model, check the microphone, pick a shortcut.
+      <div className="flex-1 overflow-x-hidden overflow-y-auto px-8 pb-8">
+        <AnimatePresence mode="wait" initial={false} custom={direction}>
+          <motion.div
+            key={step}
+            custom={direction}
+            variants={stepMotion}
+            initial="initial"
+            animate="enter"
+            exit="exit"
+            className="mx-auto max-w-2xl pt-6"
+          >
+            {step === 'welcome' && (
+              <div className="mx-auto max-w-xl space-y-7 pt-12">
+                {returning ? (
+                  <>
+                    <h1 className="serif-display text-[56px]">
+                      Welcome back{firstName ? `, ${firstName}` : ''}.
+                    </h1>
+                    <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
+                      Your account is already set up, so your dictionary, snippets and style are on
+                      this computer now. Three quick device steps and you are dictating: connect a
+                      speech model, check the microphone, pick a shortcut.
+                    </p>
+                    <FeatureList
+                      items={[
+                        `${settings.dictionary.length} dictionary ${settings.dictionary.length === 1 ? 'word' : 'words'}`,
+                        `${settings.snippets.length} ${settings.snippets.length === 1 ? 'snippet' : 'snippets'}`,
+                        `Tone: ${TONES.find((t) => t.value === settings.formatting.tone)?.label ?? 'Auto'}`
+                      ]}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <h1 className="serif-display text-[64px]">
+                      Speak.
+                      <br />
+                      <span className="italic text-muted-foreground">It types.</span>
+                    </h1>
+                    <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
+                      Hold one key anywhere on your computer, say what you mean, let go. Murmur
+                      transcribes it, cleans up the ums and self-corrections, and drops finished
+                      text right where your cursor is.
+                    </p>
+                    <FeatureList
+                      items={[
+                        'Hold to talk, tap for hands-free',
+                        'Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server',
+                        signedIn
+                          ? 'Your dictionary and snippets sync to every device you sign in on'
+                          : 'Personal dictionary and snippets',
+                        signedIn
+                          ? 'API keys stay on this device; only your words and settings sync'
+                          : 'Nothing stored anywhere but this device'
+                      ]}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
+            {step === 'personalize' && <PersonalizeStep />}
+
+            {step === 'model' && (
+              <div className="space-y-6">
+                <Header
+                  title="Connect a speech model"
+                  description="Murmur sends your recording to a transcription API you control. Pick a provider, paste a key, choose a model, and run the test. Keys stay on this computer."
+                />
+                <ProvidersPage embedded onReady={setSttOk} />
+                {sttOk && (
+                  <p className="text-[13px] text-success">
+                    Working. You can tweak fallback models later under Models.
                   </p>
-                  <FeatureList
-                    items={[
-                      `${settings.dictionary.length} dictionary ${settings.dictionary.length === 1 ? 'word' : 'words'}`,
-                      `${settings.snippets.length} ${settings.snippets.length === 1 ? 'snippet' : 'snippets'}`,
-                      `Tone: ${TONES.find((t) => t.value === settings.formatting.tone)?.label ?? 'Auto'}`
-                    ]}
-                  />
-                </>
-              ) : (
-                <>
-                  <h1 className="serif-display text-[64px]">
-                    Speak.
-                    <br />
-                    <span className="italic text-muted-foreground">It types.</span>
-                  </h1>
-                  <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
-                    Hold one key anywhere on your computer, say what you mean, let go. Murmur
-                    transcribes it, cleans up the ums and self-corrections, and drops finished text
-                    right where your cursor is.
-                  </p>
-                  <FeatureList
-                    items={[
-                      'Hold to talk, tap for hands-free',
-                      'Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server',
-                      signedIn
-                        ? 'Your dictionary and snippets sync to every device you sign in on'
-                        : 'Personal dictionary and snippets',
-                      signedIn
-                        ? 'API keys stay on this device; only your words and settings sync'
-                        : 'Nothing stored anywhere but this device'
-                    ]}
-                  />
-                </>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
-          {step === 'personalize' && <PersonalizeStep />}
+            {step === 'mic' && (
+              <div className="space-y-6">
+                <Header
+                  title="Check your microphone"
+                  description="Say a few words and watch the level. If nothing moves, pick another device."
+                />
+                <AudioPage embedded />
+              </div>
+            )}
 
-          {step === 'model' && (
-            <div className="space-y-6">
-              <Header
-                title="Connect a speech model"
-                description="Murmur sends your recording to a transcription API you control. Pick a provider, paste a key, choose a model, and run the test. Keys stay on this computer."
-              />
-              <ProvidersPage embedded onReady={setSttOk} />
-              {sttOk && (
-                <p className="text-[13px] text-success">
-                  Working. You can tweak fallback models later under Models.
-                </p>
-              )}
-            </div>
-          )}
-
-          {step === 'mic' && (
-            <div className="space-y-6">
-              <Header
-                title="Check your microphone"
-                description="Say a few words and watch the level. If nothing moves, pick another device."
-              />
-              <AudioPage embedded />
-            </div>
-          )}
-
-          {step === 'shortcut' && (
-            <div className="space-y-6">
-              <Header
-                title="Your shortcut"
-                description="This one key does both jobs. Keep the default or record your own."
-              />
-              <div className="rounded-2xl border bg-card p-5 space-y-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium">Push to talk</div>
-                    <div className="text-[13px] text-muted-foreground">
-                      Hold to record, release to insert
+            {step === 'shortcut' && (
+              <div className="space-y-6">
+                <Header
+                  title="Your shortcut"
+                  description="This one key does both jobs. Keep the default or record your own."
+                />
+                <div className="rounded-2xl border bg-card p-5 space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Push to talk</div>
+                      <div className="text-[13px] text-muted-foreground">
+                        Hold to record, release to insert
+                      </div>
                     </div>
+                    <HotkeyRecorder
+                      value={settings.hotkeys.pushToTalk}
+                      onChange={(keys) => void patch({ hotkeys: { pushToTalk: keys } })}
+                      platform={platform}
+                      sideSensitive={settings.hotkeys.sideSensitive}
+                    />
                   </div>
-                  <HotkeyRecorder
-                    value={settings.hotkeys.pushToTalk}
-                    onChange={(keys) => void patch({ hotkeys: { pushToTalk: keys } })}
+                  <div className="flex items-center justify-between border-t pt-5">
+                    <div>
+                      <div className="text-sm font-medium">Hands-free</div>
+                      <div className="text-[13px] text-muted-foreground">
+                        How to lock a session without holding the key
+                      </div>
+                    </div>
+                    <Segmented<HandsFreeTrigger>
+                      value={settings.hotkeys.handsFreeTrigger}
+                      onChange={(v) => void patch({ hotkeys: { handsFreeTrigger: v } })}
+                      options={[
+                        { value: 'tap', label: 'Tap' },
+                        { value: 'double-tap', label: 'Double-tap' },
+                        { value: 'off', label: 'Off' }
+                      ]}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === 'try' && (
+              <div className="space-y-6">
+                <Header
+                  title="Try it"
+                  description="Click into the box, then hold your shortcut and say something like “Hey, this is my first dictation, new line, pretty neat.”"
+                />
+                <div className="flex items-center justify-center gap-3 rounded-2xl border bg-card px-5 py-4">
+                  <span className="text-sm text-muted-foreground">Hold</span>
+                  <KeyCaps
+                    keys={settings.hotkeys.pushToTalk}
                     platform={platform}
                     sideSensitive={settings.hotkeys.sideSensitive}
+                    size="lg"
                   />
+                  <span className="text-sm text-muted-foreground">and speak</span>
                 </div>
-                <div className="flex items-center justify-between border-t pt-5">
-                  <div>
-                    <div className="text-sm font-medium">Hands-free</div>
-                    <div className="text-[13px] text-muted-foreground">
-                      How to lock a session without holding the key
-                    </div>
-                  </div>
-                  <Segmented<HandsFreeTrigger>
-                    value={settings.hotkeys.handsFreeTrigger}
-                    onChange={(v) => void patch({ hotkeys: { handsFreeTrigger: v } })}
-                    options={[
-                      { value: 'tap', label: 'Tap' },
-                      { value: 'double-tap', label: 'Double-tap' },
-                      { value: 'off', label: 'Off' }
-                    ]}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 'try' && (
-            <div className="space-y-6">
-              <Header
-                title="Try it"
-                description="Click into the box, then hold your shortcut and say something like “Hey, this is my first dictation, new line, pretty neat.”"
-              />
-              <div className="flex items-center justify-center gap-3 rounded-2xl border bg-card px-5 py-4">
-                <span className="text-sm text-muted-foreground">Hold</span>
-                <KeyCaps
-                  keys={settings.hotkeys.pushToTalk}
-                  platform={platform}
-                  sideSensitive={settings.hotkeys.sideSensitive}
-                  size="lg"
+                <Textarea
+                  autoFocus
+                  placeholder="Your words will appear here…"
+                  className="min-h-36 text-[15px]"
                 />
-                <span className="text-sm text-muted-foreground">and speak</span>
+                <Appear show={dictated}>
+                  <div className="flex items-center gap-2 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-sm">
+                    <Check className="size-4 text-success" /> That is it. Murmur now lives in your
+                    tray; this window can be closed.
+                  </div>
+                </Appear>
               </div>
-              <Textarea
-                autoFocus
-                placeholder="Your words will appear here…"
-                className="min-h-36 text-[15px]"
-              />
-              {dictated && (
-                <div className="flex items-center gap-2 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-sm animate-fade-in">
-                  <Check className="size-4 text-success" /> That is it. Murmur now lives in your
-                  tray; this window can be closed.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       <div className="flex items-center justify-between border-t px-8 py-4">
@@ -399,6 +412,14 @@ function PersonalizeStep(): React.JSX.Element {
       </div>
     </div>
   )
+}
+
+/** Forward (1) or back (-1) through the steps, from where the index was a moment ago. */
+function useTravel(index: number): number {
+  const [trail, setTrail] = useState<[number, number]>([index, index])
+  if (trail[1] !== index) setTrail([trail[1], index])
+  const from = trail[1] === index ? trail[0] : trail[1]
+  return index >= from ? 1 : -1
 }
 
 function Header({ title, description }: { title: string; description: string }): React.JSX.Element {

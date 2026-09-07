@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import app.murmur.android.BuildConfig
+import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsOrigin
@@ -42,7 +43,9 @@ data class SyncStatus(
     val pendingOps: Int,
     val user: UserDto?,
     val devices: List<DeviceDto>,
-    val error: String?
+    val error: String?,
+    /** The account's totals across every device, once loaded; null means show the phone's own. */
+    val stats: DictationStats? = null
 ) {
     companion object {
         val DISABLED = SyncStatus(SyncPhase.DISABLED, false, false, false, 0, null, emptyList(), null)
@@ -77,6 +80,7 @@ class CloudSync private constructor(
     private var devices: List<DeviceDto> = emptyList()
     private var serverDictionary: List<DictionaryEntryDto>? = null
     private var serverPreferences: PreferencesDto? = null
+    private var serverStats: StatsDto? = null
     private var preferencesLoaded = false
     private var mirrorPrefs: StylePreferences = StylePreferences.of(settings.get())
     private var subscriptions: Job? = null
@@ -155,6 +159,7 @@ class CloudSync private constructor(
         devices = emptyList()
         serverDictionary = null
         serverPreferences = null
+        serverStats = null
         preferencesLoaded = false
         error = null
         outbox.clear()
@@ -208,6 +213,16 @@ class CloudSync private constructor(
         if (s.onboardingComplete) {
             convex.mutation("users:completeOnboarding", mapOf("version" to ONBOARDING_VERSION))
         }
+        // Dictations made before signing in count towards the account, like the desktop app does.
+        if (s.stats.totalSessions > 0) {
+            convex.mutation<StatsDto>("stats:importLocal", mapOf(
+                "totalWords" to s.stats.totalWords.toDouble(),
+                "totalSessions" to s.stats.totalSessions.toDouble(),
+                "totalSpeechMs" to s.stats.totalSpeechMs.toDouble(),
+                "streakDays" to s.stats.streakDays.toDouble(),
+                "lastSessionDay" to s.stats.lastSessionDay
+            ))
+        }
         settings.update(SettingsOrigin.CLOUD) { it.copy(importedForUserId = userId) }
     }
 
@@ -258,6 +273,13 @@ class CloudSync private constructor(
                 convex.subscribe<List<DeviceDto>>("devices:list").collect { result ->
                     if (gen != generation) return@collect
                     result.onSuccess { devices = it }
+                    publish()
+                }
+            }
+            launch {
+                convex.subscribe<StatsDto?>("stats:get").collect { result ->
+                    if (gen != generation) return@collect
+                    result.onSuccess { serverStats = it }.onFailure { error = it.message }
                     publish()
                 }
             }
@@ -456,7 +478,8 @@ class CloudSync private constructor(
             pending > 0 -> SyncPhase.SYNCING
             else -> SyncPhase.SYNCED
         }
-        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, error)
+        val stats = serverStats?.let { SyncReducers.deriveStats(settings.get().stats, it, outbox.ops) }
+        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, error, stats)
     }
 
     companion object {

@@ -14,6 +14,7 @@ import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
@@ -64,9 +65,14 @@ enum class BackMotion {
  *
  * At the root ([previous] is null) back is left to the system, which animates the whole app away.
  *
+ * Moving sideways between sections (a drawer choice) is neither forward nor back: the entry marked
+ * [lateral] fades through, the outgoing screen dissolving before the new one settles in, as
+ * Material's top-level destinations do.
+ *
  * @param current the entry on top.
  * @param previous the entry a back gesture reveals; null at the root.
  * @param depth deeper entries sit on top of shallower ones, and moving deeper is forward.
+ * @param lateral entries reached sideways, which fade through instead of sliding or lifting.
  * @param onBack pops the stack; called once a back gesture or press has been committed.
  */
 @Composable
@@ -77,6 +83,7 @@ fun <T : Any> BackStackHost(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     motion: BackMotion = BackMotion.SURFACE,
+    lateral: (T) -> Boolean = { false },
     content: @Composable (T) -> Unit
 ) {
     val state = remember { SeekableTransitionState(current) }
@@ -124,6 +131,12 @@ fun <T : Any> BackStackHost(
             val forward = depth(targetState) > depth(initialState)
             val zIndex = depth(targetState).toFloat()
             when {
+                lateral(targetState) -> ContentTransform(
+                    fadeIn(tween(FadeThroughIn, delayMillis = FadeThroughOut, easing = StandardDecelerate)) +
+                        scaleIn(tween(FadeThroughIn, delayMillis = FadeThroughOut, easing = StandardDecelerate), initialScale = 0.96f),
+                    fadeOut(tween(FadeThroughOut, easing = StandardAccelerate)),
+                    targetContentZIndex = zIndex
+                )
                 forward -> ContentTransform(
                     slideInHorizontally(standard()) { it / 5 } + fadeIn(standard()),
                     slideOutHorizontally(standard()) { -it / 5 } + fadeOut(standard()),
@@ -162,6 +175,7 @@ fun <T : Any> BackStackHost(
         Box(
             when {
                 motion != BackMotion.SURFACE -> Modifier
+                lateral(stack.targetState) -> Modifier
                 surface -> Modifier.surface({ lift }, { gesture }, edge)
                 pop -> Modifier.ground { 1f - reveal }
                 else -> Modifier
@@ -173,8 +187,15 @@ fun <T : Any> BackStackHost(
 /** Length of every transition, and so of the stretch a back gesture scrubs through. */
 private const val Duration = 300
 
+/** A fade-through: the outgoing screen is gone before the incoming one starts to appear. */
+private const val FadeThroughOut = 90
+private const val FadeThroughIn = Duration - FadeThroughOut
+
 /** Material's standard decelerate: the surface answers the finger at once and settles gently. */
 private val StandardDecelerate = CubicBezierEasing(0f, 0f, 0f, 1f)
+
+/** Material's standard accelerate, for things on their way out. */
+private val StandardAccelerate = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 
 private fun <T> standard() = tween<T>(Duration, easing = FastOutSlowInEasing)
 

@@ -54,7 +54,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.sin
 
 @Composable
-fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
+fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     val editing by OverlayEditor.editing.collectAsState()
     var editError by remember { mutableStateOf<String?>(null) }
     var keepOpen by remember { mutableStateOf("") }
@@ -65,7 +65,7 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, onBack
     Screen(
         title = "Dictation button",
         description = "The button that appears beside your keyboard. Choose how it rests and where it sits.",
-        onBack = onBack
+        nav = nav
     ) {
         PillPreview(settings, height = 136.dp)
 

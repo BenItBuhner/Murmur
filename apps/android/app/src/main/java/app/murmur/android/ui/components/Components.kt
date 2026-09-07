@@ -23,20 +23,28 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
@@ -73,6 +81,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.murmur.android.ui.TopNav
+import app.murmur.android.ui.TopNavButton
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
 
@@ -609,15 +619,29 @@ fun StepIndicator(count: Int, current: Int, modifier: Modifier = Modifier) {
 
 // ---- screen scaffold ------------------------------------------------------------------------
 
+/** The row above every screen: the sections button or a back arrow on the left, actions on the right. */
+@Composable
+fun TopBar(nav: TopNav?, trailing: (@Composable RowScope.() -> Unit)? = null) {
+    Row(
+        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = PageMargin - 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (nav != null) TopNavButton(nav)
+        Spacer(Modifier.weight(1f))
+        trailing?.invoke(this)
+    }
+}
+
 /**
- * Every settings screen: a back arrow, a serif title, a line of context, then the content in a
- * scrolling column with the page margin applied.
+ * Every settings screen: the sections button (or a back arrow, when the screen was pushed), a
+ * serif title, a line of context, then the content in a scrolling column with the page margin
+ * applied.
  */
 @Composable
 fun Screen(
     title: String,
     description: String? = null,
-    onBack: (() -> Unit)? = null,
+    nav: TopNav? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -631,22 +655,55 @@ fun Screen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        Row(
-            Modifier.fillMaxWidth().height(56.dp).padding(horizontal = PageMargin - 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (onBack != null) {
-                GlyphButton(onClick = onBack) { ArrowLeft(c.ink) }
-            }
-            Spacer(Modifier.weight(1f))
-            trailing?.invoke(this)
-        }
+        TopBar(nav, trailing)
         Column(Modifier.padding(horizontal = PageMargin)) {
             Spacer(Modifier.height(12.dp))
             Heading(title, description)
             Spacer(Modifier.height(32.dp))
             content()
             Spacer(Modifier.height(40.dp))
+        }
+    }
+}
+
+/**
+ * The same chrome as [Screen] over a lazy list, for screens whose content can run to hundreds of
+ * rows. [header] sits under the heading and scrolls with the list; [items] fill the rest.
+ */
+@Composable
+fun LazyScreen(
+    title: String,
+    description: String? = null,
+    nav: TopNav? = null,
+    trailing: (@Composable RowScope.() -> Unit)? = null,
+    state: LazyListState = rememberLazyListState(),
+    header: (@Composable ColumnScope.() -> Unit)? = null,
+    items: LazyListScope.() -> Unit
+) {
+    val c = Murmur.colors
+    val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(c.paper)
+            .statusBarsPadding()
+            .imePadding()
+    ) {
+        TopBar(nav, trailing)
+        LazyColumn(
+            Modifier.weight(1f),
+            state = state,
+            contentPadding = PaddingValues(start = PageMargin, end = PageMargin, bottom = bottom + 40.dp)
+        ) {
+            item(key = "heading") {
+                Column {
+                    Spacer(Modifier.height(12.dp))
+                    Heading(title, description)
+                    Spacer(Modifier.height(if (header != null) 24.dp else 32.dp))
+                    header?.invoke(this)
+                }
+            }
+            items()
         }
     }
 }

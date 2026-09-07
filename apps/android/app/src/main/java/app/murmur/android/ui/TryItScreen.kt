@@ -44,7 +44,7 @@ import app.murmur.android.ui.theme.Murmur
 import kotlinx.coroutines.launch
 
 @Composable
-fun TryItScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
+fun TryItScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pad by remember { mutableStateOf("") }
@@ -55,7 +55,7 @@ fun TryItScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Un
     Screen(
         title = "Try it",
         description = "Tap into the pad. The dictation button appears beside your keyboard: tap it, speak, tap again.",
-        onBack = onBack
+        nav = nav
     ) {
         Field(
             value = pad,

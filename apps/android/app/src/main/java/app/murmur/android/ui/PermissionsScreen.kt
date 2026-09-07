@@ -59,11 +59,11 @@ private fun readPermissions(context: android.content.Context) = PermissionState(
 )
 
 @Composable
-fun PermissionsScreen(onBack: () -> Unit) {
+fun PermissionsScreen(nav: TopNav) {
     Screen(
         title = "Permissions",
         description = "Three grants from the system: one to hear you, one to draw the button, one to type for you.",
-        onBack = onBack
+        nav = nav
     ) {
         PermissionList()
     }

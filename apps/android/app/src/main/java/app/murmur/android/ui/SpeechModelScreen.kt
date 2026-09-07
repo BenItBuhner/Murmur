@@ -34,11 +34,11 @@ import app.murmur.android.ui.theme.Murmur
 import kotlinx.coroutines.launch
 
 @Composable
-fun SpeechModelScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
+fun SpeechModelScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     Screen(
         title = "Speech model",
         description = "Recordings go to a transcription service you choose. Keys stay on this phone and are never synced.",
-        onBack = onBack
+        nav = nav
     ) {
         SpeechModelForm(store, settings)
     }

@@ -99,7 +99,7 @@ function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          'z-50 w-fit max-w-xs rounded-lg bg-foreground px-2.5 py-1.5 text-xs text-background shadow-md animate-fade-in text-balance',
+          'z-50 w-fit max-w-xs rounded-lg bg-foreground px-2.5 py-1.5 text-xs text-background shadow-md text-balance data-[state=delayed-open]:animate-layer-in data-[state=instant-open]:animate-fade-in data-[state=closed]:animate-layer-out',
           className
         )}
         {...props}

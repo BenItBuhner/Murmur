@@ -3,6 +3,7 @@ package app.murmur.android.cloud
 import android.content.Context
 import android.content.SharedPreferences
 import app.murmur.android.settings.BulletMarker
+import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.HesitationLevel
@@ -85,6 +86,17 @@ data class FormattingPreferencesDto(
 
 @Serializable
 data class SyncPreferencesDto(val history: Boolean? = null)
+
+/** The account's dictation totals across every device (`stats:get`). */
+@Serializable
+data class StatsDto(
+    val totalWords: Double = 0.0,
+    val totalSessions: Double = 0.0,
+    val totalSpeechMs: Double = 0.0,
+    val streakDays: Double = 0.0,
+    val lastSessionDay: String = "",
+    val updatedAt: Double = 0.0
+)
 
 @Serializable
 data class PreferencesDto(
@@ -357,5 +369,31 @@ object SyncReducers {
     fun remoteIdFor(localId: String, serverIds: Set<String>, ops: List<SyncOp>): String? {
         if (serverIds.contains(localId)) return localId
         return ops.filterIsInstance<SyncOp.DictionaryUpsert>().firstOrNull { it.localId == localId }?.remoteId
+    }
+
+    /**
+     * The totals to show while signed in: the account's numbers plus the dictations still waiting
+     * in the outbox, so a session counts the moment it is finished and is not counted twice once
+     * the server has it. Same rule as the desktop's `deriveStats`. Without a server snapshot the
+     * device's own totals stand.
+     */
+    fun deriveStats(local: DictationStats, server: StatsDto?, ops: List<SyncOp>): DictationStats {
+        if (server == null) return local
+        val pending = ops.filterIsInstance<SyncOp.StatsRecord>()
+        var out = DictationStats(
+            totalWords = server.totalWords.toInt(),
+            totalSessions = server.totalSessions.toInt(),
+            totalSpeechMs = server.totalSpeechMs.toLong(),
+            streakDays = maxOf(server.streakDays.toInt(), if (pending.isNotEmpty()) local.streakDays else 0),
+            lastSessionDay = if (pending.isNotEmpty() && local.lastSessionDay > server.lastSessionDay) local.lastSessionDay else server.lastSessionDay
+        )
+        for (op in pending) {
+            out = out.copy(
+                totalWords = out.totalWords + op.words,
+                totalSessions = out.totalSessions + 1,
+                totalSpeechMs = out.totalSpeechMs + op.speechMs
+            )
+        }
+        return out
     }
 }

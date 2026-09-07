@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { Loader2 } from 'lucide-react'
 import { Toaster } from 'sonner'
 import type { OverlayState } from '@shared/types'
@@ -42,7 +43,9 @@ export default function App(): React.JSX.Element {
         <CloudProvider>
           <UpdatesProvider>
             <TooltipProvider delayDuration={300}>
-              <Root />
+              <MotionConfig reducedMotion="user">
+                <Root />
+              </MotionConfig>
               <Toaster
                 position="bottom-right"
                 richColors
@@ -56,6 +59,9 @@ export default function App(): React.JSX.Element {
     </SettingsProvider>
   )
 }
+
+/** The screen the app is on before (or instead of) the shell. */
+type Stage = 'splash' | 'gate' | 'onboarding' | 'shell'
 
 function Root(): React.JSX.Element | null {
   const { settings, info } = useSettingsMaybe()
@@ -78,44 +84,57 @@ function Root(): React.JSX.Element | null {
   const mode = cloud.config.accountMode
   const accountWanted =
     mode === 'required' || (mode === 'optional' && !settings.cloud.accountSkipped)
+  let stage: Stage = 'shell'
   if (accountWanted && !cloud.clerk.signedIn) {
     // Offline but previously signed in on this device: keep dictating from the local mirror.
     const offlineFallback = cloud.clerk.failed && !!settings.cloud.lastSignedInUserId
-    if (!offlineFallback) {
-      if (!cloud.clerk.loaded && !cloud.clerk.failed) return <Splash />
-      return (
-        <AccountGate
-          mode={mode}
-          clerk={cloud.clerk}
-          platform={info?.platform}
-          onSkip={mode === 'optional' ? () => void window.murmur.cloud.skipAccount() : undefined}
-        />
-      )
-    }
+    if (!offlineFallback) stage = !cloud.clerk.loaded && !cloud.clerk.failed ? 'splash' : 'gate'
   }
+  if (stage === 'shell' && !settings.onboardingComplete) stage = 'onboarding'
 
-  if (!settings.onboardingComplete) return <Onboarding />
-
+  // The big moves (signing in, finishing setup) dissolve from one screen to the next.
   return (
-    <Shell
-      route={route}
-      onNavigate={setRoute}
-      state={state}
-      enabled={enabled}
-      platform={info?.platform ?? 'linux'}
-      showAccount={cloud.enabled}
-    >
-      {route === 'home' && <HomePage state={state} onNavigate={setRoute} />}
-      {route === 'history' && <HistoryPage />}
-      {route === 'dictionary' && <DictionaryPage />}
-      {route === 'snippets' && <SnippetsPage />}
-      {route === 'style' && <StylePage />}
-      {route === 'shortcuts' && <ShortcutsPage />}
-      {route === 'audio' && <AudioPage />}
-      {route === 'providers' && <ProvidersPage />}
-      {route === 'general' && <GeneralPage />}
-      {route === 'account' && cloud.enabled && <AccountPage />}
-    </Shell>
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={stage}
+        className="h-full"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1, transition: { duration: 0.24, ease: 'easeOut' } }}
+        exit={{ opacity: 0, transition: { duration: 0.16, ease: 'easeIn' } }}
+      >
+        {stage === 'splash' && <Splash />}
+        {stage === 'gate' && (
+          <AccountGate
+            mode={mode}
+            clerk={cloud.clerk}
+            platform={info?.platform}
+            onSkip={mode === 'optional' ? () => void window.murmur.cloud.skipAccount() : undefined}
+          />
+        )}
+        {stage === 'onboarding' && <Onboarding />}
+        {stage === 'shell' && (
+          <Shell
+            route={route}
+            onNavigate={setRoute}
+            state={state}
+            enabled={enabled}
+            platform={info?.platform ?? 'linux'}
+            showAccount={cloud.enabled}
+          >
+            {route === 'home' && <HomePage state={state} onNavigate={setRoute} />}
+            {route === 'history' && <HistoryPage />}
+            {route === 'dictionary' && <DictionaryPage />}
+            {route === 'snippets' && <SnippetsPage />}
+            {route === 'style' && <StylePage />}
+            {route === 'shortcuts' && <ShortcutsPage />}
+            {route === 'audio' && <AudioPage />}
+            {route === 'providers' && <ProvidersPage />}
+            {route === 'general' && <GeneralPage />}
+            {route === 'account' && cloud.enabled && <AccountPage />}
+          </Shell>
+        )}
+      </motion.div>
+    </AnimatePresence>
   )
 }
 

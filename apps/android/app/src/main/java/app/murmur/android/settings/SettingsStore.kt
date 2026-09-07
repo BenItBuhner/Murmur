@@ -19,6 +19,20 @@ enum class SttKind(val id: String) {
     }
 }
 
+/**
+ * Where a model runs: the Murmur instance's managed models (cloud builds only) or a provider the
+ * user configured on this phone. Mirrors `inferenceSourceSchema` in the desktop settings; see
+ * app.murmur.android.inference.Inference for how the effective source is decided.
+ */
+enum class InferenceSource(val id: String) {
+    MURMUR("murmur"),
+    CUSTOM("custom");
+
+    companion object {
+        fun from(id: String?): InferenceSource = entries.firstOrNull { it.id == id } ?: MURMUR
+    }
+}
+
 enum class FormattingMode(val id: String) {
     OFF("off"),
     LIGHT("light"),
@@ -155,6 +169,13 @@ enum class AccentPreset(val id: String, val label: String, val seed: Int) {
  * and are never synced.
  */
 data class MurmurSettings(
+    /**
+     * Managed Murmur models by default in cloud builds; ignored (always the user's own provider) in
+     * local builds. The `stt…` and `llm…` connection fields describe the user's own provider only.
+     * A build seeded with MURMUR_BASE_URL starts on the seeded provider.
+     */
+    val sttSource: InferenceSource = if (BuildConfig.DEFAULT_BASE_URL.isBlank()) InferenceSource.MURMUR else InferenceSource.CUSTOM,
+    val llmSource: InferenceSource = if (BuildConfig.DEFAULT_BASE_URL.isBlank()) InferenceSource.MURMUR else InferenceSource.CUSTOM,
     val sttKind: SttKind = SttKind.OPENAI_COMPATIBLE,
     val sttBaseUrl: String = BuildConfig.DEFAULT_BASE_URL,
     val sttApiKey: String = BuildConfig.DEFAULT_API_KEY,
@@ -285,6 +306,16 @@ class SettingsStore(context: Context) {
             update(SettingsOrigin.LOCAL) { it.copy(dictionaryEntries = entries) }
             prefs.edit().remove("dictionary").apply()
         }
+        // Installs from before model sources existed: one that had connected its own speech provider
+        // keeps using it (and its formatting server) instead of being moved to the instance's models.
+        if (!prefs.contains("sttSource") && prefs.contains("sttBaseUrl") && _flow.value.sttBaseUrl.isNotBlank()) {
+            update(SettingsOrigin.LOCAL) {
+                it.copy(
+                    sttSource = InferenceSource.CUSTOM,
+                    llmSource = if (prefs.contains("llmSource")) it.llmSource else InferenceSource.CUSTOM
+                )
+            }
+        }
         if (_flow.value.deviceId.isEmpty()) {
             update(SettingsOrigin.CLOUD) { it.copy(deviceId = java.util.UUID.randomUUID().toString()) }
         }
@@ -310,6 +341,8 @@ class SettingsStore(context: Context) {
     private fun read(): MurmurSettings {
         val d = MurmurSettings()
         return MurmurSettings(
+            sttSource = InferenceSource.from(prefs.getString("sttSource", d.sttSource.id)),
+            llmSource = InferenceSource.from(prefs.getString("llmSource", d.llmSource.id)),
             sttKind = SttKind.from(prefs.getString("sttKind", d.sttKind.id)),
             sttBaseUrl = prefs.getString("sttBaseUrl", d.sttBaseUrl) ?: d.sttBaseUrl,
             sttApiKey = prefs.getString("sttApiKey", d.sttApiKey) ?: d.sttApiKey,
@@ -370,6 +403,8 @@ class SettingsStore(context: Context) {
 
     private fun write(s: MurmurSettings) {
         prefs.edit()
+            .putString("sttSource", s.sttSource.id)
+            .putString("llmSource", s.llmSource.id)
             .putString("sttKind", s.sttKind.id)
             .putString("sttBaseUrl", s.sttBaseUrl)
             .putString("sttApiKey", s.sttApiKey)

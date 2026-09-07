@@ -80,6 +80,7 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
     val name = status.user?.name
         ?: listOfNotNull(user?.firstName, user?.lastName).joinToString(" ").ifBlank { "Your account" }
     val email = status.user?.email ?: user?.primaryEmailAddress?.emailAddress
+    val inference = rememberInferenceView(settings)
 
     Screen(title = "Account", nav = nav) {
         Text(name, style = Murmur.type.displaySmall, color = c.ink)
@@ -92,7 +93,20 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
 
         Column {
             Hairline()
-            ControlRow("Sync", description = "Dictionary and style preferences. API keys stay on this phone.") {
+            ControlRow(
+                "${inference.planLabel} plan",
+                description = when {
+                    !inference.managedAvailable -> "This Murmur instance does not provide models of its own; connect your provider under Speech model."
+                    inference.status != null ->
+                        "${Math.round(inference.status.limits.sttSecondsPerMonth / 60)} minutes of transcription a month with Murmur's models. " +
+                            if (inference.routing.murmurStt) "In use on this phone." else "This phone uses your own provider."
+                    else -> "Waiting for your account status…"
+                }
+            ) {
+                Text(inference.minutesLabel ?: inference.planLabel, style = Murmur.type.labelSmall, color = c.inkSoft)
+            }
+            Hairline()
+            ControlRow("Sync", description = "Dictionary and style preferences. Your model choice and any API keys of your own stay on this phone.") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Dot(syncColor(status), size = 6.dp, pulsing = status.phase == SyncPhase.SYNCING)
                     Spacer(Modifier.width(8.dp))

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { getSttProvider, STT_PRESETS, type SttConfig } from '@core/stt'
-import { chatComplete, listChatModels } from '@core/llm/client'
+import { listChatModels, type LlmConfig } from '@core/llm/client'
 import { runPipeline } from '@core/text/pipeline'
 import { buildSttPrompt } from '@core/text/dictionary'
 import { classifyApp, resolveStyle } from '@core/text/app-context'
@@ -23,6 +23,7 @@ import type { CloudSync } from './cloud/sync-engine'
 import type { DictationController } from './dictation/session'
 import { friendlyError } from './dictation/session'
 import type { HookService } from './hotkeys/hook'
+import type { InferenceRouter } from './inference/router'
 import { injectText, injectionBackendName } from './inject'
 import { sessionType } from './inject/linux'
 import { getLogPath } from './logger'
@@ -37,6 +38,7 @@ export interface IpcDeps {
   history: HistoryStore
   controller: DictationController
   hook: HookService
+  inference: InferenceRouter
   cloudConfig: CloudConfig
   cloud: CloudSync
   updates: UpdateService
@@ -54,7 +56,7 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { settings, history, controller, hook, cloud, cloudConfig, updates } = deps
+  const { settings, history, controller, hook, inference, cloud, cloudConfig, updates } = deps
 
   settings.on('change', (next: Settings) => broadcast(IPC.settingsChanged, next))
   history.on('added', (entry: HistoryEntry) => broadcast(IPC.historyAdded, entry))
@@ -146,22 +148,57 @@ export function registerIpc(deps: IpcDeps): void {
     })
   })
 
+  /**
+   * Speech configuration for the settings UI: the resolved connection (the instance's models or
+   * the user's own provider) with any fields the page is trying out layered on top. Explicit
+   * overrides describe the user's own provider, so they never point at the Murmur gateway.
+   */
+  const sttConfigFor = async (
+    override:
+      | { kind?: Settings['stt']['kind']; baseUrl?: string; apiKey?: string; model?: string }
+      | undefined,
+    timeoutMs: number
+  ): Promise<SttConfig> => {
+    const s = settings.get()
+    if (override && (override.baseUrl !== undefined || override.kind !== undefined)) {
+      return {
+        kind: override.kind ?? s.stt.kind,
+        baseUrl: override.baseUrl ?? s.stt.baseUrl,
+        apiKey: override.apiKey ?? settings.getSecret('stt'),
+        model: override.model ?? s.stt.model,
+        language: s.stt.language,
+        timeoutMs
+      }
+    }
+    const { cfg } = await inference.stt()
+    return { ...cfg, model: override?.model ?? cfg.model, timeoutMs }
+  }
+
+  const llmConfigFor = async (
+    override: { baseUrl?: string; apiKey?: string; model?: string } | undefined,
+    timeoutMs: number
+  ): Promise<LlmConfig> => {
+    if (override && override.baseUrl !== undefined) {
+      const conn = settings.llmConnection()
+      return {
+        baseUrl: override.baseUrl,
+        apiKey: override.apiKey ?? conn.apiKey,
+        model: override.model ?? conn.model,
+        timeoutMs
+      }
+    }
+    const { cfg } = await inference.llm()
+    return { ...cfg, model: override?.model ?? cfg.model, timeoutMs }
+  }
+
   ipcMain.handle(
     IPC.sttListModels,
     async (
       _e,
       override?: { kind?: Settings['stt']['kind']; baseUrl?: string; apiKey?: string }
     ) => {
-      const s = settings.get()
-      const cfg: SttConfig = {
-        kind: override?.kind ?? s.stt.kind,
-        baseUrl: override?.baseUrl ?? s.stt.baseUrl,
-        apiKey: override?.apiKey ?? settings.getSecret('stt'),
-        model: s.stt.model,
-        language: s.stt.language,
-        timeoutMs: 15000
-      }
       try {
+        const cfg = await sttConfigFor(override, 15000)
         return { ok: true, models: await getSttProvider(cfg.kind).listModels(cfg) }
       } catch (err) {
         return { ok: false, models: [], error: friendlyError(err) }
@@ -180,16 +217,8 @@ export function registerIpc(deps: IpcDeps): void {
         model?: string
       }
     ): Promise<ProviderTestResult> => {
-      const s = settings.get()
-      const cfg: SttConfig = {
-        kind: override?.kind ?? s.stt.kind,
-        baseUrl: override?.baseUrl ?? s.stt.baseUrl,
-        apiKey: override?.apiKey ?? settings.getSecret('stt'),
-        model: override?.model ?? s.stt.model,
-        language: 'en',
-        timeoutMs: 45000
-      }
       try {
+        const cfg = { ...(await sttConfigFor(override, 45000)), language: 'en' }
         const wav = new Uint8Array(readFileSync(fixtureWav))
         const res = await getSttProvider(cfg.kind).transcribe(
           { wav, prompt: buildSttPrompt([]) },
@@ -214,15 +243,9 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(
     IPC.llmListModels,
     async (_e, override?: { baseUrl?: string; apiKey?: string }) => {
-      const conn = settings.llmConnection()
       try {
-        return {
-          ok: true,
-          models: await listChatModels({
-            baseUrl: override?.baseUrl ?? conn.baseUrl,
-            apiKey: override?.apiKey ?? conn.apiKey
-          })
-        }
+        const cfg = await llmConfigFor(override, 15000)
+        return { ok: true, models: await listChatModels(cfg) }
       } catch (err) {
         return { ok: false, models: [], error: friendlyError(err) }
       }
@@ -235,15 +258,9 @@ export function registerIpc(deps: IpcDeps): void {
       _e,
       override?: { baseUrl?: string; apiKey?: string; model?: string }
     ): Promise<ProviderTestResult> => {
-      const conn = settings.llmConnection()
-      const cfg = {
-        baseUrl: override?.baseUrl ?? conn.baseUrl,
-        apiKey: override?.apiKey ?? conn.apiKey,
-        model: override?.model ?? conn.model,
-        timeoutMs: 20000
-      }
       try {
-        const res = await chatComplete(
+        const cfg = await llmConfigFor(override, 20000)
+        const res = await inference.complete(
           cfg,
           [
             {
@@ -346,21 +363,32 @@ export function registerIpc(deps: IpcDeps): void {
         }
       }
       if (request.smart) {
-        const smart = await smartFormat({
-          light,
-          formatting: s.formatting,
-          dictionary: s.dictionary,
-          style: { ...style, mode: 'smart' },
-          app,
-          llm: {
-            ...settings.llmConnection(),
-            timeoutMs: Math.max(settings.llmConnection().timeoutMs, 20000)
+        let llm: LlmConfig = { baseUrl: '', apiKey: '', model: '', timeoutMs: 20000 }
+        let unavailable: string | undefined
+        try {
+          const resolved = await inference.llm()
+          llm = { ...resolved.cfg, timeoutMs: Math.max(resolved.cfg.timeoutMs, 20000) }
+        } catch (err) {
+          unavailable = friendlyError(err)
+        }
+        const smart = await smartFormat(
+          {
+            light,
+            formatting: s.formatting,
+            dictionary: s.dictionary,
+            style: { ...style, mode: 'smart' },
+            app,
+            llm,
+            pipelineOpts,
+            language: s.stt.language
           },
-          pipelineOpts,
-          language: s.stt.language
-        })
+          inference.complete
+        )
         out.smart = {
-          status: smart.status,
+          status:
+            unavailable && smart.status.outcome === 'skipped'
+              ? { outcome: 'skipped', detail: unavailable }
+              : smart.status,
           text:
             smart.status.outcome === 'used' || smart.status.outcome === 'partial'
               ? smart.result.text

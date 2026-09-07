@@ -1,9 +1,8 @@
 import {
   SttError,
-  classifyStatus,
   combineSignals,
+  errorFromResponse,
   normalizeBaseUrl,
-  parseErrorBody,
   toSttError
 } from '@core/stt/types'
 
@@ -62,15 +61,7 @@ export async function chatComplete(
       }),
       signal: combineSignals(cfg.timeoutMs, opts.signal)
     })
-    if (!res.ok) {
-      const { message, suggestedModels } = parseErrorBody(await res.text())
-      throw new SttError(
-        message || `HTTP ${res.status}`,
-        classifyStatus(res.status, message),
-        res.status,
-        suggestedModels
-      )
-    }
+    if (!res.ok) throw errorFromResponse(res.status, await res.text())
     const json = (await res.json()) as {
       choices?: Array<{
         message?: { content?: string | Array<{ text?: string }> }
@@ -105,14 +96,7 @@ export async function listChatModels(
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`
   try {
     const res = await fetch(`${base}/models`, { headers, signal: combineSignals(15000) })
-    if (!res.ok) {
-      const { message } = parseErrorBody(await res.text())
-      throw new SttError(
-        message || `HTTP ${res.status}`,
-        classifyStatus(res.status, message),
-        res.status
-      )
-    }
+    if (!res.ok) throw errorFromResponse(res.status, await res.text())
     const json = (await res.json()) as { data?: Array<{ id: string }> }
     const ids = (json.data ?? []).map((m) => m.id).filter(Boolean)
     const score = (id: string): number =>

@@ -1,0 +1,211 @@
+import { internal } from './_generated/api'
+import { httpAction, type ActionCtx } from './_generated/server'
+import {
+  MAX_COMPLETION_TOKENS,
+  MURMUR_MODELS,
+  STT_PASSTHROUGH_FIELDS,
+  clipSeconds,
+  describeUpstreamFailure,
+  gatewayError,
+  modelsPayload,
+  multipartBoundary,
+  parseMultipart,
+  readUpstreams,
+  subjectOf,
+  tokensUsed,
+  upstreamModelFor,
+  wavInfo,
+  type MultipartFile
+} from './lib/inference'
+
+/**
+ * Managed inference: an OpenAI-compatible facade in front of the model providers the operator
+ * configured for this instance. Clients authenticate with their Clerk session JWT (as the bearer
+ * token, exactly where an API key would go), the account's tier decides the allowance, and the
+ * provider credentials never leave the deployment's environment variables.
+ *
+ * Mounted in convex/http.ts at /v1/models, /v1/audio/transcriptions and /v1/chat/completions.
+ */
+
+const JSON_HEADERS = { 'content-type': 'application/json' }
+
+async function identityOf(ctx: ActionCtx): Promise<{ subject: string } | null> {
+  const subject = await subjectOf(ctx.auth)
+  return subject ? { subject } : null
+}
+
+function modelNotFound(requested: string, available: string): Response {
+  return gatewayError(
+    404,
+    'model_not_found',
+    `Unknown model "${requested}". Available models: ${available}`
+  )
+}
+
+function retryHeaders(retryAfterSec: number | undefined): Record<string, string> {
+  return retryAfterSec ? { 'retry-after': String(retryAfterSec) } : {}
+}
+
+export const models = httpAction(async (ctx) => {
+  if (!(await identityOf(ctx))) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  return new Response(JSON.stringify(modelsPayload(readUpstreams(process.env))), {
+    status: 200,
+    headers: JSON_HEADERS
+  })
+})
+
+export const transcriptions = httpAction(async (ctx, request) => {
+  const identity = await identityOf(ctx)
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  const upstream = readUpstreams(process.env).stt
+  if (!upstream)
+    return gatewayError(503, 'not_configured', 'This Murmur instance does not offer a managed speech model')
+
+  const contentType = request.headers.get('content-type')
+  const body = new Uint8Array(await request.arrayBuffer())
+  let fields: Record<string, string[]> = {}
+  let file: MultipartFile | undefined
+  if (multipartBoundary(contentType)) {
+    let parsed
+    try {
+      parsed = parseMultipart(body, contentType)
+    } catch (err) {
+      return gatewayError(400, 'bad_request', err instanceof Error ? err.message : 'Malformed multipart body')
+    }
+    fields = parsed.fields
+    file = parsed.files.find((f) => f.name === 'file') ?? parsed.files[0]
+  } else if (contentType && /^audio\//i.test(contentType) && body.length) {
+    // curl-friendly form: the raw clip as the body, the parameters in the query string.
+    const params = new URL(request.url).searchParams
+    for (const [key, value] of params) (fields[key] ??= []).push(value)
+    file = { name: 'file', filename: 'audio.wav', type: contentType, data: body }
+  } else {
+    return gatewayError(400, 'bad_request', 'Send multipart/form-data with a "file" part, or raw audio/* with parameters in the query string')
+  }
+  if (!file || !file.data.length) return gatewayError(400, 'bad_request', 'No audio file in the request')
+  const requested = fields.model?.[0] ?? ''
+  if (requested !== MURMUR_MODELS.stt) return modelNotFound(requested, MURMUR_MODELS.stt)
+
+  const seconds = clipSeconds(file.data)
+  const gate = await ctx.runMutation(internal.inference.authorize, {
+    clerkId: identity.subject,
+    kind: 'stt',
+    seconds
+  })
+  if (!gate.ok) return gatewayError(gate.status, gate.code, gate.message, retryHeaders(gate.retryAfterSec))
+
+  const form = new FormData()
+  form.append(
+    'file',
+    new Blob([file.data as BlobPart], { type: file.type || 'audio/wav' }),
+    file.filename || 'audio.wav'
+  )
+  form.append('model', upstreamModelFor(upstream, gate.plan))
+  for (const [key, values] of Object.entries(fields)) {
+    if (!STT_PASSTHROUGH_FIELDS.has(key)) continue
+    for (const value of values) form.append(key, value)
+  }
+  const headers: Record<string, string> = {}
+  if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
+  const started = Date.now()
+  let res: Response
+  try {
+    res = await fetch(`${upstream.baseUrl}/audio/transcriptions`, { method: 'POST', headers, body: form })
+  } catch (err) {
+    console.error('[gateway] stt upstream unreachable', err instanceof Error ? err.message : err)
+    return gatewayError(502, 'upstream_error', 'Could not reach the speech provider behind this instance')
+  }
+  const text = await res.text()
+  if (!res.ok) {
+    const failure = describeUpstreamFailure(res.status, text)
+    console.warn(`[gateway] stt upstream ${res.status} -> ${failure.status} ${failure.code}`)
+    return gatewayError(failure.status, failure.code, failure.message)
+  }
+  let json: { duration?: number } | undefined
+  try {
+    json = JSON.parse(text) as { duration?: number }
+  } catch {
+    json = undefined
+  }
+  const measured = wavInfo(file.data)?.durationSec
+  const billed = measured ?? (typeof json?.duration === 'number' ? json.duration : seconds)
+  await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'stt', seconds: billed })
+  console.log(`[gateway] stt plan=${gate.plan} seconds=${billed.toFixed(1)} upstreamMs=${Date.now() - started}`)
+  return new Response(text, {
+    status: 200,
+    headers: { 'content-type': res.headers.get('content-type') ?? 'application/json' }
+  })
+})
+
+/** Chat parameters a client may set; anything else (tools, n, streaming) is dropped. */
+const CHAT_PASSTHROUGH = [
+  'messages',
+  'temperature',
+  'top_p',
+  'stop',
+  'presence_penalty',
+  'frequency_penalty',
+  'seed',
+  'response_format'
+] as const
+
+export const chatCompletions = httpAction(async (ctx, request) => {
+  const identity = await identityOf(ctx)
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  const upstream = readUpstreams(process.env).llm
+  if (!upstream)
+    return gatewayError(503, 'not_configured', 'This Murmur instance does not offer a managed formatting model')
+
+  let input: Record<string, unknown>
+  try {
+    input = (await request.json()) as Record<string, unknown>
+  } catch {
+    return gatewayError(400, 'bad_request', 'Body must be JSON')
+  }
+  if (!input || typeof input !== 'object') return gatewayError(400, 'bad_request', 'Body must be a JSON object')
+  const requested = typeof input.model === 'string' ? input.model : ''
+  if (requested !== MURMUR_MODELS.llm) return modelNotFound(requested, MURMUR_MODELS.llm)
+  if (!Array.isArray(input.messages) || input.messages.length === 0)
+    return gatewayError(400, 'bad_request', '"messages" must be a non-empty array')
+
+  const gate = await ctx.runMutation(internal.inference.authorize, { clerkId: identity.subject, kind: 'llm' })
+  if (!gate.ok) return gatewayError(gate.status, gate.code, gate.message, retryHeaders(gate.retryAfterSec))
+
+  const outbound: Record<string, unknown> = { model: upstreamModelFor(upstream, gate.plan), stream: false }
+  for (const key of CHAT_PASSTHROUGH) if (input[key] !== undefined) outbound[key] = input[key]
+  const requestedMax = typeof input.max_tokens === 'number' ? input.max_tokens : 1024
+  outbound.max_tokens = Math.max(1, Math.min(MAX_COMPLETION_TOKENS, Math.floor(requestedMax)))
+  const requestBody = JSON.stringify(outbound)
+
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
+  const started = Date.now()
+  let res: Response
+  try {
+    res = await fetch(`${upstream.baseUrl}/chat/completions`, { method: 'POST', headers, body: requestBody })
+  } catch (err) {
+    console.error('[gateway] llm upstream unreachable', err instanceof Error ? err.message : err)
+    return gatewayError(502, 'upstream_error', 'Could not reach the model provider behind this instance')
+  }
+  const text = await res.text()
+  if (!res.ok) {
+    const failure = describeUpstreamFailure(res.status, text)
+    console.warn(`[gateway] llm upstream ${res.status} -> ${failure.status} ${failure.code}`)
+    return gatewayError(failure.status, failure.code, failure.message)
+  }
+  let json: Record<string, unknown>
+  try {
+    json = JSON.parse(text) as Record<string, unknown>
+  } catch {
+    return gatewayError(502, 'upstream_error', 'The model provider returned a malformed answer')
+  }
+  const tokens = tokensUsed(
+    json.usage as { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number } | undefined,
+    requestBody.length,
+    text.length
+  )
+  await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'llm', tokens })
+  console.log(`[gateway] llm plan=${gate.plan} tokens=${tokens} upstreamMs=${Date.now() - started}`)
+  // The upstream model is the instance's business; clients asked for the Murmur alias.
+  return new Response(JSON.stringify({ ...json, model: MURMUR_MODELS.llm }), { status: 200, headers: JSON_HEADERS })
+})

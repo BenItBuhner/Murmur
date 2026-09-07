@@ -1,5 +1,6 @@
 package app.murmur.android.stt
 
+import app.murmur.android.inference.Inference
 import app.murmur.android.settings.SttKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,30 +24,40 @@ class SttException(
     message: String,
     val kind: SttErrorKind,
     val status: Int? = null,
-    val suggestedModels: List<String> = emptyList()
+    val suggestedModels: List<String> = emptyList(),
+    /** Machine-readable `error.code` from the server, when it sent one (the Murmur gateway does). */
+    val code: String? = null
 ) : Exception(message) {
     val retryable: Boolean
         get() = kind == SttErrorKind.SERVER || kind == SttErrorKind.MODEL ||
             kind == SttErrorKind.RATE_LIMIT || kind == SttErrorKind.TIMEOUT
 
-    fun friendly(): String = when (kind) {
-        SttErrorKind.AUTH -> "Authentication failed — check your API key"
-        SttErrorKind.MODEL ->
-            if (suggestedModels.isNotEmpty())
-                "Model not available. Try: ${suggestedModels.take(3).joinToString(", ")}"
-            else "Model not available: $message"
-        SttErrorKind.RATE_LIMIT -> "Rate limited by the provider — try again in a moment"
-        SttErrorKind.TIMEOUT -> "The server took too long to respond"
-        SttErrorKind.SERVER -> "Provider error: $message"
-        else -> message ?: "Something went wrong"
+    fun friendly(): String {
+        // The Murmur gateway (and the router in front of it) already speak to the user.
+        if (code != null && code in Inference.ERROR_CODES) return message ?: "Something went wrong"
+        return when (kind) {
+            SttErrorKind.AUTH -> "Authentication failed — check your API key"
+            SttErrorKind.MODEL ->
+                if (suggestedModels.isNotEmpty())
+                    "Model not available. Try: ${suggestedModels.take(3).joinToString(", ")}"
+                else "Model not available: $message"
+            SttErrorKind.RATE_LIMIT -> "Rate limited by the provider — try again in a moment"
+            SttErrorKind.TIMEOUT -> "The server took too long to respond"
+            SttErrorKind.SERVER -> "Provider error: $message"
+            else -> message ?: "Something went wrong"
+        }
     }
 }
 
 fun normalizeBaseUrl(url: String): String = url.trim().trimEnd('/')
 
-/** Pull a human-readable message and any "available models" hint out of an error body. */
-fun parseErrorBody(body: String): Pair<String, List<String>> {
+/** What an OpenAI-style error body said. Destructures as `(message, suggestedModels)` too. */
+data class ParsedError(val message: String, val suggestedModels: List<String>, val code: String? = null)
+
+/** Pull a human-readable message, an error code and any "available models" hint out of an error body. */
+fun parseErrorBody(body: String): ParsedError {
     var message = body.trim().take(500)
+    var code: String? = null
     try {
         val json = JSONObject(body)
         when {
@@ -56,6 +67,7 @@ fun parseErrorBody(body: String): Pair<String, List<String>> {
             json.opt("message") is String -> message = json.getString("message")
             json.opt("detail") is String -> message = json.getString("detail")
         }
+        json.optJSONObject("error")?.opt("code")?.let { if (it is String) code = it }
     } catch (_: Exception) {
         // not JSON
     }
@@ -67,7 +79,13 @@ fun parseErrorBody(body: String): Pair<String, List<String>> {
             if (id.isNotEmpty()) suggested.add(id)
         }
     }
-    return message to suggested
+    return ParsedError(message, suggested, code)
+}
+
+/** Build the exception for a non-2xx response from an OpenAI-style server. */
+fun errorFromResponse(status: Int, body: String): SttException {
+    val (message, suggested, code) = parseErrorBody(body)
+    return SttException(message.ifEmpty { "HTTP $status" }, classifyStatus(status, message), status, suggested, code)
 }
 
 fun classifyStatus(status: Int, message: String): SttErrorKind = when {
@@ -238,19 +256,11 @@ object SttClient {
                 verboseUnsupported.add(base)
                 res = attempt(false, false)
             } else {
-                val (message, suggested) = parseErrorBody(body)
-                throw SttException(message, classifyStatus(400, message), 400, suggested)
+                throw errorFromResponse(400, body)
             }
         }
         res.use { r ->
-            if (!r.isSuccessful) {
-                val body = r.body?.string() ?: ""
-                val (message, suggested) = parseErrorBody(body)
-                throw SttException(
-                    message.ifEmpty { "HTTP ${r.code}" },
-                    classifyStatus(r.code, message), r.code, suggested
-                )
-            }
+            if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
             val contentType = r.header("content-type") ?: ""
             val bodyText = r.body?.string() ?: ""
             var text = bodyText
@@ -367,13 +377,7 @@ object SttClient {
                 }.build()
                 try {
                     client(15_000).newCall(req).execute().use { r ->
-                        if (!r.isSuccessful) {
-                            val (message, _) = parseErrorBody(r.body?.string() ?: "")
-                            throw SttException(
-                                message.ifEmpty { "HTTP ${r.code}" },
-                                classifyStatus(r.code, message), r.code
-                            )
-                        }
+                        if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
                         val json = JSONObject(r.body?.string() ?: "{}")
                         val ids = ArrayList<String>()
                         val data = json.optJSONArray("data")

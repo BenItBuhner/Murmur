@@ -60,6 +60,7 @@ fun OnboardingScreen(
     onFinish: () -> Unit
 ) {
     val settings by store.flow.collectAsState()
+    val inference = rememberInferenceView(settings)
     val steps = remember(signedIn, accountOnboarded) {
         buildList {
             add(Step.WELCOME)
@@ -136,7 +137,10 @@ fun OnboardingScreen(
                             Hairline()
                             FeatureRow("Tap to talk, tap again to finish")
                             Hairline()
-                            FeatureRow("Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server")
+                            FeatureRow(
+                                if (inference.offersMurmur) "Speech and formatting models included with your account, or bring your own"
+                                else "Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server"
+                            )
                             Hairline()
                             FeatureRow(
                                 if (signedIn) "Your dictionary and style sync to every device you sign in on"
@@ -144,7 +148,7 @@ fun OnboardingScreen(
                             )
                             Hairline()
                             FeatureRow(
-                                if (signedIn) "API keys stay on this phone; only your words and settings sync"
+                                if (signedIn) "Your own API keys, if you use any, stay on this phone"
                                 else "Nothing stored anywhere but this phone"
                             )
                             Hairline()
@@ -162,7 +166,10 @@ fun OnboardingScreen(
                     Step.PROVIDER -> {
                         Heading(
                             "Speech model",
-                            "Recordings go to a transcription service you choose. Keys stay on this phone. You can change any of this later."
+                            if (inference.offersMurmur)
+                                "Your account comes with speech and formatting models, so there is nothing to set up. Prefer your own provider? Switch below; keys stay on this phone. You can change this later."
+                            else
+                                "Recordings go to a transcription service you choose. Keys stay on this phone. You can change any of this later."
                         )
                         Spacer(Modifier.height(32.dp))
                         SpeechModelForm(store, settings, showAdvanced = false)

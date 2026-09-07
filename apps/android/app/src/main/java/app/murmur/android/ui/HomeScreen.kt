@@ -82,8 +82,11 @@ fun HomeScreen(
     val dictation by DictationController.state.collectAsState()
     val updateState by UpdateManager.get(context).state.collectAsState()
     val history by HistoryStore.get(context).entries.collectAsState()
-    val modelReady = settings.speechModelConfigured
+    val inference = rememberInferenceView(settings)
+    val modelReady = inference.sttReady
     val ready = permissions.allGranted && modelReady
+    // Murmur models only need a signed-in account; the user's own provider needs the model screen.
+    val modelRoute = if (inference.routing.murmurStt) Route.ACCOUNT else Route.MODEL
     val greeting = remember { greetingFor() }
     // Signed in, the account's totals stand for every device; otherwise this phone's own.
     val stats = if (signedIn) syncStatus?.stats ?: settings.stats else settings.stats
@@ -108,7 +111,7 @@ fun HomeScreen(
             Spacer(Modifier.width(6.dp))
             Wordmark()
             Spacer(Modifier.weight(1f))
-            StatusLine(dictation, ready, onClick = { onOpen(if (!permissions.allGranted) Route.PERMISSIONS else Route.MODEL) })
+            StatusLine(dictation, ready, onClick = { onOpen(if (!permissions.allGranted) Route.PERMISSIONS else modelRoute) })
         }
 
         Column(Modifier.padding(horizontal = PageMargin)) {
@@ -132,11 +135,19 @@ fun HomeScreen(
 
             Appear(!modelReady) {
                 Column {
-                    AttentionCard(
-                        "Connect a speech model",
-                        "Murmur needs a transcription endpoint: OpenAI, Groq, Deepgram, or a local whisper server.",
-                        onClick = { onOpen(Route.MODEL) }
-                    )
+                    if (inference.routing.murmurStt) {
+                        AttentionCard(
+                            "Sign in to use Murmur's speech model",
+                            "Your account includes speech and formatting models. Or connect your own provider under Speech model.",
+                            onClick = { onOpen(modelRoute) }
+                        )
+                    } else {
+                        AttentionCard(
+                            "Connect a speech model",
+                            "Murmur needs a transcription endpoint: OpenAI, Groq, Deepgram, or a local whisper server.",
+                            onClick = { onOpen(modelRoute) }
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
                 }
             }

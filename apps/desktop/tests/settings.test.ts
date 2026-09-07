@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { defaultSettings, parseSettings, sessionDurationLimitMs } from '@shared/settings'
+import {
+  SETTINGS_VERSION,
+  defaultSettings,
+  migrateSettings,
+  parseSettings,
+  sessionDurationLimitMs
+} from '@shared/settings'
 import { Key } from '@core/hotkey/keys'
 
 describe('settings schema', () => {
@@ -70,5 +76,68 @@ describe('settings schema', () => {
   it('handles garbage input', () => {
     expect(parseSettings(null)).toEqual(defaultSettings())
     expect(parseSettings('x' as unknown)).toEqual(defaultSettings())
+  })
+
+  describe('model sources', () => {
+    it('default to the instance models (ignored by local builds, see shared/inference.ts)', () => {
+      const s = parseSettings({})
+      expect(s.stt.source).toBe('murmur')
+      expect(s.formatting.llm.source).toBe('murmur')
+      expect(s.formatting.llm.sameAsStt).toBe(true)
+      expect(parseSettings({ stt: { source: 'custom' } }).stt.source).toBe('custom')
+      expect(parseSettings({ stt: { source: 'cloud' } }).stt.source).toBe('murmur')
+    })
+
+    it('keep a pre-existing bring-your-own setup when the file predates sources', () => {
+      const v1 = {
+        version: 1,
+        stt: {
+          kind: 'openai-compatible',
+          baseUrl: 'https://api.groq.com/openai/v1',
+          model: 'whisper-large-v3-turbo'
+        },
+        formatting: { llm: { sameAsStt: true, model: 'llama-3.1-8b-instant' }, tone: 'casual' }
+      }
+      const migrated = migrateSettings(v1) as {
+        version: number
+        stt: { source: string }
+        formatting: { llm: { source: string } }
+      }
+      expect(migrated.version).toBe(SETTINGS_VERSION)
+      expect(migrated.stt.source).toBe('custom')
+      expect(migrated.formatting.llm.source).toBe('custom')
+      const s = parseSettings(v1)
+      expect(s.stt.source).toBe('custom')
+      expect(s.stt.baseUrl).toBe('https://api.groq.com/openai/v1')
+      expect(s.formatting.llm.source).toBe('custom')
+      expect(s.formatting.llm.sameAsStt).toBe(true)
+      expect(s.formatting.tone).toBe('casual')
+      // A separate formatting server is kept too.
+      const separate = parseSettings({
+        stt: { baseUrl: 'http://127.0.0.1:8080/v1', model: 'whisper-1' },
+        formatting: {
+          llm: { sameAsStt: false, baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.2' }
+        }
+      })
+      expect(separate.formatting.llm).toMatchObject({
+        source: 'custom',
+        sameAsStt: false,
+        baseUrl: 'http://127.0.0.1:11434/v1'
+      })
+    })
+
+    it('leave files that already know about sources, and unset providers, alone', () => {
+      const explicit = {
+        stt: { source: 'murmur', baseUrl: 'https://api.openai.com/v1', model: 'whisper-1' }
+      }
+      expect(migrateSettings(explicit)).toBe(explicit)
+      expect(parseSettings(explicit).stt.source).toBe('murmur')
+      // Never connected a provider: nothing to preserve, so the new defaults apply.
+      const fresh = { version: 1, stt: { kind: 'openai-compatible', baseUrl: '', model: '' } }
+      expect(migrateSettings(fresh)).toBe(fresh)
+      expect(parseSettings(fresh).stt.source).toBe('murmur')
+      expect(migrateSettings(null)).toBeNull()
+      expect(migrateSettings([1, 2])).toEqual([1, 2])
+    })
   })
 })

@@ -9,6 +9,7 @@ import {
   type CloudConfig,
   type CloudDevice,
   type CloudUser,
+  type InferenceStatus,
   type RendererAuthState,
   type SyncPhase,
   type SyncStatus
@@ -92,6 +93,7 @@ interface ServerState {
   preferences: RemotePreferences | null | undefined
   stats: RemoteStats | null | undefined
   devices: CloudDevice[] | null
+  inference: InferenceStatus | null
 }
 
 interface Mirror {
@@ -108,7 +110,8 @@ const emptyServer = (): ServerState => ({
   appRules: null,
   preferences: undefined,
   stats: undefined,
-  devices: null
+  devices: null,
+  inference: null
 })
 
 const snapshot = (s: Settings): Mirror => ({
@@ -157,6 +160,7 @@ function toCloudUser(u: {
   email?: string
   name?: string
   imageUrl?: string
+  plan: CloudUser['plan']
   onboardingCompletedAt?: number
   onboardingVersion?: number
 }): CloudUser {
@@ -166,6 +170,7 @@ function toCloudUser(u: {
     email: u.email,
     name: u.name,
     imageUrl: u.imageUrl,
+    plan: u.plan,
     onboardingCompletedAt: u.onboardingCompletedAt,
     onboardingVersion: u.onboardingVersion
   }
@@ -489,6 +494,12 @@ export class CloudSync extends EventEmitter {
         api.stats.get,
         {},
         guard((st) => (this.server.stats = st)),
+        onError
+      ),
+      client.onUpdate(
+        api.inference.status,
+        {},
+        guard((status) => (this.server.inference = status)),
         onError
       ),
       client.onUpdate(
@@ -1021,7 +1032,8 @@ export class CloudSync extends EventEmitter {
       error: this.error,
       user: this.server.user ?? null,
       devices: this.server.devices ?? [],
-      deviceId: this.deviceId
+      deviceId: this.deviceId,
+      inference: this.server.inference
     }
   }
 

@@ -57,7 +57,8 @@ import app.murmur.android.ui.components.Glyph
 import app.murmur.android.ui.components.GlyphIcon
 import app.murmur.android.ui.rememberNavigator
 import app.murmur.android.ui.rememberPermissionState
-import app.murmur.android.ui.speechModelConfigured
+import app.murmur.android.ui.murmurStt
+import app.murmur.android.ui.rememberInferenceView
 import app.murmur.android.ui.syncLabel
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.MurmurTheme
@@ -167,8 +168,11 @@ private fun Main(
     val permissions = rememberPermissionState()
     val dictation by DictationController.state.collectAsState()
     val updateState by UpdateManager.get(context).state.collectAsState()
-    val modelReady = settings.speechModelConfigured
+    val inference = rememberInferenceView(settings)
+    val modelReady = inference.sttReady
     val ready = permissions.allGranted && modelReady
+    // Murmur models only need a signed-in account; the user's own provider needs the model screen.
+    val modelRoute = if (inference.routing.murmurStt) Route.ACCOUNT else Route.MODEL
     val sections = sections(
         cloud = config.enabled,
         modelReady = modelReady,
@@ -183,7 +187,11 @@ private fun Main(
             val (label, hint, dot, pulsing) = when {
                 dictation is DictationState.Listening -> StatusRow("Listening", "the button is recording", c.ember, true)
                 dictation is DictationState.Processing -> StatusRow("Working", (dictation as DictationState.Processing).label, c.ember, true)
-                !modelReady -> StatusRow("Setup needed", "connect a speech model", c.ember, false)
+                !modelReady -> StatusRow(
+                    "Setup needed",
+                    if (inference.routing.murmurStt) "sign in to use Murmur's models" else "connect a speech model",
+                    c.ember, false
+                )
                 !permissions.allGranted -> StatusRow("Setup needed", "${permissions.total - permissions.granted} permissions to allow", c.ember, false)
                 else -> StatusRow("Ready", "tap the button beside your keyboard", c.sage, false)
             }
@@ -192,7 +200,7 @@ private fun Main(
                 hint = hint,
                 dot = dot,
                 pulsing = pulsing,
-                onClick = if (ready) null else ({ select(if (!modelReady) Route.MODEL else Route.PERMISSIONS) })
+                onClick = if (ready) null else ({ select(if (!modelReady) modelRoute else Route.PERMISSIONS) })
             )
             if (config.enabled) {
                 Spacer(Modifier.height(8.dp))

@@ -12,16 +12,16 @@ import app.murmur.android.history.HistoryEntry
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.StageTimings
-import app.murmur.android.llm.LlmClient
+import app.murmur.android.inference.Inference
+import app.murmur.android.inference.InferenceRouter
 import app.murmur.android.llm.LlmConfig
 import app.murmur.android.service.RecordingService
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.FormattingMode
+import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
-import app.murmur.android.stt.SttClient
-import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttException
 import app.murmur.android.stt.adaptiveThreshold
 import app.murmur.android.stt.lastVoicedSec
@@ -184,7 +184,7 @@ object DictationController {
                     }
                     recorded
                 }
-                process(pcm, settings, appContext)
+                process(pcm, settings, appContext, InferenceRouter.get(appContext))
             } catch (e: Exception) {
                 Log.e(TAG, "dictation failed", e)
                 RecordingService.stop(appContext)
@@ -195,18 +195,12 @@ object DictationController {
         }
     }
 
-    private suspend fun process(pcm: ShortArray, s: MurmurSettings, context: Context) {
+    private suspend fun process(pcm: ShortArray, s: MurmurSettings, context: Context, router: InferenceRouter) {
         val recordMs = (stoppedAt - startedAt).coerceAtLeast(0)
-        // 1. STT, and make sure the transcript reaches the end of the speech
+        // 1. STT, and make sure the transcript reaches the end of the speech. The router decides
+        // whether the clip goes to the instance's model or the user's own provider.
         val sttStarted = System.currentTimeMillis()
-        val sttCfg = SttConfig(
-            kind = s.sttKind,
-            baseUrl = s.sttBaseUrl,
-            apiKey = s.sttApiKey,
-            model = s.sttModel,
-            language = s.language,
-            timeoutMs = s.sttTimeoutMs
-        )
+        val resolved = router.stt()
         val prompt = buildSttPrompt(s.dictionaryTerms)
         val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
         val complete = transcribeComplete(
@@ -219,7 +213,7 @@ object DictationController {
             // term the speaker says next is exactly what makes Whisper stop early.
             tailPrompt = STT_BASE_PROMPT,
             log = { Log.w(TAG, it) }
-        ) { wav, p -> SttClient.transcribeWithFallback(wav, p, sttCfg, s.sttFallbackModel) }
+        ) { wav, p -> router.transcribe(resolved, wav, p) }
         val stt = complete.output
         if (complete.resumed > 0) {
             Log.i(TAG, "transcript recovered ${"%.1f".format(complete.recoveredSec)}s of speech in ${complete.resumed} extra request(s)")
@@ -230,7 +224,10 @@ object DictationController {
         if (raw.isEmpty() ||
             (stt.noSpeechProb != null && stt.noSpeechProb > 0.85 && countWords(raw) <= 2)
         ) {
-            recordFailure(context, s, raw, "Nothing heard", StageTimings(recordMs = recordMs, sttMs = sttMs))
+            recordFailure(
+                context, s, raw, "Nothing heard", StageTimings(recordMs = recordMs, sttMs = sttMs),
+                provider = resolved.provider, model = resolved.cfg.model
+            )
             showTransient(DictationState.Error("Nothing heard"))
             return
         }
@@ -262,25 +259,29 @@ object DictationController {
         var final = light
         val pressEnter = light.pressEnter
 
-        // 3. Optional LLM formatting behind the guard
-        val (llmBase, llmKey, llmModel) = s.llmConnection()
-        val wantLlm = s.formattingMode == FormattingMode.SMART &&
-            !light.empty && light.wordCount >= s.llmMinWords &&
-            llmBase.isNotEmpty() && llmModel.isNotEmpty()
+        // 3. Optional LLM formatting behind the guard. The router picks the connection; a
+        // formatting model that cannot be reached (signed out of Murmur, no token) is not an error
+        // for the dictation: the rule-based text goes in and History says why.
         var llmMs = 0L
         var llm = LlmOutcome.SKIPPED
         var llmDetail: String? = when {
             s.formattingMode != FormattingMode.SMART -> "smart formatting off"
+            light.empty -> "nothing to format"
             light.wordCount < s.llmMinWords -> "too short"
-            llmBase.isEmpty() || llmModel.isEmpty() -> "no model configured"
             else -> null
         }
-        if (wantLlm) {
+        var llmCfg: LlmConfig? = null
+        if (llmDetail == null) {
+            val (resolvedLlm, why) = router.llmOrNull()
+            llmCfg = resolvedLlm?.cfg?.takeIf { it.baseUrl.isNotEmpty() && it.model.isNotEmpty() }
+            if (llmCfg == null) llmDetail = why ?: "no model configured"
+        }
+        if (llmCfg != null) {
             _state.value = DictationState.Processing("Formatting…")
             val llmStarted = System.currentTimeMillis()
             try {
-                val res = LlmClient.chatComplete(
-                    LlmConfig(llmBase, llmKey, llmModel, s.llmTimeoutMs),
+                val res = router.complete(
+                    llmCfg,
                     buildFormatMessages(
                         light.text.trim(), s.dictionaryTerms, style, app, light.hints, s.language,
                         dictionaryAliases = s.dictionaryEntries.associate { it.word.trim() to it.aliases }
@@ -311,7 +312,7 @@ object DictationController {
 
         val timings = StageTimings(recordMs = recordMs, sttMs = sttMs, formatMs = formatMs, llmMs = llmMs)
         if (final.empty || final.text.isEmpty()) {
-            recordFailure(context, s, raw, "Nothing to insert", timings)
+            recordFailure(context, s, raw, "Nothing to insert", timings, resolved.provider, resolved.cfg.model)
             showTransient(DictationState.Error("Nothing to insert"))
             return
         }
@@ -319,7 +320,7 @@ object DictationController {
         // 4. Inject into the focused field
         val currentSink = sink
         if (currentSink == null) {
-            recordFailure(context, s, raw, "Accessibility service not running", timings)
+            recordFailure(context, s, raw, "Accessibility service not running", timings, resolved.provider, resolved.cfg.model)
             showTransient(DictationState.Error("Accessibility service not running"))
             return
         }
@@ -335,8 +336,8 @@ object DictationController {
             wordCount = if (error == null) final.wordCount else 0,
             speechMs = recordMs,
             appName = appLabel(context, focusedPackage),
-            provider = s.sttKind.id,
-            model = modelName(s),
+            provider = resolved.provider,
+            model = resolved.cfg.model,
             injected = error == null,
             llmUsed = llm == LlmOutcome.USED,
             llm = llm,
@@ -358,13 +359,19 @@ object DictationController {
         }
     }
 
-    /** A dictation that produced nothing still shows up in History, with what went wrong. */
+    /**
+     * A dictation that produced nothing still shows up in History, with what went wrong. Before the
+     * router resolved a connection (it may be what failed), the entry names the model the settings
+     * would have used.
+     */
     private fun recordFailure(
         context: Context,
         s: MurmurSettings,
         raw: String,
         error: String,
-        timings: StageTimings = StageTimings(recordMs = (stoppedAt - startedAt).coerceAtLeast(0))
+        timings: StageTimings = StageTimings(recordMs = (stoppedAt - startedAt).coerceAtLeast(0)),
+        provider: String = configuredProvider(context, s),
+        model: String = configuredModel(context, s)
     ) {
         val now = System.currentTimeMillis()
         HistoryStore.get(context).add(
@@ -376,8 +383,8 @@ object DictationController {
                 wordCount = 0,
                 speechMs = timings.recordMs,
                 appName = appLabel(context, sink?.focusedPackage() ?: ""),
-                provider = s.sttKind.id,
-                model = modelName(s),
+                provider = provider,
+                model = model,
                 injected = false,
                 llmUsed = false,
                 timings = timings.copy(totalMs = (now - stoppedAt).coerceAtLeast(0)),
@@ -385,6 +392,15 @@ object DictationController {
             )
         )
     }
+
+    private fun murmurSpeech(context: Context): Boolean =
+        InferenceRouter.get(context).routing().stt == InferenceSource.MURMUR
+
+    private fun configuredProvider(context: Context, s: MurmurSettings): String =
+        if (murmurSpeech(context)) Inference.PROVIDER else s.sttKind.id
+
+    private fun configuredModel(context: Context, s: MurmurSettings): String =
+        if (murmurSpeech(context)) Inference.STT_MODEL else modelName(s)
 
     private fun modelName(s: MurmurSettings): String = s.sttModel.ifBlank {
         when (s.sttKind) {

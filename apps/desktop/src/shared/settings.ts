@@ -1,7 +1,13 @@
 import { z } from 'zod'
 import { ACCENT_PRESET_IDS } from './theme'
 
-export const SETTINGS_VERSION = 1
+export const SETTINGS_VERSION = 2
+
+/**
+ * Where a model runs: the Murmur instance's managed models (cloud builds only) or a provider the
+ * user configured on this device. See shared/inference.ts for how the effective source is decided.
+ */
+export const inferenceSourceSchema = z.enum(['murmur', 'custom'])
 
 export const handsFreeTriggerSchema = z.enum(['tap', 'double-tap', 'off'])
 export type HandsFreeTrigger = z.infer<typeof handsFreeTriggerSchema>
@@ -172,6 +178,11 @@ export const settingsSchema = z.object({
     .prefault({}),
   stt: z
     .object({
+      /**
+       * Managed Murmur models by default in cloud builds; ignored (always the user's own provider)
+       * in local builds. The fields below describe the user's own provider only.
+       */
+      source: inferenceSourceSchema.default('murmur'),
       kind: sttProviderKindSchema.default('openai-compatible'),
       presetId: z.string().default('custom'),
       baseUrl: z.string().default(''),
@@ -209,6 +220,8 @@ export const settingsSchema = z.object({
       appRules: z.array(appRuleSchema).default([]),
       llm: z
         .object({
+          /** As for `stt.source`. `custom` with `sameAsStt` follows the speech model's server. */
+          source: inferenceSourceSchema.default('murmur'),
           sameAsStt: z.boolean().default(true),
           baseUrl: z.string().default(''),
           apiKeyEnc: z.string().default(''),
@@ -282,7 +295,38 @@ export const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>
 export type SettingsInput = z.input<typeof settingsSchema>
 
+/**
+ * Bring a settings file written by an older build up to date before validation.
+ *
+ * v1 files predate model sources. An install that had connected its own speech provider keeps
+ * using it (and its formatting server) instead of being switched to the instance's models the day
+ * the app gains cloud support; an install that never connected one gets the new defaults.
+ */
+export function migrateSettings(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw
+  const input = raw as Record<string, unknown>
+  const stt = isRecord(input.stt) ? input.stt : undefined
+  if (!stt || stt.source !== undefined || typeof stt.baseUrl !== 'string' || !stt.baseUrl.trim())
+    return raw
+  const formatting = isRecord(input.formatting) ? input.formatting : {}
+  const llm = isRecord(formatting.llm) ? formatting.llm : {}
+  return {
+    ...input,
+    version: SETTINGS_VERSION,
+    stt: { ...stt, source: 'custom' },
+    formatting: {
+      ...formatting,
+      llm: llm.source === undefined ? { ...llm, source: 'custom' } : llm
+    }
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export function parseSettings(raw: unknown): Settings {
+  raw = migrateSettings(raw)
   const result = settingsSchema.safeParse(raw ?? {})
   if (result.success) return result.data
   // Salvage whatever validates by re-parsing section by section so one bad field

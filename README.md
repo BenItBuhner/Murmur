@@ -1,9 +1,10 @@
 # Murmur
 
 Hold a key (or tap a pill), speak, and clean text lands wherever your cursor is. Murmur is a
-Wispr Flow–style voice dictation tool. It brings your own speech model — OpenAI Whisper, Groq,
-Deepgram, ElevenLabs, or a local whisper server — and turns raw speech into polished, punctuated,
-formatted text that types itself into any application.
+Wispr Flow–style voice dictation tool. It turns raw speech into polished, punctuated, formatted
+text that types itself into any application. Against a Murmur instance the speech and formatting
+models come with your account; on its own, or whenever you prefer, it uses a model you bring —
+OpenAI Whisper, Groq, Deepgram, ElevenLabs, or a local whisper server.
 
 This is a monorepo:
 
@@ -11,7 +12,7 @@ This is a monorepo:
 | --- | --- | --- |
 | Desktop (Electron) | [`apps/desktop`](apps/desktop) | **Windows**, **Linux**, macOS (experimental) |
 | Android | [`apps/android`](apps/android) | Android 8.0+ |
-| Cloud backend (Convex + Clerk) | [`packages/backend`](packages/backend) | Accounts, synchronized dictionary and settings for both apps |
+| Cloud backend (Convex + Clerk) | [`packages/backend`](packages/backend) | Accounts, managed speech/formatting models, synchronized dictionary and settings for both apps |
 
 ![Murmur home](docs/home.png)
 
@@ -51,9 +52,10 @@ unsigned until the code-signing secrets described under [Releases](#releases) ar
 Windows SmartScreen and macOS Gatekeeper will ask you to confirm the first launch.
 
 **These published builds are local-only.** There is no production Convex or Clerk instance yet, so
-the downloadable apps do not offer accounts or cloud sync — everything stays on the device. The
-code for accounts is in the repo (`packages/backend`); it is not baked into GitHub release
-artifacts until the `MURMUR_CLOUD_RELEASE` repository variable is set to `true`.
+the downloadable apps do not offer accounts, cloud sync or Murmur's own models — you connect a
+speech model of your own and everything stays on the device. The code for accounts and managed
+models is in the repo (`packages/backend`); it is not baked into GitHub release artifacts until the
+`MURMUR_CLOUD_RELEASE` repository variable is set to `true`.
 
 ### Updates
 
@@ -86,9 +88,12 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   - **Hold to talk** — hold the shortcut, speak, release. The transcript is cleaned and inserted.
   - **Hands-free** — a quick *tap* (or *double-tap*, your choice, exactly like Wispr Flow) locks a
     session so you can keep your hands off the keyboard; tap again to stop and insert.
-- **Bring your own models.** Any OpenAI-compatible `/v1/audio/transcriptions` endpoint works, plus
-  native Deepgram and ElevenLabs. One-click **model discovery**, a **fallback model**, and a
-  built-in **latency test**.
+- **Models included, or bring your own.** Signed in to a Murmur instance, speech and formatting run
+  on the models the instance provides — nothing to configure. Under **Models** (and the Style page
+  for the formatting model) you can switch to your own provider instead: any OpenAI-compatible
+  `/v1/audio/transcriptions` endpoint works, plus native Deepgram and ElevenLabs, with one-click
+  **model discovery**, a **fallback model**, and a built-in **latency test**. Local builds only
+  ever show your own provider.
 - **Nothing you said gets dropped.** Whisper-style models sometimes stop transcribing long before
   you stopped talking (classically right after a word from your dictionary, because the vocabulary
   prompt taught them the transcript ends there). Murmur compares the word timings it gets back with
@@ -155,17 +160,46 @@ cd apps/android
 
 Murmur runs in one of two modes, decided when the apps are built:
 
-- **Local** (no cloud configured): no account, everything stays on the device. This is what `npm run dev`
-  and a checkout without keys give you.
+- **Local** (no cloud configured): no account, everything stays on the device, and speech and
+  formatting run on a provider you connect yourself. The apps never show, offer or contact a Murmur
+  server for inference. This is what `npm run dev` and a checkout without keys give you.
 - **Cloud**: the app talks to a Murmur instance made of a [Convex](https://convex.dev) deployment
   (`packages/backend`) with [Clerk](https://clerk.com) as the identity provider. Everyone signs up and
   onboards before dictating (`required`, the production default) or can skip sign-in (`optional`).
+  Speech and formatting use the **models the instance provides** by default, for free and paid
+  accounts alike; **Models** and **Style** offer "your own provider" as the alternative on each device.
 
 With an account, the **dictionary**, **snippets**, **style rules and preferences**, **stats**, the
 **device list** and (opt-in) **dictation history** are synchronized across every desktop and Android
-install. Speech-model connections and API keys are device settings and never leave the device. Both
-apps keep working offline from a local mirror; local edits queue in a persisted outbox and replay in
-order, and a device that already had a dictionary merges it into the account the first time it signs in.
+install. The choice of model source and any provider keys of your own are device settings and never
+leave the device. Both apps keep working offline from a local mirror; local edits queue in a persisted
+outbox and replay in order, and a device that already had a dictionary merges it into the account the
+first time it signs in.
+
+### Managed models and plans
+
+The backend exposes an OpenAI-compatible **inference gateway** on the deployment's HTTP-actions
+host (`https://<deployment>.convex.site`): `POST /v1/audio/transcriptions`, `POST /v1/chat/completions`
+and `GET /v1/models`. Clients send their Clerk session JWT as the bearer token where an API key would
+go, ask for the models `murmur-transcribe` and `murmur-format`, and the gateway forwards to the
+providers the operator configured — the provider credentials never leave the deployment's
+environment variables:
+
+| Convex environment variable | Purpose |
+| --- | --- |
+| `MURMUR_INFERENCE_STT_URL`, `MURMUR_INFERENCE_STT_KEY`, `MURMUR_INFERENCE_STT_MODEL` | OpenAI-compatible speech-to-text upstream (e.g. `https://api.groq.com/openai/v1`, a key, `whisper-large-v3-turbo`). |
+| `MURMUR_INFERENCE_LLM_URL`, `MURMUR_INFERENCE_LLM_KEY`, `MURMUR_INFERENCE_LLM_MODEL` | OpenAI-compatible chat upstream for smart formatting. |
+| `MURMUR_INFERENCE_STT_PRO_MODEL`, `MURMUR_INFERENCE_LLM_PRO_MODEL` | Optional better models for `pro` accounts. |
+
+A kind is offered only when its URL and model are set; an instance without them tells the apps so,
+and they fall back to the user's own provider. Every account starts on the **free** plan; an operator
+(or a billing webhook) moves it to **pro** with `internal.users.setPlan` from the Convex dashboard.
+Tiers, defined in [`packages/backend/convex/lib/plans.ts`](packages/backend/convex/lib/plans.ts),
+set the monthly minutes of transcription, formatting tokens and requests per minute (free: 120 min,
+500k tokens, 20/min; pro: 100 h, 25M tokens, 60/min). Usage is counted per account and UTC month,
+checked before a request is forwarded and billed only after the provider answered; the apps show
+the plan and the month's usage under Models and Account. Clips are limited to ten minutes
+(Convex caps HTTP bodies at 20 MB).
 
 ### Setting up an instance
 
@@ -173,7 +207,8 @@ order, and a device that already had a dictionary merges it into the account the
    (production only; the release workflow does this when `CONVEX_DEPLOY_KEY` is set). In the Convex
    dashboard set the deployment's environment variables:
    `CLERK_JWT_ISSUER_DOMAIN` (the Clerk Frontend API URL, e.g. `https://clerk.your-domain.com` or
-   `https://your-slug.clerk.accounts.dev`) and `CLERK_WEBHOOK_SIGNING_SECRET`.
+   `https://your-slug.clerk.accounts.dev`) and `CLERK_WEBHOOK_SIGNING_SECRET`, plus the
+   `MURMUR_INFERENCE_*` variables above for the models the instance provides.
 2. **Clerk** — in the Clerk dashboard:
    - create a JWT template named `convex` (the Convex preset); add `email`, `name` and `picture`
      claims if you want profile data without the webhook;
@@ -186,11 +221,14 @@ order, and a device that already had a dictionary merges it into the account the
 3. **Builds** — bake the instance into the apps with `VITE_CONVEX_URL` and `VITE_CLERK_PUBLISHABLE_KEY`
    (desktop, see [`apps/desktop/.env.example`](apps/desktop/.env.example)) and `MURMUR_CONVEX_URL` /
    `MURMUR_CLERK_PUBLISHABLE_KEY` (Android Gradle). `VITE_MURMUR_ACCOUNT_MODE` / `MURMUR_ACCOUNT_MODE`
-   choose `required` (default), `optional` or `off`. In CI and releases those values are used only
-   when the repository variable `MURMUR_CLOUD_RELEASE` is `true`; until then every artifact is
-   local-only, even if `CONVEX_URL` / `CLERK_PUBLISHABLE_KEY` happen to be set. At runtime the
-   desktop app also honours `MURMUR_CONVEX_URL`, `MURMUR_CLERK_PUBLISHABLE_KEY` and
-   `MURMUR_ACCOUNT_MODE`, which is handy for pointing a dev build at a staging instance.
+   choose `required` (default), `optional` or `off`. The gateway's `.convex.site` origin is derived
+   from the Convex URL (also for the local backend, port 3210 → 3211); a self-hosted deployment on
+   another host sets `VITE_CONVEX_SITE_URL` / `MURMUR_CONVEX_SITE_URL` explicitly. In CI and releases
+   those values are used only when the repository variable `MURMUR_CLOUD_RELEASE` is `true`; until
+   then every artifact is local-only, even if `CONVEX_URL` / `CLERK_PUBLISHABLE_KEY` happen to be set.
+   At runtime the desktop app also honours `MURMUR_CONVEX_URL`, `MURMUR_CONVEX_SITE_URL`,
+   `MURMUR_CLERK_PUBLISHABLE_KEY` and `MURMUR_ACCOUNT_MODE`, which is handy for pointing a dev build
+   at a staging instance.
 
 Backend checks: `npm run typecheck && npm run lint && npm test` in `packages/backend` (the tests run
 against an in-memory Convex via `convex-test`). The desktop app typechecks against the committed

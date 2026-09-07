@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from 'convex/server'
 import { v } from 'convex/values'
+import { planValidator } from './lib/plans'
 import {
   appRuleOverrides,
   dictationModeValidator,
@@ -11,8 +12,9 @@ import {
 
 /**
  * Document-relational layout: one row per synced record, every table keyed by the owning user and
- * indexed for the lookups the clients perform. Provider credentials are intentionally absent; API
- * keys stay on the device that entered them.
+ * indexed for the lookups the clients perform. Users' own provider credentials are intentionally
+ * absent; API keys for a bring-your-own model stay on the device that entered them. The instance's
+ * managed-model credentials live in deployment environment variables, never in the database.
  */
 export default defineSchema({
   users: defineTable({
@@ -21,6 +23,8 @@ export default defineSchema({
     email: v.optional(v.string()),
     name: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
+    /** Account tier; absent means `free`. Set through `internal.users.setPlan`. */
+    plan: v.optional(planValidator),
     /** Account-level onboarding. Device-level steps (microphone, shortcut) are repeated per device. */
     onboardingCompletedAt: v.optional(v.number()),
     onboardingVersion: v.optional(v.number()),
@@ -29,6 +33,24 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number()
   }).index('by_clerkId', ['clerkId']),
+
+  /**
+   * Managed inference consumed per account and calendar month (UTC). One row per (user, period);
+   * the gateway checks it before forwarding a request and adds to it afterwards.
+   */
+  inferenceUsage: defineTable({
+    userId: v.id('users'),
+    /** `YYYY-MM` in UTC. */
+    period: v.string(),
+    sttSeconds: v.number(),
+    sttRequests: v.number(),
+    llmTokens: v.number(),
+    llmRequests: v.number(),
+    /** Start of the current request-rate window and the requests seen in it. */
+    windowStart: v.optional(v.number()),
+    windowCount: v.optional(v.number()),
+    updatedAt: v.number()
+  }).index('by_user_and_period', ['userId', 'period']),
 
   devices: defineTable({
     userId: v.id('users'),

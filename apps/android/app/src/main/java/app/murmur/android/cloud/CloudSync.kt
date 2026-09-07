@@ -45,7 +45,9 @@ data class SyncStatus(
     val devices: List<DeviceDto>,
     val error: String?,
     /** The account's totals across every device, once loaded; null means show the phone's own. */
-    val stats: DictationStats? = null
+    val stats: DictationStats? = null,
+    /** Managed-model availability and allowance; null until the account is connected. */
+    val inference: InferenceStatusDto? = null
 ) {
     companion object {
         val DISABLED = SyncStatus(SyncPhase.DISABLED, false, false, false, 0, null, emptyList(), null)
@@ -78,6 +80,7 @@ class CloudSync private constructor(
     private var error: String? = null
     private var user: UserDto? = null
     private var devices: List<DeviceDto> = emptyList()
+    private var inference: InferenceStatusDto? = null
     private var serverDictionary: List<DictionaryEntryDto>? = null
     private var serverPreferences: PreferencesDto? = null
     private var serverStats: StatsDto? = null
@@ -157,6 +160,7 @@ class CloudSync private constructor(
         authenticated = false
         user = null
         devices = emptyList()
+        inference = null
         serverDictionary = null
         serverPreferences = null
         serverStats = null
@@ -280,6 +284,13 @@ class CloudSync private constructor(
                 convex.subscribe<StatsDto?>("stats:get").collect { result ->
                     if (gen != generation) return@collect
                     result.onSuccess { serverStats = it }.onFailure { error = it.message }
+                    publish()
+                }
+            }
+            launch {
+                convex.subscribe<InferenceStatusDto>("inference:status").collect { result ->
+                    if (gen != generation) return@collect
+                    result.onSuccess { inference = it }.onFailure { Log.w(TAG, "inference status: ${it.message}") }
                     publish()
                 }
             }
@@ -479,7 +490,7 @@ class CloudSync private constructor(
             else -> SyncPhase.SYNCED
         }
         val stats = serverStats?.let { SyncReducers.deriveStats(settings.get().stats, it, outbox.ops) }
-        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, error, stats)
+        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, error, stats, inference)
     }
 
     companion object {

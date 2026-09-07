@@ -1,6 +1,7 @@
 import { v } from 'convex/values'
 import { internalMutation } from './_generated/server'
 import { authedMutation, authedQuery } from './lib/functions'
+import { planValidator } from './lib/plans'
 import { findUserByClerkId, purgeUserData, toUserDto, upsertUser } from './lib/users'
 import { userDtoValidator } from './lib/validators'
 
@@ -75,6 +76,23 @@ export const upsertFromClerk = internalMutation({
       Date.now()
     )
     return user._id
+  }
+})
+
+/**
+ * Move an account to another tier. Internal on purpose: run it from the Convex dashboard or from a
+ * billing webhook; the account itself can never change its own plan.
+ */
+export const setPlan = internalMutation({
+  args: { clerkId: v.string(), plan: planValidator },
+  returns: userDtoValidator,
+  handler: async (ctx, args) => {
+    const now = Date.now()
+    const user = await upsertUser(ctx, args.clerkId, {}, now)
+    if (user.plan !== args.plan) {
+      await ctx.db.patch('users', user._id, { plan: args.plan, updatedAt: now })
+    }
+    return toUserDto({ ...user, plan: args.plan, updatedAt: now })
   }
 })
 

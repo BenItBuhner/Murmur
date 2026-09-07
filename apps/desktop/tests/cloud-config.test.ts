@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { frontendApiFromPublishableKey, resolveCloudConfig } from '../src/main/cloud/config'
+import {
+  deriveConvexSiteUrl,
+  frontendApiFromPublishableKey,
+  resolveCloudConfig
+} from '../src/main/cloud/config'
 import { buildRendererCsp } from '../src/main/cloud/csp'
 
 // base64("clerk.murmur.app$") / base64("bright-otter-12.clerk.accounts.dev$")
@@ -38,10 +42,48 @@ describe('resolveCloudConfig', () => {
     expect(config).toMatchObject({
       accountMode: 'required',
       convexUrl: 'https://happy-otter-123.convex.cloud',
+      convexSiteUrl: 'https://happy-otter-123.convex.site',
       clerkFrontendApiHost: 'clerk.murmur.app',
       jwtTemplate: 'convex'
     })
     expect(warnings).toEqual([])
+  })
+
+  it('derives the HTTP actions origin for the managed-model gateway, or takes an explicit one', () => {
+    expect(deriveConvexSiteUrl('https://happy-otter-123.convex.cloud')).toBe(
+      'https://happy-otter-123.convex.site'
+    )
+    expect(deriveConvexSiteUrl('http://127.0.0.1:3210')).toBe('http://127.0.0.1:3211')
+    expect(deriveConvexSiteUrl('https://convex.example.com')).toBeNull()
+    expect(deriveConvexSiteUrl('nope')).toBeNull()
+
+    const local = resolveCloudConfig(
+      { MURMUR_CONVEX_URL: 'http://127.0.0.1:3210', MURMUR_CLERK_PUBLISHABLE_KEY: TEST_KEY },
+      {}
+    )
+    expect(local.config.convexSiteUrl).toBe('http://127.0.0.1:3211')
+
+    const explicit = resolveCloudConfig(
+      { MURMUR_CONVEX_SITE_URL: 'https://api.murmur.example/' },
+      { convexUrl: 'https://convex.murmur.example', clerkPublishableKey: LIVE_KEY }
+    )
+    expect(explicit.config.convexSiteUrl).toBe('https://api.murmur.example')
+    expect(explicit.warnings).toEqual([])
+
+    const underivable = resolveCloudConfig(
+      {},
+      { convexUrl: 'https://convex.murmur.example', clerkPublishableKey: LIVE_KEY }
+    )
+    expect(underivable.config.accountMode).toBe('required')
+    expect(underivable.config.convexSiteUrl).toBe('')
+    expect(underivable.warnings[0]).toMatch(/MURMUR_CONVEX_SITE_URL/)
+
+    const bad = resolveCloudConfig(
+      { MURMUR_CONVEX_SITE_URL: 'ftp://nope' },
+      { convexUrl: 'https://a.convex.cloud', clerkPublishableKey: LIVE_KEY }
+    )
+    expect(bad.config.convexSiteUrl).toBe('https://a.convex.site')
+    expect(bad.warnings[0]).toMatch(/not an http\(s\) URL/)
   })
 
   it('lets the build or environment choose optional mode, and env wins over build values', () => {

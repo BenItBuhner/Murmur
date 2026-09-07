@@ -14,10 +14,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import app.murmur.android.inference.Inference
 import app.murmur.android.llm.LlmClient
 import app.murmur.android.settings.BulletMarker
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.HesitationLevel
+import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.ListStyle
 import app.murmur.android.settings.ListsMode
 import app.murmur.android.settings.LlmFreedom
@@ -28,6 +30,7 @@ import app.murmur.android.settings.RepetitionScope
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.Tone
 import app.murmur.android.ui.components.ChipRow
+import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
 import app.murmur.android.ui.components.Hairline
@@ -69,6 +72,7 @@ private fun repeatsOf(s: MurmurSettings): Repeats =
 @Composable
 fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     val scope = rememberCoroutineScope()
+    val inference = rememberInferenceView(settings)
     var llmModels by remember { mutableStateOf<List<String>>(emptyList()) }
     var discovering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -287,13 +291,46 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
 
         if (settings.formattingMode == FormattingMode.SMART) {
             SectionGap()
-            Group("Formatting model") {
+            if (inference.offersMurmur) {
+                SourceChooser(
+                    title = "Formatting model",
+                    selected = if (inference.routing.murmurLlm) InferenceSource.MURMUR else InferenceSource.CUSTOM,
+                    murmurMeta = "${inference.planLabel} plan",
+                    ownLabel = "Your own model",
+                    onSelect = { source ->
+                        store.update { s ->
+                            when (source) {
+                                InferenceSource.MURMUR -> s.copy(llmSource = InferenceSource.MURMUR)
+                                // "Same server as speech" would point straight back at Murmur.
+                                InferenceSource.CUSTOM -> s.copy(
+                                    llmSource = InferenceSource.CUSTOM,
+                                    llmSameAsStt = s.llmSameAsStt && s.sttSource != InferenceSource.MURMUR
+                                )
+                            }
+                        }
+                    }
+                )
+                SectionGap()
+            }
+            if (inference.routing.murmurLlm) Column {
+                Hairline()
+                ControlRow(
+                    "Model",
+                    description = if (inference.signedIn) "Provided by this Murmur instance on the ${inference.planLabel} plan. Its edits are checked against your words before anything is inserted."
+                    else "Sign in to use Murmur models."
+                ) {
+                    Text(inference.status?.models?.llm ?: Inference.LLM_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
+                }
+                Hairline()
+            } else Group(if (inference.offersMurmur) null else "Formatting model") {
                 Spacer(Modifier.height(6.dp))
                 Hairline()
                 ToggleRow(
                     "Same server as speech", settings.llmSameAsStt,
                     { v -> store.update { s -> s.copy(llmSameAsStt = v) } },
-                    description = "Reuse the speech provider's URL and key"
+                    description = if (settings.sttSource == InferenceSource.MURMUR && inference.offersMurmur)
+                        "Follow the speech model, which is Murmur's right now"
+                    else "Reuse the speech provider's URL and key"
                 )
                 Hairline()
                 Spacer(Modifier.height(24.dp))

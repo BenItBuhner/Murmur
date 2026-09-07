@@ -1,0 +1,193 @@
+import { SttError, type SttConfig } from '@core/stt'
+import {
+  chatComplete,
+  type ChatMessage,
+  type ChatOptions,
+  type ChatResult,
+  type LlmConfig
+} from '@core/llm/client'
+import type { Complete } from '@core/text/smart-format'
+import type { CloudConfig } from '@shared/cloud'
+import {
+  MURMUR_LLM_MODEL,
+  MURMUR_PROVIDER,
+  MURMUR_STT_MODEL,
+  murmurGatewayUrl,
+  resolveInferenceSources,
+  type InferenceRouting,
+  type InferenceSource
+} from '@shared/inference'
+import type { Settings, SttProviderKind } from '@shared/settings'
+import { createLogger } from '../logger'
+
+const log = createLogger('inference')
+
+/** The slice of the settings store the router needs; structural so tests can pass a stub. */
+export interface RouterSettings {
+  get(): Settings
+  getSecret(slot: 'stt' | 'llm'): string
+}
+
+export interface RouterDeps {
+  config: CloudConfig
+  settings: RouterSettings
+  /** Convex JWT for the signed-in account (from the renderer's Clerk session), or null. */
+  token: (forceRefresh: boolean) => Promise<string | null>
+  /** What the renderer last reported about the session; explains a missing token. */
+  signedIn: () => boolean
+  /** Whether the instance offers managed models, once the account status has arrived. */
+  managedAvailable: () => boolean | undefined
+}
+
+export interface ResolvedStt {
+  source: InferenceSource
+  cfg: SttConfig
+  /** Tried when the primary model errors (custom providers only). */
+  fallbackModel: string
+  /** `provider` for history entries: the provider kind, or `murmur`. */
+  provider: SttProviderKind | typeof MURMUR_PROVIDER
+}
+
+export interface ResolvedLlm {
+  source: InferenceSource
+  cfg: LlmConfig
+}
+
+/**
+ * Decides, for every request, whether speech-to-text and formatting go to the models the Murmur
+ * instance provides or to the provider the user configured, and builds the matching client
+ * configuration. Murmur-bound configurations carry the account's short-lived session token as the
+ * API key, so they are resolved per request and refreshed when the gateway rejects one.
+ *
+ * In local builds there is no instance: everything resolves to the user's own provider and no
+ * Murmur endpoint is ever contacted.
+ */
+export class InferenceRouter {
+  constructor(private readonly deps: RouterDeps) {}
+
+  get cloudEnabled(): boolean {
+    return this.deps.config.accountMode !== 'off' && !!this.deps.config.convexSiteUrl
+  }
+
+  routing(): InferenceRouting {
+    return resolveInferenceSources(this.deps.settings.get(), {
+      cloudEnabled: this.cloudEnabled,
+      managedAvailable: this.deps.managedAvailable()
+    })
+  }
+
+  private get gatewayUrl(): string {
+    return murmurGatewayUrl(this.deps.config.convexSiteUrl)
+  }
+
+  /** True for a configuration that points at this instance's gateway. */
+  isMurmur(cfg: { baseUrl: string }): boolean {
+    return this.cloudEnabled && cfg.baseUrl.replace(/\/+$/, '') === this.gatewayUrl
+  }
+
+  private async sessionToken(forceRefresh: boolean): Promise<string> {
+    const token = await this.deps.token(forceRefresh)
+    if (token) return token
+    if (!this.deps.signedIn()) {
+      throw new SttError(
+        'Sign in to use Murmur models, or choose your own provider under Models',
+        'auth',
+        undefined,
+        [],
+        'murmur_signed_out'
+      )
+    }
+    throw new SttError(
+      'Could not get a session token for Murmur models; check your connection and try again',
+      'network',
+      undefined,
+      [],
+      'murmur_no_token'
+    )
+  }
+
+  async stt(opts: { forceRefresh?: boolean } = {}): Promise<ResolvedStt> {
+    const s = this.deps.settings.get()
+    if (this.routing().stt === 'murmur') {
+      return {
+        source: 'murmur',
+        cfg: {
+          kind: 'openai-compatible',
+          baseUrl: this.gatewayUrl,
+          apiKey: await this.sessionToken(!!opts.forceRefresh),
+          model: MURMUR_STT_MODEL,
+          language: s.stt.language,
+          timeoutMs: s.stt.timeoutMs
+        },
+        fallbackModel: '',
+        provider: MURMUR_PROVIDER
+      }
+    }
+    return {
+      source: 'custom',
+      cfg: {
+        kind: s.stt.kind,
+        baseUrl: s.stt.baseUrl,
+        apiKey: this.deps.settings.getSecret('stt'),
+        model: s.stt.model,
+        language: s.stt.language,
+        timeoutMs: s.stt.timeoutMs
+      },
+      fallbackModel: s.stt.fallbackModel,
+      provider: s.stt.kind
+    }
+  }
+
+  async llm(opts: { forceRefresh?: boolean } = {}): Promise<ResolvedLlm> {
+    const s = this.deps.settings.get()
+    const llm = s.formatting.llm
+    if (this.routing().llm === 'murmur') {
+      return {
+        source: 'murmur',
+        cfg: {
+          baseUrl: this.gatewayUrl,
+          apiKey: await this.sessionToken(!!opts.forceRefresh),
+          model: MURMUR_LLM_MODEL,
+          timeoutMs: llm.timeoutMs
+        }
+      }
+    }
+    const stt = llm.sameAsStt
+    return {
+      source: 'custom',
+      cfg: {
+        baseUrl: stt ? s.stt.baseUrl : llm.baseUrl,
+        apiKey: this.deps.settings.getSecret(stt ? 'stt' : 'llm'),
+        model: llm.model,
+        timeoutMs: llm.timeoutMs
+      }
+    }
+  }
+
+  /**
+   * Chat completion that survives an expired session token: a 401 from the gateway is answered by
+   * fetching a fresh token and retrying once. Drop-in for `smartFormat`'s `complete` parameter.
+   */
+  readonly complete: Complete = async (
+    cfg: LlmConfig,
+    messages: ChatMessage[],
+    opts?: ChatOptions
+  ): Promise<ChatResult> => {
+    try {
+      return await chatComplete(cfg, messages, opts)
+    } catch (err) {
+      if (!(err instanceof SttError) || err.kind !== 'auth' || !this.isMurmur(cfg)) throw err
+      log.info('session token rejected by the gateway; refreshing and retrying')
+      const fresh = await this.sessionToken(true)
+      return await chatComplete({ ...cfg, apiKey: fresh }, messages, opts)
+    }
+  }
+
+  /** Same recovery for a speech request: returns the retry configuration, or null when not applicable. */
+  async refreshedStt(resolved: ResolvedStt, err: unknown): Promise<SttConfig | null> {
+    if (resolved.source !== 'murmur') return null
+    if (!(err instanceof SttError) || err.kind !== 'auth') return null
+    log.info('session token rejected by the gateway; refreshing and retrying')
+    return { ...resolved.cfg, apiKey: await this.sessionToken(true) }
+  }
+}

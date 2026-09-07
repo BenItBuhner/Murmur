@@ -59,6 +59,10 @@ android {
         // a local-only build, set both for a build against a Murmur instance. Accounts are required
         // by default when both are set; MURMUR_ACCOUNT_MODE=optional allows skipping.
         buildConfigField("String", "CONVEX_URL", "\"${envOrProp("MURMUR_CONVEX_URL")}\"")
+        // HTTP actions URL of the deployment (the ".convex.site" one), home of the managed-model
+        // gateway. Derived from CONVEX_URL for Convex Cloud and the local backend; set it only for
+        // a self-hosted deployment on another host.
+        buildConfigField("String", "CONVEX_SITE_URL", "\"${envOrProp("MURMUR_CONVEX_SITE_URL")}\"")
         buildConfigField(
             "String", "CLERK_PUBLISHABLE_KEY", "\"${envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY")}\""
         )

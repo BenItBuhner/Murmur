@@ -1,9 +1,18 @@
 import { httpRouter } from 'convex/server'
 import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
+import { chatCompletions, models, transcriptions } from './gateway'
 import { verifyClerkWebhook, WebhookVerificationError } from './lib/clerkWebhook'
 
 const http = httpRouter()
+
+/**
+ * Managed inference for signed-in accounts (see gateway.ts). OpenAI-compatible so both apps use
+ * the same client code they use for a user's own provider, with the Clerk JWT as the bearer token.
+ */
+http.route({ path: '/v1/models', method: 'GET', handler: models })
+http.route({ path: '/v1/audio/transcriptions', method: 'POST', handler: transcriptions })
+http.route({ path: '/v1/chat/completions', method: 'POST', handler: chatCompletions })
 
 /**
  * Clerk -> Convex user sync. Point a Clerk webhook endpoint at

@@ -1,9 +1,8 @@
 import {
   SttError,
-  classifyStatus,
   combineSignals,
+  errorFromResponse,
   normalizeBaseUrl,
-  parseErrorBody,
   rankSpeechModels,
   toSttError,
   type SttConfig,
@@ -99,25 +98,10 @@ export class OpenAiCompatibleStt implements SttProvider {
           verboseUnsupported.add(base)
           res = await attempt(false, false)
         } else {
-          const { message, suggestedModels } = parseErrorBody(body)
-          throw new SttError(
-            message,
-            classifyStatus(res.status, message),
-            res.status,
-            suggestedModels
-          )
+          throw errorFromResponse(res.status, body)
         }
       }
-      if (!res.ok) {
-        const body = await res.text()
-        const { message, suggestedModels } = parseErrorBody(body)
-        throw new SttError(
-          message || `HTTP ${res.status}`,
-          classifyStatus(res.status, message),
-          res.status,
-          suggestedModels
-        )
-      }
+      if (!res.ok) throw errorFromResponse(res.status, await res.text())
       const contentType = res.headers.get('content-type') ?? ''
       let text = ''
       let json: VerboseJson | undefined
@@ -154,14 +138,7 @@ export class OpenAiCompatibleStt implements SttProvider {
         headers,
         signal: combineSignals(Math.min(cfg.timeoutMs, 15000))
       })
-      if (!res.ok) {
-        const { message } = parseErrorBody(await res.text())
-        throw new SttError(
-          message || `HTTP ${res.status}`,
-          classifyStatus(res.status, message),
-          res.status
-        )
-      }
+      if (!res.ok) throw errorFromResponse(res.status, await res.text())
       const json = (await res.json()) as {
         data?: Array<{ id: string }>
         models?: Array<{ name?: string; id?: string }>

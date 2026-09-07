@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { Clock3, Copy, CornerDownLeft, Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { HistoryEntry } from '@shared/types'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Badge } from '@renderer/components/ui/misc'
+import { Appear, arrive, leave, settle } from '@renderer/components/motion'
 import { Empty, PageHeader } from '@renderer/components/SettingRow'
 import { SyncBadge } from '@renderer/components/SyncBadge'
 import { useSettings } from '@renderer/hooks/useSettings'
-import { formatRelative } from '@renderer/lib/utils'
+import { cn, formatRelative } from '@renderer/lib/utils'
 import { LatencyBar } from './Home'
 
 /**
@@ -136,7 +138,7 @@ export function HistoryPage(): React.JSX.Element {
           </>
         }
       />
-      {entries.length > 0 && (
+      <Appear show={entries.length > 0}>
         <div className="relative mb-4">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -146,7 +148,7 @@ export function HistoryPage(): React.JSX.Element {
             className="pl-9"
           />
         </div>
-      )}
+      </Appear>
       {entries.length === 0 ? (
         <Empty
           icon={<Clock3 />}
@@ -156,106 +158,126 @@ export function HistoryPage(): React.JSX.Element {
       ) : filtered.length === 0 ? (
         <Empty title="No matches" description="Try a different search." />
       ) : (
-        <div className="space-y-2">
-          {filtered.map((e) => {
-            const expanded = open === e.id
-            return (
-              <div
-                key={e.id}
-                className="group rounded-xl border bg-card shadow-xs transition-colors"
-              >
-                <button
-                  className="flex w-full items-start gap-4 px-5 py-3.5 text-left"
-                  onClick={() => setOpen(expanded ? null : e.id)}
+        <div>
+          {/* Rows glide to their new places as a search narrows the list; deleted ones fold away. */}
+          <AnimatePresence initial={false}>
+            {filtered.map((e) => {
+              const expanded = open === e.id
+              return (
+                <motion.div
+                  key={e.id}
+                  layout="position"
+                  transition={settle}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0, transition: { duration: 0.3, ease: arrive } }}
+                  exit={{
+                    opacity: 0,
+                    height: 0,
+                    marginBottom: 0,
+                    transition: { duration: 0.18, ease: leave }
+                  }}
+                  className={cn(
+                    'group mb-2 overflow-hidden rounded-xl border bg-card shadow-xs transition-colors',
+                    expanded && 'border-input'
+                  )}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className={expanded ? 'whitespace-pre-wrap text-sm' : 'truncate text-sm'}>
-                      {e.error && !e.finalText ? (
-                        <span className="text-destructive">{e.error}</span>
-                      ) : (
-                        e.finalText
-                      )}
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <span>{formatRelative(e.createdAt)}</span>
-                      {e.appName && <span>· {e.appName}</span>}
-                      <span>· {e.wordCount} words</span>
-                      {e.mode !== 'hold' && (
-                        <Badge variant="secondary" className="ml-1">
-                          {e.mode === 'hands-free' ? 'hands-free' : 'command'}
-                        </Badge>
-                      )}
-                      <LlmBadge entry={e} />
-                      {e.remote && (
-                        <Badge variant="outline" title="Dictated on another device">
-                          {e.deviceName ?? 'other device'}
-                        </Badge>
-                      )}
-                      {!e.injected && !e.error && !e.remote && (
-                        <Badge variant="outline">clipboard</Badge>
-                      )}
-                      {e.error && e.finalText && <Badge variant="destructive">not inserted</Badge>}
-                      {settings.general.showLatencyInHistory && !e.error && !e.remote && (
-                        <span className="ml-auto tabular-nums">{e.timings.totalMs} ms</span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-                {expanded && (
-                  <div className="space-y-4 border-t px-5 py-4 animate-fade-in">
-                    {e.rawText && e.rawText.trim() !== e.finalText.trim() && (
-                      <div>
-                        <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                          Raw transcript
-                        </div>
-                        <div className="whitespace-pre-wrap rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground">
-                          {e.rawText}
-                        </div>
+                  <button
+                    className="flex w-full items-start gap-4 px-5 py-3.5 text-left"
+                    onClick={() => setOpen(expanded ? null : e.id)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className={expanded ? 'whitespace-pre-wrap text-sm' : 'truncate text-sm'}
+                      >
+                        {e.error && !e.finalText ? (
+                          <span className="text-destructive">{e.error}</span>
+                        ) : (
+                          e.finalText
+                        )}
                       </div>
-                    )}
-                    {settings.general.showLatencyInHistory && !e.error && !e.remote && (
-                      <LatencyBar t={e.timings} />
-                    )}
-                    {(e.stages?.length || e.llm) && (
-                      <div className="flex flex-wrap items-center gap-1 text-[11px]">
-                        <span className="mr-1 font-medium uppercase tracking-wider text-muted-foreground">
-                          Stages
-                        </span>
-                        {e.stages?.map((s) => (
-                          <Badge key={s} variant="outline">
-                            {s}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span>{formatRelative(e.createdAt)}</span>
+                        {e.appName && <span>· {e.appName}</span>}
+                        <span>· {e.wordCount} words</span>
+                        {e.mode !== 'hold' && (
+                          <Badge variant="secondary" className="ml-1">
+                            {e.mode === 'hands-free' ? 'hands-free' : 'command'}
                           </Badge>
-                        ))}
-                        {e.llm && <LlmBadge entry={e} detailed />}
+                        )}
+                        <LlmBadge entry={e} />
+                        {e.remote && (
+                          <Badge variant="outline" title="Dictated on another device">
+                            {e.deviceName ?? 'other device'}
+                          </Badge>
+                        )}
+                        {!e.injected && !e.error && !e.remote && (
+                          <Badge variant="outline">clipboard</Badge>
+                        )}
+                        {e.error && e.finalText && (
+                          <Badge variant="destructive">not inserted</Badge>
+                        )}
+                        {settings.general.showLatencyInHistory && !e.error && !e.remote && (
+                          <span className="ml-auto tabular-nums">{e.timings.totalMs} ms</span>
+                        )}
                       </div>
-                    )}
-                    <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                      <span>
-                        {e.provider} · {e.model}
-                      </span>
-                      {e.injectionMethod && <span>· inserted via {e.injectionMethod}</span>}
-                      <span className="ml-auto flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => copy(e.finalText)}>
-                          <Copy /> Copy
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => reinsert(e.id)}
-                          disabled={!e.finalText}
-                        >
-                          <CornerDownLeft /> Insert again
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => remove(e.id)}>
-                          <Trash2 /> Delete
-                        </Button>
-                      </span>
                     </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                  </button>
+                  <Appear show={expanded}>
+                    <div className="space-y-4 border-t px-5 py-4">
+                      {e.rawText && e.rawText.trim() !== e.finalText.trim() && (
+                        <div>
+                          <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                            Raw transcript
+                          </div>
+                          <div className="whitespace-pre-wrap rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground">
+                            {e.rawText}
+                          </div>
+                        </div>
+                      )}
+                      {settings.general.showLatencyInHistory && !e.error && !e.remote && (
+                        <LatencyBar t={e.timings} />
+                      )}
+                      {(e.stages?.length || e.llm) && (
+                        <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                          <span className="mr-1 font-medium uppercase tracking-wider text-muted-foreground">
+                            Stages
+                          </span>
+                          {e.stages?.map((s) => (
+                            <Badge key={s} variant="outline">
+                              {s}
+                            </Badge>
+                          ))}
+                          {e.llm && <LlmBadge entry={e} detailed />}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                        <span>
+                          {e.provider} · {e.model}
+                        </span>
+                        {e.injectionMethod && <span>· inserted via {e.injectionMethod}</span>}
+                        <span className="ml-auto flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => copy(e.finalText)}>
+                            <Copy /> Copy
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => reinsert(e.id)}
+                            disabled={!e.finalText}
+                          >
+                            <CornerDownLeft /> Insert again
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => remove(e.id)}>
+                            <Trash2 /> Delete
+                          </Button>
+                        </span>
+                      </div>
+                    </div>
+                  </Appear>
+                </motion.div>
+              )
+            })}
+          </AnimatePresence>
         </div>
       )}
     </div>

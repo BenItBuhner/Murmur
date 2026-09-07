@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { ArrowRight, Clock3, Flame, Gauge, Type } from 'lucide-react'
 import type { HistoryEntry, OverlayState } from '@shared/types'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/input'
 import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
+import { Appear, CountUp, Rolling, arrive, item, leave, list } from '@renderer/components/motion'
 import { UpdateBanner } from '@renderer/components/Updates'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
@@ -68,19 +70,23 @@ export function HomePage({
                 ? 'secondary'
                 : 'success'
           }
-          className="mt-3 h-6 px-2.5 text-xs"
+          className="mt-3 h-6 px-2.5 text-xs transition-colors duration-300"
         >
-          {state.phase === 'listening'
-            ? 'Listening'
-            : state.phase === 'processing'
-              ? 'Transcribing'
-              : state.phase === 'disabled'
-                ? 'Paused'
-                : 'Ready'}
+          <Rolling
+            text={
+              state.phase === 'listening'
+                ? 'Listening'
+                : state.phase === 'processing'
+                  ? 'Transcribing'
+                  : state.phase === 'disabled'
+                    ? 'Paused'
+                    : 'Ready'
+            }
+          />
         </Badge>
       </div>
 
-      {!configured && (
+      <Appear show={!configured}>
         <Card className="border-record/40 bg-record/5">
           <CardContent className="flex items-center justify-between gap-4 py-4">
             <div>
@@ -95,7 +101,7 @@ export function HomePage({
             </Button>
           </CardContent>
         </Card>
-      )}
+      </Appear>
 
       <UpdateBanner onNavigate={onNavigate} />
 
@@ -153,25 +159,29 @@ export function HomePage({
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Stat icon={<Type />} label="Words dictated" value={formatNumber(stats.totalWords)} />
+        <motion.div
+          className="grid grid-cols-2 gap-3"
+          variants={list}
+          initial="initial"
+          animate="enter"
+        >
+          <Stat icon={<Type />} label="Words dictated">
+            <CountUp value={stats.totalWords} format={formatNumber} />
+          </Stat>
           <Stat
             icon={<Gauge />}
             label="Speaking pace"
-            value={wpm ? `${wpm} wpm` : '—'}
             hint={wpm ? `vs ~${TYPING_WPM} typing` : undefined}
-          />
-          <Stat
-            icon={<Clock3 />}
-            label="Time saved"
-            value={savedMs > 0 ? formatDuration(savedMs) : '—'}
-          />
-          <Stat
-            icon={<Flame />}
-            label="Day streak"
-            value={stats.streakDays ? String(stats.streakDays) : '—'}
-          />
-        </div>
+          >
+            {wpm ? <CountUp value={wpm} format={(n) => `${Math.round(n)} wpm`} /> : '—'}
+          </Stat>
+          <Stat icon={<Clock3 />} label="Time saved">
+            {savedMs > 0 ? <CountUp value={savedMs} format={formatDuration} /> : '—'}
+          </Stat>
+          <Stat icon={<Flame />} label="Day streak">
+            {stats.streakDays ? <CountUp value={stats.streakDays} /> : '—'}
+          </Stat>
+        </motion.div>
       </div>
 
       <section className="space-y-3">
@@ -186,34 +196,54 @@ export function HomePage({
             Nothing yet. Your dictations show up here with their timing breakdown.
           </div>
         ) : (
-          <div className="rounded-2xl border bg-card divide-y">
-            {recent.map((e) => (
-              <div key={e.id} className="flex items-start gap-4 px-5 py-4">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[15px]">
-                    {e.error ? <span className="text-destructive">{e.error}</span> : e.finalText}
+          <motion.div
+            className="overflow-hidden rounded-2xl border bg-card"
+            variants={list}
+            initial="initial"
+            animate="enter"
+          >
+            {/* Entries dictated while this page is open slide in at the top. */}
+            <AnimatePresence>
+              {recent.map((e) => (
+                <motion.div
+                  key={e.id}
+                  layout="position"
+                  variants={item}
+                  exit={{ opacity: 0, height: 0, transition: { duration: 0.18, ease: leave } }}
+                  className="overflow-hidden border-b last:border-b-0"
+                >
+                  <div className="flex items-start gap-4 px-5 py-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px]">
+                        {e.error ? (
+                          <span className="text-destructive">{e.error}</span>
+                        ) : (
+                          e.finalText
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <span>{formatRelative(e.createdAt)}</span>
+                        {e.appName && <span>· {e.appName}</span>}
+                        <span>· {e.wordCount} words</span>
+                        {settings.general.showLatencyInHistory && !e.error && (
+                          <span>· {e.timings.totalMs} ms</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>{formatRelative(e.createdAt)}</span>
-                    {e.appName && <span>· {e.appName}</span>}
-                    <span>· {e.wordCount} words</span>
-                    {settings.general.showLatencyInHistory && !e.error && (
-                      <span>· {e.timings.totalMs} ms</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </motion.div>
         )}
       </section>
 
-      {lastLatency && settings.general.showLatencyInHistory && (
+      <Appear show={!!lastLatency && settings.general.showLatencyInHistory}>
         <section className="space-y-3">
           <h2 className="eyebrow">Last dictation, where the time went</h2>
-          <LatencyBar t={lastLatency} />
+          {lastLatency && <LatencyBar t={lastLatency} />}
         </section>
-      )}
+      </Appear>
     </div>
   )
 }
@@ -221,28 +251,34 @@ export function HomePage({
 function Stat({
   icon,
   label,
-  value,
+  children,
   hint
 }: {
   icon: React.ReactNode
   label: string
-  value: string
+  children: React.ReactNode
   hint?: string
 }): React.JSX.Element {
   return (
-    <Card>
-      <CardContent className="pt-5">
-        <div className="flex items-center gap-2 text-[12px] text-muted-foreground [&>svg]:size-3.5 [&>svg]:stroke-[1.75]">
-          {icon}
-          {label}
-        </div>
-        <div className="serif-display mt-3 text-[34px] tabular-nums">{value}</div>
-        {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
-      </CardContent>
-    </Card>
+    <motion.div variants={item}>
+      <Card className="h-full">
+        <CardContent className="pt-5">
+          <div className="flex items-center gap-2 text-[12px] text-muted-foreground [&>svg]:size-3.5 [&>svg]:stroke-[1.75]">
+            {icon}
+            {label}
+          </div>
+          <div className="serif-display mt-3 text-[34px] tabular-nums">{children}</div>
+          {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }
 
+/**
+ * Where a dictation's time went, stage by stage. The bar grows in from the left the first time it
+ * is shown, and its segments glide to their new shares when it is fed another dictation.
+ */
 export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Element {
   const parts = [
     { label: 'Silence trim', ms: t.vadMs, color: 'bg-chart-1' },
@@ -255,11 +291,13 @@ export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Ele
   return (
     <div className="rounded-2xl border bg-card p-5">
       <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
-        {parts.map((p) => (
-          <div
+        {parts.map((p, i) => (
+          <motion.div
             key={p.label}
             className={p.color}
-            style={{ width: `${Math.max(1, (p.ms / total) * 100)}%` }}
+            initial={{ width: 0 }}
+            animate={{ width: `${Math.max(1, (p.ms / total) * 100)}%` }}
+            transition={{ duration: 0.7, ease: arrive, delay: 0.1 + i * 0.05 }}
             title={`${p.label}: ${p.ms} ms`}
           />
         ))}
@@ -268,12 +306,16 @@ export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Ele
         {parts.map((p) => (
           <span key={p.label} className="inline-flex items-center gap-1.5">
             <span className={`size-2 rounded-full ${p.color}`} /> {p.label}{' '}
-            <span className="tabular-nums text-foreground">{p.ms} ms</span>
+            <span className="tabular-nums text-foreground">
+              <CountUp value={p.ms} duration={0.7} format={(n) => `${Math.round(n)} ms`} />
+            </span>
           </span>
         ))}
         <span className="ml-auto">
           Release to inserted:{' '}
-          <span className="font-medium tabular-nums text-foreground">{t.totalMs} ms</span>
+          <span className="font-medium tabular-nums text-foreground">
+            <CountUp value={t.totalMs} duration={0.7} format={(n) => `${Math.round(n)} ms`} />
+          </span>
         </span>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { removeHesitations } from '@core/text/hesitations'
 import { collapseRepeats } from '@core/text/repeats'
-import { convertNumbers } from '@core/text/numbers'
+import { convertNumbers, findNumbers } from '@core/text/numbers'
 import { formatLists, detectListIntent } from '@core/text/lists'
 import { applySelfCorrections } from '@core/text/corrections'
 
@@ -97,7 +97,25 @@ describe('repeats scratch', () => {
     ['We should, we could try that', 'We could try that', 'thorough'],
     ['If you want, I can help', 'If you want, I can help', 'thorough'],
     ['I think, I really do', 'I think, I really do', 'thorough'],
-    ['yesterday I want to, I need to go', 'yesterday I need to go', 'thorough']
+    ['yesterday I want to, I need to go', 'yesterday I need to go', 'thorough'],
+    // Numbers are never a stutter, in any pass: a repeated digit is a digit that was said.
+    ['call five five five one two one two', 'call five five five one two one two', 'phrases'],
+    ['call five five five one two one two', 'call five five five one two one two', 'thorough'],
+    ['call five five five, one two one two', 'call five five five, one two one two', 'phrases'],
+    ['the pin is zero zero zero zero', 'the pin is zero zero zero zero', 'thorough'],
+    ['one zero zero zero one zero zero zero', 'one zero zero zero one zero zero zero', 'phrases'],
+    ['version two point zero point zero', 'version two point zero point zero', 'phrases'],
+    ['five thousand five thousand', 'five thousand five thousand', 'phrases'],
+    ['it costs 1000 1000', 'it costs 1000 1000', 'phrases'],
+    ['the code is A1 A1 B2 B2', 'the code is A1 A1 B2 B2', 'phrases'],
+    ['it is 100% 100% certain', 'it is 100% 100% certain', 'phrases'],
+    ['point five point five', 'point five point five', 'phrases'],
+    ['five to, five three', 'five to, five three', 'thorough'],
+    // Letters being spelled out are not stutters either; the words "a" and "I" still are.
+    ['spell it A B B Y', 'spell it A B B Y', 'words'],
+    ['a b a b a b', 'a b a b a b', 'phrases'],
+    ['a a report', 'a report', 'words'],
+    ['I I think', 'I think', 'words']
   ]
   for (const [input, expected, scope] of cases) {
     it(`${scope}: ${input}`, () => {
@@ -154,7 +172,25 @@ describe('numbers scratch', () => {
     ['I said no one came', 'I said no one came'],
     ['I saw twenty-three people', 'I saw 23 people'],
     ['twelve fifteen am', '12:15 am'],
-    ['a couple of things', 'a couple of things']
+    ['a couple of things', 'a couple of things'],
+    // Digits read out one by one keep every digit, leading zeros included.
+    ['the pin is zero zero zero zero', 'the pin is 0000'],
+    ['zero zero seven', '007'],
+    ['agent zero zero seven, zero zero seven', 'agent 007, 007'],
+    ['the code is zero zero zero seven', 'the code is 0007'],
+    ['room four oh seven', 'room 407'],
+    ['dial nine one one', 'dial 911'],
+    ['one two three', '123'],
+    ['four oh', 'four oh'],
+    ['I have two three apples', 'I have two three apples'],
+    ['two point zero zero five', '2.005'],
+    // Two numbers in a row stay two numbers.
+    ['five thousand five thousand', '5,000 5,000'],
+    ['one hundred one hundred', '100 100'],
+    ['two thousand five hundred', '2,500'],
+    // Chained "point"s are a version wherever they occur.
+    ['two point zero point zero', '2.0.0'],
+    ['three point one four one five', '3.1415']
   ]
   for (const [input, expected] of smart) {
     it(`smart: ${input}`, () => {
@@ -172,6 +208,49 @@ describe('numbers scratch', () => {
       expect(convertNumbers(input, 'all')).toBe(expected)
     })
   }
+})
+
+describe('number spans', () => {
+  const keys = (s: string): string[] => findNumbers(s).map((n) => n.key)
+  const same: string[][] = [
+    ['twenty five dollars', '$25', '25 dollars', 'twenty five bucks', '$ 25'],
+    ['twenty euros', '€20'],
+    ['ten dollars and fifty cents', '$10.50'],
+    ['fifty cents', '$0.50'],
+    ['twenty percent', '20%', '20 percent'],
+    ['one hundred thousand', '100,000', '100000', 'a hundred thousand'],
+    ['zero zero seven', '007'],
+    ['five thirty', '5:30'],
+    ['seventeen fifty', '17:50'],
+    ['one point five million', '1.5 million', '1,500,000'],
+    ['two million', '2,000,000'],
+    ['twenty twenty six', '2026'],
+    ['the twenty first', 'the 21st'],
+    ['two and a half hours', '2.5 hours'],
+    ['version two point three point one', 'version 2.3.1'],
+    ['five five five one two one two', '555-1212', '5551212'],
+    ['twenty-three people', '23 people']
+  ]
+  for (const group of same) {
+    it(`${group.join(' = ')}`, () => {
+      const first = keys(group[0])
+      expect(first.length).toBeGreaterThan(0)
+      for (const other of group.slice(1)) expect(keys(other)).toEqual(first)
+    })
+  }
+  it('keeps different numbers apart', () => {
+    expect(keys('2.5')).not.toEqual(keys('25'))
+    expect(keys('1000')).not.toEqual(keys('100'))
+    expect(keys('0007')).not.toEqual(keys('7'))
+    expect(keys('$25')).not.toEqual(keys('€25'))
+    expect(keys('five thirty')).not.toEqual(keys('530'))
+  })
+  it('leaves single ordinal words and bare scale words alone', () => {
+    expect(keys('wait a second')).toEqual([])
+    expect(keys('first, we go')).toEqual([])
+    expect(keys('thousands of people')).toEqual([])
+    expect(keys('one of them')).toEqual(['1'])
+  })
 })
 
 describe('lists scratch', () => {

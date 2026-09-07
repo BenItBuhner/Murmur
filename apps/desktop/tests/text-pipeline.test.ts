@@ -425,6 +425,19 @@ describe('full pipeline', () => {
       'I think it was very, very slow '
     )
   })
+  it('never de-duplicates or shortens numbers', () => {
+    expect(runPipeline('my number is five five five one two one two', opts).text).toBe(
+      'My number is 5551212 '
+    )
+    expect(runPipeline('the pin is zero zero zero zero', opts).text).toBe('The pin is 0000 ')
+    expect(runPipeline('one zero zero zero, one zero zero zero', opts).text).toBe('1000, 1000 ')
+    expect(runPipeline('version two point zero point zero', opts).text).toBe('Version 2.0.0 ')
+    expect(runPipeline('the code is A1 A1 B2 B2', opts).text).toBe('The code is A1 A1 B2 B2 ')
+    expect(runPipeline('it costs 1,000,000 1,000,000', opts).text).toBe(
+      'It costs 1,000,000 1,000,000 '
+    )
+    expect(runPipeline('agent zero zero seven, zero zero seven', opts).text).toBe('Agent 007, 007 ')
+  })
   it('writes spoken quotations with quotation marks', () => {
     expect(runPipeline('she said quote I will be late end quote and left', opts).text).toBe(
       'She said "I will be late" and left '

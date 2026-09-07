@@ -12,6 +12,11 @@ import { NUMBER_WORDS } from './numbers'
  * emphasis or feeling ("no, no, no", "very, very slowly", "fuck, fuck, fuck", "go go go"). So a
  * repeat separated by pauses, or said three or more times, stays unless the word is one people
  * stumble over; a bare double ("report report") is a stutter unless the word is a usual emphatic.
+ *
+ * Numbers are never noise. "zero zero zero", "one two one two", "5,000 5,000", "A1 A1" are a PIN,
+ * a phone number, a price read twice, an ID: a repeated digit is information and a de-duplicated
+ * number is a wrong number. Anything with numeric content stays exactly as spoken, in every pass,
+ * and so do spelled-out letters ("A B B Y").
  */
 
 const W = "[\\p{L}\\p{N}'’]"
@@ -224,14 +229,28 @@ const WORD_TOKEN = new RegExp(`${W}+`, 'gu')
 
 const PAUSE = /[,–—-]/
 
+/**
+ * A word that carries numeric content: a number word ("five", "hundred", the digit "oh"), the
+ * connectors inside a spoken number ("point", "dot"), or anything with a digit in it ("1000",
+ * "A1", "3D", "v2"). Repeats of these are read out on purpose.
+ */
+export function isNumeric(word: string): boolean {
+  const lower = word.toLowerCase()
+  return NUMBER_WORDS.has(lower) || lower === 'point' || lower === 'dot' || /\p{N}/u.test(lower)
+}
+
+/** A single letter other than the words "a" and "I": someone spelling something out. */
+const isSpelledLetter = (word: string): boolean =>
+  word.length === 1 && /\p{L}/u.test(word) && !/^[ai]$/i.test(word)
+
 export function collapseRepeats(text: string, scope: RepetitionScope = 'words'): string {
   if (!text) return text
   // Twice: "s- s- something" reveals the first fragment only once the second is gone.
   let out = text.replace(PART_WORD_STUTTER, '').replace(PART_WORD_STUTTER, '')
   out = out.replace(WORD_REPEAT, (match, word: string, rest: string) => {
     const lower = word.toLowerCase()
-    // "five five five one two one two" is a phone number, not a stutter.
-    if (NUMBER_WORDS.has(lower) || /^\d+$/.test(lower)) return match
+    // "five five five one two one two" is a phone number, "zero zero zero" a PIN, "A1 A1" an ID.
+    if (isNumeric(lower) || isSpelledLetter(word)) return match
     const paused = PAUSE.test(rest)
     if (GRAMMATICAL_DOUBLES.has(lower) && !paused) return match
     // "I, I think", "the the report": a stumble however it was said.
@@ -252,6 +271,10 @@ export function collapseRepeats(text: string, scope: RepetitionScope = 'words'):
       const words = (phrase.match(new RegExp(`${W}+`, 'gu')) ?? []).map((w) => w.toLowerCase())
       // "go go go go": one word said many times was already judged by the word pass.
       if (words.every((w) => w === words[0])) return match
+      // "one two one two", "point zero point zero", "5,000 5,000": numbers are never a stutter.
+      if (words.some(isNumeric)) return match
+      // "a b a b": letters being spelled out.
+      if (words.every((w) => w.length === 1)) return match
       // "go away, go away" is said on purpose; "I think, I think we should" is a restart.
       if (PAUSE.test(rest) && !STUTTER_PRONE.has(words[0])) return match
       return phrase
@@ -285,12 +308,16 @@ export function removeFalseStarts(text: string): string {
     if (
       tail &&
       RESTART_TAILS.has(tail[0].toLowerCase()) &&
-      /^\s*$/.test(before.slice(tail.index + tail[0].length))
+      /^\s*$/.test(before.slice(tail.index + tail[0].length)) &&
+      !isNumeric(c1) &&
+      !isNumeric(c2)
     ) {
       for (let n = 2; n <= 4 && n <= words.length; n++) {
         const frag = words.slice(-n)
         const fragText = before.slice(frag[0].index)
         if (/[.,;:!?\n]/.test(fragText)) break
+        // "five to, five three" is two numbers, not a restart.
+        if (frag.some((w) => isNumeric(w[0]))) break
         if (frag[0][0].toLowerCase() !== c1.toLowerCase()) continue
         if (frag[1][0].toLowerCase() === c2.toLowerCase()) break
         cut = frag[0].index

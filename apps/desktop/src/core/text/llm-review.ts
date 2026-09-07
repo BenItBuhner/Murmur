@@ -1,6 +1,6 @@
 import type { LlmFreedom } from '@shared/settings'
 import { fixPunctuationSpacing, normalizeWhitespace } from './format'
-import { spokenNumberValue } from './numbers'
+import { findNumbers, ordinalWordKey } from './numbers'
 import { STUTTER_PRONE } from './repeats'
 import { QUESTION_START, countWords, editDistance, isQuestion } from './util'
 
@@ -12,6 +12,11 @@ import { QUESTION_START, countWords, editDistance, isQuestion } from './util'
  *                        the freedom level and anything unjustified is reverted to the speaker's words
  * The result is the model's polish with the user's content guaranteed: names, numbers and points
  * survive even when a small model gets creative.
+ *
+ * Numbers are diffed as whole values, not as words. "one hundred thousand", "100,000" and "100000"
+ * are one token each with the same key, so the alignment can never run through the middle of a
+ * number ("one 100 thousand"), a repeated digit group can never pass for a stutter, and a model
+ * may write a number differently but never change, drop or invent one.
  */
 
 // ---- 1. cleaning ---------------------------------------------------------------------------
@@ -121,78 +126,123 @@ function contentWords(s: string): Set<string> {
 
 // ---- 3. edit review ------------------------------------------------------------------------
 
-export type TokenKind = 'word' | 'punct' | 'newline' | 'marker'
+export type TokenKind = 'word' | 'number' | 'punct' | 'newline' | 'marker'
 
 export interface DiffToken {
   text: string
-  /** Comparison key: lower-cased, straight apostrophes, single number words as digits. */
+  /**
+   * Comparison key: lower-cased with straight apostrophes for words; for a number, its canonical
+   * digits (see `findNumbers`), so "twenty five dollars" and "$25" compare equal.
+   */
   key: string
   kind: TokenKind
   /** True when whitespace preceded the token in the source. */
   spaced: boolean
 }
 
-const SMALL_NUMBERS: Record<string, string> = {
-  zero: '0',
-  one: '1',
-  two: '2',
-  three: '3',
-  four: '4',
-  five: '5',
-  six: '6',
-  seven: '7',
-  eight: '8',
-  nine: '9',
-  ten: '10',
-  eleven: '11',
-  twelve: '12',
-  thirteen: '13',
-  fourteen: '14',
-  fifteen: '15',
-  sixteen: '16',
-  seventeen: '17',
-  eighteen: '18',
-  nineteen: '19',
-  twenty: '20',
-  thirty: '30',
-  forty: '40',
-  fifty: '50',
-  sixty: '60',
-  seventy: '70',
-  eighty: '80',
-  ninety: '90',
-  hundred: '100',
-  thousand: '1000'
-}
-
 const TOKEN_RE = /\n+|[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*|[^\s\p{L}\p{N}]/gu
 
+interface RawToken extends DiffToken {
+  start: number
+  end: number
+}
+
 export function tokenizeForDiff(text: string): DiffToken[] {
-  const out: DiffToken[] = []
+  const raw: RawToken[] = []
   let atLineStart = true
   let last = 0
   for (const m of text.matchAll(TOKEN_RE)) {
-    const raw = m[0]
+    const tok = m[0]
     const spaced = m.index > last && /\s/.test(text.slice(last, m.index))
-    last = m.index + raw.length
-    if (raw.startsWith('\n')) {
-      out.push({ text: raw.length > 1 ? '\n\n' : '\n', key: '\n', kind: 'newline', spaced: false })
+    const start = m.index
+    last = m.index + tok.length
+    if (tok.startsWith('\n')) {
+      raw.push({
+        text: tok.length > 1 ? '\n\n' : '\n',
+        key: '\n',
+        kind: 'newline',
+        spaced: false,
+        start,
+        end: last
+      })
       atLineStart = true
       continue
     }
     let kind: TokenKind
-    if (/^[\p{L}\p{N}]/u.test(raw)) {
+    if (/^[\p{L}\p{N}]/u.test(tok)) {
+      // "1." or "1)" opening a line with an item after it; "100." at the end is a number.
       const next = text[last] ?? ''
+      const item = /^\s+\S/.test(text.slice(last + 1))
       kind =
-        atLineStart && /^\d{1,3}$/.test(raw) && (next === '.' || next === ')') ? 'marker' : 'word'
+        atLineStart && /^\d{1,3}$/.test(tok) && (next === '.' || next === ')') && item
+          ? 'marker'
+          : 'word'
     } else {
       kind =
-        atLineStart && /^[-•*–—·]$/.test(raw) && /\s/.test(text[last] ?? '') ? 'marker' : 'punct'
+        atLineStart && /^[-•*–—·]$/.test(tok) && /\s/.test(text[last] ?? '') ? 'marker' : 'punct'
     }
-    const lower = raw.toLowerCase().replace(/’/g, "'").replace(/\.$/, '')
-    const key = kind === 'word' ? (SMALL_NUMBERS[lower] ?? lower) : kind === 'marker' ? '#' : raw
-    out.push({ text: raw, key, kind, spaced })
+    const lower = tok.toLowerCase().replace(/’/g, "'").replace(/\.$/, '')
+    const key = kind === 'word' ? lower : kind === 'marker' ? '#' : tok
+    raw.push({ text: tok, key, kind, spaced, start, end: last })
     atLineStart = kind === 'marker' || (atLineStart && kind === 'punct')
+  }
+  return mergeNumbers(raw, text)
+}
+
+/**
+ * Every number becomes one token whose key is its canonical value, whether it was spoken
+ * ("twenty five dollars"), written ("$25", "1,000,000", "5:30") or both ("1.5 million"). A span
+ * only merges when it lines up with token boundaries and holds no list marker or line break.
+ */
+function mergeNumbers(raw: RawToken[], text: string): DiffToken[] {
+  const spans = findNumbers(text)
+  const out: DiffToken[] = []
+  let s = 0
+  let i = 0
+  while (i < raw.length) {
+    const tok = raw[i]
+    while (s < spans.length && spans[s].end <= tok.start) s++
+    const span = spans[s]
+    if (span && tok.start === span.start) {
+      let j = i
+      while (j < raw.length && raw[j].end <= span.end) j++
+      const inside = raw.slice(i, j)
+      const clean = inside.every((t) => t.kind !== 'marker' && t.kind !== 'newline')
+      if (j > i && raw[j - 1].end === span.end && clean) {
+        out.push({
+          text: text.slice(span.start, span.end),
+          key: span.key,
+          kind: 'number',
+          spaced: tok.spaced
+        })
+        i = j
+        s++
+        continue
+      }
+    }
+    out.push({ text: tok.text, key: tok.key, kind: tok.kind, spaced: tok.spaced })
+    i++
+  }
+  return out
+}
+
+const isWordish = (t: DiffToken): boolean => t.kind === 'word' || t.kind === 'number'
+const isNumber = (t: DiffToken): boolean => t.kind === 'number'
+const isDigitKey = (k: string): boolean => /^\d+$/.test(k)
+
+/**
+ * The numbers in a hunk side: the keys of its number tokens, plus an ordinal word ("third")
+ * when the other side wrote that ordinal as digits ("3rd"), so the two compare as one number.
+ */
+function numberKeysOf(tokens: DiffToken[], other: DiffToken[]): string[] {
+  const written = new Set(other.filter(isNumber).map((t) => t.key))
+  const out: string[] = []
+  for (const t of tokens) {
+    if (t.kind === 'number') out.push(t.key)
+    else if (t.kind === 'word') {
+      const ord = ordinalWordKey(t.key)
+      if (ord && written.has(ord)) out.push(ord)
+    }
   }
   return out
 }
@@ -374,6 +424,35 @@ const CORRECTION_MARKERS = new Set([
 ])
 
 const QUOTE_COMMAND = /^(?:(?:open|begin|start|end|close) )?quote$|^unquote$|^end of quote$/
+
+/** Words that only announce the next item; a list marker says the same thing. */
+const ENUMERATORS = new Set([
+  'first',
+  'firstly',
+  'second',
+  'secondly',
+  'third',
+  'thirdly',
+  'fourth',
+  'fifth',
+  'sixth',
+  'seventh',
+  'eighth',
+  'ninth',
+  'tenth',
+  'next',
+  'then',
+  'also',
+  'and',
+  'finally',
+  'lastly',
+  'last',
+  'number',
+  'step',
+  'item',
+  'bullet',
+  'point'
+])
 
 /** Words whose loss changes nothing but emphasis; the only single-word deletions balanced accepts. */
 const INTENSIFIERS = new Set([
@@ -639,16 +718,6 @@ function isSpellingFix(a: string, b: string): boolean {
 const hasDigit = (s: string): boolean => /\p{N}/u.test(s)
 const isCapitalized = (s: string): boolean => /^\p{Lu}/u.test(s)
 
-/** "twenty five dollars" and "$25" are the same number; units and currency words are ignored. */
-function numericValue(tokens: DiffToken[]): number | null {
-  const words = tokens
-    .filter((t) => t.kind === 'word' || /^[$€£%]$/.test(t.text))
-    .map((t) => t.text.toLowerCase())
-    .filter((w) => !/^(?:dollars?|euros?|pounds?|bucks|cents?|percent|[$€£%])$/.test(w))
-  if (!words.length) return null
-  return spokenNumberValue(words.join(' '))
-}
-
 interface Judgement {
   accept: boolean
   why: string
@@ -657,8 +726,8 @@ interface Judgement {
 function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy): Judgement {
   const aTok = a.slice(hunk.aStart, hunk.aEnd)
   const bTok = b.slice(hunk.bStart, hunk.bEnd)
-  const aWords = aTok.filter((t) => t.kind === 'word')
-  const bWords = bTok.filter((t) => t.kind === 'word')
+  const aWords = aTok.filter(isWordish)
+  const bWords = bTok.filter(isWordish)
   const aKeys = aWords.map((t) => t.key)
   const bKeys = bWords.map((t) => t.key)
   const level = policy.freedom === 'strict' ? 0 : policy.freedom === 'balanced' ? 1 : 2
@@ -669,6 +738,15 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
   if (aNl && !bNl && policy.preserveLayout) return { accept: false, why: 'layout-removed' }
   if (bNl && !aNl && !policy.allowNewLines) return { accept: false, why: 'layout-added' }
   if (!aWords.length && !bWords.length) return { accept: true, why: 'punctuation' }
+  // "first ..., second ..." laid out as "1. ...", "2. ...": the marker replaces the enumerator.
+  const markers = bTok.filter((t) => t.kind === 'marker').map((t) => t.text)
+  if (
+    markers.length &&
+    !bWords.length &&
+    aWords.length <= 3 &&
+    aWords.every((t) => ENUMERATORS.has(t.key) || (isNumber(t) && markers.includes(t.key)))
+  )
+    return { accept: true, why: 'layout' }
   // Deleting across a sentence boundary drops a whole thought.
   if (!bWords.length && aTok.some((t) => /^[.!?]$/.test(t.text)) && aWords.length > 1)
     return { accept: false, why: 'sentence-deleted' }
@@ -678,22 +756,38 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
   const properNouns = (toks: DiffToken[], startIdx: number, src: DiffToken[]): string[] =>
     toks
       .filter((t, i) => {
-        if (!isCapitalized(t.text) || t.text.length < 2) return false
+        if (t.kind !== 'word' || !isCapitalized(t.text) || t.text.length < 2) return false
         // Sentence-initial capitals are not proper nouns.
         const prev = src[startIdx + i - 1]
         return !!prev && prev.kind !== 'newline' && !/[.!?]/.test(prev.text)
       })
       .map((t) => t.key)
+  const isCorrection = (): boolean => {
+    const last = aKeys[aKeys.length - 1]
+    if (aWords.length > 6) return false
+    if (CORRECTION_MARKERS.has(last) && !(aWords.length === 1 && last === 'no')) return true
+    // "no wait", "I mean" inside the span followed by nothing else meaningful.
+    return aKeys.some((k) => k === 'mean' || k === 'sorry' || k === 'scratch' || k === 'correction')
+  }
 
   // Deletion.
   if (!bWords.length) {
     // The nearest words on either side of the hunk; the diff often cuts at a comma.
     let p = hunk.aStart - 1
-    while (p >= 0 && a[p].kind !== 'word') p--
+    while (p >= 0 && !isWordish(a[p])) p--
     let n = hunk.aEnd
-    while (n < a.length && a[n].kind !== 'word') n++
+    while (n < a.length && !isWordish(a[n])) n++
     const prevKey = p >= 0 ? a[p].key : undefined
     const nextKey = n < a.length ? a[n].key : undefined
+    // A number is never noise, never a stutter, never an intensifier: "000" after "000" is the
+    // next group of a million, "zero zero" after "zero" is a PIN, "A1 A1" is two IDs. The one
+    // deletion that may take a number with it is a spoken correction of that number ("at 5,
+    // sorry," before "6").
+    if (aTok.some((t) => isNumber(t) || (t.kind === 'word' && hasDigit(t.key)))) {
+      if (isCorrection() && n < a.length && isNumber(a[n]))
+        return { accept: true, why: 'self-correction' }
+      return { accept: false, why: 'number-deleted' }
+    }
     // Deliberate repetition: copies separated by pauses, or three or more of them, of a word
     // people stress rather than stumble over ("no, no, no", "go go go"). Dropping them flattens
     // the speaker's voice, however tidy the result looks.
@@ -721,19 +815,7 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
         (i > 0 && t.key === aWords[i - 1].key)
     )
     if (droppable) return { accept: true, why: 'noise' }
-    const last = aKeys[aKeys.length - 1]
-    if (
-      aWords.length <= 6 &&
-      CORRECTION_MARKERS.has(last) &&
-      !(aWords.length === 1 && last === 'no')
-    )
-      return { accept: true, why: 'self-correction' }
-    // "no wait", "I mean" inside the span followed by nothing else meaningful.
-    if (
-      aWords.length <= 6 &&
-      aKeys.some((k) => k === 'mean' || k === 'sorry' || k === 'scratch' || k === 'correction')
-    )
-      return { accept: true, why: 'self-correction' }
+    if (isCorrection()) return { accept: true, why: 'self-correction' }
     if (protectedIn(aKeys)) return { accept: false, why: 'protected-deleted' }
     if (aKeys.some((k) => NEGATIONS.has(k) || /n't$/.test(k)))
       return { accept: false, why: 'negation-deleted' }
@@ -748,6 +830,7 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
 
   // Insertion.
   if (!aWords.length) {
+    if (bTok.some(isNumber)) return { accept: false, why: 'number-added' }
     if (protectedIn(bKeys) && !bKeys.every((k) => policy.protectedTerms.has(k)))
       return { accept: false, why: 'number-added' }
     const nouns = properNouns(bTok, hunk.bStart, b)
@@ -763,6 +846,22 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
   const aJoined = aKeys.join(' ')
   const bJoined = bKeys.join(' ')
   if (aJoined === bJoined) return { accept: true, why: 'punctuation' }
+  // Numbers first, before any check that could mistake "2.5" for "25": the same value written
+  // another way is fine ("twenty five dollars" -> "$25", "4 0 0 7" -> "4007"); a different value,
+  // a lost number or a new one is not.
+  const aNums = numberKeysOf(aTok, bTok)
+  const bNums = numberKeysOf(bTok, aTok)
+  if (aNums.length || bNums.length) {
+    const noSpace = (s: string): string => s.replace(/\s+/g, '')
+    const same =
+      aNums.join(' ') === bNums.join(' ') ||
+      // "4 0 0 7" -> "4007", "555 1212" -> "5551212": the same digits, grouped differently.
+      (aNums.every(isDigitKey) && bNums.every(isDigitKey) && aNums.join('') === bNums.join('')) ||
+      // "5 pm" -> "5pm": the number and its unit written as one token.
+      noSpace(aJoined) === noSpace(bJoined)
+    if (!same) return { accept: false, why: 'number-changed' }
+    if (aWords.every(isNumber) && bWords.every(isNumber)) return { accept: true, why: 'number' }
+  }
   const squash = (s: string): string => s.replace(/[\s'’.-]/g, '')
   if (squash(aJoined) === squash(bJoined)) return { accept: true, why: 'spacing' }
   if (expand(aJoined, NORMALIZE_ALL) === expand(bJoined, NORMALIZE_ALL))
@@ -773,11 +872,6 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
       expand(expand(bJoined, NORMALIZE_ALL), NORMALIZE_BALANCED)
   )
     return { accept: true, why: 'informal' }
-  const aNum = numericValue(aTok)
-  const bNum = numericValue(bTok)
-  if (aNum !== null && bNum !== null && aNum === bNum) return { accept: true, why: 'number' }
-  if (aNum !== null && bNum !== null && aNum !== bNum)
-    return { accept: false, why: 'number-changed' }
   // "cube control" -> "kubectl", "whisper flow" -> "Wispr Flow": the model applied the dictionary.
   if (policy.dictionaryPhrases?.has(bJoined) && aWords.length <= bWords.length + 2)
     return { accept: true, why: 'dictionary' }
@@ -793,6 +887,8 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
       const y = bKeys[i]
       if (x === y) continue
       if (policy.protectedTerms.has(y) && !policy.protectedTerms.has(x)) continue // canonical spelling
+      // "third" -> "3rd": the ordinal as digits.
+      if (ordinalWordKey(x) === y || ordinalWordKey(y) === x) continue
       if (sameHomophoneGroup(x, y) || isSpellingFix(x, y)) continue
       if (level >= 1 && (sameGrammarGroup(x, y) || sameStem(x, y))) {
         why = 'grammar'
@@ -905,13 +1001,22 @@ export function reviewLlmEdits(light: string, candidate: string, policy: ReviewP
     tok.text.toLowerCase() === from.text.toLowerCase()
       ? { ...tok, text: from.text }
       : tok
+  /**
+   * The same number: the model may re-format it ("1000000" -> "1,000,000", "25 dollars" ->
+   * "$25") but digits never go back to words ("5 apples" stays digits in a code editor).
+   */
+  const isDigitForm = (t: DiffToken): boolean => /^[$€£]?\s?\d/.test(t.text)
+  const withNumberForm = (tok: DiffToken, from: DiffToken): DiffToken =>
+    tok.kind === 'number' && from.kind === 'number' && isDigitForm(from) && !isDigitForm(tok)
+      ? { ...tok, text: from.text }
+      : tok
 
   for (const h of [...hunks, null]) {
     const stopA = h ? h.aStart : a.length
     const stopB = h ? h.bStart : b.length
     // Equal run.
     while (i < stopA && j < stopB) {
-      const tokB = b[j]
+      const tokB = withNumberForm(b[j], a[i])
       const tokA = a[i]
       emit(afterRevert ? withCasing(tokB, tokA) : tokB, tokB.spaced || tokA.spaced)
       afterRevert = false
@@ -942,21 +1047,23 @@ export function reviewLlmEdits(light: string, candidate: string, policy: ReviewP
       const aSide = a.slice(h.aStart, h.aEnd)
       const bSide = b.slice(h.bStart, h.bEnd)
       // The model may have capitalized its first word because it now opens the sentence; keep that.
-      const bFirst = bSide.find((t) => t.kind === 'word')
+      const bFirst = bSide.find(isWordish)
       for (let k = 0; k < aSide.length; k++) {
         let tok = aSide[k]
         if (
           k === 0 &&
           bFirst &&
-          tok.kind === 'word' &&
+          isWordish(tok) &&
           isCapitalized(bFirst.text) &&
           !isCapitalized(tok.text)
         )
           tok = { ...tok, text: tok.text[0].toUpperCase() + tok.text.slice(1) }
         emit(tok, tok.spaced || k === 0)
       }
-      // Sentence punctuation the model added at the end of a reverted word span still applies.
-      const aWordsOnly = aSide.length > 0 && aSide.every((t) => t.kind === 'word')
+      // Sentence punctuation the model added at the end of a reverted word span still applies;
+      // the dot of a rejected list marker ("1.") is not sentence punctuation.
+      const aWordsOnly =
+        aSide.length > 0 && aSide.every(isWordish) && !bSide.some((t) => t.kind === 'marker')
       const trailing: DiffToken[] = []
       for (
         let k = bSide.length - 1;

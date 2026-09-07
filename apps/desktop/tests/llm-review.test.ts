@@ -189,6 +189,77 @@ describe('reviewLlmEdits', () => {
       'She told me, "Do not touch that."',
       strict,
       0
+    ],
+    // Numbers are compared as whole values: the model may write one differently ...
+    ['one hundred thousand people came', '100,000 people came.', '100,000 people came.', strict, 0],
+    ['the number is 1,000,000', 'The number is 1000000.', 'The number is 1000000.', strict, 0],
+    ['the number is 1000000', 'The number is 1,000,000.', 'The number is 1,000,000.', strict, 0],
+    ['it costs 100 dollars', 'It costs $100.', 'It costs $100.', strict, 0],
+    ['it costs twenty five bucks', 'It costs $25.', 'It costs $25.', strict, 0],
+    ['ten dollars and fifty cents', '$10.50.', '$10.50.', strict, 0],
+    ['it is 20 percent', 'It is 20%.', 'It is 20%.', strict, 0],
+    ['the pin is zero zero zero zero', 'The pin is 0000.', 'The pin is 0000.', strict, 0],
+    ['the code is 4 0 0 7', 'The code is 4007.', 'The code is 4007.', strict, 0],
+    ['call 555 1212', 'Call 555-1212.', 'Call 555-1212.', strict, 0],
+    ['meet at five thirty', 'Meet at 5:30.', 'Meet at 5:30.', strict, 0],
+    ['meet at 5 pm', 'Meet at 5pm.', 'Meet at 5pm.', strict, 0],
+    [
+      'we have one point five million users',
+      'We have 1.5 million users.',
+      'We have 1.5 million users.',
+      strict,
+      0
+    ],
+    ['it took two and a half hours', 'It took 2.5 hours.', 'It took 2.5 hours.', strict, 0],
+    ['on June third', 'On June 3rd.', 'On June 3rd.', strict, 0],
+    ['we got second place', 'We got 2nd place.', 'We got 2nd place.', strict, 0],
+    ['1st place', 'First place.', 'First place.', strict, 0],
+    ['second, we ship it', 'Secondly, we ship it.', 'Secondly, we ship it.', base, 0],
+    ['I have five apples', 'I have 5 apples.', 'I have 5 apples.', strict, 0],
+    // ... digits never go back to words ...
+    ['I have 5 apples', 'I have five apples.', 'I have 5 apples.', strict, 0],
+    ['the total is 1,000,000', 'The total is one million.', 'The total is 1,000,000.', strict, 0],
+    // ... and a number is never changed, dropped or de-duplicated, at any freedom level.
+    ['the number is 1,000,000', 'The number is 1,000.', 'The number is 1,000,000.', natural, 1],
+    ['the number is 1000 000', 'The number is 1000.', 'The number is 1000 000.', natural, 1],
+    ['the code is 4007', 'The code is 407.', 'The code is 4007.', natural, 1],
+    ['the rate is 2.5', 'The rate is 25.', 'The rate is 2.5.', natural, 1],
+    ['it is 1000', 'It is 100.', 'It is 1000.', natural, 1],
+    ['it costs $25', 'It costs €25.', 'It costs $25.', natural, 1],
+    ['it costs 1000 dollars', 'It costs $100.', 'It costs 1000 dollars.', natural, 1],
+    [
+      'the pin is zero zero zero zero',
+      'The pin is 0.',
+      'The pin is zero zero zero zero.',
+      natural,
+      1
+    ],
+    ['the pin is 0 0 0 0', 'The pin is 0.', 'The pin is 0 0 0 0.', natural, 1],
+    ['the pin is zero zero seven', 'The PIN is 7.', 'The PIN is zero zero seven.', natural, 1],
+    ['I said one two one two', 'I said one two.', 'I said one two one two.', natural, 1],
+    ['send 5 5 5 copies', 'Send 5 copies.', 'Send 5 5 5 copies.', natural, 1],
+    ['the code is A1 A1 B2', 'The code is A1 B2.', 'The code is A1 A1 B2.', natural, 1],
+    ['account 4444 1111', 'Account 4444.', 'Account 4444 1111.', natural, 1],
+    ['version 2.0.0 is out', 'Version 2.0 is out.', 'Version 2.0.0 is out.', natural, 1],
+    ['meet at five thirty', 'Meet at 530.', 'Meet at five thirty.', natural, 1],
+    ['meet at 5 pm', 'Meet at 6 pm.', 'Meet at 5 pm.', natural, 1],
+    ['one hundred thousand', '100.', 'one hundred thousand.', natural, 1],
+    [
+      'we need milk and eggs',
+      'We need 2 things: milk and eggs.',
+      'We need milk and eggs.',
+      natural,
+      1
+    ],
+    // a spoken correction of a number is still a correction
+    ['at 5, sorry, 6 pm', 'At 6 pm.', 'At 6 pm.', strict, 0],
+    // enumerators may become list markers when lists are allowed
+    [
+      'first finish the deck second email the vendor',
+      '1. Finish the deck\n2. Email the vendor',
+      '1. Finish the deck\n2. Email the vendor',
+      base,
+      0
     ]
   ]
   for (const [light, model, expected, policy, reverted] of cases) {
@@ -214,6 +285,21 @@ describe('reviewLlmEdits', () => {
       allowNewLines: false
     })
     expect(r.text).toBe('We need milk, eggs and bread')
+    // A rejected "1." marker leaves no stray dot behind the enumerator it replaced.
+    const numbered = reviewLlmEdits(
+      'first finish the deck second email the vendor',
+      '1. Finish the deck\n2. Email the vendor',
+      { ...base, allowNewLines: false }
+    )
+    expect(numbered.text).toBe('first finish the deck second email the vendor')
+  })
+  it('never lets the alignment run through the middle of a number', () => {
+    // "hundred" used to align with "100" and the merge read "one 100 thousand."
+    const r = reviewLlmEdits('one hundred thousand', '100,000.', base)
+    expect(r.text).toBe('100,000.')
+    expect(r.reverted).toBe(0)
+    const dollars = reviewLlmEdits('it costs 100 dollars', 'It costs $100.', base)
+    expect(dollars.text).toBe('It costs $100.')
   })
   it('rejects a wholesale rewrite', () => {
     const r = reviewLlmOutput(

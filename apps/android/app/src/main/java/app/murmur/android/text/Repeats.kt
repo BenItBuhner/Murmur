@@ -13,6 +13,11 @@ import app.murmur.android.settings.RepetitionScope
  * emphasis or feeling ("no, no, no", "very, very slowly", "fuck, fuck, fuck", "go go go"). So a
  * repeat separated by pauses, or said three or more times, stays unless the word is one people
  * stumble over; a bare double ("report report") is a stutter unless the word is a usual emphatic.
+ *
+ * Numbers are never noise. "zero zero zero", "one two one two", "5,000 5,000", "A1 A1" are a PIN,
+ * a phone number, a price read twice, an ID: a repeated digit is information and a de-duplicated
+ * number is a wrong number. Anything with numeric content stays exactly as spoken, in every pass,
+ * and so do spelled-out letters ("A B B Y").
  */
 
 private const val W = "[\\p{L}\\p{N}'’]"
@@ -55,6 +60,22 @@ private val RESTART_SEPARATOR = Regex("\\s*[,–—-]\\s+($W+)(\\s+)($W+)", Rege
 private val WORD_TOKEN = Regex("$W+")
 
 private val PAUSE = Regex("[,–—-]")
+private val HAS_DIGIT = Regex("\\p{N}")
+private val LETTER = Regex("\\p{L}")
+
+/**
+ * A word that carries numeric content: a number word ("five", "hundred", the digit "oh"), the
+ * connectors inside a spoken number ("point", "dot"), or anything with a digit in it ("1000",
+ * "A1", "3D", "v2"). Repeats of these are read out on purpose.
+ */
+fun isNumeric(word: String): Boolean {
+    val lower = word.lowercase()
+    return lower in NUMBER_WORDS || lower == "point" || lower == "dot" || HAS_DIGIT.containsMatchIn(lower)
+}
+
+/** A single letter other than the words "a" and "I": someone spelling something out. */
+private fun isSpelledLetter(word: String): Boolean =
+    word.length == 1 && LETTER.matches(word) && word.lowercase() != "a" && word.lowercase() != "i"
 
 fun collapseRepeats(text: String, scope: RepetitionScope = RepetitionScope.WORDS): String {
     if (text.isEmpty()) return text
@@ -65,8 +86,8 @@ fun collapseRepeats(text: String, scope: RepetitionScope = RepetitionScope.WORDS
         val lower = word.lowercase()
         val paused = PAUSE.containsMatchIn(rest)
         when {
-            // "five five five one two one two" is a phone number, not a stutter.
-            lower in NUMBER_WORDS || Regex("^\\d+$").matches(lower) -> m.value
+            // "five five five one two one two" is a phone number, "zero zero zero" a PIN, "A1 A1" an ID.
+            isNumeric(lower) || isSpelledLetter(word) -> m.value
             lower in GRAMMATICAL_DOUBLES && !paused -> m.value
             // "I, I think", "the the report": a stumble however it was said.
             lower in STUTTER_PRONE -> word
@@ -86,6 +107,10 @@ fun collapseRepeats(text: String, scope: RepetitionScope = RepetitionScope.WORDS
             when {
                 // "go go go go": one word said many times was already judged by the word pass.
                 words.all { it == words[0] } -> m.value
+                // "one two one two", "point zero point zero", "5,000 5,000": numbers are never a stutter.
+                words.any { isNumeric(it) } -> m.value
+                // "a b a b": letters being spelled out.
+                words.all { it.length == 1 } -> m.value
                 // "go away, go away" is said on purpose; "I think, I think we should" is a restart.
                 PAUSE.containsMatchIn(rest) && words[0] !in STUTTER_PRONE -> m.value
                 else -> phrase
@@ -114,13 +139,16 @@ fun removeFalseStarts(text: String): String {
         var fragFirst = ""
         val tail = words.lastOrNull()
         if (tail != null && tail.value.lowercase() in RESTART_TAILS &&
-            before.substring(tail.range.last + 1).isBlank()
+            before.substring(tail.range.last + 1).isBlank() &&
+            !isNumeric(c1) && !isNumeric(c2)
         ) {
             var n = 2
             while (n <= 4 && n <= words.size) {
                 val frag = words.subList(words.size - n, words.size)
                 val fragText = before.substring(frag[0].range.first)
                 if (Regex("[.,;:!?\\n]").containsMatchIn(fragText)) break
+                // "five to, five three" is two numbers, not a restart.
+                if (frag.any { isNumeric(it.value) }) break
                 if (frag[0].value.lowercase() != c1.lowercase()) {
                     n++
                     continue

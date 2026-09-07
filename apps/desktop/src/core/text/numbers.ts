@@ -155,9 +155,51 @@ export interface ParsedNumber {
   fraction?: string
   /** Digits spoken one by one ("five five five one two one two"). */
   digitRun?: boolean
+  /**
+   * The digits of a digit run exactly as spoken. "zero zero zero seven" is a code, not the
+   * number seven: leading zeros are part of what was said and `value` cannot hold them.
+   */
+  literal?: string
   yearLike?: boolean
   /** Ambiguous ("seventeen fifty"): leave every token unchanged. */
   blocked?: boolean
+  /** The second half of a blocked pair ("fifty" in "seventeen fifty"). */
+  tail?: number
+}
+
+/**
+ * Digits spoken one by one: three or more single digits in a row ("zero zero seven", "five five
+ * five one two one two"). An "oh" between digits is a zero ("four oh seven"); one at the very end
+ * is an interjection and stays outside the run.
+ */
+function parseDigitRun(
+  tokens: Tok[],
+  i: number,
+  contiguous: (k: number) => boolean
+): { literal: string; next: number } | null {
+  if (!isSmallOnes(tokens[i])) return null
+  let k = i
+  let digits = ''
+  let next = i
+  while (k < tokens.length && contiguous(k)) {
+    const w = tokens[k].lower
+    if (isSmallOnes(tokens[k])) {
+      digits += String(ONES[w])
+      k++
+      next = k
+      continue
+    }
+    if ((w === 'oh' || w === 'o') && digits.length) {
+      digits += '0'
+      k++
+      continue
+    }
+    break
+  }
+  // Trailing "oh"s were never counted: `digits` is rebuilt up to the last real digit.
+  if (next < k) digits = digits.slice(0, digits.length - (k - next))
+  if (digits.length < 3) return null
+  return { literal: digits, next }
 }
 
 /**
@@ -170,15 +212,15 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
     k === i || (k < tokens.length && k > 0 && joined(text, tokens[k - 1], tokens[k]))
   const before = text.slice(0, tokens[i].start)
 
-  // Digits spoken one by one: four or more single digits in a row.
-  let k = i
-  const digits: number[] = []
-  while (k < tokens.length && contiguous(k) && isSmallOnes(at(k))) {
-    digits.push(ONES[at(k)!.lower])
-    k++
-  }
-  if (digits.length >= 4)
-    return { value: Number(digits.join('')), next: k, scaled: false, digitRun: true }
+  const run = parseDigitRun(tokens, i, contiguous)
+  if (run)
+    return {
+      value: Number(run.literal),
+      next: run.next,
+      scaled: false,
+      digitRun: true,
+      literal: run.literal
+    }
 
   let j = i
   let total = 0
@@ -189,6 +231,10 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
   let lastScale = Infinity
   let hasTens = false
   let hasOnes = false
+  // The ones/tens group that follows the last scale word, so "five thousand five thousand" can
+  // give the second "five" back instead of reading it as 5,005 with a stray "thousand".
+  let groupStart = i
+  let group = 0
 
   const skipAnd = (): void => {
     const a = at(j)
@@ -201,6 +247,12 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
       (n.lower in ONES || n.lower in TENS)
     )
       j++
+  }
+  const rollBackGroup = (): void => {
+    if (group > 0 && scaled) {
+      current -= group
+      j = groupStart
+    }
   }
 
   if (at(j)?.lower === 'a' && at(j + 1) && contiguous(j + 1) && at(j + 1)!.lower in SCALES) {
@@ -216,6 +268,7 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
       if (hasOnes) break
       if (hasTens && v >= 10) break
       current += v
+      group += v
       hasOnes = true
       sawAny = true
       j++
@@ -224,24 +277,37 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
     if (w in TENS) {
       if (hasTens || hasOnes) break
       current += TENS[w]
+      group += TENS[w]
       hasTens = true
       sawAny = true
       j++
       continue
     }
     if (w === 'hundred') {
-      if (!sawAny || current === 0 || current >= 100) break
+      if (!sawAny || current === 0) break
+      if (current >= 100) {
+        // "one hundred one hundred": two numbers, not "101 hundred".
+        rollBackGroup()
+        break
+      }
       current *= 100
       scaled = true
       hasTens = false
       hasOnes = false
       j++
       skipAnd()
+      groupStart = j
+      group = 0
       continue
     }
     if (w in SCALES) {
       const s = SCALES[w]
-      if (!sawAny || s >= lastScale) break
+      if (!sawAny) break
+      if (s >= lastScale) {
+        // "five thousand five thousand": the second number starts at its own "five".
+        rollBackGroup()
+        break
+      }
       if (s >= 1_000_000) {
         keepScale = w
         j++
@@ -255,6 +321,8 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
       hasOnes = false
       j++
       skipAnd()
+      groupStart = j
+      group = 0
       continue
     }
     break
@@ -283,10 +351,11 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
       yearLike = true
     } else if (yr) {
       // "seventeen fifty": a price, a year or a time; nobody wants "17 50".
-      return { value, next: yr.next, scaled: false, blocked: true }
+      return { value, next: yr.next, scaled: false, blocked: true, tail: yr.value }
     }
   } else if (pairFollows && nextTok!.lower !== 'hundred' && nextTok!.lower !== 'oh') {
-    return { value, next: j + 1, scaled: false, blocked: true }
+    const tail = nextTok!.lower in TENS ? TENS[nextTok!.lower] : ONES[nextTok!.lower]
+    return { value, next: j + 1, scaled: false, blocked: true, tail }
   }
 
   let fraction: string | undefined
@@ -319,17 +388,215 @@ export function parseCardinal(tokens: Tok[], text: string, i: number): ParsedNum
   return { value, next: j, scaled, keepScale, fraction, yearLike }
 }
 
-/** The value of a fully spelled-out number ("twenty five", "two point five", "2,500"), or null. */
-export function spokenNumberValue(text: string): number | null {
-  const trimmed = text.trim()
-  if (/^[$€£]?\d[\d,]*(?:\.\d+)?%?$/.test(trimmed)) return Number(trimmed.replace(/[$€£,%]/g, ''))
+// ---- canonical number spans (for the LLM review) -------------------------------------------
+
+export interface NumberSpan {
+  start: number
+  end: number
+  /**
+   * The number as digits, the same for every way of saying or writing it: "twenty five
+   * dollars", "$25" and "25 dollars" are all "25 usd"; "one hundred thousand", "100,000" and
+   * "100000" are "100000"; "zero zero seven" and "007" are "007"; "five thirty" and "5:30" are
+   * "5:30". Two spans with different keys are different numbers.
+   */
+  key: string
+}
+
+const CURRENCY_SYMBOLS: Record<string, string> = { $: 'usd', '€': 'eur', '£': 'gbp' }
+const CURRENCY_WORD = /^\s*(dollars?|bucks|usd|euros?|eur|pounds?|quid|gbp)(?![\p{L}\p{N}])/iu
+const CENTS_WORD = /^\s*cents?(?![\p{L}\p{N}])/iu
+const AND_CENTS = /^\s+and\s+([\p{L}\p{N}]+(?:[\s-][\p{L}\p{N}]+)?)\s+cents?(?![\p{L}])/iu
+const PERCENT_WORD = /^\s*(?:percent|per\s+cent|%)(?![\p{L}\p{N}])/iu
+const DIGIT_ORDINAL = /^(\d+)(?:st|nd|rd|th)$/i
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+function currencyOf(word: string): string {
+  const w = word.toLowerCase()
+  if (/^(?:euro|eur)/.test(w)) return 'eur'
+  if (/^(?:pound|quid|gbp)/.test(w)) return 'gbp'
+  return 'usd'
+}
+
+/** "1.5" shifted by six places is "1500000"; a digits-only string stays digits-only. */
+function shiftDecimal(digits: string, places: number): string {
+  const [int, frac = ''] = digits.split('.')
+  const moved = frac.padEnd(places, '0')
+  const whole = `${int}${moved.slice(0, places)}`.replace(/^0+(?=\d)/, '')
+  const rest = moved.slice(places)
+  return rest ? `${whole}.${rest}` : whole
+}
+
+const log10 = (n: number): number => Math.round(Math.log10(n))
+
+/** The value of a spoken cents amount ("fifty", "5", "twenty five"), or null. */
+function centsValue(spoken: string): number | null {
+  const toks = tokenize(spoken)
+  const parsed = toks.length ? parseCardinal(toks, spoken, 0) : null
+  const v = parsed && !parsed.blocked ? parsed.value : isDigits(spoken) ? Number(spoken) : NaN
+  return Number.isNaN(v) || v >= 100 ? null : v
+}
+
+/**
+ * Every number in the text, spoken or written, with its canonical key (see `NumberSpan`). The
+ * style rules of `convertNumbers` play no part here: "one of them" yields a span for "one",
+ * because the question is only ever whether two texts contain the same numbers.
+ */
+export function findNumbers(text: string): NumberSpan[] {
   const tokens = tokenize(text)
-  if (!tokens.length) return null
-  const parsed = parseCardinal(tokens, text, 0)
-  if (!parsed || parsed.blocked || parsed.next !== tokens.length) return null
-  const base =
-    parsed.fraction !== undefined ? Number(`${parsed.value}.${parsed.fraction}`) : parsed.value
-  return parsed.keepScale ? base * SCALES[parsed.keepScale] : base
+  const spans: NumberSpan[] = []
+  let i = 0
+  while (i < tokens.length) {
+    const t = tokens[i]
+    let key: string | null = null
+    let next = i + 1
+    let end = t.end
+    // Plain digits or a written number: "1,000,000", "2.5", "2.0.0", "5:30", "555-1212".
+    if (isDigits(t.lower)) {
+      const d = readDigits(tokens, text, i)
+      key = d.key
+      next = d.next
+      end = d.end
+    } else if (DIGIT_ORDINAL.test(t.lower)) {
+      key = t.lower
+    } else if (/^\d/.test(t.lower)) {
+      // "5pm", "10k", "1080p": digits with a suffix; the whole token is the number.
+      key = t.lower
+    } else {
+      const ver = parseVersion(tokens, text, i)
+      if (ver && ver.dots >= 2) {
+        key = ver.text
+        next = ver.next
+        end = tokens[next - 1].end
+      } else {
+        const ord = parseOrdinal(tokens, text, i)
+        if (ord && ord.next > i + 1) {
+          key = `${ord.value}${ordinalSuffix(ord.value)}`
+          next = ord.next
+          end = tokens[next - 1].end
+        } else if (!ord) {
+          const num = parseCardinal(tokens, text, i)
+          if (num) {
+            key = cardinalKey(num)
+            next = num.next
+            end = tokens[next - 1].end
+          }
+        }
+      }
+    }
+    if (key === null) {
+      i++
+      continue
+    }
+    let start = t.start
+    // Units and currency belong to the number: "$25", "25 dollars" and "twenty five bucks" agree.
+    const symbol = /([$€£])\s?$/.exec(text.slice(0, start))
+    let unit = ''
+    if (symbol) {
+      unit = ` ${CURRENCY_SYMBOLS[symbol[1]]}`
+      start -= symbol[0].length
+    }
+    const after = text.slice(end)
+    const percent = PERCENT_WORD.exec(after)
+    const money = CURRENCY_WORD.exec(after)
+    const cents = CENTS_WORD.exec(after)
+    if (percent) {
+      unit = '%'
+      end += percent[0].length
+    } else if (money) {
+      unit = ` ${currencyOf(money[1])}`
+      end += money[0].length
+      const more = AND_CENTS.exec(text.slice(end))
+      const c = more ? centsValue(more[1]) : null
+      if (more && c !== null && /^\d+$/.test(key)) {
+        key = `${key}.${pad2(c)}`
+        end += more[0].length
+        while (next < tokens.length && tokens[next].end <= end) next++
+      }
+    } else if (cents && /^\d+$/.test(key) && Number(key) < 100) {
+      unit = ' usd'
+      key = `0.${pad2(Number(key))}`
+      end += cents[0].length
+    }
+    spans.push({ start, end, key: `${key}${unit}` })
+    i = next
+  }
+  return spans
+}
+
+/** Canonical digits of a parsed spoken cardinal. */
+function cardinalKey(num: ParsedNumber): string {
+  if (num.blocked) {
+    // "five thirty", "seventeen fifty": a time when it can be one, otherwise the two halves.
+    const tail = num.tail ?? 0
+    return tail < 60 && num.value >= 1 && num.value <= 24
+      ? `${num.value}:${pad2(tail)}`
+      : `${num.value} ${tail}`
+  }
+  if (num.literal !== undefined) return num.literal
+  const digits = num.fraction !== undefined ? `${num.value}.${num.fraction}` : String(num.value)
+  return num.keepScale ? shiftDecimal(digits, log10(SCALES[num.keepScale])) : digits
+}
+
+/**
+ * A written number starting at a digits token: thousands groups ("1,000,000"), a decimal or
+ * version ("2.5", "2.0.0"), a time ("5:30"), hyphenated digits ("555-1212", key "5551212") and a
+ * following scale word ("1.5 million" -> "1500000").
+ */
+function readDigits(
+  tokens: Tok[],
+  text: string,
+  i: number
+): { key: string; next: number; end: number } {
+  const t = tokens[i]
+  let key = t.text
+  let k = i + 1
+  const sep = (idx: number): string => text.slice(tokens[idx - 1].end, tokens[idx].start)
+  const has = (idx: number): boolean => idx < tokens.length
+  let groups = 0
+  while (has(k) && t.text.length <= 3 && sep(k) === ',' && /^\d{3}$/.test(tokens[k].text)) {
+    key += tokens[k].text
+    k++
+    groups++
+  }
+  let dots = 0
+  while (has(k) && sep(k) === '.' && isDigits(tokens[k].lower)) {
+    key += `.${tokens[k].text}`
+    k++
+    dots++
+  }
+  let time = false
+  if (!dots && !groups && has(k) && sep(k) === ':' && /^\d{2}$/.test(tokens[k].text)) {
+    key += `:${tokens[k].text}`
+    k++
+    time = true
+  }
+  if (!dots && !groups && !time) {
+    while (has(k) && sep(k) === '-' && isDigits(tokens[k].lower)) {
+      key += tokens[k].text
+      k++
+    }
+  }
+  // "2 million", "1.5 billion": the scale is part of the value.
+  if (
+    has(k) &&
+    dots <= 1 &&
+    !time &&
+    /^\s+$/.test(sep(k)) &&
+    tokens[k].lower in SCALES &&
+    /^\d+(?:\.\d+)?$/.test(key)
+  ) {
+    key = shiftDecimal(key, log10(SCALES[tokens[k].lower]))
+    k++
+  }
+  return { key, next: k, end: tokens[k - 1].end }
+}
+
+/** "third" -> "3rd", "twentieth" -> "20th": the key a single ordinal word shares with its digits. */
+export function ordinalWordKey(word: string): string | null {
+  const w = word.toLowerCase()
+  const n = ORDINAL_ONES[w] ?? ORDINAL_TENS[w]
+  return n === undefined ? null : `${n}${ordinalSuffix(n)}`
 }
 
 function parseYearTail(
@@ -443,20 +710,25 @@ export function convertNumbers(text: string, mode: NumbersMode): string {
 
     // Times: "five thirty pm", "at five fifteen", "five o'clock", "five pm".
     const time = parseTime(tokens, text, i)
-    if (time) {
-      if (time.text !== null) replacements.push({ start: t.start, end: time.end, text: time.text })
+    if (time && time.text !== null) {
+      replacements.push({ start: t.start, end: time.end, text: time.text })
+      i = time.next
+      continue
+    }
+    // Nothing marks it as a time: "five thirty" stays as spoken, but digits read out one by one
+    // ("four oh seven", "one oh one") are a number.
+    if (time && !parseCardinal(tokens, text, i)?.digitRun) {
       i = time.next
       continue
     }
 
-    // Versions: "version two point three point one" -> "version 2.3.1".
-    if (VERSION_BEFORE.test(before)) {
-      const ver = parseVersion(tokens, text, i)
-      if (ver) {
-        replacements.push({ start: t.start, end: tokens[ver.next - 1].end, text: ver.text })
-        i = ver.next
-        continue
-      }
+    // Versions: "version two point three point one" -> "version 2.3.1". Two or more "point"s are
+    // a version wherever they occur; "two point zero point zero" is never "2.0 point zero".
+    const ver = parseVersion(tokens, text, i)
+    if (ver && (VERSION_BEFORE.test(before) || ver.dots >= 2)) {
+      replacements.push({ start: t.start, end: tokens[ver.next - 1].end, text: ver.text })
+      i = ver.next
+      continue
     }
 
     const ord = parseOrdinal(tokens, text, i)
@@ -540,7 +812,8 @@ export function convertNumbers(text: string, mode: NumbersMode): string {
     // "two thousand twenty six" is a year, not "2,026"; "two thousand dollars" is "$2,000".
     const yearish = num.scaled && value >= 1900 && value <= 2099 && !quantityContext && !hasFraction
     const grouped = num.scaled && !num.yearLike && !num.digitRun && !yearish
-    const digits = `${formatInteger(value, grouped)}${hasFraction ? `.${num.fraction}` : ''}`
+    const integer = num.literal ?? formatInteger(value, grouped)
+    const digits = `${integer}${hasFraction ? `.${num.fraction}` : ''}`
     let end = endTok.end
     let out: string
     if (percent) {
@@ -684,7 +957,7 @@ function parseVersion(
   tokens: Tok[],
   text: string,
   i: number
-): { text: string; next: number } | null {
+): { text: string; next: number; dots: number } | null {
   const parts: string[] = []
   let j = i
   while (j < tokens.length && (j === i || joined(text, tokens[j - 1], tokens[j]))) {
@@ -710,5 +983,5 @@ function parseVersion(
   }
   if (parts.length === 0) return null
   if (parts.length === 1 && !(tokens[i].lower in ONES || tokens[i].lower in TENS)) return null
-  return { text: parts.join(''), next: j }
+  return { text: parts.join(''), next: j, dots: (parts.length - 1) / 2 }
 }

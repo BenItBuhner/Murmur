@@ -114,7 +114,7 @@ data class Paper(
     val sage: Color,
     /** Errors. */
     val clay: Color,
-    /** The dark stage the live pill preview sits on. */
+    /** The stage the live pill preview sits on: a keyboard-like surface in the mode's brightness. */
     val stage: Color,
     /** Text on the stage. */
     val onStage: Color,
@@ -135,8 +135,9 @@ fun paperFrom(scheme: ColorScheme, extras: MurmurColors, dark: Boolean): Paper =
     emberText = scheme.primary,
     sage = extras.success,
     clay = scheme.error,
-    stage = if (dark) scheme.surfaceContainerLowest else scheme.inverseSurface,
-    onStage = if (dark) scheme.onSurface else scheme.inverseOnSurface,
+    // The pill follows the mode, so its stage does too: near-black at night, keyboard grey by day.
+    stage = if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainerHighest,
+    onStage = if (dark) scheme.onSurface else scheme.onSurfaceVariant,
     isDark = dark
 )
 

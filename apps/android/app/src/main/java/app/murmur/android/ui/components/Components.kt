@@ -591,7 +591,11 @@ fun GlyphButton(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Co
 
 // ---- surfaces -------------------------------------------------------------------------------
 
-/** The dark block the live dictation button is shown on. At night a hairline keeps its edge. */
+/**
+ * The keyboard-like block the live dictation button is shown on: near-black at night, keyboard grey
+ * by day, so the pill previews over the brightness it will actually float on. At night a hairline
+ * keeps its edge.
+ */
 @Composable
 fun Stage(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val c = Murmur.colors

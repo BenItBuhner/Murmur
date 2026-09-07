@@ -215,6 +215,26 @@ describe('smartFormat', () => {
     expect(r.status.outcome).toBe('used')
     expect(r.result.text).toBe('Please implement this in a clean manner, like Wispr Flow does. ')
   })
+  it('keeps every digit when the model shortens or de-duplicates a number', async () => {
+    const light = runPipeline(
+      'my pin is zero zero zero seven and the code is one two one two',
+      pipelineOpts
+    )
+    expect(light.text).toBe('My pin is 0007 and the code is 1212 ')
+    const r = await smartFormat(
+      input('my pin is zero zero zero seven and the code is one two one two', { light }),
+      reply('My PIN is 7 and the code is 12.')
+    )
+    expect(r.status.outcome).toBe('partial')
+    expect(r.result.text).toBe('My PIN is 0007 and the code is 1212. ')
+    // A model that only re-formats the numbers is taken at its word.
+    const money = await smartFormat(
+      input('the budget is one hundred thousand dollars for twenty people'),
+      reply('The budget is $100,000 for 20 people.')
+    )
+    expect(money.status.outcome).toBe('used')
+    expect(money.result.text).toBe('The budget is $100,000 for 20 people. ')
+  })
   it('rejects an answer the model could not finish', async () => {
     const r = await smartFormat(
       input('hello there my friend how are you doing today and tomorrow'),

@@ -101,7 +101,10 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   personal **dictionary**, and voice **snippets**. Every stage has an off/light/thorough style
   control. What you said on purpose stays: “no, no, no”, “very, very slowly”, “go go go” and any
   swearing are your voice, not noise — only stumbles over small words (“I, I think”, “the the”)
-  are cleaned up, and the formatting model is held to the same rule.
+  are cleaned up, and the formatting model is held to the same rule. Numbers are never
+  de-duplicated or shortened: “zero zero zero seven” is `0007`, “five five five one two one two”
+  is `5551212`, “five thousand, five thousand” stays two numbers, and spelled-out letters
+  (“A B B Y”) keep every letter.
 - **A dictionary that hears, not just spells.** Terms are matched by sound as well as by spelling:
   “Wispr Flow” is recovered from “whisper flow”, “Wisper Flo” or “whisperflow” without an alias
   for each, and names are corrected when the recognizer got a letter wrong. Aliases you add are
@@ -115,7 +118,9 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   a freedom level you choose (strict / balanced / natural), your own instructions, and per-app
   overrides. Its answer is cleaned (reasoning tags, markdown, commentary), guarded (no answering,
   no chatting) and diffed word by word against your words: edits it cannot justify are reverted,
-  names, numbers and negations always survive, and History shows what happened.
+  names, numbers and negations always survive, and History shows what happened. Numbers are
+  compared as values, so the model may write “one hundred thousand dollars” as `$100,000` or
+  “five thirty” as `5:30`, but a number it changed, dropped, de-duplicated or invented is put back.
 - **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”; the
   selection is rewritten in place.
 - **Your colours.** Light, dark or follow the system; keep the neutral look or pick an accent — your

@@ -1,4 +1,5 @@
 import { v, type Infer } from 'convex/values'
+import { planValidator } from './plans'
 
 /**
  * Validators shared by the schema, the public function signatures and the tests. The wire shapes
@@ -215,8 +216,38 @@ export const userDtoValidator = v.object({
   email: v.optional(v.string()),
   name: v.optional(v.string()),
   imageUrl: v.optional(v.string()),
+  /** Account tier deciding the managed-inference allowance (see lib/plans.ts). */
+  plan: planValidator,
   onboardingCompletedAt: v.optional(v.number()),
   onboardingVersion: v.optional(v.number()),
   createdAt: v.number()
 })
 export type UserDto = Infer<typeof userDtoValidator>
+
+export const inferenceKindValidator = v.union(v.literal('stt'), v.literal('llm'))
+
+/** What a client needs to know about the instance's managed models and this account's allowance. */
+export const inferenceStatusValidator = v.object({
+  /** The instance offers at least the managed speech model. */
+  available: v.boolean(),
+  models: v.object({
+    stt: v.union(v.string(), v.null()),
+    llm: v.union(v.string(), v.null())
+  }),
+  plan: planValidator,
+  limits: v.object({
+    sttSecondsPerMonth: v.number(),
+    llmTokensPerMonth: v.number(),
+    requestsPerMinute: v.number(),
+    maxClipSeconds: v.number()
+  }),
+  /** The most recent month with any usage; clients treat other months as zero. */
+  usage: v.object({
+    period: v.string(),
+    sttSeconds: v.number(),
+    sttRequests: v.number(),
+    llmTokens: v.number(),
+    llmRequests: v.number()
+  })
+})
+export type InferenceStatus = Infer<typeof inferenceStatusValidator>

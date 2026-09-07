@@ -1,6 +1,7 @@
 import type { UserIdentity } from 'convex/server'
 import type { Doc, Id } from '../_generated/dataModel'
 import type { MutationCtx, QueryCtx } from '../_generated/server'
+import { DEFAULT_PLAN } from './plans'
 import type { UserDto } from './validators'
 
 export interface ClerkProfile {
@@ -65,7 +66,16 @@ export async function upsertUser(
 
 /** Remove every record owned by a user, then the user itself. Used for account deletion. */
 export async function purgeUserData(ctx: MutationCtx, userId: Id<'users'>): Promise<void> {
-  const [devices, dictionaryEntries, snippets, appRules, preferences, stats, historyEntries] =
+  const [
+    devices,
+    dictionaryEntries,
+    snippets,
+    appRules,
+    preferences,
+    stats,
+    historyEntries,
+    inferenceUsage
+  ] =
     await Promise.all([
       ctx.db
         .query('devices')
@@ -94,6 +104,10 @@ export async function purgeUserData(ctx: MutationCtx, userId: Id<'users'>): Prom
       ctx.db
         .query('historyEntries')
         .withIndex('by_user_and_createdAt', (q) => q.eq('userId', userId))
+        .collect(),
+      ctx.db
+        .query('inferenceUsage')
+        .withIndex('by_user_and_period', (q) => q.eq('userId', userId))
         .collect()
     ])
   for (const doc of devices) await ctx.db.delete('devices', doc._id)
@@ -103,6 +117,7 @@ export async function purgeUserData(ctx: MutationCtx, userId: Id<'users'>): Prom
   for (const doc of preferences) await ctx.db.delete('preferences', doc._id)
   for (const doc of stats) await ctx.db.delete('stats', doc._id)
   for (const doc of historyEntries) await ctx.db.delete('historyEntries', doc._id)
+  for (const doc of inferenceUsage) await ctx.db.delete('inferenceUsage', doc._id)
   await ctx.db.delete('users', userId)
 }
 
@@ -113,6 +128,7 @@ export function toUserDto(user: Doc<'users'>): UserDto {
     email: user.email,
     name: user.name,
     imageUrl: user.imageUrl,
+    plan: user.plan ?? DEFAULT_PLAN,
     onboardingCompletedAt: user.onboardingCompletedAt,
     onboardingVersion: user.onboardingVersion,
     createdAt: user.createdAt

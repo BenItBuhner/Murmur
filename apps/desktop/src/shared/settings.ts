@@ -159,6 +159,12 @@ export const settingsSchema = z.object({
       trimSilence: z.boolean().default(true),
       skipIfSilent: z.boolean().default(true),
       silenceThresholdDb: z.number().min(-80).max(-10).default(-48),
+      /**
+       * Hands-free / locked sessions run until the user stops them unless this is on.
+       * Off by default so a leftover 300s cap never cuts someone off mid-thought.
+       */
+      limitDuration: z.boolean().default(false),
+      /** Used only when `limitDuration` is on. */
       maxDurationSec: z.number().int().min(5).max(1800).default(300),
       noiseSuppression: z.boolean().default(true),
       autoGainControl: z.boolean().default(true)
@@ -295,3 +301,9 @@ export function parseSettings(raw: unknown): Settings {
 }
 
 export const defaultSettings = (): Settings => settingsSchema.parse({})
+
+/** Milliseconds until a listening session is force-stopped, or `null` when the user left the cap off. */
+export function sessionDurationLimitMs(audio: Settings['audio']): number | null {
+  if (!audio.limitDuration) return null
+  return audio.maxDurationSec * 1000
+}

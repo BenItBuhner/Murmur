@@ -230,14 +230,18 @@ const isWordish = (t: DiffToken): boolean => t.kind === 'word' || t.kind === 'nu
 const isNumber = (t: DiffToken): boolean => t.kind === 'number'
 const isDigitKey = (k: string): boolean => /^\d+$/.test(k)
 
-/** The numbers a token stands for: its key for a number token, "3rd" for the word "third". */
-function numberKeysOf(tokens: DiffToken[]): string[] {
+/**
+ * The numbers in a hunk side: the keys of its number tokens, plus an ordinal word ("third")
+ * when the other side wrote that ordinal as digits ("3rd"), so the two compare as one number.
+ */
+function numberKeysOf(tokens: DiffToken[], other: DiffToken[]): string[] {
+  const written = new Set(other.filter(isNumber).map((t) => t.key))
   const out: string[] = []
   for (const t of tokens) {
     if (t.kind === 'number') out.push(t.key)
     else if (t.kind === 'word') {
       const ord = ordinalWordKey(t.key)
-      if (ord) out.push(ord)
+      if (ord && written.has(ord)) out.push(ord)
     }
   }
   return out
@@ -845,8 +849,8 @@ function judge(a: DiffToken[], b: DiffToken[], hunk: Hunk, policy: ReviewPolicy)
   // Numbers first, before any check that could mistake "2.5" for "25": the same value written
   // another way is fine ("twenty five dollars" -> "$25", "4 0 0 7" -> "4007"); a different value,
   // a lost number or a new one is not.
-  const aNums = numberKeysOf(aTok)
-  const bNums = numberKeysOf(bTok)
+  const aNums = numberKeysOf(aTok, bTok)
+  const bNums = numberKeysOf(bTok, aTok)
   if (aNums.length || bNums.length) {
     const noSpace = (s: string): string => s.replace(/\s+/g, '')
     const same =

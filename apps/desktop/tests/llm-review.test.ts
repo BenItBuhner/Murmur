@@ -213,6 +213,8 @@ describe('reviewLlmEdits', () => {
     ['it took two and a half hours', 'It took 2.5 hours.', 'It took 2.5 hours.', strict, 0],
     ['on June third', 'On June 3rd.', 'On June 3rd.', strict, 0],
     ['we got second place', 'We got 2nd place.', 'We got 2nd place.', strict, 0],
+    ['1st place', 'First place.', 'First place.', strict, 0],
+    ['second, we ship it', 'Secondly, we ship it.', 'Secondly, we ship it.', base, 0],
     ['I have five apples', 'I have 5 apples.', 'I have 5 apples.', strict, 0],
     // ... digits never go back to words ...
     ['I have 5 apples', 'I have five apples.', 'I have 5 apples.', strict, 0],

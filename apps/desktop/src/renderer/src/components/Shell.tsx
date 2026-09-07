@@ -83,7 +83,12 @@ export function Shell({
         <div className={cn('flex items-center px-6', isWin ? 'h-10 drag-region' : 'h-16')}>
           <Wordmark />
         </div>
-        <nav className="flex-1 space-y-px px-3 pt-3">
+        {/*
+          The active pill is one shared element that glides between items. It sits on a negative
+          z-index inside the nav's own stacking context, so mid-flight it passes under every label
+          rather than over the ones it crosses.
+        */}
+        <nav className="isolate flex-1 space-y-px px-3 pt-3">
           {nav.map((item) => {
             const active = route === item.id
             return (
@@ -93,7 +98,7 @@ export function Shell({
                   onClick={() => onNavigate(item.id)}
                   aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'relative flex w-full items-center gap-2.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground active:scale-[0.985]',
+                    'relative flex w-full items-center gap-2.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground',
                     active && 'text-foreground [&>svg]:text-primary'
                   )}
                 >
@@ -101,15 +106,15 @@ export function Shell({
                     <motion.span
                       layoutId="nav-active"
                       transition={settle}
-                      className="absolute inset-0 rounded-full bg-accent"
+                      className="absolute inset-0 -z-10 rounded-full bg-accent"
                       aria-hidden
                     />
                   )}
                   <item.icon
-                    className="relative size-4 opacity-80 transition-colors duration-200"
+                    className="size-4 opacity-80 transition-colors duration-200"
                     strokeWidth={1.75}
                   />
-                  <span className="relative">{item.label}</span>
+                  <span>{item.label}</span>
                 </button>
               </React.Fragment>
             )

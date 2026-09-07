@@ -1,7 +1,10 @@
 package app.murmur.android
 
+import android.content.res.Configuration
+import app.murmur.android.overlay.PillPalette
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.AccentPreset
+import app.murmur.android.settings.ThemeMode
 import app.murmur.android.ui.theme.Oklch
 import app.murmur.android.ui.theme.harmonizeHue
 import app.murmur.android.ui.theme.hueDelta
@@ -9,6 +12,7 @@ import app.murmur.android.ui.theme.schemeFromSeed
 import app.murmur.android.ui.theme.toneToLightness
 import app.murmur.android.ui.theme.withAlpha
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -109,13 +113,67 @@ class ThemeTest {
     }
 
     @Test
-    fun `pill palette keeps a translucent dark body and an accent that matches the seed`() {
-        val palette = PillTheme.fromAccent(0xFF7CACF8.toInt(), 0xFF1B1B1F.toInt())
-        assertEquals(0xF2, (palette.background ushr 24))
-        assertEquals(0xFF7CACF8.toInt(), palette.accent)
-        assertTrue(Oklch.fromArgb(palette.successBackground).l < 0.3)
-        assertTrue(Oklch.fromArgb(palette.successForeground).l > 0.75)
-        assertTrue(Oklch.fromArgb(palette.errorBackground).h in 5.0..45.0)
+    fun `pill palette takes the scheme's brightness, accent and ink`() {
+        val seed = AccentPreset.BLUE.seed
+        val darkScheme = schemeFromSeed(seed, dark = true)
+        val lightScheme = schemeFromSeed(seed, dark = false)
+        val dark = PillTheme.fromScheme(darkScheme, dark = true)
+        val light = PillTheme.fromScheme(lightScheme, dark = false)
+
+        assertTrue(dark.isDark)
+        assertFalse(light.isDark)
+        // Translucent bodies: near-black at night, near-white by day, each with contrasting ink.
+        assertEquals(0xF2, dark.background ushr 24)
+        assertEquals(0xF2, light.background ushr 24)
+        assertTrue(Oklch.fromArgb(dark.background).l < 0.3)
+        assertTrue(Oklch.fromArgb(light.background).l > 0.9)
+        assertTrue(Oklch.fromArgb(dark.ink).l > 0.8)
+        assertTrue(Oklch.fromArgb(light.ink).l < 0.3)
+        assertTrue(Oklch.fromArgb(light.inkSoft).l > Oklch.fromArgb(light.ink).l)
+        assertTrue(Oklch.fromArgb(dark.inkSoft).l < Oklch.fromArgb(dark.ink).l)
+        // The accent is the scheme's primary (tone 80 at night, 40 by day) and carries legible ink.
+        assertEquals(darkScheme.primary, dark.accent)
+        assertEquals(lightScheme.primary, light.accent)
+        assertTrue(Oklch.fromArgb(dark.onAccent).l < Oklch.fromArgb(dark.accent).l - 0.3)
+        assertTrue(Oklch.fromArgb(light.onAccent).l > Oklch.fromArgb(light.accent).l + 0.3)
+        // The edit chrome sits in the same brightness as the body.
+        assertTrue(Oklch.fromArgb(dark.panel).l < 0.3)
+        assertTrue(Oklch.fromArgb(light.panel).l > 0.9)
+        assertTrue(Oklch.fromArgb(dark.chip).l < 0.4)
+        assertTrue(Oklch.fromArgb(light.chip).l > 0.85)
+        assertTrue(Oklch.fromArgb(light.onChip).l < 0.3)
+        // Status surfaces follow too and keep their hues: deep green/red with pale icons at night,
+        // pale with deep icons by day.
+        assertTrue(Oklch.fromArgb(dark.successBackground).l < 0.3)
+        assertTrue(Oklch.fromArgb(dark.successForeground).l > 0.75)
+        assertTrue(Oklch.fromArgb(light.successBackground).l > 0.85)
+        assertTrue(Oklch.fromArgb(light.successForeground).l < 0.55)
+        assertTrue(Oklch.fromArgb(light.errorBackground).l > 0.85)
+        assertTrue(Oklch.fromArgb(light.errorForeground).l < 0.55)
+        for (p in listOf(dark, light)) {
+            assertTrue(Oklch.fromArgb(p.errorBackground).h in 5.0..45.0)
+            assertTrue(Oklch.fromArgb(p.errorForeground).h in 5.0..45.0)
+            assertTrue(Oklch.fromArgb(p.successForeground).h in 130.0..170.0)
+        }
         assertEquals(0x80123456.toInt(), 0xFF123456.toInt().withAlpha(0x80))
+    }
+
+    @Test
+    fun `the default pill is the dark coral one`() {
+        assertEquals(PillTheme.fromScheme(schemeFromSeed(AccentPreset.CORAL.seed, dark = true), dark = true), PillPalette.DEFAULT)
+        assertTrue(PillPalette.DEFAULT.isDark)
+    }
+
+    @Test
+    fun `the pill is dark when the theme says so, or when the system does`() {
+        val night = Configuration.UI_MODE_TYPE_NORMAL or Configuration.UI_MODE_NIGHT_YES
+        val day = Configuration.UI_MODE_TYPE_NORMAL or Configuration.UI_MODE_NIGHT_NO
+        assertTrue(PillTheme.isDark(ThemeMode.DARK, day))
+        assertTrue(PillTheme.isDark(ThemeMode.DARK, night))
+        assertFalse(PillTheme.isDark(ThemeMode.LIGHT, night))
+        assertFalse(PillTheme.isDark(ThemeMode.LIGHT, day))
+        assertTrue(PillTheme.isDark(ThemeMode.SYSTEM, night))
+        assertFalse(PillTheme.isDark(ThemeMode.SYSTEM, day))
+        assertFalse(PillTheme.isDark(ThemeMode.SYSTEM, Configuration.UI_MODE_TYPE_NORMAL or Configuration.UI_MODE_NIGHT_UNDEFINED))
     }
 }

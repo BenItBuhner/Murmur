@@ -114,7 +114,7 @@ data class Paper(
     val sage: Color,
     /** Errors. */
     val clay: Color,
-    /** The dark stage the live pill preview sits on. */
+    /** The stage the live pill preview sits on: a keyboard-like surface in the mode's brightness. */
     val stage: Color,
     /** Text on the stage. */
     val onStage: Color,
@@ -135,8 +135,9 @@ fun paperFrom(scheme: ColorScheme, extras: MurmurColors, dark: Boolean): Paper =
     emberText = scheme.primary,
     sage = extras.success,
     clay = scheme.error,
-    stage = if (dark) scheme.surfaceContainerLowest else scheme.inverseSurface,
-    onStage = if (dark) scheme.onSurface else scheme.inverseOnSurface,
+    // The pill follows the mode, so its stage does too: near-black at night, keyboard grey by day.
+    stage = if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainerHighest,
+    onStage = if (dark) scheme.onSurface else scheme.onSurfaceVariant,
     isDark = dark
 )
 
@@ -320,6 +321,56 @@ fun SchemeArgb.toColorScheme(dark: Boolean): ColorScheme {
         surfaceContainerHighest = Color(surfaceContainerHighest),
         surfaceContainerLow = Color(surfaceContainerLow),
         surfaceContainerLowest = Color(surfaceContainerLowest)
+    )
+}
+
+/**
+ * The inverse of [toColorScheme], for the pill: the wallpaper scheme Compose builds is the only
+ * source of Material You colours, and the pill draws from [SchemeArgb]. Success and warning are
+ * grown from the scheme's primary, as [MurmurTheme] does.
+ */
+fun ColorScheme.toSchemeArgb(dark: Boolean): SchemeArgb {
+    val extras = schemeFromSeed(primary.toArgb(), dark)
+    return SchemeArgb(
+        primary = primary.toArgb(),
+        onPrimary = onPrimary.toArgb(),
+        primaryContainer = primaryContainer.toArgb(),
+        onPrimaryContainer = onPrimaryContainer.toArgb(),
+        inversePrimary = inversePrimary.toArgb(),
+        secondary = secondary.toArgb(),
+        onSecondary = onSecondary.toArgb(),
+        secondaryContainer = secondaryContainer.toArgb(),
+        onSecondaryContainer = onSecondaryContainer.toArgb(),
+        tertiary = tertiary.toArgb(),
+        onTertiary = onTertiary.toArgb(),
+        tertiaryContainer = tertiaryContainer.toArgb(),
+        onTertiaryContainer = onTertiaryContainer.toArgb(),
+        background = background.toArgb(),
+        onBackground = onBackground.toArgb(),
+        surface = surface.toArgb(),
+        onSurface = onSurface.toArgb(),
+        surfaceVariant = surfaceVariant.toArgb(),
+        onSurfaceVariant = onSurfaceVariant.toArgb(),
+        surfaceTint = surfaceTint.toArgb(),
+        inverseSurface = inverseSurface.toArgb(),
+        inverseOnSurface = inverseOnSurface.toArgb(),
+        error = error.toArgb(),
+        onError = onError.toArgb(),
+        errorContainer = errorContainer.toArgb(),
+        onErrorContainer = onErrorContainer.toArgb(),
+        outline = outline.toArgb(),
+        outlineVariant = outlineVariant.toArgb(),
+        scrim = scrim.toArgb(),
+        surfaceBright = surfaceBright.toArgb(),
+        surfaceDim = surfaceDim.toArgb(),
+        surfaceContainer = surfaceContainer.toArgb(),
+        surfaceContainerHigh = surfaceContainerHigh.toArgb(),
+        surfaceContainerHighest = surfaceContainerHighest.toArgb(),
+        surfaceContainerLow = surfaceContainerLow.toArgb(),
+        surfaceContainerLowest = surfaceContainerLowest.toArgb(),
+        success = extras.success,
+        onSuccess = extras.onSuccess,
+        warning = extras.warning
     )
 }
 

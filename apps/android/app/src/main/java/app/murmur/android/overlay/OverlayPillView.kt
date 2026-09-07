@@ -2,7 +2,6 @@ package app.murmur.android.overlay
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
@@ -18,7 +17,6 @@ import android.view.animation.AnimationUtils
 import androidx.core.graphics.ColorUtils
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.settings.OverlayShape
-import app.murmur.android.ui.theme.Oklch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.exp
@@ -50,17 +48,13 @@ private const val TOUCH_PAD_DP = 6f
 /** The pulsing "recording" dot: a fixed red-orange, whatever the theme, because that is what it means. */
 private const val RECORD = 0xFFFF5A36.toInt()
 
-// The edit-mode toolbar is a dark control surface over the keyboard, whatever the pill's theme.
-private const val CHIP_DARK = 0xFF2A2A31.toInt()
-private const val PANEL_BG = 0xF5151519.toInt()
-private const val MUTED = 0xFF9A9AA2.toInt()
-
 /**
- * The floating dictation pill, drawn to match the desktop overlay: a dark rounded pill with a
- * pulsing red dot, live waveform, elapsed time and cancel/confirm buttons while listening; bouncing
- * dots while processing; a check or warning with a message afterwards. At rest it collapses to a
- * mic button (a wide pill or a compact circle) that lives on one of a few user-chosen *spots* near
- * the keyboard.
+ * The floating dictation pill, drawn to match the desktop overlay: a rounded pill in the theme's
+ * colours (see [PillPalette]: light or dark, tinted by the accent) with a pulsing red dot, live
+ * waveform, elapsed time and cancel/confirm buttons while listening; bouncing dots while
+ * processing; a check or warning with a message afterwards. At rest it collapses to a mic button
+ * (a wide pill or a compact circle) that lives on one of a few user-chosen *spots* near the
+ * keyboard.
  *
  * At rest the button can be picked up and dragged: it follows the finger in real time, every spot
  * shows as a ghost with the one it would land on highlighted, and on release it springs onto the
@@ -242,23 +236,25 @@ class OverlayPillView(context: Context) : View(context) {
 
     private val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // Text paints rest on the palette's ink; a routine that borrows one puts the ink back.
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = palette.ink
         textSize = sp(13f)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
     private val smallTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = palette.ink
         textSize = sp(12f)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
     private val tinyTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = palette.ink
         textSize = sp(11f)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
     private val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = palette.ink
         textSize = sp(9.5f)
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
@@ -299,13 +295,22 @@ class OverlayPillView(context: Context) : View(context) {
         if (shapeChanged || layoutChanged) retarget()
     }
 
-    /** Theme colours; the body colour morphs to the new value like any other look change. */
+    /**
+     * Theme colours. A new tint morphs in like any other look change; a flip between light and dark
+     * snaps, since the ink changes with it and dark ink on a body still fading out of dark would be
+     * illegible for the whole morph.
+     */
     fun setPalette(palette: PillPalette) {
         if (palette == this.palette) return
+        val brightnessFlipped = palette.isDark != this.palette.isDark
         this.palette = palette
-        retarget()
+        for (p in arrayOf(textPaint, smallTextPaint, tinyTextPaint, badgeTextPaint)) p.color = palette.ink
+        retarget(animate = !brightnessFlipped)
         invalidate()
     }
+
+    /** The palette's ink at [alpha] (0..255): hairlines, translucent fills and secondary text. */
+    private fun ink(alpha: Int): Int = ColorUtils.setAlphaComponent(palette.ink, alpha)
 
     fun setEditing(editing: Boolean) {
         if (this.editing == editing) return
@@ -595,8 +600,9 @@ class OverlayPillView(context: Context) : View(context) {
         clipPath.rewind()
         clipPath.addRoundRect(scratchRect, radius, radius, Path.Direction.CW)
 
-        // Hairline ring (as on the desktop pill) so the button stays legible on dark keyboards.
-        strokePaint.color = 0x1AFFFFFF
+        // Hairline ring (as on the desktop pill) so the button keeps an edge on a keyboard of its
+        // own brightness: light on a dark pill, dark on a light one.
+        strokePaint.color = ink(0x1A)
         strokePaint.strokeWidth = dp(1f)
         scratchRect.inset(dp(0.5f), dp(0.5f))
         canvas.drawRoundRect(scratchRect, radius - dp(0.5f), radius - dp(0.5f), strokePaint)
@@ -639,7 +645,7 @@ class OverlayPillView(context: Context) : View(context) {
     private fun drawIdle(canvas: Canvas, box: Box) {
         val cx = box.centerX
         val cy = box.centerY
-        strokePaint.color = Color.WHITE
+        strokePaint.color = palette.ink
         strokePaint.strokeWidth = dp(1.8f)
         val mw = dp(4.4f)
         val mh = dp(7.5f)
@@ -654,9 +660,9 @@ class OverlayPillView(context: Context) : View(context) {
         val btnR = dp(14f)
         val cancelCx = box.left + dp(24f)
         cancelBox = Box.centered(cancelCx, cy, btnR * 2, btnR * 2)
-        paint.color = 0x1FFFFFFF
+        paint.color = ink(0x1F)
         canvas.drawCircle(cancelCx, cy, btnR - dp(2f), paint)
-        strokePaint.color = 0xFFCCCCCC.toInt()
+        strokePaint.color = palette.inkSoft
         strokePaint.strokeWidth = dp(2f)
         val xr = dp(4.5f)
         canvas.drawLine(cancelCx - xr, cy - xr, cancelCx + xr, cy + xr, strokePaint)
@@ -677,7 +683,7 @@ class OverlayPillView(context: Context) : View(context) {
         val frac = 1f - ((nextBarShiftAt - now).toFloat() / BAR_STEP_MS).coerceIn(0f, 1f)
         canvas.save()
         canvas.clipRect(barsLeft - dp(1f), box.top, barsRight + dp(1f), box.bottom)
-        paint.color = Color.WHITE
+        paint.color = palette.ink
         for (i in 0..BAR_COUNT) {
             val v = barLevels[i]
             val bh = max(dp(3f), v * dp(20f))
@@ -691,16 +697,15 @@ class OverlayPillView(context: Context) : View(context) {
         paint.alpha = 255
         canvas.restore()
 
-        textPaint.color = 0xB3FFFFFF.toInt()
+        textPaint.color = ink(0xB3)
         canvas.drawText(elapsedText(), barsRight + dp(8f), cy + textPaint.textSize / 2.8f, textPaint)
-        textPaint.color = Color.WHITE
+        textPaint.color = palette.ink
 
         val confirmCx = box.right - dp(24f)
         confirmBox = Box.centered(confirmCx, cy, btnR * 2, btnR * 2)
         paint.color = palette.accent
         canvas.drawCircle(confirmCx, cy, btnR - dp(2f), paint)
-        // Light accents (Material You tone 80) need a dark tick to stay legible.
-        strokePaint.color = onAccent()
+        strokePaint.color = palette.onAccent
         strokePaint.strokeWidth = dp(2.2f)
         canvas.drawLine(confirmCx - dp(4.6f), cy + dp(0.5f), confirmCx - dp(1f), cy + dp(4f), strokePaint)
         canvas.drawLine(confirmCx - dp(1f), cy + dp(4f), confirmCx + dp(5f), cy - dp(3.5f), strokePaint)
@@ -750,7 +755,7 @@ class OverlayPillView(context: Context) : View(context) {
     private fun drawProcessing(canvas: Canvas, box: Box, label: String, now: Long) {
         val cy = box.centerY
         var x = box.left + dp(20f)
-        paint.color = Color.WHITE
+        paint.color = palette.ink
         val phase = 2.0 * PI * (now % 1100L) / 1100.0
         for (i in 0 until 3) {
             val bounce = max(0.0, sin(phase - i * 0.9)).toFloat() * dp(3.5f)
@@ -759,9 +764,9 @@ class OverlayPillView(context: Context) : View(context) {
             x += dp(10f)
         }
         paint.alpha = 255
-        textPaint.color = 0xD9FFFFFF.toInt()
+        textPaint.color = ink(0xD9)
         canvas.drawText(label, x + dp(4f), cy + textPaint.textSize / 2.8f, textPaint)
-        textPaint.color = Color.WHITE
+        textPaint.color = palette.ink
     }
 
     private fun drawMessage(canvas: Canvas, box: Box, look: Look, color: Int, check: Boolean, now: Long) {
@@ -822,9 +827,9 @@ class OverlayPillView(context: Context) : View(context) {
                 strokePaint.strokeWidth = dp(2f)
                 canvas.drawRoundRect(scratchRect, r, r, strokePaint)
             } else {
-                paint.color = ColorUtils.setAlphaComponent(0x141414, (0x40 * alpha).toInt())
+                paint.color = ColorUtils.setAlphaComponent(palette.background, (0x59 * alpha).toInt())
                 canvas.drawRoundRect(scratchRect, r, r, paint)
-                dashPaint.color = ColorUtils.setAlphaComponent(Color.WHITE, (0x8C * alpha).toInt())
+                dashPaint.color = ink((0x8C * alpha).toInt())
                 canvas.drawRoundRect(scratchRect, r, r, dashPaint)
             }
         }
@@ -922,9 +927,9 @@ class OverlayPillView(context: Context) : View(context) {
             val box = boxFor(idle, px, py)
             val r = box.height / 2f
             scratchRect.set(box.left, box.top, box.right, box.bottom)
-            paint.color = 0xA6141414.toInt()
+            paint.color = ColorUtils.setAlphaComponent(palette.background, 0xA6)
             canvas.drawRoundRect(scratchRect, r, r, paint)
-            dashPaint.color = 0x80FFFFFF.toInt()
+            dashPaint.color = ink(0x80)
             canvas.drawRoundRect(scratchRect, r, r, dashPaint)
             canvas.saveLayerAlpha(box.left, box.top, box.right, box.bottom, 110)
             drawIdle(canvas, box)
@@ -937,14 +942,14 @@ class OverlayPillView(context: Context) : View(context) {
         val r = dp(8f)
         val cx = box.right - dp(3f)
         val cy = box.top + dp(3f)
-        paint.color = if (active) palette.accent else 0xFF3C3C45.toInt()
+        paint.color = if (active) palette.accent else palette.chip
         canvas.drawCircle(cx, cy, r, paint)
         strokePaint.color = 0x33000000
         strokePaint.strokeWidth = dp(1f)
         canvas.drawCircle(cx, cy, r, strokePaint)
-        badgeTextPaint.color = if (active) onAccent() else Color.WHITE
+        badgeTextPaint.color = if (active) palette.onAccent else palette.onChip
         canvas.drawText(number.toString(), cx, cy + badgeTextPaint.textSize / 2.8f, badgeTextPaint)
-        badgeTextPaint.color = Color.WHITE
+        badgeTextPaint.color = palette.ink
     }
 
     private fun drawEditGuides(canvas: Canvas, now: Long, button: Box) {
@@ -954,7 +959,7 @@ class OverlayPillView(context: Context) : View(context) {
         scratchRect.set(ghost.left, ghost.top, ghost.right, ghost.bottom)
         scratchPath.rewind()
         scratchPath.addRoundRect(scratchRect, ghost.height / 2f, ghost.height / 2f, Path.Direction.CW)
-        dashPaint.color = 0x59FFFFFF
+        dashPaint.color = ink(0x59)
         canvas.drawPath(scratchPath, dashPaint)
 
         // Alignment guides the drag is snapped to: the middle of the screen or another spot's row/column.
@@ -982,7 +987,14 @@ class OverlayPillView(context: Context) : View(context) {
         var hintTop = button.top - dp(16f) - hintH
         if (hintTop < panelBottom + dp(8f)) hintTop = button.bottom + dp(16f)
         val hintLeft = OverlayGeometry.clampCenter(button.centerX, hintW, screenW, dp(8f)) - hintW / 2f
-        drawChip(canvas, Box(hintLeft, hintTop, hintLeft + hintW, hintTop + hintH), hint, 0xE6202024.toInt(), 0xE6FFFFFF.toInt(), false)
+        drawChip(
+            canvas,
+            Box(hintLeft, hintTop, hintLeft + hintW, hintTop + hintH),
+            hint,
+            ColorUtils.setAlphaComponent(palette.chip, 0xE6),
+            ColorUtils.setAlphaComponent(palette.onChip, 0xE6),
+            false
+        )
     }
 
     /** The toolbar at the top of the screen: spots, arrangement, nudge pad, Reset and Done. */
@@ -998,12 +1010,12 @@ class OverlayPillView(context: Context) : View(context) {
         val top = max(statusBarInset(), dp(24f)) + dp(8f)
         panelBottom = top + pad * 2 + chipH * 3 + rowGap * 3 + captionH
 
-        pillPaint.color = PANEL_BG
+        pillPaint.color = palette.panel
         pillPaint.setShadowLayer(dp(10f), 0f, dp(4f), 0x66000000)
         scratchRect.set(left, top, right, panelBottom)
         canvas.drawRoundRect(scratchRect, dp(20f), dp(20f), pillPaint)
         pillPaint.clearShadowLayer()
-        strokePaint.color = 0x1FFFFFFF
+        strokePaint.color = ink(0x1F)
         strokePaint.strokeWidth = dp(1f)
         canvas.drawRoundRect(scratchRect, dp(20f), dp(20f), strokePaint)
 
@@ -1028,7 +1040,7 @@ class OverlayPillView(context: Context) : View(context) {
         y += chipH + rowGap
         x = left + pad
         for ((dx, dy) in NUDGES) x = drawNudgeControl(canvas, x, y, chipH, dx, dy) + gap
-        tinyTextPaint.color = MUTED
+        tinyTextPaint.color = palette.muted
         canvas.drawText("Nudge 1 dp", x + dp(4f), y + chipH / 2f + tinyTextPaint.textSize / 2.8f, tinyTextPaint)
         drawControlRightAligned(canvas, right - pad, y, chipH, "Reset", false, Control.Reset)
 
@@ -1040,14 +1052,14 @@ class OverlayPillView(context: Context) : View(context) {
             OverlayArrangement.FREE -> "Drag a spot to move it · tap another spot to select it"
         }
         canvas.drawText(fitText(caption, tinyTextPaint, right - left - pad * 2), left + pad, y + tinyTextPaint.textSize, tinyTextPaint)
-        tinyTextPaint.color = Color.WHITE
+        tinyTextPaint.color = palette.ink
     }
 
     private fun drawControl(canvas: Canvas, x: Float, y: Float, h: Float, label: String, selected: Boolean, control: Control, square: Boolean = false): Float {
         val w = if (square) h else smallTextPaint.measureText(label) + dp(28f)
         val box = Box(x, y, x + w, y + h)
         hits += Hit(control, box)
-        drawChip(canvas, box, label, if (selected) palette.accent else CHIP_DARK, if (selected) onAccent() else Color.WHITE, pressedControl == control)
+        drawChip(canvas, box, label, if (selected) palette.accent else palette.chip, if (selected) palette.onAccent else palette.onChip, pressedControl == control)
         return box.right
     }
 
@@ -1055,19 +1067,19 @@ class OverlayPillView(context: Context) : View(context) {
         val w = smallTextPaint.measureText(label) + dp(32f)
         val box = Box(right - w, y, right, y + h)
         hits += Hit(control, box)
-        drawChip(canvas, box, label, if (accent) palette.accent else CHIP_DARK, if (accent) onAccent() else Color.WHITE, pressedControl == control)
+        drawChip(canvas, box, label, if (accent) palette.accent else palette.chip, if (accent) palette.onAccent else palette.onChip, pressedControl == control)
     }
 
     private fun drawNudgeControl(canvas: Canvas, x: Float, y: Float, h: Float, dx: Int, dy: Int): Float {
         val control = Control.Nudge(dx, dy)
         val box = Box(x, y, x + h, y + h)
         hits += Hit(control, box)
-        drawChip(canvas, box, "", CHIP_DARK, Color.WHITE, pressedControl == control)
+        drawChip(canvas, box, "", palette.chip, palette.onChip, pressedControl == control)
         // A chevron pointing the way the spot will move.
         val cx = box.centerX
         val cy = box.centerY
         val a = dp(4.5f)
-        strokePaint.color = Color.WHITE
+        strokePaint.color = palette.onChip
         strokePaint.strokeWidth = dp(2f)
         scratchPath.rewind()
         if (dx != 0) {
@@ -1095,13 +1107,13 @@ class OverlayPillView(context: Context) : View(context) {
         scratchRect.set(drawn.left, drawn.top, drawn.right, drawn.bottom)
         canvas.drawRoundRect(scratchRect, r, r, pillPaint)
         pillPaint.clearShadowLayer()
-        strokePaint.color = 0x1FFFFFFF
+        strokePaint.color = ink(0x1F)
         strokePaint.strokeWidth = dp(1f)
         canvas.drawRoundRect(scratchRect, r, r, strokePaint)
         if (label.isNotEmpty()) {
             smallTextPaint.color = fg
             canvas.drawText(label, drawn.centerX - smallTextPaint.measureText(label) / 2f, drawn.centerY + smallTextPaint.textSize / 2.8f, smallTextPaint)
-            smallTextPaint.color = Color.WHITE
+            smallTextPaint.color = palette.ink
         }
     }
 
@@ -1111,9 +1123,6 @@ class OverlayPillView(context: Context) : View(context) {
         while (s.length > 4 && p.measureText("$s…") > maxWidth) s = s.dropLast(1)
         return "$s…"
     }
-
-    /** Text/icon colour that stays legible on the accent (dark ink on light Material You tones). */
-    private fun onAccent(): Int = if (Oklch.fromArgb(palette.accent).l > 0.7) 0xE6000000.toInt() else Color.WHITE
 
     private fun statusBarInset(): Float {
         val insets = rootWindowInsets ?: return dp(24f)

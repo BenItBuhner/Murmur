@@ -77,16 +77,20 @@ export class SettingsStore extends EventEmitter {
     this.store = new JsonStore<Settings>(join(userDataPath, 'settings.json'), parseSettings)
     const s = this.store.get()
     if (!s.stt.baseUrl && process.env.MURMUR_BASE_URL) {
-      // Developer convenience: seed provider settings from the environment on first run.
+      // Developer convenience: seed provider settings from the environment on first run. A seeded
+      // provider is meant to be used, so the models come from it rather than from the instance.
       this.patch({
         stt: {
+          source: 'custom',
           baseUrl: process.env.MURMUR_BASE_URL,
           model: process.env.MURMUR_STT_MODEL ?? s.stt.model,
           apiKeyEnc: process.env.MURMUR_API_KEY
             ? encryptSecret(process.env.MURMUR_API_KEY)
             : s.stt.apiKeyEnc
         },
-        formatting: { llm: { model: process.env.MURMUR_LLM_MODEL ?? s.formatting.llm.model } }
+        formatting: {
+          llm: { source: 'custom', model: process.env.MURMUR_LLM_MODEL ?? s.formatting.llm.model }
+        }
       })
     }
   }

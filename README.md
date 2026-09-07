@@ -144,7 +144,12 @@ npm run dev
 
 The same Wispr Flow pattern on your phone: a floating dictation pill above the keyboard. Material
 You throughout: light, dark or system, wallpaper colours on Android 12+ (or one of the accent
-presets on older devices), and the pill takes the same palette.
+presets on older devices), and the pill takes the same palette. Home is the same dashboard as the
+desktop's — words dictated, speaking pace, time saved, day streak, the latest dictations and where
+their time went — and every section (History, Dictionary, Style, the button, models, permissions,
+updates, account) sits in the drawer behind the button at the top left, or a swipe in from the
+edge. Dictations are kept in a History on the phone with what was heard, what was inserted and how
+long each stage took.
 
 ```bash
 cd apps/android

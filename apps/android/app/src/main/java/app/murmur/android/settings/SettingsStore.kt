@@ -248,7 +248,9 @@ data class MurmurSettings(
     /** Offer pre-releases (vX.Y.Z-beta.N); always on while running a pre-release build. */
     val updateIncludePrereleases: Boolean = false,
     /** Version the user dismissed; withheld until a newer one appears. */
-    val updateSkippedVersion: String = ""
+    val updateSkippedVersion: String = "",
+    /** Totals of everything dictated on this phone (see [DictationStats]); never synced as such. */
+    val stats: DictationStats = DictationStats.EMPTY
 ) {
     val dictionaryTerms: List<String>
         get() = dictionaryEntries.map { it.word.trim() }.filter { it.isNotEmpty() }
@@ -388,7 +390,14 @@ class SettingsStore(context: Context) {
             updateAutoCheck = prefs.getBoolean("updateAutoCheck", d.updateAutoCheck),
             updateAutoInstall = prefs.getBoolean("updateAutoInstall", d.updateAutoInstall),
             updateIncludePrereleases = prefs.getBoolean("updateIncludePrereleases", d.updateIncludePrereleases),
-            updateSkippedVersion = prefs.getString("updateSkippedVersion", d.updateSkippedVersion) ?: ""
+            updateSkippedVersion = prefs.getString("updateSkippedVersion", d.updateSkippedVersion) ?: "",
+            stats = DictationStats(
+                totalWords = prefs.getInt("statsTotalWords", 0),
+                totalSessions = prefs.getInt("statsTotalSessions", 0),
+                totalSpeechMs = prefs.getLong("statsTotalSpeechMs", 0L),
+                streakDays = prefs.getInt("statsStreakDays", 0),
+                lastSessionDay = prefs.getString("statsLastSessionDay", "") ?: ""
+            )
         )
     }
 
@@ -444,6 +453,11 @@ class SettingsStore(context: Context) {
             .putBoolean("updateAutoInstall", s.updateAutoInstall)
             .putBoolean("updateIncludePrereleases", s.updateIncludePrereleases)
             .putString("updateSkippedVersion", s.updateSkippedVersion)
+            .putInt("statsTotalWords", s.stats.totalWords)
+            .putInt("statsTotalSessions", s.stats.totalSessions)
+            .putLong("statsTotalSpeechMs", s.stats.totalSpeechMs)
+            .putInt("statsStreakDays", s.stats.streakDays)
+            .putString("statsLastSessionDay", s.stats.lastSessionDay)
             .apply()
     }
 

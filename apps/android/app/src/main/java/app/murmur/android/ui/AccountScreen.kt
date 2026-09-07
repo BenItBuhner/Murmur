@@ -52,7 +52,7 @@ fun syncColor(status: SyncStatus, c: Paper = Murmur.colors): Color = when (statu
 }
 
 @Composable
-fun AccountScreen(config: CloudConfig, store: SettingsStore, onBack: () -> Unit, onSignIn: () -> Unit) {
+fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSignIn: () -> Unit) {
     val sync = CloudSync.get()
     val status by (sync?.status ?: return).collectAsState()
     val user by Clerk.userFlow.collectAsState()
@@ -64,7 +64,7 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, onBack: () -> Unit,
         Screen(
             title = "Account",
             description = "You are using Murmur without an account. Everything stays on this phone.",
-            onBack = onBack
+            nav = nav
         ) {
             Text(
                 "Sign in to carry your dictionary and style to your other devices. The words already on this phone are merged into the account the first time.",
@@ -82,7 +82,7 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, onBack: () -> Unit,
     val email = status.user?.email ?: user?.primaryEmailAddress?.emailAddress
     val inference = rememberInferenceView(settings)
 
-    Screen(title = "Account", onBack = onBack) {
+    Screen(title = "Account", nav = nav) {
         Text(name, style = Murmur.type.displaySmall, color = c.ink)
         if (email != null) {
             Spacer(Modifier.height(6.dp))

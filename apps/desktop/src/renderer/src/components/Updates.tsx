@@ -13,6 +13,7 @@ import { describeInstallKind, kindCanSelfUpdate, type UpdateStatus } from '@shar
 import { Button } from '@renderer/components/ui/button'
 import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
 import { Switch } from '@renderer/components/ui/switch'
+import { Appear } from '@renderer/components/motion'
 import { Section, SettingRow } from '@renderer/components/SettingRow'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { useUpdates } from '@renderer/hooks/useUpdates'
@@ -295,19 +296,36 @@ function ProgressBar({ percent }: { percent: number }): React.JSX.Element {
   )
 }
 
-/** Home page card while an update is available, downloading or ready. */
+/** Home page card while an update is available, downloading or ready; folds in and out. */
 export function UpdateBanner({
   onNavigate
 }: {
   onNavigate: (r: Route) => void
-}): React.JSX.Element | null {
+}): React.JSX.Element {
   const api = useUpdates()
   const status = api.status
   const release = status?.release
-  if (!status || !release) return null
-  if (status.phase !== 'available' && status.phase !== 'downloading' && status.phase !== 'ready') {
-    return null
-  }
+  const visible =
+    !!status &&
+    !!release &&
+    (status.phase === 'available' || status.phase === 'downloading' || status.phase === 'ready')
+  return (
+    <Appear show={visible}>
+      {visible && <UpdateCard status={status} onNavigate={onNavigate} />}
+    </Appear>
+  )
+}
+
+function UpdateCard({
+  status,
+  onNavigate
+}: {
+  status: UpdateStatus
+  onNavigate: (r: Route) => void
+}): React.JSX.Element | null {
+  const api = useUpdates()
+  const release = status.release
+  if (!release) return null
 
   let title = `Murmur ${release.version} is available`
   let detail: string = releaseMeta(status)

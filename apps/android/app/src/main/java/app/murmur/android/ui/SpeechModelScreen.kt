@@ -38,7 +38,7 @@ import app.murmur.android.ui.theme.Murmur
 import kotlinx.coroutines.launch
 
 @Composable
-fun SpeechModelScreen(store: SettingsStore, settings: MurmurSettings, onBack: () -> Unit) {
+fun SpeechModelScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     val inference = rememberInferenceView(settings)
     Screen(
         title = "Speech model",
@@ -46,7 +46,7 @@ fun SpeechModelScreen(store: SettingsStore, settings: MurmurSettings, onBack: ()
             "The models that come with your account, or a transcription service you choose. Keys for your own service stay on this phone and are never synced."
         else
             "Recordings go to a transcription service you choose. Keys stay on this phone and are never synced.",
-        onBack = onBack
+        nav = nav
     ) {
         SpeechModelForm(store, settings)
     }

@@ -30,7 +30,7 @@ import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.theme.Murmur
 
 @Composable
-fun DictionaryScreen(store: SettingsStore, synced: Boolean, onBack: () -> Unit) {
+fun DictionaryScreen(store: SettingsStore, synced: Boolean, nav: TopNav) {
     Screen(
         title = "Dictionary",
         description = if (synced) {
@@ -38,7 +38,7 @@ fun DictionaryScreen(store: SettingsStore, synced: Boolean, onBack: () -> Unit) 
         } else {
             "Names and terms the transcriber should get right, spelled the way you write them."
         },
-        onBack = onBack
+        nav = nav
     ) {
         DictionaryEditor(store)
     }

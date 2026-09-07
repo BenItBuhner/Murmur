@@ -11,6 +11,7 @@ import {
   multipartBoundary,
   parseMultipart,
   readUpstreams,
+  subjectOf,
   tokensUsed,
   upstreamModelFor,
   wavInfo,
@@ -29,8 +30,8 @@ import {
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
 async function identityOf(ctx: ActionCtx): Promise<{ subject: string } | null> {
-  const identity = await ctx.auth.getUserIdentity()
-  return identity ? { subject: identity.subject } : null
+  const subject = await subjectOf(ctx.auth)
+  return subject ? { subject } : null
 }
 
 function modelNotFound(requested: string, available: string): Response {

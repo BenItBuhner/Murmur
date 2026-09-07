@@ -7,6 +7,7 @@ import {
   multipartBoundary,
   parseMultipart,
   readUpstreams,
+  subjectOf,
   tokensUsed,
   upstreamModelFor,
   wavInfo
@@ -158,6 +159,21 @@ describe('inference helpers', () => {
     const blank = makeWav(4)
     new DataView(blank.buffer).setUint32(40, 0xffffffff, true)
     expect(wavInfo(blank)!.durationSec).toBeCloseTo(4, 3)
+  })
+
+  it('treats a bearer token Convex cannot parse as "not signed in", never as a crash', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    expect(await subjectOf({ getUserIdentity: async () => ({ subject: 'user_ada' }) })).toBe('user_ada')
+    expect(await subjectOf({ getUserIdentity: async () => null })).toBeNull()
+    expect(
+      await subjectOf({
+        getUserIdentity: async () => {
+          throw new Error('Could not parse JWT payload')
+        }
+      })
+    ).toBeNull()
+    expect(warn).toHaveBeenCalledWith('[gateway] rejected bearer token:', 'Could not parse JWT payload')
+    warn.mockRestore()
   })
 
   it('maps upstream failures without leaking credentials and counts tokens', () => {

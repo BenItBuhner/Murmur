@@ -63,6 +63,22 @@ export function upstreamModelFor(upstream: Upstream, plan: Plan): string {
   return plan === 'pro' && upstream.proModel ? upstream.proModel : upstream.model
 }
 
+/**
+ * The Clerk subject behind a request, or null when there is no usable session. Convex throws on a
+ * bearer token that is not even a JWT; to the gateway that is simply "not signed in", never a 500.
+ */
+export async function subjectOf(auth: {
+  getUserIdentity(): Promise<{ subject: string } | null>
+}): Promise<string | null> {
+  try {
+    const identity = await auth.getUserIdentity()
+    return identity?.subject ?? null
+  } catch (err) {
+    console.warn('[gateway] rejected bearer token:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 /** Which managed models an account can currently ask for, in `/v1/models` shape. */
 export function modelsPayload(upstreams: Upstreams): {
   object: 'list'

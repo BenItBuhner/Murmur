@@ -12,6 +12,11 @@ export interface OverlayState {
   elapsedSec?: number
   /** Visible when the user has an active hands-free lock. */
   locked?: boolean
+  /**
+   * Error phase only: the history entry whose stored recording can be sent again. The pill shows a
+   * Retry button and stays up until the user acts on it (or gives up on them after a while).
+   */
+  retryId?: string
 }
 
 export interface StageTimings {
@@ -64,6 +69,14 @@ export interface HistoryEntry {
   stages?: string[]
   timings: StageTimings
   error?: string
+  /**
+   * File name of the stored audio (16 kHz mono WAV) in the recordings directory, when it was kept.
+   * A failed dictation always keeps its recording so it can be retried; whether successful ones do
+   * is the "Keep recordings" setting.
+   */
+  recording?: string
+  /** How many times this dictation has been sent for transcription (absent means once). */
+  attempts?: number
   /** Set on entries that arrived through account history sync from another device. */
   deviceId?: string
   deviceName?: string

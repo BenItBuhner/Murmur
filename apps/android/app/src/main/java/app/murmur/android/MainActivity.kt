@@ -31,6 +31,7 @@ import app.murmur.android.cloud.SyncStatus
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.history.HistoryStore
+import app.murmur.android.history.RecordingStore
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
@@ -228,7 +229,7 @@ private fun Main(
     ) { entry, nav ->
         when (entry.route) {
             Route.HOME -> HomeScreen(config, settings, signedIn, firstName, syncStatus, nav, onOpen = navigator::open)
-            Route.HISTORY -> HistoryScreen(HistoryStore.get(context), nav)
+            Route.HISTORY -> HistoryScreen(HistoryStore.get(context), store, RecordingStore.get(context), nav)
             Route.BUTTON -> DictationButtonScreen(store, settings, nav)
             Route.MODEL -> SpeechModelScreen(store, settings, nav)
             Route.LANGUAGE -> LanguageScreen(store, settings, signedIn, nav)

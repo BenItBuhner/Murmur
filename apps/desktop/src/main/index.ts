@@ -26,6 +26,7 @@ import { registerIpc } from './ipc'
 import { createLogger, initLogger } from './logger'
 import { getActiveWindow } from './active-window'
 import { HistoryStore } from './store/history'
+import { RecordingStore } from './store/recordings'
 import { SettingsStore } from './store/settings'
 import { AppTray } from './tray'
 import { SystemAccent } from './theme/system-accent'
@@ -116,7 +117,10 @@ async function main(): Promise<void> {
   if (cloudConfig.accountMode !== 'off') registerDeepLinkHandler(cloudConfig.deepLinkScheme)
 
   const settings = new SettingsStore(userData)
-  const history = new HistoryStore(userData)
+  // The audio behind History entries; a recording never outlives its entry.
+  const recordings = new RecordingStore(join(userData, 'recordings'))
+  const history = new HistoryStore(userData, recordings)
+  recordings.sweep(history.recordingNames())
 
   // Updates: follow the GitHub Releases of the repository this build came from.
   const updateSource = resolveUpdateSource(process.env, {
@@ -205,6 +209,7 @@ async function main(): Promise<void> {
     settings,
     history,
     recorder,
+    recordings,
     hook,
     inference,
     overlay: { setState: (s) => overlay.setState(s), playSound: (n) => overlay.playSound(n) },
@@ -302,7 +307,9 @@ async function main(): Promise<void> {
   registerIpc({
     settings,
     history,
+    recordings,
     controller,
+    overlay,
     hook,
     inference,
     cloudConfig,

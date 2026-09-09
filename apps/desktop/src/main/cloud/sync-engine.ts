@@ -256,6 +256,8 @@ export class CloudSync extends EventEmitter {
     })
     this.deps.settings.on('change', this.onSettingsChange)
     this.deps.history.on('added', this.onHistoryAdded)
+    // A failed dictation sent again and now transcribed is new text for the account too.
+    this.deps.history.on('replaced', this.onHistoryAdded)
     this.deps.history.on('deleted', this.onHistoryDeleted)
     this.deps.history.on('cleared', this.onHistoryCleared)
     log.info(
@@ -1050,6 +1052,7 @@ export class CloudSync extends EventEmitter {
     this.connectionUnsub?.()
     this.deps.settings.off('change', this.onSettingsChange)
     this.deps.history.off('added', this.onHistoryAdded)
+    this.deps.history.off('replaced', this.onHistoryAdded)
     this.deps.history.off('deleted', this.onHistoryDeleted)
     this.deps.history.off('cleared', this.onHistoryCleared)
     this.outbox.flush()

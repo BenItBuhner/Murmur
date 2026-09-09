@@ -1,5 +1,7 @@
 package app.murmur.android.dictation
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.util.Log
@@ -11,6 +13,7 @@ import app.murmur.android.cloud.CloudSync
 import app.murmur.android.history.HistoryEntry
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
+import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
@@ -51,13 +54,39 @@ import java.util.UUID
 
 private const val TAG = "MurmurDictation"
 
+/** How long an error that can be retried stays on the pill, waiting for the user. */
+private const val RETRY_HOLD_MS = 15_000L
+
 sealed class DictationState {
     data object Idle : DictationState()
     data class Listening(val elapsedSec: Int, val level: Float) : DictationState()
     data class Processing(val label: String) : DictationState()
     data class Success(val message: String) : DictationState()
-    data class Error(val message: String) : DictationState()
+
+    /**
+     * [retryId]: the history entry whose stored recording can be sent again. The pill then shows a
+     * Retry button and stays up until the user acts on it (or gives up on them after a while).
+     */
+    data class Error(val message: String, val retryId: String? = null) : DictationState()
 }
+
+/** One run of the pipeline: a dictation that was just spoken, or a stored one sent again. */
+private class Run(
+    val id: String,
+    /** Speech captured, for the entry and the stats. */
+    val recordMs: Long,
+    /** File name of the stored audio, when it was kept. */
+    val recording: String?,
+    /** Sent again: the failed entry this run replaces. */
+    val previous: HistoryEntry? = null,
+    /** How many times this audio has now been sent for transcription. */
+    val attempts: Int = 1,
+    /**
+     * Insert the text into the focused field. A retry started from the History screen only copies
+     * it: the focused field, if any, is Murmur's own search box.
+     */
+    val insert: Boolean = true
+)
 
 /** Where the final text should go. */
 interface TextSink {
@@ -168,6 +197,8 @@ object DictationController {
         _state.value = DictationState.Processing("Transcribing…")
 
         scope.launch {
+            val id = sessionId
+            var run: Run? = null
             try {
                 val pcm: ShortArray = if (fixtureMode(settings)) {
                     loadFixture(appContext)
@@ -184,19 +215,94 @@ object DictationController {
                     }
                     recorded
                 }
-                process(pcm, settings, appContext, InferenceRouter.get(appContext))
+                // Store the audio before anything can go wrong with it: a failed request is retried
+                // from this file, and a kept recording is what History plays back.
+                val started = Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = storeRecording(appContext, id, pcm))
+                run = started
+                process(started, pcm, settings, appContext, InferenceRouter.get(appContext))
             } catch (e: Exception) {
                 Log.e(TAG, "dictation failed", e)
                 RecordingService.stop(appContext)
                 val message = friendlyError(e)
-                recordFailure(appContext, settings, raw = "", error = message)
-                showTransient(DictationState.Error(message))
+                val failed = run ?: Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = null)
+                recordFailure(appContext, settings, failed, raw = "", error = message)
+                showError(message, failed)
+            } finally {
+                run?.let { releaseRecording(appContext, it) }
             }
         }
     }
 
-    private suspend fun process(pcm: ShortArray, s: MurmurSettings, context: Context, router: InferenceRouter) {
-        val recordMs = (stoppedAt - startedAt).coerceAtLeast(0)
+    /**
+     * Send a dictation's stored audio through the pipeline again. With [insert] the result goes into
+     * the field that is still focused (the pill's Retry button, moments after the failure); without
+     * it the text is copied to the clipboard and kept in History (the History screen's Retry).
+     *
+     * @return null when the retry is under way, or why it could not start.
+     */
+    fun retry(context: Context, id: String, insert: Boolean = true): String? {
+        if (isListening) return "Finish the current dictation first"
+        if (isBusy) return "Still working on the last one"
+        val appContext = context.applicationContext
+        val entry = HistoryStore.get(appContext).get(id) ?: return "This dictation is no longer in History"
+        if (entry.finalText.isNotEmpty()) return "This dictation already has its text"
+        val recording = entry.recording?.takeIf { RecordingStore.get(appContext).has(it) }
+            ?: return "The recording of this dictation was not kept"
+        val decoded = RecordingStore.get(appContext).read(recording) ?: return "The recording could not be read"
+        val settings = SettingsStore.get(appContext).get()
+        resetJob?.cancel()
+        sessionId = id
+        stoppedAt = System.currentTimeMillis()
+        startedAt = stoppedAt - entry.speechMs
+        _state.value = DictationState.Processing("Transcribing…")
+        val run = Run(
+            id = id,
+            recordMs = entry.speechMs,
+            recording = recording,
+            previous = entry,
+            attempts = entry.attempts + 1,
+            insert = insert
+        )
+        Log.i(TAG, "retry #${run.attempts} of ${id.take(8)}${if (insert) "" else " (copy only)"}")
+        scope.launch {
+            try {
+                val (pcm, rate) = decoded
+                process(run, Wav.resample(pcm, rate, SAMPLE_RATE), settings, appContext, InferenceRouter.get(appContext))
+            } catch (e: Exception) {
+                Log.e(TAG, "retry failed", e)
+                val message = friendlyError(e)
+                recordFailure(appContext, settings, run, raw = "", error = message)
+                showError(message, run)
+            } finally {
+                releaseRecording(appContext, run)
+            }
+        }
+        return null
+    }
+
+    /** The user waved the pill's message away. */
+    fun dismiss() {
+        if (_state.value is DictationState.Error || _state.value is DictationState.Success) {
+            resetJob?.cancel()
+            _state.value = DictationState.Idle
+        }
+    }
+
+    private fun storeRecording(context: Context, id: String, pcm: ShortArray): String? = try {
+        RecordingStore.get(context).save(id, pcm, SAMPLE_RATE)
+    } catch (e: Exception) {
+        Log.w(TAG, "could not store the recording", e)
+        null
+    }
+
+    /** After a run: audio that no History entry refers to any more has nothing to be kept for. */
+    private fun releaseRecording(context: Context, run: Run) {
+        val name = run.recording ?: return
+        if (HistoryStore.get(context).get(run.id)?.recording != name) RecordingStore.get(context).delete(name)
+    }
+
+    private suspend fun process(run: Run, pcm: ShortArray, s: MurmurSettings, context: Context, router: InferenceRouter) {
+        val recordMs = run.recordMs
         // 1. STT, and make sure the transcript reaches the end of the speech. The router decides
         // whether the clip goes to the instance's model or the user's own provider.
         val sttStarted = System.currentTimeMillis()
@@ -225,10 +331,10 @@ object DictationController {
             (stt.noSpeechProb != null && stt.noSpeechProb > 0.85 && countWords(raw) <= 2)
         ) {
             recordFailure(
-                context, s, raw, "Nothing heard", StageTimings(recordMs = recordMs, sttMs = sttMs),
+                context, s, run, raw, "Nothing heard", StageTimings(recordMs = recordMs, sttMs = sttMs),
                 provider = resolved.provider, model = resolved.cfg.model
             )
-            showTransient(DictationState.Error("Nothing heard"))
+            showError("Nothing heard", run)
             return
         }
 
@@ -312,51 +418,66 @@ object DictationController {
 
         val timings = StageTimings(recordMs = recordMs, sttMs = sttMs, formatMs = formatMs, llmMs = llmMs)
         if (final.empty || final.text.isEmpty()) {
-            recordFailure(context, s, raw, "Nothing to insert", timings, resolved.provider, resolved.cfg.model)
-            showTransient(DictationState.Error("Nothing to insert"))
+            recordFailure(context, s, run, raw, "Nothing to insert", timings, resolved.provider, resolved.cfg.model)
+            showError("Nothing to insert", run)
             return
         }
 
-        // 4. Inject into the focused field
+        // 4. Inject into the focused field, or only copy when the text has nowhere to go right now.
         val currentSink = sink
-        if (currentSink == null) {
-            recordFailure(context, s, raw, "Accessibility service not running", timings, resolved.provider, resolved.cfg.model)
-            showTransient(DictationState.Error("Accessibility service not running"))
+        if (run.insert && currentSink == null) {
+            recordFailure(context, s, run, raw, "Accessibility service not running", timings, resolved.provider, resolved.cfg.model)
+            showError("Accessibility service not running", run)
             return
         }
-        _state.value = DictationState.Processing("Inserting…")
+        _state.value = DictationState.Processing(if (run.insert) "Inserting…" else "Copying…")
         val injectStarted = System.currentTimeMillis()
-        val error = currentSink.insert(final.text, final.pressEnter)
+        val error = if (run.insert && currentSink != null) currentSink.insert(final.text, final.pressEnter) else copyToClipboard(context, final.text)
         val now = System.currentTimeMillis()
+        // The audio stays with a successful dictation only if the user wants recordings kept.
+        val recording = if (error == null && !s.keepRecordings) null else run.recording
         val entry = HistoryEntry(
-            id = sessionId,
-            createdAt = now,
+            id = run.id,
+            createdAt = run.previous?.createdAt ?: now,
             rawText = raw,
             finalText = if (error == null) final.text.trimEnd() else "",
             wordCount = if (error == null) final.wordCount else 0,
             speechMs = recordMs,
-            appName = appLabel(context, focusedPackage),
+            appName = if (run.insert) appLabel(context, focusedPackage) else run.previous?.appName,
             provider = resolved.provider,
             model = resolved.cfg.model,
-            injected = error == null,
+            injected = error == null && run.insert,
             llmUsed = llm == LlmOutcome.USED,
             llm = llm,
             llmDetail = llmDetail,
             stages = final.stages,
             timings = timings.copy(injectMs = now - injectStarted, totalMs = now - stoppedAt),
-            error = error
+            error = error,
+            recording = recording,
+            attempts = run.attempts
         )
-        HistoryStore.get(context).add(entry)
+        val history = HistoryStore.get(context)
+        if (run.previous != null) history.replace(entry) else history.add(entry)
         if (error == null) {
-            Log.i(TAG, "inserted ${final.wordCount} words in ${entry.timings.totalMs}ms")
-            showTransient(DictationState.Success("Inserted"), 1500)
+            Log.i(TAG, "${if (run.insert) "inserted" else "copied"} ${final.wordCount} words in ${entry.timings.totalMs}ms${if (run.attempts > 1) " (attempt ${run.attempts})" else ""}")
+            showTransient(DictationState.Success(if (run.insert) "Inserted" else "Copied"), 1500)
             SettingsStore.get(context).update { current ->
                 current.copy(stats = current.stats.record(entry.wordCount, entry.speechMs, DictationStats.localDay(now)))
             }
             CloudSync.get()?.recordSession(sessionId = entry.id, words = entry.wordCount, speechMs = entry.speechMs)
         } else {
-            showTransient(DictationState.Error(error))
+            showError(error, run)
         }
+    }
+
+    /** @return null on success, or a user-facing error message. */
+    private fun copyToClipboard(context: Context, text: String): String? = try {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Murmur", text))
+        null
+    } catch (e: Exception) {
+        Log.w(TAG, "clipboard write failed", e)
+        "Could not copy the text"
     }
 
     /**
@@ -367,30 +488,34 @@ object DictationController {
     private fun recordFailure(
         context: Context,
         s: MurmurSettings,
+        run: Run,
         raw: String,
         error: String,
-        timings: StageTimings = StageTimings(recordMs = (stoppedAt - startedAt).coerceAtLeast(0)),
+        timings: StageTimings = StageTimings(recordMs = run.recordMs),
         provider: String = configuredProvider(context, s),
         model: String = configuredModel(context, s)
     ) {
         val now = System.currentTimeMillis()
-        HistoryStore.get(context).add(
-            HistoryEntry(
-                id = sessionId.ifEmpty { UUID.randomUUID().toString() },
-                createdAt = now,
-                rawText = raw,
-                finalText = "",
-                wordCount = 0,
-                speechMs = timings.recordMs,
-                appName = appLabel(context, sink?.focusedPackage() ?: ""),
-                provider = provider,
-                model = model,
-                injected = false,
-                llmUsed = false,
-                timings = timings.copy(totalMs = (now - stoppedAt).coerceAtLeast(0)),
-                error = error
-            )
+        val previous = run.previous
+        val entry = HistoryEntry(
+            id = run.id.ifEmpty { UUID.randomUUID().toString() },
+            createdAt = previous?.createdAt ?: now,
+            rawText = raw.ifEmpty { previous?.rawText ?: "" },
+            finalText = "",
+            wordCount = 0,
+            speechMs = timings.recordMs,
+            appName = if (run.insert) appLabel(context, sink?.focusedPackage() ?: "") else previous?.appName,
+            provider = provider,
+            model = model,
+            injected = false,
+            llmUsed = false,
+            timings = timings.copy(totalMs = (now - stoppedAt).coerceAtLeast(0)),
+            error = error,
+            recording = run.recording,
+            attempts = run.attempts
         )
+        val history = HistoryStore.get(context)
+        if (previous != null) history.replace(entry) else history.add(entry)
     }
 
     private fun murmurSpeech(context: Context): Boolean =
@@ -428,6 +553,15 @@ object DictationController {
             delay(holdMs)
             _state.value = DictationState.Idle
         }
+    }
+
+    /**
+     * A failure the user can do something about: when the audio was stored the pill offers to send
+     * it again and waits much longer for the answer than a plain message would.
+     */
+    private fun showError(message: String, run: Run) {
+        val retryId = run.id.takeIf { run.recording != null }
+        showTransient(DictationState.Error(message, retryId), if (retryId != null) RETRY_HOLD_MS else 2500)
     }
 
     private fun loadFixture(context: Context): ShortArray {

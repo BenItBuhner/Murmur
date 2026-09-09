@@ -212,6 +212,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             onMicTap = { DictationController.toggle(this@MurmurAccessibilityService) }
             onCancelTap = { DictationController.cancel(this@MurmurAccessibilityService) }
             onConfirmTap = { DictationController.stopAndInsert(this@MurmurAccessibilityService) }
+            // The field the dictation was meant for is still focused: send the audio again into it.
+            onRetryTap = { id -> DictationController.retry(this@MurmurAccessibilityService, id, insert = true) }
+            onDismissTap = { DictationController.dismiss() }
             onLayoutChanged = { layout -> settings.update { it.copy(overlayLayout = layout) } }
             onEditDone = { OverlayEditor.stop() }
             onEditReset = { settings.update { it.copy(overlayLayout = OverlayLayout.DEFAULT) } }

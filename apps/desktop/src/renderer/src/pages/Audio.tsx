@@ -1,4 +1,8 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import type { RecordingsInfo } from '@shared/ipc'
+import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
 import { Slider } from '@renderer/components/ui/slider'
 import { Input } from '@renderer/components/ui/input'
@@ -13,10 +17,43 @@ import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow
 import { MicMeter, useMicDevices } from '@renderer/components/MicMeter'
 import { useSettings } from '@renderer/hooks/useSettings'
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  const mb = bytes / (1024 * 1024)
+  return mb < 1024 ? `${mb.toFixed(mb < 10 ? 1 : 0)} MB` : `${(mb / 1024).toFixed(2)} GB`
+}
+
+/** What the recordings directory holds; refreshed whenever History changes. */
+function useRecordingsInfo(): RecordingsInfo {
+  const [info, setInfo] = useState<RecordingsInfo>({ count: 0, bytes: 0 })
+  useEffect(() => {
+    const refresh = (): void => void window.murmur.recordings.info().then(setInfo)
+    refresh()
+    const unsubs = [
+      window.murmur.history.onAdded(refresh),
+      window.murmur.history.onChanged(refresh)
+    ]
+    return () => unsubs.forEach((u) => u())
+  }, [])
+  return info
+}
+
 export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Element {
   const { settings, patch } = useSettings()
   const a = settings.audio
   const { devices, error } = useMicDevices()
+  const recordings = useRecordingsInfo()
+  const [clearing, setClearing] = useState(false)
+
+  const clearRecordings = async (): Promise<void> => {
+    setClearing(true)
+    try {
+      await window.murmur.recordings.clear()
+      toast.success('Recordings deleted')
+    } finally {
+      setClearing(false)
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -169,6 +206,37 @@ export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Eleme
           </div>
         </SettingRow>
       </Section>
+
+      {!embedded && (
+        <Section title="Recordings">
+          <SettingRow
+            title="Keep recordings"
+            description="Store the audio of every dictation with its History entry, so you can play it back or send it again. Off, only dictations that failed keep their audio, until they succeed or you delete them. Recordings never leave this device."
+          >
+            <Switch
+              checked={a.keepRecordings}
+              onCheckedChange={(v) => void patch({ audio: { keepRecordings: v } })}
+            />
+          </SettingRow>
+          <SettingRow
+            title="Storage"
+            description={
+              recordings.count === 0
+                ? 'No recordings stored. The oldest are removed once they take more than 500 MB.'
+                : `${recordings.count} recording${recordings.count === 1 ? '' : 's'}, ${formatBytes(recordings.bytes)}. The oldest are removed once they take more than 500 MB.`
+            }
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={recordings.count === 0 || clearing}
+              onClick={() => void clearRecordings()}
+            >
+              <Trash2 /> Delete all
+            </Button>
+          </SettingRow>
+        </Section>
+      )}
     </div>
   )
 }

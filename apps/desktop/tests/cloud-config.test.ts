@@ -160,5 +160,8 @@ describe('buildRendererCsp', () => {
     const dev = buildRendererCsp({ dev: true })
     expect(dev).toMatch(/script-src [^;]*'unsafe-eval'/)
     expect(dev).toMatch(/connect-src [^;]*ws:\/\/localhost:\*/)
+    // The overlay's AudioWorklet module is a blob: URL and only the dev build serves it under the CSP.
+    expect(dev).toMatch(/script-src [^;]*blob:/)
+    expect(local).not.toMatch(/script-src [^;]*blob:/)
   })
 })

@@ -173,7 +173,12 @@ export const settingsSchema = z.object({
       /** Used only when `limitDuration` is on. */
       maxDurationSec: z.number().int().min(5).max(1800).default(300),
       noiseSuppression: z.boolean().default(true),
-      autoGainControl: z.boolean().default(true)
+      autoGainControl: z.boolean().default(true),
+      /**
+       * Store the audio of every dictation next to its History entry (play it back, send it again).
+       * Off, only failed dictations keep their audio, and only until they succeed or are deleted.
+       */
+      keepRecordings: z.boolean().default(true)
     })
     .prefault({}),
   stt: z

@@ -3,9 +3,11 @@ package app.murmur.android
 import app.murmur.android.history.HistoryEntry
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
+import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -95,5 +97,67 @@ class HistoryStoreTest {
         val e = HistoryStore(file()).get("x")!!
         assertTrue(e.failed)
         assertEquals("Nothing heard", e.error)
+    }
+
+    @Test
+    fun `replace keeps the entry in place and only its outcome changes`() {
+        val store = HistoryStore(file())
+        store.add(entry("a").copy(finalText = "", wordCount = 0, injected = false, error = "Timed out", recording = "a.wav"))
+        store.add(entry("b"))
+        store.add(entry("c"))
+        assertTrue(store.get("a")!!.retryable)
+
+        store.replace(entry("a", text = "now it worked").copy(recording = "a.wav", attempts = 2))
+
+        assertEquals(listOf("c", "b", "a"), store.entries.value.map { it.id })
+        val a = HistoryStore(file()).get("a")!!
+        assertEquals("now it worked", a.finalText)
+        assertEquals(2, a.attempts)
+        assertFalse(a.retryable)
+
+        store.replace(entry("z"))
+        assertEquals("z", store.entries.value.first().id)
+    }
+
+    @Test
+    fun `a recording never outlives its entry`() {
+        val recordings = RecordingStore(File(folder.root, "recordings"))
+        val store = HistoryStore(file(), maxEntries = 3, recordings = recordings)
+        val pcm = ShortArray(1600) { (it % 100).toShort() }
+        val names = (1..4).map { i -> recordings.save("e$i", pcm, 16_000) }
+        for (i in 1..3) store.add(entry("e$i").copy(recording = names[i - 1]))
+
+        // Evicted past the cap.
+        store.add(entry("e4").copy(recording = names[3]))
+        assertFalse(recordings.has(names[0]))
+        assertTrue(recordings.has(names[1]))
+
+        // Replaced without its audio (the user does not keep successful recordings).
+        store.replace(store.get("e2")!!.copy(recording = null))
+        assertFalse(recordings.has(names[1]))
+
+        store.delete("e3")
+        assertFalse(recordings.has(names[2]))
+
+        store.stripRecordings()
+        assertNull(store.get("e4")!!.recording)
+        assertFalse(recordings.has(names[3]))
+        assertEquals(0, recordings.info().count)
+
+        store.add(entry("e5").copy(recording = recordings.save("e5", pcm, 16_000)))
+        store.clear()
+        assertEquals(0, recordings.info().count)
+    }
+
+    @Test
+    fun `history files written before recordings existed still load`() {
+        file().writeText(
+            """[{"id":"old","createdAt":1,"rawText":"","finalText":"hi","wordCount":1,"speechMs":1,
+               "provider":"p","model":"m","injected":true,"llmUsed":false}]"""
+        )
+        val e = HistoryStore(file()).get("old")!!
+        assertNull(e.recording)
+        assertEquals(1, e.attempts)
+        assertFalse(e.retryable)
     }
 }

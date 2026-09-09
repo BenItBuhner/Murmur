@@ -128,6 +128,12 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   “five thirty” as `5:30`, but a number it changed, dropped, de-duplicated or invented is put back.
 - **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”; the
   selection is rewritten in place.
+- **Nothing you said is lost to a bad connection either.** Every dictation's audio is kept with
+  its History entry (turn **Keep recordings** off under Microphone to keep only failed ones). When
+  the server times out or errors, the pill shows the reason with a **Retry** button instead of
+  making you say it all again — press it as often as you like, the text lands where your cursor
+  still is. History plays recordings back and retries failed dictations from there too (the text is
+  copied, since the settings window has focus). Recordings never leave the device.
 - **Your colours.** Light, dark or follow the system; keep the neutral look or pick an accent — your
   OS accent colour (Windows, macOS, GNOME 47+, KDE), a preset, or any hex — and optionally Material
   You style tinted surfaces. The whole window and the dictation pill follow, live.
@@ -148,8 +154,9 @@ presets on older devices), and the pill takes the same palette. Home is the same
 desktop's — words dictated, speaking pace, time saved, day streak, the latest dictations and where
 their time went — and every section (History, Dictionary, Style, the button, models, permissions,
 updates, account) sits in the drawer behind the button at the top left, or a swipe in from the
-edge. Dictations are kept in a History on the phone with what was heard, what was inserted and how
-long each stage took.
+edge. Dictations are kept in a History on the phone with what was heard, what was inserted, how
+long each stage took and the recording itself; a dictation the server failed on shows **Retry** on
+the pill, and can be played back or sent again from History later.
 
 ```bash
 cd apps/android

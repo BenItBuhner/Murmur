@@ -42,6 +42,9 @@ private const val TALL_DP = 46f
 /** Widest a message pill gets (long error texts are ellipsized to fit). */
 private const val MESSAGE_MAX_W_DP = 300f
 
+/** An error with a Retry button and a dismiss cross needs the room; the message gives way first. */
+private const val RETRY_MAX_W_DP = 344f
+
 /** How far outside the pill a touch still counts; the touch window is padded by this. */
 private const val TOUCH_PAD_DP = 6f
 
@@ -100,6 +103,9 @@ class OverlayPillView(context: Context) : View(context) {
     var onMicTap: (() -> Unit)? = null
     var onCancelTap: (() -> Unit)? = null
     var onConfirmTap: (() -> Unit)? = null
+    /** The Retry button on an error whose recording was kept; the argument is the history entry. */
+    var onRetryTap: ((String) -> Unit)? = null
+    var onDismissTap: (() -> Unit)? = null
     var onEditDone: (() -> Unit)? = null
     var onEditReset: (() -> Unit)? = null
 
@@ -115,9 +121,11 @@ class OverlayPillView(context: Context) : View(context) {
         val h: Float,
         val bg: Int,
         val text: String = "",
-        val restingW: Float = w
+        val restingW: Float = w,
+        /** Error only: the entry whose recording can be sent again (draws Retry and a dismiss cross). */
+        val retryId: String? = null
     ) {
-        fun sameContent(other: Look): Boolean = kind == other.kind && text == other.text
+        fun sameContent(other: Look): Boolean = kind == other.kind && text == other.text && retryId == other.retryId
     }
 
     /** Tappable pieces of the edit-mode panel. */
@@ -274,6 +282,8 @@ class OverlayPillView(context: Context) : View(context) {
     private val scratchRect = RectF()
     private var cancelBox = Box.EMPTY
     private var confirmBox = Box.EMPTY
+    private var retryBox = Box.EMPTY
+    private var dismissBox = Box.EMPTY
 
     // ---- public API -----------------------------------------------------------------------------
 
@@ -357,8 +367,19 @@ class OverlayPillView(context: Context) : View(context) {
         is DictationState.Listening -> listeningLook()
         is DictationState.Processing -> Look(Kind.PROCESSING, textPaint.measureText(s.label) + dp(64f), dp(TALL_DP), palette.background, s.label)
         is DictationState.Success -> Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(TALL_DP), palette.successBackground, s.message)
-        is DictationState.Error -> Look(Kind.ERROR, min(dp(MESSAGE_MAX_W_DP), textPaint.measureText(s.message) + dp(56f)), dp(TALL_DP), palette.errorBackground, s.message)
+        is DictationState.Error -> {
+            if (s.retryId == null) {
+                Look(Kind.ERROR, min(dp(MESSAGE_MAX_W_DP), textPaint.measureText(s.message) + dp(56f)), dp(TALL_DP), palette.errorBackground, s.message)
+            } else {
+                // Icon, message, the Retry chip and the dismiss cross; the message is what gives way.
+                val maxW = if (screenW > 0f) min(dp(RETRY_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)) else dp(RETRY_MAX_W_DP)
+                val natural = dp(38f) + textPaint.measureText(s.message) + dp(10f) + retryChipWidth() + dp(6f) + dp(28f) + dp(9f)
+                Look(Kind.ERROR, min(maxW, natural), dp(TALL_DP), palette.errorBackground, s.message, retryId = s.retryId)
+            }
+        }
     }
+
+    private fun retryChipWidth(): Float = smallTextPaint.measureText(RETRY_LABEL) + dp(24f)
 
     /** Screen-space centre of the resting button on [spot]. */
     private fun spotPoint(spot: OverlayAnchor): Pair<Float, Float> {
@@ -797,12 +818,41 @@ class OverlayPillView(context: Context) : View(context) {
         // Fit the text to the pill's resting width, not the box mid-morph: while the pill is still
         // growing or shrinking the pill's outline clips it instead of re-ellipsizing every frame.
         var msg = look.text
-        val maxWidth = look.restingW - dp(48f)
+        var maxWidth = look.restingW - dp(48f)
+        val retryable = look.kind == Kind.ERROR && look.retryId != null
+        if (retryable) maxWidth = look.restingW - dp(38f) - dp(10f) - retryChipWidth() - dp(6f) - dp(28f) - dp(9f)
         if (textPaint.measureText(msg) > maxWidth) {
             while (msg.length > 4 && textPaint.measureText("$msg…") > maxWidth) msg = msg.dropLast(1)
             msg = "$msg…"
         }
         canvas.drawText(msg, box.left + dp(38f), cy + textPaint.textSize / 2.8f, textPaint)
+        if (retryable) drawRetryControls(canvas, box, look)
+    }
+
+    /**
+     * The recording of a failed dictation is stored, so the pill offers to send it again instead of
+     * making the user say it all over: an accent Retry chip and a cross to wave the message away.
+     */
+    private fun drawRetryControls(canvas: Canvas, box: Box, look: Look) {
+        val cy = box.centerY
+        // Laid out from the pill's resting right edge so nothing slides while the pill grows.
+        val right = box.left + look.restingW
+        val dismissR = dp(14f)
+        val dismissCx = right - dp(9f) - dismissR
+        dismissBox = Box.centered(dismissCx, cy, dismissR * 2, dismissR * 2)
+        paint.color = ink(if (pressed && dismissBox.inflate(dp(4f)).contains(downX, downY)) 0x3D else 0x1F)
+        canvas.drawCircle(dismissCx, cy, dismissR - dp(2f), paint)
+        strokePaint.color = palette.inkSoft
+        strokePaint.strokeWidth = dp(2f)
+        val xr = dp(4f)
+        canvas.drawLine(dismissCx - xr, cy - xr, dismissCx + xr, cy + xr, strokePaint)
+        canvas.drawLine(dismissCx - xr, cy + xr, dismissCx + xr, cy - xr, strokePaint)
+
+        val chipW = retryChipWidth()
+        val chipH = dp(30f)
+        val chipRight = dismissBox.left - dp(6f)
+        retryBox = Box(chipRight - chipW, cy - chipH / 2f, chipRight, cy + chipH / 2f)
+        drawChip(canvas, retryBox, RETRY_LABEL, palette.accent, palette.onAccent, pressed && retryBox.inflate(dp(4f)).contains(downX, downY))
     }
 
     // ---- flick between spots (normal mode) ------------------------------------------------------
@@ -1229,6 +1279,13 @@ class OverlayPillView(context: Context) : View(context) {
         when (toLook.kind) {
             Kind.IDLE -> onMicTap?.invoke()
             Kind.LISTENING -> if (cancelBox.inflate(dp(4f)).contains(x, y)) onCancelTap?.invoke() else onConfirmTap?.invoke()
+            Kind.ERROR -> {
+                val retryId = toLook.retryId ?: return
+                when {
+                    retryBox.inflate(dp(4f)).contains(x, y) -> onRetryTap?.invoke(retryId)
+                    dismissBox.inflate(dp(4f)).contains(x, y) -> onDismissTap?.invoke()
+                }
+            }
             else -> Unit
         }
     }
@@ -1423,6 +1480,7 @@ class OverlayPillView(context: Context) : View(context) {
 
     private companion object {
         const val FLICK_GHOST_FADE_MS = 220L
+        const val RETRY_LABEL = "Retry"
         val NUDGES = listOf(-1 to 0, 1 to 0, 0 to -1, 0 to 1)
         val ARRANGEMENT_LABELS = listOf(
             OverlayArrangement.FREE to "Free",

@@ -68,9 +68,20 @@ data class HistoryEntry(
     /** Rule-based stages that changed the text, in order. */
     val stages: List<String> = emptyList(),
     val timings: StageTimings = StageTimings(),
-    val error: String? = null
+    val error: String? = null,
+    /**
+     * File name of the stored audio (16 kHz mono WAV) in the recordings directory, when it was kept.
+     * A failed dictation always keeps its recording so it can be sent again; whether successful
+     * ones do is the "Keep recordings" setting.
+     */
+    val recording: String? = null,
+    /** How many times this audio has been sent for transcription. */
+    val attempts: Int = 1
 ) {
     val failed: Boolean get() = error != null
+
+    /** Nothing was inserted and the audio is still here: the dictation can be sent again. */
+    val retryable: Boolean get() = finalText.isEmpty() && recording != null
 }
 
 /**
@@ -80,9 +91,11 @@ data class HistoryEntry(
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class HistoryStore(
-    private val file: File,
+    val file: File,
     private val maxEntries: Int = MAX_ENTRIES,
-    private val scope: CoroutineScope? = null
+    private val scope: CoroutineScope? = null,
+    /** Where the entries' audio lives, so a recording never outlives its entry. */
+    private val recordings: RecordingStore? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val _entries = MutableStateFlow(load())
@@ -99,6 +112,21 @@ class HistoryStore(
         commit(listOf(entry) + _entries.value.filter { it.id != entry.id })
     }
 
+    /**
+     * A dictation sent again: the entry keeps its place in the list (and its date) and only its
+     * outcome changes. Falls back to [add] when the entry is gone.
+     */
+    @Synchronized
+    fun replace(entry: HistoryEntry) {
+        val current = _entries.value
+        val index = current.indexOfFirst { it.id == entry.id }
+        if (index < 0) {
+            add(entry)
+            return
+        }
+        commit(current.toMutableList().also { it[index] = entry })
+    }
+
     @Synchronized
     fun delete(id: String) {
         val current = _entries.value
@@ -111,9 +139,29 @@ class HistoryStore(
         if (_entries.value.isNotEmpty()) commit(emptyList())
     }
 
+    /** The user deleted every recording: the entries stay, their audio references go. */
+    @Synchronized
+    fun stripRecordings() {
+        val current = _entries.value
+        if (current.none { it.recording != null }) return
+        commit(current.map { if (it.recording == null) it else it.copy(recording = null) })
+    }
+
+    /** Every recording file the current entries refer to. */
+    fun recordingNames(): Set<String> = _entries.value.mapNotNull { it.recording }.toSet()
+
+    /** Persist the list, deleting the recordings of entries that are no longer in it. */
     private fun commit(list: List<HistoryEntry>) {
+        val previous = _entries.value
         val next = list.take(maxEntries)
         _entries.value = next
+        if (recordings != null) {
+            val kept = next.mapNotNull { it.recording }.toSet()
+            for (e in previous + list.drop(maxEntries)) {
+                val name = e.recording ?: continue
+                if (name !in kept) recordings.delete(name)
+            }
+        }
         if (scope == null) persist(next) else scope.launch { persist(next) }
     }
 
@@ -149,12 +197,20 @@ class HistoryStore(
         @Volatile
         private var instance: HistoryStore? = null
 
-        fun get(context: Context): HistoryStore =
-            instance ?: synchronized(this) {
-                instance ?: HistoryStore(
-                    File(context.applicationContext.filesDir, "history.json"),
-                    scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
-                ).also { instance = it }
+        /** One store per app data directory (which only ever changes under test). */
+        fun get(context: Context): HistoryStore {
+            val file = File(context.applicationContext.filesDir, "history.json")
+            instance?.takeIf { it.file == file }?.let { return it }
+            return synchronized(this) {
+                instance?.takeIf { it.file == file } ?: HistoryStore(
+                    file,
+                    scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1)),
+                    recordings = RecordingStore.get(context)
+                ).also { store ->
+                    instance = store
+                    RecordingStore.get(context).sweep(store.recordingNames())
+                }
             }
+        }
     }
 }

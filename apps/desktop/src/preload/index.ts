@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { exposeClerkBridge } from '@clerk/electron/preload'
-import { IPC, type ThemeReport } from '@shared/ipc'
+import { IPC, type RecordingsInfo, type RetryResult, type ThemeReport } from '@shared/ipc'
 import type { Settings, SttProviderKind } from '@shared/settings'
 import type {
   CloudConfig,
@@ -78,8 +78,16 @@ const api = {
     delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC.historyDelete, id),
     clear: (): Promise<void> => ipcRenderer.invoke(IPC.historyClear),
     reinsert: (id: string): Promise<InjectResultDto> => ipcRenderer.invoke(IPC.historyReinsert, id),
+    /** Send a failed dictation's stored audio again; the text is copied, not typed. */
+    retry: (id: string): Promise<RetryResult> => ipcRenderer.invoke(IPC.historyRetry, id),
+    /** The entry's recording as WAV bytes, or null when none was kept. */
+    audio: (id: string): Promise<Uint8Array | null> => ipcRenderer.invoke(IPC.historyAudio, id),
     onAdded: (cb: (e: HistoryEntry) => void): Unsub => on(IPC.historyAdded, cb),
     onChanged: (cb: () => void): Unsub => on(IPC.historyChanged, cb)
+  },
+  recordings: {
+    info: (): Promise<RecordingsInfo> => ipcRenderer.invoke(IPC.recordingsInfo),
+    clear: (): Promise<void> => ipcRenderer.invoke(IPC.recordingsClear)
   },
   cloud: {
     config: (): Promise<CloudConfig> => ipcRenderer.invoke(IPC.cloudConfig),

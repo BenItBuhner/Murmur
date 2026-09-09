@@ -211,6 +211,11 @@ data class MurmurSettings(
     val llmTimeoutMs: Int = 15_000,
     val maxDurationSec: Int = 300,
     /**
+     * Store the audio of every dictation next to its History entry (play it back, send it again).
+     * Off, only failed dictations keep their audio, and only until they succeed or are deleted.
+     */
+    val keepRecordings: Boolean = true,
+    /**
      * Personal dictionary: STT prompt hint, LLM spelling list and enforced in the text. Synced with
      * the account when signed in (same shape as the desktop app and the backend).
      */
@@ -375,6 +380,7 @@ class SettingsStore(context: Context) {
             llmMinWords = prefs.getInt("llmMinWords", d.llmMinWords),
             llmTimeoutMs = prefs.getInt("llmTimeoutMs", d.llmTimeoutMs),
             maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec),
+            keepRecordings = prefs.getBoolean("keepRecordings", d.keepRecordings),
             dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
             useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio),
             overlayShape = OverlayShape.from(prefs.getString("overlayShape", d.overlayShape.id)),
@@ -437,6 +443,7 @@ class SettingsStore(context: Context) {
             .putInt("llmMinWords", s.llmMinWords)
             .putInt("llmTimeoutMs", s.llmTimeoutMs)
             .putInt("maxDurationSec", s.maxDurationSec)
+            .putBoolean("keepRecordings", s.keepRecordings)
             .putString("dictionaryEntries", DictionaryCodec.encode(s.dictionaryEntries))
             .putBoolean("useFixtureAudio", s.useFixtureAudio)
             .putString("overlayShape", s.overlayShape.id)

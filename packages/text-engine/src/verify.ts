@@ -49,6 +49,9 @@ export function cleanModelOutput(output: string, transcript: string): string {
   if (lines.length > 2 && COMMENTARY_LINE.test(lines[0].trim()) && lines[1].trim() === '')
     lines.splice(0, 2)
   text = lines.join('\n').trim()
+  // A fence that was followed by commentary only closes once the commentary is gone.
+  const fenced = /^```[a-z]*\n?([\s\S]*?)\n?```$/i.exec(text)
+  if (fenced) text = fenced[1].trim()
   return text.replace(LABEL_PREFIX, '').trim()
 }
 

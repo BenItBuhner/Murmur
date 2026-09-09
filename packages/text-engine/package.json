@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "MURMUR_LIVE=1 vitest run eval",
-    "golden": "vitest run tests/golden.test.ts --update"
+    "golden": "UPDATE_GOLDEN=1 vitest run tests/golden.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

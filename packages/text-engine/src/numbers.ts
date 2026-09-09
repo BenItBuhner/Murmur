@@ -175,10 +175,8 @@ const isDigitLike = (t: Tok | undefined): boolean =>
 
 /** Integer-safe rendering: no exponent, no fraction noise. */
 function digitsOf(value: number): string {
-  if (!Number.isFinite(value)) return ''
-  const rounded = Math.round(Math.abs(value))
-  if (rounded >= 1e21) return ''
-  return String(rounded)
+  if (!Number.isFinite(value) || Math.abs(value) >= 1e18) return ''
+  return String(Math.round(Math.abs(value)))
 }
 
 /**

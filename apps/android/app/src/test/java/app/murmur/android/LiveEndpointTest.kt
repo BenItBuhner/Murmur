@@ -4,16 +4,18 @@ import app.murmur.android.audio.Wav
 import app.murmur.android.llm.LlmClient
 import app.murmur.android.llm.LlmConfig
 import app.murmur.android.settings.SttKind
+import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.Tone
 import app.murmur.android.stt.SttClient
 import app.murmur.android.stt.SttConfig
 import app.murmur.android.text.AppCategory
-import app.murmur.android.text.AppContext
-import app.murmur.android.text.PipelineOptions
-import app.murmur.android.text.buildFormatMessages
-import app.murmur.android.text.maxTokensFor
-import app.murmur.android.text.runPipeline
-import app.murmur.android.text.sanitizeLlmOutput
+import app.murmur.android.text.Engine
+import app.murmur.android.text.FormatContext
+import app.murmur.android.text.FormatInput
+import app.murmur.android.text.FormatOutcome
+import app.murmur.android.text.ModelAnswer
+import app.murmur.android.text.basicCleanup
+import app.murmur.android.text.prepareTranscript
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -48,22 +50,25 @@ class LiveEndpointTest {
         println("STT (${stt.latencyMs}ms): ${stt.text}")
         assertTrue(stt.text.lowercase().contains("country"))
 
-        val light = runPipeline(stt.text, PipelineOptions())
+        val light = basicCleanup(prepareTranscript(stt.text).text, emptyList())
         assertTrue(light.text.isNotEmpty())
 
         if (llmModel.isNotEmpty()) {
-            val res = LlmClient.chatComplete(
-                LlmConfig(baseUrl, apiKey, llmModel, 30_000),
-                buildFormatMessages(
-                    light.text.trim(), emptyList(), Tone.NEUTRAL,
-                    AppContext("test", AppCategory.UNKNOWN)
-                ),
-                maxTokens = maxTokensFor(light.text)
-            )
-            println("LLM (${res.latencyMs}ms): ${res.text}")
-            val guard = sanitizeLlmOutput(res.text, light.text)
-            assertTrue("LLM output rejected: ${guard.reason}", guard.ok)
-            assertTrue(guard.text.lowercase().contains("country"))
+            val cfg = LlmConfig(baseUrl, apiKey, llmModel, 30_000)
+            val result = Engine.formatTranscript(
+                FormatInput(
+                    transcript = stt.text,
+                    mode = FormattingMode.SMART,
+                    context = FormatContext(AppCategory.UNKNOWN, Tone.NEUTRAL, language = "en"),
+                    dictionary = emptyList()
+                )
+            ) { messages, maxTokens ->
+                val res = LlmClient.chatComplete(cfg, messages, maxTokens = maxTokens)
+                ModelAnswer(res.text, res.finishReason)
+            }
+            println("LLM (${result.llmMs}ms, ${result.status}): ${result.text}")
+            assertTrue("model output not used: ${result.status}", result.status.outcome == FormatOutcome.USED)
+            assertTrue(result.text.lowercase().contains("country"))
         }
     }
 }

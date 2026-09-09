@@ -1,15 +1,13 @@
 package app.murmur.android.text
 
-import app.murmur.android.settings.BulletMarker
-import app.murmur.android.settings.ListStyle
-import app.murmur.android.settings.ListsMode
-import app.murmur.android.settings.NumbersMode
+import app.murmur.android.settings.DictionaryEntry
 
 /**
- * Kotlin port of the desktop deterministic cleanup pipeline
- * (apps/desktop/src/core/text/{format,fillers,commands,corrections,pipeline,util}.ts).
- * Fast and predictable; doubles as the fallback whenever the smart-formatting model is
- * slow, unavailable, or returns something suspicious.
+ * Kotlin port of the text engine's deterministic stages
+ * (packages/text-engine/src/{text,fillers,commands,cleanup}.ts). There are three moments for
+ * rules around the model: `prepareTranscript` before it (exact structural commands), `basicCleanup`
+ * instead of it (the fallback, and "light" mode), and `finish` after either (dictionary spellings,
+ * spacing, destination finishing, trailing space).
  */
 
 // ---- util ------------------------------------------------------------------------------------
@@ -317,267 +315,65 @@ private fun lastSentenceBoundary(s: String): Int {
     return m.range.first + 1
 }
 
-// ---- self-corrections ------------------------------------------------------------------------
-
-private val CORRECTION_MARKERS = listOf(
-    "no wait", "wait no", "no", "i mean", "sorry", "or rather", "rather",
-    "correction", "make that", "scratch that"
-)
-private val STOP_WORDS = setOf(
-    "and", "but", "or", "then", "so", "because", "with", "at", "on", "in",
-    "to", "for", "of", "by", "from"
-)
-private val UNFINISHED_TAIL = STOP_WORDS + setOf(
-    "the", "a", "an", "my", "your", "our", "their", "his", "her", "its", "this", "these", "those", "some",
-    "any", "is", "are", "was", "were", "be", "i", "we", "you", "they", "he", "she", "it", "that", "about",
-    "into", "onto", "like"
-)
-private val MARKER_RE = Regex(
-    ",\\s*(?:${CORRECTION_MARKERS.joinToString("|") { it.replace(" ", "\\s+") }})\\s*,\\s*",
-    RegexOption.IGNORE_CASE
-)
-private val NUMERIC = Regex("^[$€£]?\\d[\\d,.:]*(?:%|am|pm|k|x)?$", RegexOption.IGNORE_CASE)
-
-private data class Tok(val text: String, val start: Int, val end: Int)
-
-/**
- * "let's meet on Tuesday, no, Wednesday at 5" -> "let's meet on Wednesday at 5".
- * Conservative: the marker must be wrapped in commas (how Whisper transcribes the pause)
- * and the replacement is bounded by punctuation/conjunctions.
- */
-fun applySelfCorrections(text: String): String {
-    var out = text
-    var guard = 0
-    var searchFrom = 0
-    while (guard++ < 20) {
-        val m = MARKER_RE.find(out, searchFrom) ?: break
-        val before = out.substring(0, m.range.first)
-        val after = out.substring(m.range.last + 1)
-
-        val afterAll = leadingTokens(after, 6)
-        val beforeAll = trailingTokensInSentence(before, 6)
-        val lastBefore = beforeAll.lastOrNull()
-        // "No, no, no, that is wrong": a marker inside a run of itself is repetition for emphasis,
-        // not a correction. Leave it and look further along.
-        val marker = m.value.replace(Regex("[,\\s]+"), " ").trim().lowercase()
-        if (lastBefore?.text?.lowercase() == marker || afterAll.firstOrNull()?.text?.lowercase() == marker) {
-            searchFrom = m.range.last
-            continue
-        }
-        searchFrom = 0
-        // After an unfinished phrase ("the flights for, I mean, ...") the marker is hesitation.
-        if (afterAll.isEmpty() || beforeAll.isEmpty() ||
-            (lastBefore != null && lastBefore.text.lowercase() in UNFINISHED_TAIL)
-        ) {
-            out = "${before.trimEnd()} $after"
-            continue
-        }
-
-        val beforeSpan: List<Tok>
-        val replacement: List<Tok>
-
-        val anchor = findAnchor(beforeAll, afterAll[0])
-        if (anchor >= 0 && beforeAll.size - anchor <= afterAll.size) {
-            val n = beforeAll.size - anchor
-            beforeSpan = beforeAll.subList(anchor, beforeAll.size)
-            replacement = afterAll.subList(0, n)
-        } else if (NUMERIC.matches(afterAll[0].text) && lastNumericIndex(beforeAll) >= 0) {
-            val idx = lastNumericIndex(beforeAll)
-            beforeSpan = listOf(beforeAll[idx])
-            replacement = listOf(afterAll[0])
-        } else {
-            val run = boundedRun(afterAll)
-            val n = minOf(run.size, beforeAll.size)
-            beforeSpan = beforeAll.subList(beforeAll.size - n, beforeAll.size)
-            replacement = run.subList(0, n)
-        }
-
-        val head = before.substring(0, beforeSpan[0].start)
-        val tail = after.substring(replacement.last().end)
-        var replacementText = after.substring(replacement[0].start, replacement.last().end)
-        if (Regex("^\\s*$").matches(head) || Regex("[.!?]\\s*$").containsMatchIn(head)) {
-            replacementText = capitalizeFirst(replacementText)
-        }
-        out = "$head$replacementText$tail"
-    }
-    return out
-}
-
-private fun leadingTokens(s: String, max: Int): List<Tok> {
-    val re = Regex("[\\p{L}\\p{N}'’$€£%#@:-]+|[.,;!?\\n]")
-    val out = ArrayList<Tok>()
-    for (m in re.findAll(s)) {
-        if (out.size >= max) break
-        val t = m.value
-        if (Regex("^[.,;!?\\n]$").matches(t)) break
-        out.add(Tok(t, m.range.first, m.range.last + 1))
-    }
-    return out
-}
-
-private fun trailingTokensInSentence(s: String, max: Int): List<Tok> {
-    val boundaryMatch = Regex("[.!?\\n](?=[^.!?\\n]*$)").find(s)
-    val startAt = if (boundaryMatch != null) boundaryMatch.range.first + 1 else 0
-    val re = Regex("[\\p{L}\\p{N}'’$€£%#@:-]+")
-    val all = ArrayList<Tok>()
-    for (m in re.findAll(s.substring(startAt))) {
-        all.add(Tok(m.value, startAt + m.range.first, startAt + m.range.last + 1))
-    }
-    return if (all.size <= max) all else all.subList(all.size - max, all.size)
-}
-
-private fun findAnchor(before: List<Tok>, first: Tok): Int {
-    val target = first.text.lowercase()
-    if (target in STOP_WORDS) return -1
-    for (i in before.size - 1 downTo maxOf(0, before.size - 4)) {
-        if (before[i].text.lowercase() == target) return i
-    }
-    return -1
-}
-
-private fun lastNumericIndex(before: List<Tok>): Int {
-    for (i in before.size - 1 downTo maxOf(0, before.size - 3)) {
-        if (NUMERIC.matches(before[i].text)) return i
-    }
-    return -1
-}
-
-/** First run of words (max 3) that stops at a conjunction/preposition after the first word. */
-private fun boundedRun(tokens: List<Tok>): List<Tok> {
-    val out = ArrayList<Tok>()
-    for (t in tokens) {
-        if (out.isNotEmpty() && t.text.lowercase() in STOP_WORDS) break
-        out.add(t)
-        if (out.size == 3) break
-    }
-    return out
-}
-
 // ---- pipeline --------------------------------------------------------------------------------
 
-data class PipelineOptions(
-    val removeFillers: Boolean = true,
-    val fillerWords: List<String> = DEFAULT_FILLERS,
-    val hesitations: app.murmur.android.settings.HesitationLevel = app.murmur.android.settings.HesitationLevel.LIGHT,
-    val hesitationPhrases: List<String> = emptyList(),
-    val collapseRepeats: Boolean = true,
-    val repetitionScope: app.murmur.android.settings.RepetitionScope = app.murmur.android.settings.RepetitionScope.PHRASES,
-    val spokenCommands: Boolean = true,
-    val selfCorrections: Boolean = true,
-    val autoCapitalize: Boolean = true,
-    val trailingSpace: Boolean = true,
-    val pressEnterCommand: Boolean = true,
-    val lists: ListsMode = ListsMode.AUTO,
-    val listStyle: ListStyle = ListStyle.AUTO,
-    val bulletMarker: BulletMarker = BulletMarker.DASH,
-    val numbers: NumbersMode = NumbersMode.SMART,
-    /** Spellings to enforce, same stage order as the desktop pipeline. */
-    val dictionary: List<app.murmur.android.settings.DictionaryEntry> = emptyList()
-)
+data class PreparedTranscript(val text: String, val pressEnter: Boolean, val stages: List<String>)
 
-/** What the deterministic pass learned about the text; the smart-formatting prompt uses it. */
-data class TextHints(
-    val list: ListIntent = ListIntent(null, false, false, 0),
-    val listApplied: Boolean = false,
-    val isQuestion: Boolean = false,
-    val hasLineBreaks: Boolean = false
-)
-
-data class PipelineResult(
-    val text: String,
-    val pressEnter: Boolean,
-    val wordCount: Int,
-    val stages: List<String>,
-    val empty: Boolean,
-    val hints: TextHints = TextHints()
-)
-
-/**
- * Deterministic cleanup that runs on every dictation, with or without the LLM stage. Same order
- * as the desktop pipeline: commands, fillers, self-corrections, hesitation, repeats, dictionary,
- * lists, numbers, then presentation.
- */
-fun runPipeline(raw: String, opts: PipelineOptions): PipelineResult {
+/** Before the model: the structural commands that are exact or have side effects. */
+fun prepareTranscript(raw: String): PreparedTranscript {
     val stages = ArrayList<String>()
     var text = normalizeWhitespace(raw)
-    var pressEnter = false
-
+    val enter = extractPressEnter(text)
+    if (enter.pressEnter) {
+        stages.add("press-enter")
+        text = enter.text
+    }
     fun step(name: String, fn: (String) -> String) {
         val next = fn(text)
         if (next != text) stages.add(name)
         text = next
     }
-
-    if (opts.spokenCommands) {
-        if (opts.pressEnterCommand) {
-            val r = extractPressEnter(text)
-            if (r.pressEnter) {
-                stages.add("press-enter")
-                pressEnter = true
-                text = r.text
-            }
-        }
-        step("scratch-that", ::applyScratchThat)
-        step("line-commands", ::applyLineCommands)
-        step("literal-punctuation", ::applyLiteralPunctuation)
-        step("quotes", ::applySpokenQuotes)
-    }
-    if (opts.removeFillers) step("fillers") { removeFillers(it, opts.fillerWords) }
-    if (opts.selfCorrections) step("self-corrections", ::applySelfCorrections)
-    if (opts.hesitations != app.murmur.android.settings.HesitationLevel.OFF) {
-        step("hesitations") { removeHesitations(it, opts.hesitations, opts.hesitationPhrases) }
-    }
-    if (opts.collapseRepeats) step("repeats") { collapseRepeats(it, opts.repetitionScope) }
-    step("dictionary") { applyDictionary(it, opts.dictionary) }
-
-    val list = formatLists(text, ListOptions(opts.lists, opts.listStyle, opts.bulletMarker, opts.autoCapitalize))
-    if (list.text != text) {
-        stages.add(if (list.applied) "lists" else "list-request")
-        text = list.text
-    }
-
-    if (opts.numbers != NumbersMode.OFF) step("numbers") { convertNumbers(it, opts.numbers) }
-    step("punctuation", ::fixPunctuationSpacing)
-    if (opts.autoCapitalize) step("capitalize", ::capitalizeSentences)
-    text = normalizeWhitespace(text)
-
-    val empty = !isMeaningful(text)
-    if (!empty) text = applyTrailing(text, opts.trailingSpace && !text.endsWith("\n"))
-
-    return PipelineResult(
-        text = if (empty) "" else text,
-        pressEnter = pressEnter,
-        wordCount = countWords(text),
-        stages = stages,
-        empty = empty,
-        hints = TextHints(
-            list = list.intent,
-            listApplied = list.applied,
-            isQuestion = isQuestion(text),
-            hasLineBreaks = text.contains('\n')
-        )
-    )
+    step("line-commands", ::applyLineCommands)
+    step("literal-punctuation", ::applyLiteralPunctuation)
+    return PreparedTranscript(normalizeWhitespace(text), enter.pressEnter, stages)
 }
 
-/** Second pass after the LLM: re-assert dictionary spellings and layout rules only. */
-fun finalizeAfterLlm(llmText: String, opts: PipelineOptions): PipelineResult {
-    var text = normalizeWhitespace(llmText)
-    text = normalizeListMarkers(text, opts.bulletMarker)
-    text = applyDictionary(text, opts.dictionary)
-    text = fixPunctuationSpacing(text)
-    val empty = !isMeaningful(text)
-    if (!empty) text = applyTrailing(text, opts.trailingSpace && !text.endsWith("\n"))
-    return PipelineResult(
-        text = if (empty) "" else text,
-        pressEnter = false,
-        wordCount = countWords(text),
-        stages = listOf("llm"),
-        empty = empty,
-        hints = TextHints(
-            list = detectListIntent(text),
-            listApplied = Regex("(?:^|\\n)(?:[-•*]|\\d+\\.)\\s").containsMatchIn(text),
-            isQuestion = isQuestion(text),
-            hasLineBreaks = text.contains('\n')
-        )
-    )
+data class Cleaned(val text: String, val stages: List<String>)
+
+/** Instead of the model: what "light" formatting and every fallback insert. */
+fun basicCleanup(prepared: String, dictionary: List<DictionaryEntry>): Cleaned {
+    val stages = ArrayList<String>()
+    var text = prepared
+    fun step(name: String, fn: (String) -> String) {
+        val next = fn(text)
+        if (next != text) stages.add(name)
+        text = next
+    }
+    step("scratch-that", ::applyScratchThat)
+    step("quotes", ::applySpokenQuotes)
+    step("fillers") { removeFillers(it) }
+    step("dictionary") { applyDictionary(it, dictionary) }
+    step("punctuation", ::fixPunctuationSpacing)
+    step("capitalize", ::capitalizeSentences)
+    return Cleaned(normalizeWhitespace(text), stages)
+}
+
+data class Finished(val text: String, val empty: Boolean, val stages: List<String>)
+
+/** After the model (or the fallback): the parts that must be exact. */
+fun finish(text: String, category: AppCategory, dictionary: List<DictionaryEntry>, trailingSpace: Boolean): Finished {
+    val stages = ArrayList<String>()
+    var out = normalizeWhitespace(text)
+    val dict = applyDictionary(out, dictionary)
+    if (dict != out) stages.add("dictionary")
+    out = fixPunctuationSpacing(dict)
+    if (category == AppCategory.TERMINAL) {
+        val one = out.replace(Regex("\\s*\\n+\\s*"), " ").trim().trimEnd('.')
+        if (one != out) stages.add("terminal")
+        out = one
+    }
+    out = normalizeWhitespace(out)
+    val empty = !isMeaningful(out)
+    if (!empty) out = applyTrailing(out, trailingSpace && !out.endsWith("\n"))
+    return Finished(if (empty) "" else out, empty, stages)
 }

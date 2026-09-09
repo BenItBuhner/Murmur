@@ -523,12 +523,8 @@ private fun StylePreferences.toDto() = PreferencesDto(
     formatting = FormattingPreferencesDto(
         mode = mode,
         tone = tone,
-        removeFillers = removeFillers,
-        collapseRepeats = collapseRepeats,
-        spokenCommands = spokenCommands,
-        selfCorrections = selfCorrections,
-        autoCapitalize = autoCapitalize,
-        trailingSpace = trailingSpace
+        trailingSpace = trailingSpace,
+        llmInstructions = llmInstructions
     ),
     language = language
 )

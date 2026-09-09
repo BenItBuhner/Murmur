@@ -116,19 +116,28 @@ export class OverlayWindow {
 
   setState(state: OverlayState): void {
     this.state = state
+    this.push()
+    this.applyVisibility()
+    this.setInteractive(state.phase === 'error' && !!state.retryId)
+    this.armHideTimer()
+  }
+
+  private clearHideTimer(): void {
     if (this.hideTimer) {
       clearTimeout(this.hideTimer)
       this.hideTimer = null
     }
-    this.push()
-    this.applyVisibility()
-    this.setInteractive(state.phase === 'error' && !!state.retryId)
-    if (state.phase === 'success' || state.phase === 'error') {
-      this.hideTimer = setTimeout(
-        () => this.setState({ phase: 'idle' }),
-        state.phase === 'success' ? SUCCESS_HOLD_MS : state.retryId ? RETRY_HOLD_MS : ERROR_HOLD_MS
-      )
-    }
+  }
+
+  /** Results go away on their own; an error that can be retried waits for the user much longer. */
+  private armHideTimer(): void {
+    this.clearHideTimer()
+    const { phase, retryId } = this.state
+    if (phase !== 'success' && phase !== 'error') return
+    this.hideTimer = setTimeout(
+      () => this.setState({ phase: 'idle' }),
+      phase === 'success' ? SUCCESS_HOLD_MS : retryId ? RETRY_HOLD_MS : ERROR_HOLD_MS
+    )
   }
 
   /** The user waved the pill's message away. */
@@ -157,9 +166,12 @@ export class OverlayWindow {
     else this.win.setIgnoreMouseEvents(true, { forward: true })
   }
 
+  /** A pill the pointer is over is being read or aimed at: it never times out underneath the user. */
   private onHover(over: boolean): void {
-    if (!this.win || !this.interactive || process.platform === 'linux') return
-    this.win.setIgnoreMouseEvents(!over, { forward: true })
+    if (!this.win || !this.interactive) return
+    if (over) this.clearHideTimer()
+    else this.armHideTimer()
+    if (process.platform !== 'linux') this.win.setIgnoreMouseEvents(!over, { forward: true })
   }
 
   playSound(name: SoundName): void {

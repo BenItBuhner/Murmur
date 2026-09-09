@@ -10,6 +10,9 @@ const log = createLogger('recordings')
 /** 16 kHz mono PCM is ~1.9 MB per minute; half a gigabyte is roughly four hours of speech. */
 export const DEFAULT_RECORDINGS_BUDGET_BYTES = 500 * 1024 * 1024
 
+/** Younger than this, a file without an entry is a dictation being processed, not an orphan. */
+export const IN_FLIGHT_MS = 60_000
+
 const FILE_NAME = /^[A-Za-z0-9_-]+\.wav$/
 
 /**
@@ -85,11 +88,14 @@ export class RecordingStore {
     }
   }
 
-  /** Delete every file that no history entry refers to (entries evicted, files left behind). */
-  sweep(keep: ReadonlySet<string>): void {
+  /**
+   * Delete every file that no history entry refers to (entries evicted, files left behind). A file
+   * written moments ago belongs to a dictation still in flight, whose entry is not there yet.
+   */
+  sweep(keep: ReadonlySet<string>, now = Date.now()): void {
     let removed = 0
     for (const f of this.files()) {
-      if (keep.has(f.name)) continue
+      if (keep.has(f.name) || now - f.mtime < IN_FLIGHT_MS) continue
       this.delete(f.name)
       removed++
     }

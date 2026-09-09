@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { RecordingStore } from '../src/main/store/recordings'
+import { IN_FLIGHT_MS, RecordingStore } from '../src/main/store/recordings'
 
 const SAMPLE_RATE = 16000
 
@@ -52,7 +52,10 @@ describe('RecordingStore', () => {
     expect(store.has(a)).toBe(false)
     expect(store.info().count).toBe(2)
 
+    // Just written: a dictation still in flight, not an orphan.
     store.sweep(new Set([b]))
+    expect(store.has(c)).toBe(true)
+    store.sweep(new Set([b]), Date.now() + IN_FLIGHT_MS + 1)
     expect(store.has(b)).toBe(true)
     expect(store.has(c)).toBe(false)
 

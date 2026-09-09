@@ -11,7 +11,7 @@ import {
   formatTranscript,
   prepareTranscript,
   resolveStyle,
-  type Complete
+  type FormatResult
 } from '@engine'
 import { IPC, type RecordingsInfo, type RetryResult, type ThemeReport } from '@shared/ipc'
 import type { Settings } from '@shared/settings'
@@ -415,33 +415,22 @@ export function registerIpc(deps: IpcDeps): void {
         }
       }
       if (request.smart) {
-        let complete: Complete | null = null
-        let unavailable: string | undefined
-        try {
-          const resolved = await inference.llm()
-          const llm = { ...resolved.cfg, timeoutMs: Math.max(resolved.cfg.timeoutMs, 20000) }
-          if (llm.baseUrl && llm.model)
-            complete = (messages, opts) => inference.complete(llm, messages, opts)
-        } catch (err) {
-          unavailable = friendlyError(err)
+        const input = {
+          transcript: request.raw,
+          mode: 'smart' as const,
+          context: controller.formatContext(s, style, app)
         }
-        const formatted = await formatTranscript(
-          {
-            transcript: request.raw,
-            mode: 'smart',
-            context: controller.formatContext(s, style, app)
-          },
-          complete
-        )
+        let formatted: FormatResult
+        try {
+          const formatter = await inference.formatter()
+          formatted = await formatter.format(input)
+        } catch (err) {
+          formatted = await formatTranscript(input, null)
+          formatted.status = { outcome: 'failed', detail: friendlyError(err), attempts: 0 }
+        }
         const finished = finish(formatted.text, finishOpts)
         out.smart = {
-          status: {
-            ...formatted.status,
-            detail:
-              unavailable && formatted.status.outcome === 'skipped'
-                ? unavailable
-                : formatted.status.detail
-          },
+          status: formatted.status,
           text: formatted.status.outcome === 'used' ? finished.text : undefined,
           modelText: formatted.modelText,
           llmMs: formatted.llmMs,

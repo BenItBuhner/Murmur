@@ -21,8 +21,9 @@ import {
   formatTranscript,
   resolveStyle,
   type AppContext,
-  type Complete,
   type FormatContext,
+  type FormatInput,
+  type FormatResult,
   type ResolvedStyle
 } from '@engine'
 import { MURMUR_ERROR_CODES } from '@shared/inference'
@@ -513,23 +514,26 @@ export class DictationController extends EventEmitter {
       finalText = raw + (style.trailingSpace ? ' ' : '')
     } else {
       t = performance.now()
-      // A formatting model that cannot be reached (signed out of Murmur, no token) is not an
-      // error for the dictation: the rule-based text goes in, and History says why.
-      let complete: Complete | null = null
-      let llmUnavailable: string | undefined
-      if (style.mode === 'smart') {
+      const input: FormatInput = {
+        transcript: raw,
+        mode: style.mode,
+        context: this.formatContext(s, style, app)
+      }
+      let formatted: FormatResult
+      if (style.mode !== 'smart') {
+        formatted = await formatTranscript(input, null)
+      } else {
+        // A formatting model that cannot be reached (signed out of Murmur, no token, gateway
+        // down) is not an error for the dictation: the rule-based text goes in, and History
+        // says why.
         try {
-          const llm = (await this.deps.inference.llm()).cfg
-          if (llm.baseUrl && llm.model)
-            complete = (messages, opts) => this.deps.inference.complete(llm, messages, opts)
+          const formatter = await this.deps.inference.formatter()
+          formatted = await formatter.format(input)
         } catch (err) {
-          llmUnavailable = friendlyError(err)
+          formatted = await formatTranscript(input, null)
+          formatted.status = { outcome: 'failed', detail: friendlyError(err), attempts: 0 }
         }
       }
-      const formatted = await formatTranscript(
-        { transcript: raw, mode: style.mode, context: this.formatContext(s, style, app) },
-        complete
-      )
       const finished = finish(formatted.text, {
         category: app.category,
         dictionary: s.dictionary,
@@ -542,13 +546,7 @@ export class DictationController extends EventEmitter {
       pressEnter = formatted.pressEnter
       finalText = finished.text
       stages = [...formatted.stages, ...finished.stages]
-      llmStatus = {
-        ...formatted.status,
-        detail:
-          llmUnavailable && formatted.status.outcome === 'skipped'
-            ? llmUnavailable
-            : formatted.status.detail
-      }
+      llmStatus = formatted.status
       llmUsed = formatted.status.outcome === 'used'
       if (formatted.status.outcome === 'rejected')
         log.warn(

@@ -15,6 +15,10 @@ export const IPC = {
   historyDelete: 'history:delete',
   historyClear: 'history:clear',
   historyReinsert: 'history:reinsert',
+  historyRetry: 'history:retry',
+  historyAudio: 'history:audio',
+  recordingsInfo: 'recordings:info',
+  recordingsClear: 'recordings:clear',
   sttListModels: 'stt:list-models',
   sttTest: 'stt:test',
   llmListModels: 'llm:list-models',
@@ -73,6 +77,11 @@ export const IPC = {
   overlayState: 'overlay:state',
   overlayPlaySound: 'overlay:play-sound',
   overlayTheme: 'overlay:theme',
+  /** The user pressed Retry / the dismiss cross on the pill (overlay -> main). */
+  overlayRetry: 'overlay:retry',
+  overlayDismiss: 'overlay:dismiss',
+  /** The pointer entered or left the pill; main makes the window clickable only while it is over. */
+  overlayHover: 'overlay:hover',
   audioConfigure: 'audio:configure',
   audioStart: 'audio:start',
   audioStop: 'audio:stop',
@@ -139,3 +148,14 @@ export interface AudioStatusMessage {
 }
 
 export type SoundName = 'start' | 'stop' | 'lock' | 'error' | 'cancel'
+
+/** What the recordings directory holds, for the settings page. */
+export interface RecordingsInfo {
+  count: number
+  bytes: number
+}
+
+export interface RetryResult {
+  ok: boolean
+  error?: string
+}

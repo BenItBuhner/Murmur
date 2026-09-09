@@ -28,7 +28,12 @@ const api = {
   sendChunk: (m: AudioChunkMessage): void => ipcRenderer.send(IPC.audioChunk, m),
   sendStopped: (m: AudioStoppedMessage): void => ipcRenderer.send(IPC.audioStopped, m),
   sendStatus: (m: AudioStatusMessage): void => ipcRenderer.send(IPC.audioStatus, m),
-  sendLevel: (level: number): void => ipcRenderer.send(IPC.audioLevel, level)
+  sendLevel: (level: number): void => ipcRenderer.send(IPC.audioLevel, level),
+  /** The pill's Retry button: send the failed dictation's audio again. */
+  retry: (id: string): void => ipcRenderer.send(IPC.overlayRetry, id),
+  dismiss: (): void => ipcRenderer.send(IPC.overlayDismiss),
+  /** Pointer over the pill: main lets the window take clicks only while this is true. */
+  hover: (over: boolean): void => ipcRenderer.send(IPC.overlayHover, over)
 }
 
 export type MurmurOverlayApi = typeof api

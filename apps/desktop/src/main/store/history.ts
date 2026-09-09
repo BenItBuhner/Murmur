@@ -16,10 +16,18 @@ function parseHistory(raw: unknown): HistoryEntry[] {
   )
 }
 
+/** Where the entries' audio lives, so a recording never outlives its entry. */
+export interface RecordingSink {
+  delete(name: string | undefined): void
+}
+
 export class HistoryStore extends EventEmitter {
   private store: JsonStore<HistoryEntry[]>
 
-  constructor(userDataPath: string) {
+  constructor(
+    userDataPath: string,
+    private readonly recordings: RecordingSink | null = null
+  ) {
     super()
     this.store = new JsonStore<HistoryEntry[]>(
       join(userDataPath, 'history.json'),
@@ -29,10 +37,68 @@ export class HistoryStore extends EventEmitter {
   }
 
   add(entry: HistoryEntry): void {
-    const list = [entry, ...this.store.get().filter((e) => e.id !== entry.id)].slice(0, MAX_ENTRIES)
-    this.store.set(list)
+    const current = this.store.get()
+    const list = [entry, ...current.filter((e) => e.id !== entry.id)]
+    this.commit(list.slice(0, MAX_ENTRIES), current, list.slice(MAX_ENTRIES))
     this.emit('added', entry)
     this.emit('changed')
+  }
+
+  /**
+   * A dictation sent again: the entry keeps its place in the list (and its date) and only its
+   * outcome changes. Falls back to `add` when the entry is gone.
+   */
+  replace(entry: HistoryEntry): void {
+    const current = this.store.get()
+    const index = current.findIndex((e) => e.id === entry.id)
+    if (index < 0) {
+      this.add(entry)
+      return
+    }
+    const list = current.slice()
+    list[index] = entry
+    this.commit(list, current)
+    this.emit('replaced', entry)
+    this.emit('changed')
+  }
+
+  /** The user deleted every recording: the entries stay, their audio references go. */
+  stripRecordings(): void {
+    const current = this.store.get()
+    if (!current.some((e) => e.recording)) return
+    const next = current.map((e) => {
+      if (!e.recording) return e
+      const rest: HistoryEntry = { ...e }
+      delete rest.recording
+      return rest
+    })
+    this.commit(next, current)
+    this.emit('changed')
+  }
+
+  /** Every recording file the current entries refer to. */
+  recordingNames(): Set<string> {
+    const names = new Set<string>()
+    for (const e of this.store.get()) if (e.recording) names.add(e.recording)
+    return names
+  }
+
+  /**
+   * Persist `next`, deleting the recordings of entries that are no longer in it. `evicted` are
+   * entries that fell off the end of the list and are not in `next` either.
+   */
+  private commit(
+    next: HistoryEntry[],
+    previous: HistoryEntry[],
+    evicted: HistoryEntry[] = []
+  ): void {
+    this.store.set(next)
+    if (!this.recordings) return
+    const kept = new Set<string>()
+    for (const e of next) if (e.recording) kept.add(e.recording)
+    for (const e of [...previous, ...evicted]) {
+      if (e.recording && !kept.has(e.recording)) this.recordings.delete(e.recording)
+    }
   }
 
   list(limit = 100, offset = 0): { entries: HistoryEntry[]; total: number } {
@@ -45,13 +111,17 @@ export class HistoryStore extends EventEmitter {
   }
 
   delete(id: string, origin: HistoryOrigin = 'local'): void {
-    this.store.set(this.store.get().filter((e) => e.id !== id))
+    const current = this.store.get()
+    this.commit(
+      current.filter((e) => e.id !== id),
+      current
+    )
     this.emit('deleted', id, origin)
     this.emit('changed')
   }
 
   clear(origin: HistoryOrigin = 'local'): void {
-    this.store.set([])
+    this.commit([], this.store.get())
     this.emit('cleared', origin)
     this.emit('changed')
   }
@@ -72,7 +142,7 @@ export class HistoryStore extends EventEmitter {
     const next = [...kept, ...additions]
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, MAX_ENTRIES)
-    this.store.set(next)
+    this.commit(next, current)
     this.emit('changed')
   }
 
@@ -81,12 +151,12 @@ export class HistoryStore extends EventEmitter {
     const current = this.store.get()
     const next = current.filter((e) => !e.remote)
     if (next.length === current.length) return
-    this.store.set(next)
+    this.commit(next, current)
     this.emit('changed')
   }
 
   replaceAll(entries: HistoryEntry[], origin: HistoryOrigin = 'local'): void {
-    this.store.set(entries.slice(0, MAX_ENTRIES))
+    this.commit(entries.slice(0, MAX_ENTRIES), this.store.get())
     this.emit('cleared', origin)
     this.emit('changed')
   }

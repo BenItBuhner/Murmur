@@ -1,6 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Clock3, Copy, CornerDownLeft, Search, Trash2 } from 'lucide-react'
+import {
+  Clock3,
+  Copy,
+  CornerDownLeft,
+  Loader2,
+  Play,
+  RotateCcw,
+  Search,
+  Square,
+  Trash2
+} from 'lucide-react'
 import { toast } from 'sonner'
 import type { HistoryEntry } from '@shared/types'
 import { Button } from '@renderer/components/ui/button'
@@ -69,11 +79,23 @@ export function HistoryPage(): React.JSX.Element {
   const [total, setTotal] = useState(0)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<string | null>(null)
+  /** Entry whose recording is being sent again right now. */
+  const [retrying, setRetrying] = useState<string | null>(null)
+  const [playing, setPlaying] = useState<string | null>(null)
+  const player = useRef<{ audio: HTMLAudioElement; url: string } | null>(null)
 
   const load = async (): Promise<void> => {
     const r = await window.murmur.history.list(300)
     setEntries(r.entries)
     setTotal(r.total)
+  }
+  const stopPlayback = (): void => {
+    const p = player.current
+    if (!p) return
+    p.audio.pause()
+    URL.revokeObjectURL(p.url)
+    player.current = null
+    setPlaying(null)
   }
   useEffect(() => {
     void load()
@@ -82,10 +104,14 @@ export function HistoryPage(): React.JSX.Element {
         setEntries((prev) => [e, ...prev.filter((x) => x.id !== e.id)])
         setTotal((t) => t + 1)
       }),
-      // Entries merged from other devices (or removed there) arrive through the sync engine.
+      // Entries merged from other devices (or removed there), and dictations sent again, arrive
+      // as a whole-list change.
       window.murmur.history.onChanged(() => void load())
     ]
-    return () => unsubs.forEach((u) => u())
+    return () => {
+      unsubs.forEach((u) => u())
+      stopPlayback()
+    }
   }, [])
 
   const filtered = useMemo(() => {
@@ -109,15 +135,53 @@ export function HistoryPage(): React.JSX.Element {
     if (!r.ok) toast.error(r.error ?? 'Could not insert')
   }
   const remove = async (id: string): Promise<void> => {
+    if (playing === id) stopPlayback()
     await window.murmur.history.delete(id)
     setEntries((prev) => prev.filter((e) => e.id !== id))
     setTotal((t) => t - 1)
   }
   const clear = async (): Promise<void> => {
+    stopPlayback()
     await window.murmur.history.clear()
     setEntries([])
     setTotal(0)
     toast.success('History cleared')
+  }
+  /** Send the stored audio through the pipeline again; the result is copied, not typed. */
+  const retry = async (id: string): Promise<void> => {
+    if (retrying) return
+    setRetrying(id)
+    try {
+      const r = await window.murmur.history.retry(id)
+      if (r.ok) toast.success('Transcribed — the text is on your clipboard')
+      else toast.error(r.error ?? 'Still failing')
+    } finally {
+      setRetrying(null)
+    }
+  }
+  const togglePlay = async (id: string): Promise<void> => {
+    if (playing === id) {
+      stopPlayback()
+      return
+    }
+    stopPlayback()
+    const bytes = await window.murmur.history.audio(id)
+    if (!bytes) {
+      toast.error('No recording was kept for this dictation')
+      return
+    }
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'audio/wav' }))
+    const audio = new Audio(url)
+    audio.onended = () => {
+      if (player.current?.audio === audio) stopPlayback()
+    }
+    audio.onerror = () => {
+      toast.error('Could not play the recording')
+      if (player.current?.audio === audio) stopPlayback()
+    }
+    player.current = { audio, url }
+    setPlaying(id)
+    await audio.play().catch(() => stopPlayback())
   }
 
   return (
@@ -153,7 +217,7 @@ export function HistoryPage(): React.JSX.Element {
         <Empty
           icon={<Clock3 />}
           title="No dictations yet"
-          description="Everything you dictate is listed here with the raw transcript, the cleaned text, and how long each step took."
+          description="Everything you dictate is listed here with the raw transcript, the cleaned text, the recording, and how long each step took. A dictation that failed can be sent again from here."
         />
       ) : filtered.length === 0 ? (
         <Empty title="No matches" description="Try a different search." />
@@ -181,9 +245,18 @@ export function HistoryPage(): React.JSX.Element {
                     expanded && 'border-input'
                   )}
                 >
-                  <button
-                    className="flex w-full items-start gap-4 px-5 py-3.5 text-left"
+                  {/* A div, not a button: the row carries its own Retry button for failures. */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="flex w-full cursor-pointer items-start gap-4 px-5 py-3.5 text-left"
                     onClick={() => setOpen(expanded ? null : e.id)}
+                    onKeyDown={(ev) => {
+                      if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault()
+                        setOpen(expanded ? null : e.id)
+                      }
+                    }}
                   >
                     <div className="min-w-0 flex-1">
                       <div
@@ -216,12 +289,36 @@ export function HistoryPage(): React.JSX.Element {
                         {e.error && e.finalText && (
                           <Badge variant="destructive">not inserted</Badge>
                         )}
+                        {(e.attempts ?? 1) > 1 && (
+                          <Badge variant="outline" title="This recording was sent more than once">
+                            attempt {e.attempts}
+                          </Badge>
+                        )}
                         {settings.general.showLatencyInHistory && !e.error && !e.remote && (
                           <span className="ml-auto tabular-nums">{e.timings.totalMs} ms</span>
                         )}
+                        {e.error && !e.finalText && e.recording && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="ml-auto h-7"
+                            disabled={retrying !== null}
+                            onClick={(ev) => {
+                              ev.stopPropagation()
+                              void retry(e.id)
+                            }}
+                          >
+                            {retrying === e.id ? (
+                              <Loader2 className="animate-spin" />
+                            ) : (
+                              <RotateCcw />
+                            )}
+                            {retrying === e.id ? 'Sending again…' : 'Retry'}
+                          </Button>
+                        )}
                       </div>
                     </div>
-                  </button>
+                  </div>
                   <Appear show={expanded}>
                     <div className="space-y-4 border-t px-5 py-4">
                       {e.rawText && e.rawText.trim() !== e.finalText.trim() && (
@@ -256,7 +353,23 @@ export function HistoryPage(): React.JSX.Element {
                         </span>
                         {e.injectionMethod && <span>· inserted via {e.injectionMethod}</span>}
                         <span className="ml-auto flex gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => copy(e.finalText)}>
+                          {e.recording && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => void togglePlay(e.id)}
+                              title="Play the recording"
+                            >
+                              {playing === e.id ? <Square /> : <Play />}
+                              {playing === e.id ? 'Stop' : 'Play'}
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copy(e.finalText)}
+                            disabled={!e.finalText}
+                          >
                             <Copy /> Copy
                           </Button>
                           <Button

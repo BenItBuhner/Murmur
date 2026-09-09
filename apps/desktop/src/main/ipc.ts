@@ -6,7 +6,7 @@ import { runPipeline } from '@core/text/pipeline'
 import { buildSttPrompt } from '@core/text/dictionary'
 import { classifyApp, resolveStyle } from '@core/text/app-context'
 import { smartFormat } from '@core/text/smart-format'
-import { IPC, type ThemeReport } from '@shared/ipc'
+import { IPC, type RecordingsInfo, type RetryResult, type ThemeReport } from '@shared/ipc'
 import type { Settings } from '@shared/settings'
 import { isHexColor } from '@shared/theme'
 import type { CloudConfig, RendererAuthState, SyncStatus } from '@shared/cloud'
@@ -26,17 +26,23 @@ import type { HookService } from './hotkeys/hook'
 import type { InferenceRouter } from './inference/router'
 import { injectText, injectionBackendName } from './inject'
 import { sessionType } from './inject/linux'
-import { getLogPath } from './logger'
+import { createLogger, getLogPath } from './logger'
 import type { SettingsStore, SettingsPatch } from './store/settings'
 import type { HistoryStore } from './store/history'
+import type { RecordingStore } from './store/recordings'
 import type { UpdateService } from './update/service'
 import { releasesPageUrl, type UpdateSource } from './update/source'
 import { showMainWindow, updateChrome } from './windows/main-window'
+import type { OverlayWindow } from './windows/overlay'
+
+const log = createLogger('ipc')
 
 export interface IpcDeps {
   settings: SettingsStore
   history: HistoryStore
+  recordings: RecordingStore
   controller: DictationController
+  overlay: OverlayWindow
   hook: HookService
   inference: InferenceRouter
   cloudConfig: CloudConfig
@@ -56,7 +62,18 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { settings, history, controller, hook, inference, cloud, cloudConfig, updates } = deps
+  const {
+    settings,
+    history,
+    recordings,
+    controller,
+    overlay,
+    hook,
+    inference,
+    cloud,
+    cloudConfig,
+    updates
+  } = deps
 
   settings.on('change', (next: Settings) => broadcast(IPC.settingsChanged, next))
   history.on('added', (entry: HistoryEntry) => broadcast(IPC.historyAdded, entry))
@@ -147,6 +164,33 @@ export function registerIpc(deps: IpcDeps): void {
       waitForKeysUp: () => hook.waitForKeysUp(1000)
     })
   })
+  // From the History page the settings window is what has focus, so the result is only copied.
+  ipcMain.handle(IPC.historyRetry, (_e, id: string): Promise<RetryResult> =>
+    controller.retry(id, { inject: false })
+  )
+  ipcMain.handle(IPC.historyAudio, async (_e, id: string): Promise<Uint8Array | null> => {
+    const entry = history.get(id)
+    if (!entry || !recordings.has(entry.recording)) return null
+    try {
+      return await recordings.readBytes(entry.recording)
+    } catch (err) {
+      log.warn(`recording ${entry.recording} unreadable`, err)
+      return null
+    }
+  })
+  ipcMain.handle(IPC.recordingsInfo, (): RecordingsInfo => recordings.info())
+  ipcMain.handle(IPC.recordingsClear, () => {
+    history.stripRecordings()
+    recordings.clear()
+  })
+
+  // The pill's own buttons: Retry sends the failed dictation's audio again into the field that is
+  // still focused; the cross just waves the message away.
+  ipcMain.on(IPC.overlayRetry, (_e, id: string) => {
+    if (typeof id !== 'string') return
+    void controller.retry(id, { inject: true })
+  })
+  ipcMain.on(IPC.overlayDismiss, () => overlay.dismiss())
 
   /**
    * Speech configuration for the settings UI: the resolved connection (the instance's models or

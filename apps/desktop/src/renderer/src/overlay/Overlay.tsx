@@ -17,6 +17,11 @@ interface Props {
   state: OverlayState
   level: number
   micError?: string
+  /** The pill's buttons, shown on an error whose recording can be sent again. */
+  onRetry?: (id: string) => void
+  onDismiss?: () => void
+  /** The pointer entered or left the pill (main decides whether the window takes clicks). */
+  onHover?: (over: boolean) => void
 }
 
 /** One set of pill contents. The current layer renders live props; leaving layers are frozen. */
@@ -43,7 +48,7 @@ function contentKey(s: OverlayState): string {
     case 'listening':
       return `listening:${s.mode === 'command' ? 'command' : 'dictation'}`
     default:
-      return `${s.phase}:${s.mode ?? ''}:${s.message ?? ''}`
+      return `${s.phase}:${s.mode ?? ''}:${s.message ?? ''}:${s.retryId ?? ''}`
   }
 }
 
@@ -71,10 +76,18 @@ function labelFor(s: OverlayState): string {
  * of each other while it does. The idle indicator is the same element collapsed to a thin bar, so
  * starting a dictation grows the bar into the pill instead of swapping two elements.
  */
-export function Overlay({ state, level, micError }: Props): React.JSX.Element {
+export function Overlay({
+  state,
+  level,
+  micError,
+  onRetry,
+  onDismiss,
+  onHover
+}: Props): React.JSX.Element {
   const key = contentKey(state)
   const idle = state.phase === 'idle'
   const listening = state.phase === 'listening'
+  const interactive = state.phase === 'error' && !!state.retryId
 
   // ---- waveform: a new sample slides in on a fixed cadence, independent of the frame rate -----
   const [levels, setLevels] = useState<readonly number[]>(FLAT_LEVELS)
@@ -154,6 +167,8 @@ export function Overlay({ state, level, micError }: Props): React.JSX.Element {
       <div
         title={idle ? micError : undefined}
         style={{ width, height }}
+        onPointerEnter={interactive ? () => onHover?.(true) : undefined}
+        onPointerLeave={interactive ? () => onHover?.(false) : undefined}
         className={cn(
           'overlay-pill relative overflow-hidden rounded-full text-[13px] font-medium text-overlay-foreground',
           idle
@@ -183,6 +198,8 @@ export function Overlay({ state, level, micError }: Props): React.JSX.Element {
               <Contents
                 state={layer.leaving ? layer.state : state}
                 levels={layer.leaving ? layer.levels : levels}
+                onRetry={layer.leaving ? undefined : onRetry}
+                onDismiss={layer.leaving ? undefined : onDismiss}
               />
             </div>
           </div>
@@ -194,10 +211,14 @@ export function Overlay({ state, level, micError }: Props): React.JSX.Element {
 
 function Contents({
   state,
-  levels
+  levels,
+  onRetry,
+  onDismiss
 }: {
   state: OverlayState
   levels: readonly number[]
+  onRetry?: (id: string) => void
+  onDismiss?: () => void
 }): React.JSX.Element | null {
   const label = labelFor(state)
   const elapsed = state.elapsedSec ?? 0
@@ -265,13 +286,42 @@ function Contents({
           <span>{label}</span>
         </>
       )
-    case 'error':
+    case 'error': {
+      const retryId = state.retryId
+      if (!retryId) {
+        return (
+          <>
+            <WarnIcon />
+            <span className="max-w-[260px] truncate">{label}</span>
+          </>
+        )
+      }
+      // The recording is stored: offer to send it again instead of making the user say it all over.
       return (
         <>
           <WarnIcon />
-          <span className="max-w-[260px] truncate">{label}</span>
+          <span className="max-w-[170px] truncate" title={label}>
+            {label}
+          </span>
+          <button
+            type="button"
+            onClick={() => onRetry?.(retryId)}
+            className="flex h-7 items-center gap-1.5 rounded-full bg-overlay-foreground/15 px-3 text-[12px] font-semibold text-overlay-foreground transition-colors hover:bg-overlay-foreground/28 active:bg-overlay-foreground/35"
+          >
+            <RetryIcon /> Retry
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            title="Dismiss"
+            onClick={() => onDismiss?.()}
+            className="-ml-1 flex size-7 items-center justify-center rounded-full text-overlay-foreground/70 transition-colors hover:bg-overlay-foreground/15 hover:text-overlay-foreground"
+          >
+            <CloseIcon />
+          </button>
         </>
       )
+    }
     case 'disabled':
       return (
         <>
@@ -333,6 +383,39 @@ function WarnIcon(): React.JSX.Element {
     >
       <circle cx="12" cy="12" r="9" />
       <path d="M12 8v4M12 16h.01" />
+    </svg>
+  )
+}
+function RetryIcon(): React.JSX.Element {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v5h5" />
+    </svg>
+  )
+}
+function CloseIcon(): React.JSX.Element {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 6l12 12M18 6L6 18" />
     </svg>
   )
 }

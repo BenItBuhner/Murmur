@@ -56,7 +56,16 @@ function App(): React.JSX.Element {
     return () => unsubs.forEach((u) => u())
   }, [])
 
-  return <Overlay state={state} level={level} micError={micError} />
+  return (
+    <Overlay
+      state={state}
+      level={level}
+      micError={micError}
+      onRetry={(id) => bridge.retry(id)}
+      onDismiss={() => bridge.dismiss()}
+      onHover={(over) => bridge.hover(over)}
+    />
+  )
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -78,7 +78,13 @@ object Verify {
     }
 
     /** `text` is the cleaned model output; `transcript` is what the model was given. */
-    fun verifyOutput(transcript: String, text: String, allowEmpty: Boolean = false): Verdict {
+    fun verifyOutput(
+        transcript: String,
+        text: String,
+        allowEmpty: Boolean = false,
+        language: String? = null,
+        keepVerbatim: List<String> = emptyList()
+    ): Verdict {
         val raw = transcript.trim()
         if (text.isBlank()) return if (allowEmpty) Verdict(true) else Verdict(false, "empty")
         if (CHATTY_PREFIX.containsMatchIn(text) && !CHATTY_PREFIX.containsMatchIn(raw)) return Verdict(false, "chatty")
@@ -107,12 +113,24 @@ object Verify {
             if (shared.toDouble() / outSet.size < 0.45) return Verdict(false, "diverged")
         }
 
+        for (phrase in keepVerbatim) {
+            val p = phrase.trim().lowercase()
+            if (p.isNotEmpty() && raw.lowercase().contains(p) && !text.lowercase().contains(p)) {
+                return Verdict(false, "verbatim-lost", phrase)
+            }
+        }
+
         val expected = NumberSignature.digitSignature(raw)
         val withoutMarkers = NumberSignature.digitSignature(text, true)
-        if (withoutMarkers != expected) {
-            val withMarkers = NumberSignature.digitSignature(text, false)
-            if (withMarkers != expected) return Verdict(false, "numbers-changed", expected, withoutMarkers)
+        val withMarkers = NumberSignature.digitSignature(text, false)
+        val lang = (language ?: "auto").trim().lowercase().split('-', '_')[0]
+        if (lang.isNotEmpty() && lang != "auto" && lang != "en") {
+            if (!withoutMarkers.contains(expected) && !withMarkers.contains(expected)) {
+                return Verdict(false, "numbers-changed", expected, withoutMarkers)
+            }
+            return Verdict(true)
         }
+        if (withoutMarkers != expected && withMarkers != expected) return Verdict(false, "numbers-changed", expected, withoutMarkers)
         return Verdict(true)
     }
 }

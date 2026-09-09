@@ -13,13 +13,12 @@ const ctx: FormatContext = {
 
 const answering = (...answers: string[]): Complete & { calls: ChatMessage[][] } => {
   const calls: ChatMessage[][] = []
-  const fn = (async (messages: ChatMessage[]) => {
+  const fn: Complete = async (messages) => {
     calls.push(messages)
     const text = answers[Math.min(calls.length - 1, answers.length - 1)]
     return { text }
-  }) as Complete & { calls: ChatMessage[][] }
-  fn.calls = calls
-  return fn
+  }
+  return Object.assign(fn, { calls })
 }
 
 describe('prepareTranscript', () => {

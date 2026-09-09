@@ -353,44 +353,71 @@
   ],
   "verify": [
     {
+      "transcript": "wir treffen uns um zehn uhr dreißig",
+      "output": "Wir treffen uns um 10:30 Uhr.",
+      "options": {
+        "language": "de"
+      },
+      "ok": true,
+      "reason": null
+    },
+    {
+      "transcript": "sign it with my sig",
+      "output": "Sign it with my signature.",
+      "options": {
+        "keepVerbatim": [
+          "my sig"
+        ]
+      },
+      "ok": true,
+      "reason": null
+    },
+    {
       "transcript": "the budget is one million two hundred thousand dollars",
       "output": "The budget is $1,200,000.",
+      "options": null,
       "ok": true,
       "reason": null
     },
     {
       "transcript": "five thousand five thousand",
       "output": "5,000",
+      "options": null,
       "ok": false,
       "reason": "numbers-changed"
     },
     {
       "transcript": "what time is the meeting tomorrow",
       "output": "The meeting is at 10 am.",
+      "options": null,
       "ok": false,
       "reason": "answered"
     },
     {
       "transcript": "can you send me the report",
       "output": "Sure! Here is the report.",
+      "options": null,
       "ok": false,
       "reason": "chatty"
     },
     {
       "transcript": "number one finish the deck number two email the vendor",
       "output": "1. Finish the deck\n2. Email the vendor",
+      "options": null,
       "ok": true,
       "reason": null
     },
     {
       "transcript": "we discussed the quarterly numbers the hiring plan and the office move in some detail",
       "output": "We talked.",
+      "options": null,
       "ok": false,
       "reason": "too-short"
     },
     {
       "transcript": "hello world",
       "output": "",
+      "options": null,
       "ok": false,
       "reason": "empty"
     }

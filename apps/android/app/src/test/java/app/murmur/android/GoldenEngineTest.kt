@@ -93,7 +93,13 @@ class GoldenEngineTest {
         val cases = golden.getJSONArray("verify")
         for (i in 0 until cases.length()) {
             val c = cases.getJSONObject(i)
-            val v = Verify.verifyOutput(c.getString("transcript"), c.getString("output"))
+            val options = c.optJSONObject("options")
+            val v = Verify.verifyOutput(
+                c.getString("transcript"),
+                c.getString("output"),
+                language = options?.optString("language")?.takeIf { options.has("language") },
+                keepVerbatim = options?.optJSONArray("keepVerbatim")?.strings() ?: emptyList()
+            )
             assertEquals("${c.getString("transcript")} -> ${c.getString("output")}", c.getBoolean("ok"), v.ok)
             assertEquals("${c.getString("transcript")} -> ${c.getString("output")}", if (c.isNull("reason")) null else c.getString("reason"), v.reason)
         }

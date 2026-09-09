@@ -98,7 +98,10 @@ export async function formatTranscript(
     const verdict =
       res.finishReason === 'length'
         ? ({ ok: false, reason: 'too-long' } as const)
-        : verifyOutput(prepared.text, text)
+        : verifyOutput(prepared.text, text, {
+            language: input.context.language,
+            keepVerbatim: input.context.keepVerbatim
+          })
     if (verdict.ok) {
       return {
         ...base,
@@ -112,7 +115,9 @@ export async function formatTranscript(
     const detail =
       verdict.reason === 'numbers-changed'
         ? `numbers-changed (${verdict.expected} -> ${verdict.actual})`
-        : (verdict.reason ?? 'rejected')
+        : verdict.reason === 'verbatim-lost'
+          ? `verbatim-lost (${verdict.expected})`
+          : (verdict.reason ?? 'rejected')
     if (attempt === 0) firstReason = detail
     else {
       return fallback(

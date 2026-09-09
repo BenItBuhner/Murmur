@@ -71,6 +71,7 @@ export type VerifyReason =
   | 'answered'
   | 'diverged'
   | 'numbers-changed'
+  | 'verbatim-lost'
 
 export interface Verdict {
   ok: boolean
@@ -83,6 +84,14 @@ export interface Verdict {
 export interface VerifyOptions {
   /** The transcript was noise and an empty answer is the right one. */
   allowEmpty?: boolean
+  /**
+   * The dictation language ('auto' or ISO-639-1). The number reader only knows English number
+   * words; for another pinned language the model may write spoken numbers as digits the reader
+   * cannot see in the transcript, so only the digits the transcript already had are enforced.
+   */
+  language?: string
+  /** Phrases that must survive verbatim (snippet triggers); checked case-insensitively. */
+  keepVerbatim?: readonly string[]
 }
 
 /** Content words: letters only, three or more, not part of a number. */
@@ -126,14 +135,27 @@ export function verifyOutput(transcript: string, text: string, opts: VerifyOptio
     if (shared / outSet.size < 0.45) return { ok: false, reason: 'diverged' }
   }
 
+  // Phrases the caller needs verbatim (a snippet trigger the client expands afterwards).
+  for (const phrase of opts.keepVerbatim ?? []) {
+    const p = phrase.trim().toLowerCase()
+    if (p && raw.toLowerCase().includes(p) && !text.toLowerCase().includes(p))
+      return { ok: false, reason: 'verbatim-lost', expected: phrase }
+  }
+
   // Same numbers, same order. List numbering the model added is not a number the speaker said,
   // unless the speaker said it ("number one ..., number two ...").
   const expected = digitSignature(raw)
   const withoutMarkers = digitSignature(text, true)
-  if (withoutMarkers !== expected) {
-    const withMarkers = digitSignature(text, false)
-    if (withMarkers !== expected)
+  const withMarkers = digitSignature(text, false)
+  const lang = (opts.language ?? 'auto').trim().toLowerCase().split(/[-_]/)[0]
+  if (lang && lang !== 'auto' && lang !== 'en') {
+    // Number words in this language are invisible to the reader: the model may legitimately turn
+    // them into digits, but every digit the transcript already had must still be there, in order.
+    if (!withoutMarkers.includes(expected) && !withMarkers.includes(expected))
       return { ok: false, reason: 'numbers-changed', expected, actual: withoutMarkers }
+    return { ok: true }
   }
+  if (withoutMarkers !== expected && withMarkers !== expected)
+    return { ok: false, reason: 'numbers-changed', expected, actual: withoutMarkers }
   return { ok: true }
 }

@@ -121,7 +121,8 @@ object Engine {
             }
             val text = Verify.cleanModelOutput(answer.text, prepared.text)
             lastModelText = text
-            val verdict = if (answer.finishReason == "length") Verify.Verdict(false, "too-long") else Verify.verifyOutput(prepared.text, text)
+            val verdict = if (answer.finishReason == "length") Verify.Verdict(false, "too-long")
+            else Verify.verifyOutput(prepared.text, text, language = input.context.language, keepVerbatim = input.context.keepVerbatim)
             if (verdict.ok) {
                 return FormatResult(
                     text = text,
@@ -132,7 +133,11 @@ object Engine {
                     stages = prepared.stages + (if (attempt > 0) "llm-strict" else "llm")
                 )
             }
-            val detail = if (verdict.reason == "numbers-changed") "numbers-changed (${verdict.expected} -> ${verdict.actual})" else verdict.reason ?: "rejected"
+            val detail = when (verdict.reason) {
+                "numbers-changed" -> "numbers-changed (${verdict.expected} -> ${verdict.actual})"
+                "verbatim-lost" -> "verbatim-lost (${verdict.expected})"
+                else -> verdict.reason ?: "rejected"
+            }
             if (attempt == 0) firstReason = detail
             else return fallback(FormatOutcome.REJECTED, detail, attempts, firstReason, System.currentTimeMillis() - started, text)
         }

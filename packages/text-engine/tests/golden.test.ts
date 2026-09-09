@@ -27,7 +27,13 @@ const PROMPT_CASES: PromptCase[] = [
   {
     name: 'minimal chat',
     transcript: 'um hello there sarah',
-    context: { category: 'chat', app: 'com.Slack', tone: 'casual', dictionary: [], language: 'auto' }
+    context: {
+      category: 'chat',
+      app: 'com.Slack',
+      tone: 'casual',
+      dictionary: [],
+      language: 'auto'
+    }
   },
   {
     name: 'everything set',
@@ -96,13 +102,21 @@ const CLEAN_CASES: Array<[string, string]> = [
   ['<think>hmm</think>```\nHello there.\n```\n\nLet me know!', 'hello there']
 ]
 
-const VERIFY_CASES: Array<[string, string]> = [
+const VERIFY_CASES: Array<[string, string, { language?: string; keepVerbatim?: string[] }?]> = [
+  ['wir treffen uns um zehn uhr dreißig', 'Wir treffen uns um 10:30 Uhr.', { language: 'de' }],
+  ['sign it with my sig', 'Sign it with my signature.', { keepVerbatim: ['my sig'] }],
   ['the budget is one million two hundred thousand dollars', 'The budget is $1,200,000.'],
   ['five thousand five thousand', '5,000'],
   ['what time is the meeting tomorrow', 'The meeting is at 10 am.'],
   ['can you send me the report', 'Sure! Here is the report.'],
-  ['number one finish the deck number two email the vendor', '1. Finish the deck\n2. Email the vendor'],
-  ['we discussed the quarterly numbers the hiring plan and the office move in some detail', 'We talked.'],
+  [
+    'number one finish the deck number two email the vendor',
+    '1. Finish the deck\n2. Email the vendor'
+  ],
+  [
+    'we discussed the quarterly numbers the hiring plan and the office move in some detail',
+    'We talked.'
+  ],
   ['hello world', '']
 ]
 
@@ -121,9 +135,9 @@ function build(): unknown {
       transcript,
       cleaned: cleanModelOutput(output, transcript)
     })),
-    verify: VERIFY_CASES.map(([transcript, output]) => {
-      const v = verifyOutput(transcript, output)
-      return { transcript, output, ok: v.ok, reason: v.reason ?? null }
+    verify: VERIFY_CASES.map(([transcript, output, opts]) => {
+      const v = verifyOutput(transcript, output, opts)
+      return { transcript, output, options: opts ?? null, ok: v.ok, reason: v.reason ?? null }
     })
   }
 }

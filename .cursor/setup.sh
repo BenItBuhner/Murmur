@@ -7,8 +7,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 # --- Desktop (Electron) dependencies -----------------------------------------
-# Lockfile lives in apps/desktop, so install there (there is no root lockfile).
+# Lockfiles live per package (there is no root lockfile).
 npm --prefix apps/desktop ci
+npm --prefix packages/text-engine ci
+npm --prefix packages/backend ci
 
 # --- Android SDK -------------------------------------------------------------
 # The Android app builds with AGP 8.13 / compileSdk 36 via the Gradle wrapper.

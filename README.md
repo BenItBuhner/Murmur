@@ -13,6 +13,7 @@ This is a monorepo:
 | Desktop (Electron) | [`apps/desktop`](apps/desktop) | **Windows**, **Linux**, macOS (experimental) |
 | Android | [`apps/android`](apps/android) | Android 8.0+ |
 | Cloud backend (Convex + Clerk) | [`packages/backend`](packages/backend) | Accounts, managed speech/formatting models, synchronized dictionary and settings for both apps |
+| Text engine | [`packages/text-engine`](packages/text-engine) | Turns the raw transcript into the text you meant to type: the formatting prompt, the verifier and the few rules. Shared by the desktop app and the backend; the Android app carries a port pinned to it |
 
 ![Murmur home](docs/home.png)
 
@@ -99,33 +100,33 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   prompt taught them the transcript ends there). Murmur compares the word timings it gets back with
   where your speech actually ends and, when the transcript stops short, transcribes the rest from
   the nearest pause and appends it. History shows an `stt-resumed` stage when that happened.
-- **Wispr Flow–style cleanup, rule-based.** Filler sounds, hesitation phrases (“you know”,
-  “I mean”, a pause-“like”, “let me think”), stutters and accidental repeats, false starts,
-  self-corrections (“Tuesday, no, Wednesday” → “Wednesday”), spoken commands (“new line”,
-  “new paragraph”, “scratch that”, “question mark”, “quote … end quote”, “press enter”), a
-  personal **dictionary**, and voice **snippets**. Every stage has an off/light/thorough style
-  control. What you said on purpose stays: “no, no, no”, “very, very slowly”, “go go go” and any
-  swearing are your voice, not noise — only stumbles over small words (“I, I think”, “the the”)
-  are cleaned up, and the formatting model is held to the same rule. Numbers are never
-  de-duplicated or shortened: “zero zero zero seven” is `0007`, “five five five one two one two”
-  is `5551212`, “five thousand, five thousand” stays two numbers, and spelled-out letters
-  (“A B B Y”) keep every letter.
+- **The model does the language work; the engine makes sure it did not cheat.** Every dictation
+  goes to the formatting model as the speech model returned it, together with where the text is
+  going (chat, email, a document, a code editor, a terminal), what is already before the cursor,
+  your dictionary and your instructions. The model removes fillers, stutters, false starts and
+  “Tuesday, no, Wednesday”, applies spoken commands (“new line”, “scratch that”, “quote … end
+  quote”), writes numbers the way a person types them (“five thirty pm” → `5:30 pm`, “one million
+  two hundred thousand dollars” → `$1,200,000`, “version two point oh point one” → `2.0.1`,
+  “zero zero zero seven” → `0007`), lays an enumeration out as a list, and matches the
+  destination. Its answer is then checked against what you said: it must not be empty, chatty or
+  an answer to your question, it must keep most of your words and roughly your length, phrases
+  that must stay verbatim must be there, and it must contain **exactly the same numbers in the same
+  order**, whatever way it wrote them (“five thousand, five thousand” stays two numbers; a
+  de-duplicated `5,000` is caught). A failed check gets one strict retry, then the rule-based
+  cleanup of the transcript is inserted instead, and History says why. Numbers are never converted
+  by regex any more, so nothing is truncated or split by a rule the model then cannot fix.
+- **Adaptive, not configurable.** Tone follows the app (casual in chat, professional in email and
+  documents) unless you pick one; code editors keep identifiers exact with no prose punctuation;
+  terminals get one line and no trailing period; text before the cursor is continued mid-sentence.
+  The Style page is down to mode (off / light / smart), tone, your standing instructions, the
+  trailing space and per-app rules for those same things. **Light** mode and every fallback are a
+  small rule set: filler sounds, spoken commands, casing, punctuation spacing and your dictionary.
 - **A dictionary that hears, not just spells.** Terms are matched by sound as well as by spelling:
   “Wispr Flow” is recovered from “whisper flow”, “Wisper Flo” or “whisperflow” without an alias
   for each, and names are corrected when the recognizer got a letter wrong. Aliases you add are
-  passed to the formatting model as the mis-hearings to watch for, and its corrections into a
-  dictionary term always survive the review.
-- **Lists and numbers without a model.** “bullet point …”, “number one …”, “make this a numbered
-  list: …”, “first…, second…, third…” and “here are three things: a, b and c” become bullets or
-  numbered lines; “five thirty pm” → “5:30 pm”, “twenty three percent” → “23%”, “ten dollars” →
-  “$10”, “version two point three” → “version 2.3”. Never inside code editors or terminals.
-- **Optional smart formatting, reviewed.** A small, fast LLM pass polishes the rule-based text with
-  a freedom level you choose (strict / balanced / natural), your own instructions, and per-app
-  overrides. Its answer is cleaned (reasoning tags, markdown, commentary), guarded (no answering,
-  no chatting) and diffed word by word against your words: edits it cannot justify are reverted,
-  names, numbers and negations always survive, and History shows what happened. Numbers are
-  compared as values, so the model may write “one hundred thousand dollars” as `$100,000` or
-  “five thirty” as `5:30`, but a number it changed, dropped, de-duplicated or invented is put back.
+  passed to the formatting model as the mis-hearings to watch for, and the dictionary is
+  re-applied after the model as belt and braces. Voice **snippets** expand after the model, which
+  is told to leave their triggers alone.
 - **Command mode.** Highlight text anywhere, hold a key, and say “make this more concise”; the
   selection is rewritten in place.
 - **Nothing you said is lost to a bad connection either.** Every dictation's audio is kept with
@@ -187,10 +188,14 @@ first time it signs in.
 
 The backend exposes an OpenAI-compatible **inference gateway** on the deployment's HTTP-actions
 host (`https://<deployment>.convex.site`): `POST /v1/audio/transcriptions`, `POST /v1/chat/completions`
-and `GET /v1/models`. Clients send their Clerk session JWT as the bearer token where an API key would
-go, ask for the models `murmur-transcribe` and `murmur-format`, and the gateway forwards to the
-providers the operator configured — the provider credentials never leave the deployment's
-environment variables:
+and `GET /v1/models`, plus Murmur's own `POST /v1/format`. Clients send their Clerk session JWT as
+the bearer token where an API key would go, ask for the models `murmur-transcribe` and
+`murmur-format`, and the gateway forwards to the providers the operator configured — the provider
+credentials never leave the deployment's environment variables. `/v1/format` takes the transcript
+and the dictation's context and runs the whole text engine (prompt, verifier, strict retry,
+fallback) on the server against the instance's model, so both apps share one implementation and
+an operator can tune it without shipping an app; one format request counts as one request for the
+quota, whatever a retry costs in tokens.
 
 | Convex environment variable | Purpose |
 | --- | --- |
@@ -238,7 +243,13 @@ the plan and the month's usage under Models and Account. Clips are limited to te
    at a staging instance.
 
 Backend checks: `npm run typecheck && npm run lint && npm test` in `packages/backend` (the tests run
-against an in-memory Convex via `convex-test`). The desktop app typechecks against the committed
+against an in-memory Convex via `convex-test`). Engine checks: the same three commands in
+`packages/text-engine`; `npm test` there includes the offline **eval corpus**
+(`eval/fixtures.json`: realistic dictations and the properties the inserted text must have) and
+the **golden contract** (`golden/engine.golden.json`) the Android port is pinned to — after changing
+the prompt, the verifier or the number reader, run `npm run golden`, review the diff, and port the
+change to `apps/android/.../text`. `MURMUR_LIVE=1 MURMUR_BASE_URL=… MURMUR_API_KEY=…
+MURMUR_LLM_MODEL=… npm run test:live` runs the corpus against a real model and reports per fixture. The desktop app typechecks against the committed
 `packages/backend/convex/_generated`, so run `npx convex dev` (or `npx convex codegen`) after
 changing backend functions and commit the result. `MURMUR_LIVE=1 npm run test:live -- tests/live/cloud-sync.test.ts`
 in `apps/desktop` drives the real sync engine against a Convex deployment that trusts a test JWT

@@ -12,7 +12,9 @@ export interface CspOptions {
 export function buildRendererCsp({ clerkFrontendApiHost, dev }: CspOptions): string {
   const clerk = clerkFrontendApiHost ? `https://${clerkFrontendApiHost}` : ''
   const script = ["'self'", "'unsafe-inline'", clerk, clerk && 'https://challenges.cloudflare.com']
-  if (dev) script.push("'unsafe-eval'")
+  // The overlay's AudioWorklet module is a blob: URL; in dev the overlay is served under this
+  // policy too (packaged builds load it from file://, where it does not apply).
+  if (dev) script.push("'unsafe-eval'", 'blob:')
   const connect = ["'self'", clerk, clerk && 'https://clerk-telemetry.com']
   if (dev)
     connect.push('ws://localhost:*', 'http://localhost:*', 'ws://127.0.0.1:*', 'http://127.0.0.1:*')

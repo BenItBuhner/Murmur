@@ -48,9 +48,7 @@ describe.skipIf(!enabled)('live endpoint', () => {
     const res = await provider.transcribe(
       {
         wav,
-        prompt: buildSttPrompt([
-          { id: '1', word: 'Americans', aliases: [], fuzzy: false, createdAt: 0 }
-        ])
+        prompt: buildSttPrompt([{ word: 'Americans', aliases: [] }])
       },
       {
         kind: 'openai-compatible',

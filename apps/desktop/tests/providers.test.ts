@@ -91,7 +91,7 @@ describe('settings -> engine context', () => {
       app: app.app,
       tone: style.tone,
       language: 'pt-BR',
-      dictionary: [{ id: '1', word: 'Wispr Flow', aliases: [], fuzzy: false, createdAt: 0 }]
+      dictionary: [{ word: 'Wispr Flow', aliases: [] }]
     })
     expect(msg).toContain('Destination: a chat message (Slack). Tone: casual.')
     expect(msg).toContain('Language: Portuguese.')

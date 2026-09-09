@@ -2,10 +2,17 @@ import { readFileSync } from 'node:fs'
 import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { getSttProvider, STT_PRESETS, type SttConfig } from '@core/stt'
 import { listChatModels, type LlmConfig } from '@core/llm/client'
-import { runPipeline } from '@core/text/pipeline'
-import { buildSttPrompt } from '@core/text/dictionary'
-import { classifyApp, resolveStyle } from '@core/text/app-context'
-import { smartFormat } from '@core/text/smart-format'
+import {
+  basicCleanup,
+  buildSttPrompt,
+  classifyApp,
+  countWords,
+  finish,
+  formatTranscript,
+  prepareTranscript,
+  resolveStyle,
+  type Complete
+} from '@engine'
 import { IPC, type RecordingsInfo, type RetryResult, type ThemeReport } from '@shared/ipc'
 import type { Settings } from '@shared/settings'
 import { isHexColor } from '@shared/theme'
@@ -382,69 +389,63 @@ export function registerIpc(deps: IpcDeps): void {
       const request: PreviewRequest = typeof req === 'string' ? { raw: req } : req
       const s = settings.get()
       const app = classifyApp(request.app ?? '', request.title ?? '')
-      const style = resolveStyle(s.formatting, app)
-      const pipelineOpts = controller.pipelineOptions(s, style)
-      const light = runPipeline(request.raw, pipelineOpts)
+      const style = resolveStyle(s.formatting, s.formatting.appRules, app)
+      const finishOpts = {
+        category: app.category,
+        dictionary: s.dictionary,
+        trailingSpace: false,
+        snippets: s.snippets,
+        snippetContext: { now: new Date() }
+      }
+      const prepared = prepareTranscript(request.raw)
+      const light = basicCleanup(prepared.text, { dictionary: s.dictionary })
+      const lightFinished = finish(light.text, finishOpts)
       const out: PreviewResult = {
         light: {
-          text: light.text,
-          stages: light.stages,
-          wordCount: light.wordCount,
-          pressEnter: light.pressEnter,
-          listRequested: light.hints.list.requested,
-          listApplied: light.hints.listApplied,
-          isQuestion: light.hints.isQuestion
+          text: lightFinished.text,
+          stages: [...prepared.stages, ...light.stages, ...lightFinished.stages],
+          wordCount: countWords(lightFinished.text),
+          pressEnter: prepared.pressEnter
         },
         style: {
           category: app.category,
           ruleMatch: style.rule?.match,
           tone: style.tone,
-          mode: style.mode,
-          lists: style.lists,
-          numbers: style.numbers,
-          freedom: style.freedom,
-          structure: style.structure
+          mode: style.mode
         }
       }
       if (request.smart) {
-        let llm: LlmConfig = { baseUrl: '', apiKey: '', model: '', timeoutMs: 20000 }
+        let complete: Complete | null = null
         let unavailable: string | undefined
         try {
           const resolved = await inference.llm()
-          llm = { ...resolved.cfg, timeoutMs: Math.max(resolved.cfg.timeoutMs, 20000) }
+          const llm = { ...resolved.cfg, timeoutMs: Math.max(resolved.cfg.timeoutMs, 20000) }
+          if (llm.baseUrl && llm.model)
+            complete = (messages, opts) => inference.complete(llm, messages, opts)
         } catch (err) {
           unavailable = friendlyError(err)
         }
-        const smart = await smartFormat(
+        const formatted = await formatTranscript(
           {
-            light,
-            formatting: s.formatting,
-            dictionary: s.dictionary,
-            style: { ...style, mode: 'smart' },
-            app,
-            llm,
-            pipelineOpts,
-            language: s.stt.language
+            transcript: request.raw,
+            mode: 'smart',
+            context: controller.formatContext(s, style, app)
           },
-          inference.complete
+          complete
         )
+        const finished = finish(formatted.text, finishOpts)
         out.smart = {
-          status:
-            unavailable && smart.status.outcome === 'skipped'
-              ? { outcome: 'skipped', detail: unavailable }
-              : smart.status,
-          text:
-            smart.status.outcome === 'used' || smart.status.outcome === 'partial'
-              ? smart.result.text
-              : undefined,
-          modelText: smart.modelText,
-          llmMs: smart.llmMs,
-          review: smart.review?.map((d) => ({
-            accept: d.accept,
-            why: d.why,
-            from: d.from,
-            to: d.to
-          }))
+          status: {
+            ...formatted.status,
+            detail:
+              unavailable && formatted.status.outcome === 'skipped'
+                ? unavailable
+                : formatted.status.detail
+          },
+          text: formatted.status.outcome === 'used' ? finished.text : undefined,
+          modelText: formatted.modelText,
+          llmMs: formatted.llmMs,
+          stages: [...formatted.stages, ...finished.stages]
         }
       }
       return out

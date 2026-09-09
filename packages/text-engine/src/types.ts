@@ -4,14 +4,7 @@
  */
 
 export type AppCategory =
-  | 'chat'
-  | 'email'
-  | 'document'
-  | 'code'
-  | 'terminal'
-  | 'browser'
-  | 'notes'
-  | 'unknown'
+  'chat' | 'email' | 'document' | 'code' | 'terminal' | 'browser' | 'notes' | 'unknown'
 
 export type Tone = 'auto' | 'casual' | 'neutral' | 'professional'
 export type ResolvedTone = Exclude<Tone, 'auto'>

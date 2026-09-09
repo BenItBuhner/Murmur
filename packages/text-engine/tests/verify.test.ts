@@ -8,21 +8,27 @@ describe('cleanModelOutput', () => {
     expect(cleanModelOutput('```\nHello there.\n```', 'hello there')).toBe('Hello there.')
     expect(cleanModelOutput('Cleaned text: Hello there.', 'hello there')).toBe('Hello there.')
     expect(cleanModelOutput('"Hello there."', 'hello there')).toBe('Hello there.')
-    expect(cleanModelOutput('Hello there.\n\nLet me know if you need anything else!', 'hello there')).toBe(
+    expect(
+      cleanModelOutput('Hello there.\n\nLet me know if you need anything else!', 'hello there')
+    ).toBe('Hello there.')
+    expect(cleanModelOutput('**Hello** there.', 'hello there')).toBe('Hello there.')
+    expect(cleanModelOutput('<transcript>Hello there.</transcript>', 'hello there')).toBe(
       'Hello there.'
     )
-    expect(cleanModelOutput('**Hello** there.', 'hello there')).toBe('Hello there.')
-    expect(cleanModelOutput('<transcript>Hello there.</transcript>', 'hello there')).toBe('Hello there.')
   })
   it('keeps quotes the speaker dictated', () => {
-    expect(cleanModelOutput('"Hands off," she said.', '"hands off" she said')).toBe('"Hands off," she said.')
+    expect(cleanModelOutput('"Hands off," she said.', '"hands off" she said')).toBe(
+      '"Hands off," she said.'
+    )
   })
 })
 
 describe('verifyOutput', () => {
   const ok = (raw: string, out: string): void => {
     const v = verifyOutput(raw, out)
-    expect(v, `${raw} -> ${out}: ${v.reason ?? ''} ${v.expected ?? ''} ${v.actual ?? ''}`).toEqual({ ok: true })
+    expect(v, `${raw} -> ${out}: ${v.reason ?? ''} ${v.expected ?? ''} ${v.actual ?? ''}`).toEqual({
+      ok: true
+    })
   }
   const bad = (raw: string, out: string, reason: string): void => {
     expect(verifyOutput(raw, out).reason).toBe(reason)
@@ -37,12 +43,18 @@ describe('verifyOutput', () => {
     )
     ok('we need three hundred and twenty thousand more', 'We need 320,000 more.')
     ok('the revenue was three hundred grand', 'The revenue was $300k.')
-    ok('I mean it was a hundred and fifty maybe a hundred and sixty people', 'It was 150, maybe 160 people.')
+    ok(
+      'I mean it was a hundred and fifty maybe a hundred and sixty people',
+      'It was 150, maybe 160 people.'
+    )
     ok(
       'first we have one thousand second we have two thousand and third we have three thousand',
       'First we have 1,000, second we have 2,000, and third we have 3,000.'
     )
-    ok('I think we should probably go with the second option', 'I think we should probably go with the second option.')
+    ok(
+      'I think we should probably go with the second option',
+      'I think we should probably go with the second option.'
+    )
   })
 
   it('accepts list layout, with or without spoken numbering', () => {
@@ -63,7 +75,11 @@ describe('verifyOutput', () => {
     bad('one two one two', '12', 'numbers-changed')
     bad('call me at five five five one two one two', 'Call me at 555-1213.', 'numbers-changed')
     bad('two dozen eggs please', '24 eggs, please.', 'numbers-changed')
-    bad('we need about three hundred units', 'We need about 300 units by Friday at 5.', 'numbers-changed')
+    bad(
+      'we need about three hundred units',
+      'We need about 300 units by Friday at 5.',
+      'numbers-changed'
+    )
     bad('one million two hundred thousand dollars', 'one million $200,000', 'numbers-changed')
   })
 

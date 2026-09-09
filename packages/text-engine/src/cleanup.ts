@@ -103,7 +103,10 @@ export function finish(text: string, opts: FinishOptions): Finished {
   out = fixPunctuationSpacing(dict)
   if (opts.category === 'terminal') {
     // A command stays on one line and never ends in prose punctuation.
-    const one = out.replace(/\s*\n+\s*/g, ' ').trim().replace(/\.+$/, '')
+    const one = out
+      .replace(/\s*\n+\s*/g, ' ')
+      .trim()
+      .replace(/\.+$/, '')
     if (one !== out) stages.push('terminal')
     out = one
   }

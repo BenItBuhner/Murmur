@@ -59,11 +59,13 @@ export async function formatTranscript(
     }
   }
 
-  if (input.mode !== 'smart') return fallback('skipped', input.mode === 'off' ? 'formatting off' : 'light mode')
+  if (input.mode !== 'smart')
+    return fallback('skipped', input.mode === 'off' ? 'formatting off' : 'light mode')
   if (!isMeaningful(prepared.text)) return fallback('skipped', 'nothing to format')
   if (!complete) return fallback('skipped', 'no model configured')
   const minWords = input.minWords ?? 3
-  if (countWords(prepared.text) < minWords) return fallback('skipped', `shorter than ${minWords} words`)
+  if (countWords(prepared.text) < minWords)
+    return fallback('skipped', `shorter than ${minWords} words`)
 
   const started = now()
   let attempts = 0
@@ -122,5 +124,10 @@ export async function formatTranscript(
       )
     }
   }
-  return fallback('rejected', firstReason, { llmMs: now() - started, modelText: lastModelText }, attempts)
+  return fallback(
+    'rejected',
+    firstReason,
+    { llmMs: now() - started, modelText: lastModelText },
+    attempts
+  )
 }

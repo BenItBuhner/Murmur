@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { classifyApp, resolveStyle } from '../src/context'
-import { EXAMPLES, SYSTEM_PROMPT, buildCommandMessages, buildFormatMessages, userMessage } from '../src/prompt'
+import {
+  EXAMPLES,
+  SYSTEM_PROMPT,
+  buildCommandMessages,
+  buildFormatMessages,
+  userMessage
+} from '../src/prompt'
 import type { FormatContext } from '../src/types'
 
 const ctx: FormatContext = {
@@ -46,7 +52,11 @@ describe('buildFormatMessages', () => {
   })
 
   it('pins a fixed language and adds the strict line on retry', () => {
-    const user = userMessage('hallo', { category: 'email', tone: 'professional', dictionary: [], language: 'de' }, true)
+    const user = userMessage(
+      'hallo',
+      { category: 'email', tone: 'professional', dictionary: [], language: 'de' },
+      true
+    )
     expect(user).toContain('Language: German.')
     expect(user).toContain('Strict:')
   })
@@ -81,11 +91,20 @@ describe('buildCommandMessages', () => {
 })
 
 describe('resolveStyle', () => {
-  const prefs = { mode: 'smart' as const, tone: 'auto' as const, instructions: 'be brief', trailingSpace: true }
+  const prefs = {
+    mode: 'smart' as const,
+    tone: 'auto' as const,
+    instructions: 'be brief',
+    trailingSpace: true
+  }
   it('derives tone from the destination and lets a rule override', () => {
     const slack = classifyApp('slack')
     expect(resolveStyle(prefs, [], slack).tone).toBe('casual')
-    const styled = resolveStyle(prefs, [{ match: 'slack', tone: 'professional', instructions: 'no emoji' }], slack)
+    const styled = resolveStyle(
+      prefs,
+      [{ match: 'slack', tone: 'professional', instructions: 'no emoji' }],
+      slack
+    )
     expect(styled.tone).toBe('professional')
     expect(styled.instructions).toBe('be brief\n\nno emoji')
     expect(styled.rule?.match).toBe('slack')

@@ -4,9 +4,9 @@ import {
   type ChatMessage,
   type ChatOptions,
   type ChatResult,
+  type Complete,
   type LlmConfig
 } from '@core/llm/client'
-import type { Complete } from '@core/text/smart-format'
 import type { CloudConfig } from '@shared/cloud'
 import {
   MURMUR_LLM_MODEL,

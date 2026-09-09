@@ -7,13 +7,7 @@ import {
   rankSpeechModels
 } from '@core/stt/types'
 import { findPreset, STT_PRESETS } from '@core/stt/presets'
-import {
-  buildCommandMessages,
-  buildFormatMessages,
-  maxTokensFor,
-  sanitizeLlmOutput
-} from '@core/text/llm-prompt'
-import { classifyApp, resolveStyle, type ResolvedStyle } from '@core/text/app-context'
+import { buildCommandMessages, classifyApp, resolveStyle, userMessage } from '@engine'
 import { defaultSettings } from '@shared/settings'
 import { LANGUAGE_OPTIONS, LANGUAGES, languageLabel, languageName } from '@shared/languages'
 
@@ -62,161 +56,60 @@ describe('STT error parsing', () => {
   })
 })
 
-describe('LLM prompt and output guard', () => {
-  it('builds a system prompt that carries dictionary, tone and app context', () => {
-    const formatting = { ...defaultSettings().formatting, tone: 'casual' as const }
-    const app = classifyApp('Slack', 'general - Slack')
-    const msgs = buildFormatMessages({
-      raw: 'hello there',
-      dictionary: [{ id: '1', word: 'Wispr Flow', aliases: [], fuzzy: false, createdAt: 0 }],
-      style: resolveStyle(formatting, app),
-      app
-    })
-    expect(msgs[0].role).toBe('system')
-    expect(msgs[0].content).toContain('Wispr Flow')
-    expect(msgs[0].content).toContain('Casual')
-    expect(msgs[0].content).toContain('chat message')
-    expect(msgs[msgs.length - 1]).toEqual({ role: 'user', content: 'hello there' })
-  })
-  const neutral = (app = classifyApp('Slack', 'general - Slack')): ResolvedStyle =>
-    resolveStyle({ ...defaultSettings().formatting, tone: 'neutral' as const }, app)
-  it('keeps the auto-detect language rule when no language is fixed', () => {
-    const base = {
-      raw: 'hello there',
-      dictionary: [],
-      style: neutral(),
-      app: classifyApp('Slack', 'general - Slack')
-    }
-    for (const language of [undefined, 'auto', '', 'xx']) {
-      const system = buildFormatMessages({ ...base, language })[0].content
-      expect(system).toContain('Write the output in the language the speaker used.')
-      expect(system).not.toContain('The speaker dictates in')
-      expect(system).toContain('translate')
-    }
-  })
-  it('pins the output to the chosen dictation language', () => {
-    const system = buildFormatMessages({
-      raw: 'hallo zusammen',
-      dictionary: [],
-      style: neutral(),
-      app: classifyApp('Slack', 'general - Slack'),
-      language: 'de'
-    })[0].content
-    expect(system).toContain(
-      '- The speaker dictates in German. Write the output in German and never translate it into another language.'
-    )
-    expect(system).toContain('Treat such stray fragments as recognition errors')
-    expect(system).toContain('most plausibly said in German')
-    expect(system).not.toContain('Write the output in the language the speaker used.')
-    // The generic rule keeps everything except the language clause, which the lines above own.
-    expect(system).toContain(
-      "- Preserve the speaker's words, meaning, and order. Never summarize, expand, answer, or add anything they did not say."
-    )
-    // Region subtags synced from another client still resolve.
+describe('settings -> engine context', () => {
+  it('resolves tone from the destination, the global setting, then a per-app rule', () => {
+    const f = defaultSettings().formatting
+    expect(resolveStyle(f, f.appRules, classifyApp('outlook.exe')).tone).toBe('professional')
+    expect(resolveStyle(f, f.appRules, classifyApp('discord.exe')).tone).toBe('casual')
     expect(
-      buildFormatMessages({
-        raw: 'oi',
-        dictionary: [],
-        style: neutral(classifyApp('', '')),
-        app: classifyApp('', ''),
-        language: 'pt-BR'
-      })[0].content
-    ).toContain('dictates in Portuguese')
+      resolveStyle({ ...f, tone: 'professional' }, f.appRules, classifyApp('discord.exe')).tone
+    ).toBe('professional')
+    const appRules = [
+      { id: 'r', match: 'discord', tone: 'neutral' as const, instructions: 'no emoji' }
+    ]
+    const styled = resolveStyle(
+      { ...f, instructions: 'be brief' },
+      appRules,
+      classifyApp('Discord.exe')
+    )
+    expect(styled.tone).toBe('neutral')
+    expect(styled.instructions).toBe('be brief\n\nno emoji')
+    expect(styled.mode).toBe('smart')
   })
-  it('keeps the language pinned at natural freedom without contradicting the smoothing rule', () => {
-    const style = { ...neutral(), freedom: 'natural' as const }
-    const fixed = buildFormatMessages({
-      raw: 'hallo',
-      dictionary: [],
-      style,
-      app: classifyApp('', ''),
-      language: 'de'
-    })[0].content
-    expect(fixed).toContain('The speaker dictates in German.')
-    expect(fixed).not.toContain("- Preserve the speaker's words, meaning, and order.")
-    const auto = buildFormatMessages({
-      raw: 'hallo',
-      dictionary: [],
-      style,
-      app: classifyApp('', '')
-    })[0].content
-    expect(auto).toContain('Write the output in the language the speaker used; never translate it.')
-    expect(auto).toContain('Awkward or tangled phrasing')
+  it('classifies apps', () => {
+    expect(classifyApp('slack.exe').category).toBe('chat')
+    expect(classifyApp('Code.exe', 'main.ts - project').category).toBe('code')
+    expect(classifyApp('chrome.exe', 'Inbox - Gmail').category).toBe('email')
+    expect(classifyApp('notepad.exe').category).toBe('unknown')
+  })
+  it('builds the per-dictation message from settings-shaped data', () => {
+    const app = classifyApp('Slack', 'general - Slack')
+    const f = { ...defaultSettings().formatting, tone: 'casual' as const }
+    const style = resolveStyle(f, f.appRules, app)
+    const msg = userMessage('hello there', {
+      category: app.category,
+      app: app.app,
+      tone: style.tone,
+      language: 'pt-BR',
+      dictionary: [{ id: '1', word: 'Wispr Flow', aliases: [], fuzzy: false, createdAt: 0 }]
+    })
+    expect(msg).toContain('Destination: a chat message (Slack). Tone: casual.')
+    expect(msg).toContain('Language: Portuguese.')
+    expect(msg).toContain('Dictionary: Wispr Flow.')
+    expect(msg.endsWith('Transcript:\nhello there')).toBe(true)
   })
   it('tells command mode which language the instruction was spoken in', () => {
     const input = {
       selection: 'Bonjour à tous',
       instruction: 'mach das förmlicher',
-      app: classifyApp('Code.exe', 'notes.md - Code'),
+      category: classifyApp('Code.exe', 'notes.md - Code').category,
       dictionary: []
     }
     const auto = buildCommandMessages(input)[0].content
     expect(auto).toContain('- Keep the original language unless asked to translate.')
     const fixed = buildCommandMessages({ ...input, language: 'de' })[0].content
     expect(fixed).toContain('The user speaks German, so the instruction is in German.')
-    expect(fixed).toContain(
-      'Keep the text in its original language unless the instruction asks to translate.'
-    )
     expect(fixed).not.toContain('- Keep the original language unless asked to translate.')
-  })
-  it('accepts a faithful rewrite', () => {
-    const r = sanitizeLlmOutput(
-      'Hey, can you send the report to John on Wednesday? Thanks.',
-      'um hey can you uh send the report to john on tuesday no wednesday thanks'
-    )
-    expect(r.ok).toBe(true)
-    expect(r.text.startsWith('Hey')).toBe(true)
-  })
-  it('strips fences, quotes and labels', () => {
-    expect(sanitizeLlmOutput('```\nHello world.\n```', 'hello world').text).toBe('Hello world.')
-    expect(sanitizeLlmOutput('"Hello world."', 'hello world').text).toBe('Hello world.')
-    expect(sanitizeLlmOutput('Cleaned text: Hello world.', 'hello world').text).toBe('Hello world.')
-  })
-  it('rejects answers, commentary and runaway length', () => {
-    expect(sanitizeLlmOutput("Sure! Here's the cleaned text: Hello.", 'hello').ok).toBe(false)
-    expect(
-      sanitizeLlmOutput('The capital of France is Paris.', 'what is the capital of france').ok
-    ).toBe(false)
-    expect(sanitizeLlmOutput('', 'hello there friend').ok).toBe(false)
-    const raw = 'one two three four five six seven eight'
-    expect(sanitizeLlmOutput('one', raw).ok).toBe(false)
-    expect(sanitizeLlmOutput(`${raw} ${raw} ${raw}`, raw).ok).toBe(false)
-  })
-  it('never starves reasoning models of completion tokens', () => {
-    expect(maxTokensFor('short')).toBe(768)
-    expect(maxTokensFor(Array(400).fill('word').join(' '))).toBe(1792)
-    expect(maxTokensFor(Array(5000).fill('word').join(' '))).toBe(4096)
-  })
-  it('flags an answered question and a diverged rewrite', () => {
-    expect(sanitizeLlmOutput('Paris is the capital.', 'what is the capital of france').ok).toBe(
-      false
-    )
-    expect(
-      sanitizeLlmOutput('What is the capital of France?', 'what is the capital of france').ok
-    ).toBe(true)
-    expect(
-      sanitizeLlmOutput(
-        'The weather will be sunny tomorrow with mild winds.',
-        'please send the invoice to the client by friday'
-      ).ok
-    ).toBe(false)
-  })
-})
-
-describe('app context', () => {
-  it('classifies apps and resolves tone', () => {
-    expect(classifyApp('slack.exe').category).toBe('chat')
-    expect(classifyApp('Code.exe', 'main.ts - project').category).toBe('code')
-    expect(classifyApp('chrome.exe', 'Inbox - Gmail').category).toBe('email')
-    expect(classifyApp('notepad.exe').category).toBe('unknown')
-    const f = defaultSettings().formatting
-    expect(resolveStyle(f, classifyApp('outlook.exe')).tone).toBe('professional')
-    expect(resolveStyle(f, classifyApp('discord.exe')).tone).toBe('casual')
-    expect(resolveStyle({ ...f, tone: 'professional' }, classifyApp('discord.exe')).tone).toBe(
-      'professional'
-    )
-    const appRules = [{ id: 'r', match: 'discord', tone: 'neutral' as const }]
-    expect(resolveStyle({ ...f, appRules }, classifyApp('Discord.exe')).tone).toBe('neutral')
   })
 })
 

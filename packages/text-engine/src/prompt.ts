@@ -79,7 +79,8 @@ export function userMessage(transcript: string, ctx: FormatContext, strict = fal
   if (keep.length) lines.push(`Keep verbatim: ${keep.map((k) => `"${k}"`).join(', ')}.`)
   const preceding = ctx.precedingText?.replace(/\s+$/, '')
   if (preceding) {
-    const tail = preceding.length > PRECEDING_MAX ? `…${preceding.slice(-PRECEDING_MAX)}` : preceding
+    const tail =
+      preceding.length > PRECEDING_MAX ? `…${preceding.slice(-PRECEDING_MAX)}` : preceding
     lines.push(`Before the cursor: ${JSON.stringify(tail)}`)
   }
   const instructions = ctx.instructions?.trim()

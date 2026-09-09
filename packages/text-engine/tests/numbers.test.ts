@@ -5,8 +5,14 @@ import { countUnits, digitSignature, numberList } from '../src/numbers'
 const SAME: Array<[string, string]> = [
   ['the budget is one million two hundred thousand dollars', 'The budget is $1,200,000.'],
   ['we are on version two point oh point one', 'We are on version 2.0.1.'],
-  ['count with me one two three four five six seven eight nine ten', 'Count with me: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10.'],
-  ['count with me one two three four five six seven eight nine ten', 'Count with me: one, two, three, four, five, six, seven, eight, nine, ten.'],
+  [
+    'count with me one two three four five six seven eight nine ten',
+    'Count with me: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10.'
+  ],
+  [
+    'count with me one two three four five six seven eight nine ten',
+    'Count with me: one, two, three, four, five, six, seven, eight, nine, ten.'
+  ],
   ['we need three hundred and twenty thousand more', 'We need 320,000 more.'],
   ['it cost about two thousand five hundred dollars', 'It cost about $2,500.'],
   ['we had one thousand two hundred and fifty people', 'We had 1,250 people.'],
@@ -56,8 +62,14 @@ const SAME: Array<[string, string]> = [
   ['march third twenty twenty four', 'March 3rd, 2024'],
   ['march third twenty twenty four', 'March 3, 2024'],
   ['first finish the deck second email the vendor', '1. Finish the deck\n2. Email the vendor'],
-  ['first we have one thousand second we have two thousand and third we have three thousand', 'First we have 1,000, second we have 2,000, and third we have 3,000.'],
-  ['I mean it was a hundred and fifty maybe a hundred and sixty people', 'It was 150, maybe 160 people.'],
+  [
+    'first we have one thousand second we have two thousand and third we have three thousand',
+    'First we have 1,000, second we have 2,000, and third we have 3,000.'
+  ],
+  [
+    'I mean it was a hundred and fifty maybe a hundred and sixty people',
+    'It was 150, maybe 160 people.'
+  ],
   ['five to ten percent', '5-10%'],
   ['one of them said no', 'One of them said no.'],
   ['a couple of things', 'A couple of things.'],
@@ -83,7 +95,10 @@ const DIFFERENT: Array<[string, string]> = [
   ['send two copies', 'Send a couple of copies.'],
   ['one million two hundred thousand', 'one million 200,000'],
   ['call me at five five five one two one two', 'Call me at 555-1213.'],
-  ['finish the deck and email the vendor', '1. Finish the deck\n2. Email the vendor and call 5 people']
+  [
+    'finish the deck and email the vendor',
+    '1. Finish the deck\n2. Email the vendor and call 5 people'
+  ]
 ]
 
 describe('digitSignature', () => {
@@ -100,7 +115,15 @@ describe('digitSignature', () => {
 
   it('reads the exact values', () => {
     expect(numberList('one million two hundred thousand dollars')).toEqual(['1200000'])
-    expect(numberList('five five five one two one two')).toEqual(['5', '5', '5', '1', '2', '1', '2'])
+    expect(numberList('five five five one two one two')).toEqual([
+      '5',
+      '5',
+      '5',
+      '1',
+      '2',
+      '1',
+      '2'
+    ])
     expect(numberList('twenty twenty four')).toEqual(['20', '24'])
     expect(numberList('two point oh point one')).toEqual(['20', '1'])
     expect(numberList('2.0.1')).toEqual(['201'])

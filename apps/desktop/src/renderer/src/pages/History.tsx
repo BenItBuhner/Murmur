@@ -25,7 +25,7 @@ import { LatencyBar } from './Home'
 
 /**
  * What the smart-formatting stage did. The short form sits in the row; the detailed form in the
- * expanded view explains rejections and how many model edits were reverted to the spoken words.
+ * expanded view explains rejections and retries.
  */
 function LlmBadge({
   entry,
@@ -38,18 +38,21 @@ function LlmBadge({
   if (!llm) return entry.llmUsed ? <Badge variant="secondary">smart</Badge> : null
   switch (llm.outcome) {
     case 'used':
-      return <Badge variant="secondary">smart</Badge>
-    case 'partial':
-      return (
-        <Badge variant="secondary" title="Some model edits were reverted to your words">
-          smart · {llm.reverted} reverted
+      return llm.retriedAfter ? (
+        <Badge
+          variant="secondary"
+          title={`First answer rejected (${llm.retriedAfter}); a strict retry was used`}
+        >
+          smart · retried
         </Badge>
+      ) : (
+        <Badge variant="secondary">smart</Badge>
       )
     case 'rejected':
       return detailed ? (
         <Badge
           variant="destructive"
-          title="The model's answer failed the guard rails; the rule-based text was inserted"
+          title="The model's answer failed verification; the rule-based text was inserted"
         >
           model rejected: {llm.detail}
         </Badge>

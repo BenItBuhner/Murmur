@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { ACCENT_PRESET_IDS } from './theme'
 
-export const SETTINGS_VERSION = 2
+export const SETTINGS_VERSION = 3
 
 /**
  * Where a model runs: the Murmur instance's managed models (cloud builds only) or a provider the
@@ -17,56 +17,6 @@ export type FormattingMode = z.infer<typeof formattingModeSchema>
 
 export const toneSchema = z.enum(['auto', 'casual', 'neutral', 'professional'])
 export type Tone = z.infer<typeof toneSchema>
-
-/**
- * Hesitation phrases ("you know", "I mean", a pause-"like"). `light` removes only pure hesitation
- * with no meaning of its own; `thorough` also drops hedges ("sort of", "basically"), sentence
- * openers ("so,", "okay,") and a conjunction left hanging at the very end.
- */
-export const hesitationLevelSchema = z.enum(['off', 'light', 'thorough'])
-export type HesitationLevel = z.infer<typeof hesitationLevelSchema>
-
-/**
- * What counts as a repetition. `words`: identical adjacent words and part-word stutters
- * ("th- the"). `phrases`: also repeated runs of up to five words ("I think, I think").
- * `thorough`: also restarts where the speaker abandons a short phrase ("I want to, I need to").
- */
-export const repetitionScopeSchema = z.enum(['words', 'phrases', 'thorough'])
-export type RepetitionScope = z.infer<typeof repetitionScopeSchema>
-
-/**
- * When dictation becomes a list. `spoken`: only on explicit commands or requests ("bullet point",
- * "as a numbered list"). `auto`: also when the speech enumerates ("first…, second…", "number
- * one…", "here are three things: a, b and c").
- */
-export const listsModeSchema = z.enum(['off', 'spoken', 'auto'])
-export type ListsMode = z.infer<typeof listsModeSchema>
-
-export const listStyleSchema = z.enum(['auto', 'bullets', 'numbers'])
-export type ListStyle = z.infer<typeof listStyleSchema>
-
-export const bulletMarkerSchema = z.enum(['-', '•', '*'])
-export type BulletMarker = z.infer<typeof bulletMarkerSchema>
-
-/**
- * Spelled-out numbers. `smart`: digits for ten and up and whenever a unit makes digits natural
- * (times, money, percentages, decimals, versions). `all`: every number becomes digits.
- */
-export const numbersModeSchema = z.enum(['off', 'smart', 'all'])
-export type NumbersMode = z.infer<typeof numbersModeSchema>
-
-/**
- * How far the smart-formatting model may go. Every level fixes punctuation, casing, spelling,
- * mis-hearings and removes hesitation. `strict` never changes a word beyond that; `balanced`
- * also repairs grammar slips and obvious self-corrections; `natural` may smooth awkward phrasing
- * while keeping every point the speaker made.
- */
-export const llmFreedomSchema = z.enum(['strict', 'balanced', 'natural'])
-export type LlmFreedom = z.infer<typeof llmFreedomSchema>
-
-/** `keep`: the model preserves the speaker's layout. `assist`: it may add lists and paragraph breaks. */
-export const llmStructureSchema = z.enum(['keep', 'assist'])
-export type LlmStructure = z.infer<typeof llmStructureSchema>
 
 export const LLM_INSTRUCTIONS_MAX = 2000
 
@@ -108,15 +58,18 @@ export const snippetSchema = z.object({
 })
 export type Snippet = z.infer<typeof snippetSchema>
 
+/**
+ * A per-app override, matched on the window title or process name. Everything the destination
+ * needs beyond this (lists, digits, layout, how far the model may go) the engine derives from the
+ * app category itself, so a rule only carries what a person would actually want to say about an
+ * app: how it should sound, whether to format at all, and any extra guidance for the model.
+ */
 export const appRuleSchema = z.object({
   id: z.string(),
   match: z.string().min(1),
   tone: toneSchema.default('auto'),
   formatting: formattingModeSchema.optional(),
   trailingSpace: z.boolean().optional(),
-  lists: listsModeSchema.optional(),
-  numbers: numbersModeSchema.optional(),
-  freedom: llmFreedomSchema.optional(),
   /** Extra guidance for the model in this app only; appended to the global instructions. */
   instructions: z.string().max(LLM_INSTRUCTIONS_MAX).optional()
 })
@@ -200,29 +153,21 @@ export const settingsSchema = z.object({
       timeoutMs: z.number().int().min(2000).max(120000).default(45000)
     })
     .prefault({}),
+  /**
+   * How speech becomes text. The engine (packages/text-engine) does the language work with the
+   * formatting model and adapts to the destination on its own; what is left to choose is whether
+   * to use the model, how the result should sound, and anything you want to tell the model.
+   */
   formatting: z
     .object({
       mode: formattingModeSchema.default('smart'),
-      removeFillers: z.boolean().default(true),
-      fillerWords: z
-        .array(z.string())
-        .default(['um', 'uh', 'uhm', 'umm', 'erm', 'er', 'ah', 'hmm', 'mm', 'mhm', 'hm']),
-      hesitations: hesitationLevelSchema.default('light'),
-      /** User additions to the built-in hesitation lexicon, removed at every level except off. */
-      hesitationPhrases: z.array(z.string()).default([]),
-      collapseRepeats: z.boolean().default(true),
-      repetitionScope: repetitionScopeSchema.default('phrases'),
-      spokenCommands: z.boolean().default(true),
-      selfCorrections: z.boolean().default(true),
-      autoCapitalize: z.boolean().default(true),
-      trailingSpace: z.boolean().default(true),
-      pressEnterCommand: z.boolean().default(true),
-      lists: listsModeSchema.default('auto'),
-      listStyle: listStyleSchema.default('auto'),
-      bulletMarker: bulletMarkerSchema.default('-'),
-      numbers: numbersModeSchema.default('smart'),
       tone: toneSchema.default('auto'),
+      /** Free-form guidance for the model ("British spelling", "dates as ISO"). Synced. */
+      instructions: z.string().max(LLM_INSTRUCTIONS_MAX).default(''),
+      /** Add a space after each dictation so the next one flows on naturally. */
+      trailingSpace: z.boolean().default(true),
       appRules: z.array(appRuleSchema).default([]),
+      /** The formatting model connection. Device-local; never synced. */
       llm: z
         .object({
           /** As for `stt.source`. `custom` with `sameAsStt` follows the speech model's server. */
@@ -231,15 +176,7 @@ export const settingsSchema = z.object({
           baseUrl: z.string().default(''),
           apiKeyEnc: z.string().default(''),
           model: z.string().default(''),
-          minWords: z.number().int().min(1).max(50).default(4),
-          timeoutMs: z.number().int().min(1000).max(60000).default(8000),
-          maxTokensMultiplier: z.number().min(1).max(4).default(2),
-          freedom: llmFreedomSchema.default('balanced'),
-          structure: llmStructureSchema.default('assist'),
-          /** Free-form guidance appended to the system prompt ("British spelling", "dates as ISO"). */
-          instructions: z.string().max(LLM_INSTRUCTIONS_MAX).default(''),
-          /** Short worked examples in the prompt; small models follow them far better than rules. */
-          examples: z.boolean().default(true)
+          timeoutMs: z.number().int().min(1000).max(60000).default(8000)
         })
         .prefault({})
     })
@@ -306,24 +243,39 @@ export type SettingsInput = z.input<typeof settingsSchema>
  * v1 files predate model sources. An install that had connected its own speech provider keeps
  * using it (and its formatting server) instead of being switched to the instance's models the day
  * the app gains cloud support; an install that never connected one gets the new defaults.
+ *
+ * v2 files carry the rule-based cleanup knobs (fillers, hesitations, repeats, lists, numbers,
+ * model freedom, ...) that the engine no longer has. They are dropped by the schema; the model
+ * instructions move from `formatting.llm.instructions` to `formatting.instructions`.
  */
 export function migrateSettings(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw
-  const input = raw as Record<string, unknown>
+  let input = raw as Record<string, unknown>
   const stt = isRecord(input.stt) ? input.stt : undefined
-  if (!stt || stt.source !== undefined || typeof stt.baseUrl !== 'string' || !stt.baseUrl.trim())
-    return raw
-  const formatting = isRecord(input.formatting) ? input.formatting : {}
-  const llm = isRecord(formatting.llm) ? formatting.llm : {}
-  return {
-    ...input,
-    version: SETTINGS_VERSION,
-    stt: { ...stt, source: 'custom' },
-    formatting: {
-      ...formatting,
-      llm: llm.source === undefined ? { ...llm, source: 'custom' } : llm
+  if (stt && stt.source === undefined && typeof stt.baseUrl === 'string' && stt.baseUrl.trim()) {
+    const formatting = isRecord(input.formatting) ? input.formatting : {}
+    const llm = isRecord(formatting.llm) ? formatting.llm : {}
+    input = {
+      ...input,
+      stt: { ...stt, source: 'custom' },
+      formatting: {
+        ...formatting,
+        llm: llm.source === undefined ? { ...llm, source: 'custom' } : llm
+      }
     }
   }
+  const formatting = isRecord(input.formatting) ? input.formatting : undefined
+  const llm = formatting && isRecord(formatting.llm) ? formatting.llm : undefined
+  if (
+    formatting &&
+    llm &&
+    typeof llm.instructions === 'string' &&
+    formatting.instructions === undefined
+  ) {
+    const { instructions, ...rest } = llm
+    input = { ...input, formatting: { ...formatting, instructions, llm: rest } }
+  }
+  return input === raw ? raw : { ...input, version: SETTINGS_VERSION }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

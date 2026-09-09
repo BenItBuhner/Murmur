@@ -1,18 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Loader2, Play, Plus, Sparkles, Trash2, WandSparkles } from 'lucide-react'
-import type {
-  AppRule,
-  BulletMarker,
-  FormattingMode,
-  HesitationLevel,
-  ListStyle,
-  ListsMode,
-  LlmFreedom,
-  LlmStructure,
-  NumbersMode,
-  RepetitionScope,
-  Tone
-} from '@shared/settings'
+import type { AppRule, FormattingMode, Tone } from '@shared/settings'
 import { LLM_INSTRUCTIONS_MAX } from '@shared/settings'
 import { MURMUR_LLM_MODEL } from '@shared/inference'
 import type { LlmStatus, PreviewResult, ProviderTestResult } from '@shared/types'
@@ -49,7 +37,7 @@ const TONES: Level<Tone>[] = [
   {
     value: 'auto',
     label: 'Auto',
-    hint: 'Casual in chat apps, professional in email and documents.'
+    hint: 'Casual in chat apps, professional in email and documents, neutral elsewhere.'
   },
   { value: 'casual', label: 'Casual', hint: 'Relaxed, contractions, fragments are fine.' },
   { value: 'neutral', label: 'Neutral', hint: 'Clean sentences, faithful to how you talk.' },
@@ -61,128 +49,12 @@ const MODES: Level<FormattingMode>[] = [
   {
     value: 'light',
     label: 'Light',
-    hint: 'Rules only, instant: fillers, hesitation, repeats, self-corrections, lists, numbers, dictionary, punctuation.'
+    hint: 'Rules only, instant: filler sounds, spoken commands, casing, punctuation spacing and your dictionary. Numbers and phrasing stay as heard.'
   },
   {
     value: 'smart',
     label: 'Smart',
-    hint: 'Rules first, then a language model polishes the result. Every edit the model makes is checked against your words before anything is inserted; if it misbehaves or is slow, the rule-based text goes in.'
-  }
-]
-
-const HESITATIONS: Level<HesitationLevel>[] = [
-  { value: 'off', label: 'Off', hint: 'Phrases like “you know” stay exactly as spoken.' },
-  {
-    value: 'light',
-    label: 'Light',
-    hint: 'Pure hesitation goes wherever the transcript marks a pause: “you know”, “I mean”, a pause-“like”, “let me think”, “so yeah”, “okay so”, and a conjunction left hanging at the very end. “Do you know”, “I like” and “I mean it” are untouched.'
-  },
-  {
-    value: 'thorough',
-    label: 'Thorough',
-    hint: 'Also hedges and openers when they are asides: “sort of”, “basically”, “actually”, “I guess”, “or whatever”, a leading “Okay, so, …”, and trailing “, yeah”. Tag questions like “, right?” stay.'
-  }
-]
-
-const REPETITIONS: Level<RepetitionScope | 'off'>[] = [
-  { value: 'off', label: 'Off', hint: 'Repeated words stay as spoken.' },
-  {
-    value: 'words',
-    label: 'Words',
-    hint: '“the the report”, “I, I think” and part-word stutters (“th- the”). Intentional repeats keep their commas: “no, no, no”.'
-  },
-  {
-    value: 'phrases',
-    label: 'Phrases',
-    hint: 'Also repeated runs of up to five words: “I think, I think we should” and “we need to, we need to go”.'
-  },
-  {
-    value: 'thorough',
-    label: 'Thorough',
-    hint: 'Also abandoned restarts, where you stop mid-phrase and start again: “I want to, I need to go” becomes “I need to go”.'
-  }
-]
-
-const LISTS: Level<ListsMode>[] = [
-  {
-    value: 'off',
-    label: 'Off',
-    hint: 'Never turned into a list; the model is told to keep your layout too.'
-  },
-  {
-    value: 'spoken',
-    label: 'Spoken',
-    hint: 'Only when you ask for one: “bullet point …”, “number one …”, “step one …”, or “make this a numbered list: …”. The instruction itself is removed.'
-  },
-  {
-    value: 'auto',
-    label: 'Auto',
-    hint: 'Also when you enumerate: “first…, second…, third…”, “1. …, 2. …”, or “here are three things: a, b and c”. Never inside code editors or terminals.'
-  }
-]
-
-const LIST_STYLES: Level<ListStyle>[] = [
-  {
-    value: 'auto',
-    label: 'Auto',
-    hint: 'Numbers when the order matters (“first, second”, “step one”), bullets otherwise.'
-  },
-  { value: 'bullets', label: 'Bullets', hint: 'Every list becomes bullets.' },
-  { value: 'numbers', label: 'Numbers', hint: 'Every list becomes 1. 2. 3.' }
-]
-
-const MARKERS: Level<BulletMarker>[] = [
-  {
-    value: '-',
-    label: '-',
-    hint: '“- ” turns into a real bullet in Markdown-aware apps (Slack, Notion, GitHub).'
-  },
-  { value: '•', label: '•', hint: '“• ” looks right in plain text fields and email.' },
-  { value: '*', label: '*', hint: '“* ” is the other Markdown bullet.' }
-]
-
-const NUMBERS: Level<NumbersMode>[] = [
-  { value: 'off', label: 'Off', hint: 'Numbers stay as spoken.' },
-  {
-    value: 'smart',
-    label: 'Smart',
-    hint: 'Digits from ten up, and whenever a unit makes them natural: “five pm” → “5 pm”, “twenty three percent” → “23%”, “ten dollars” → “$10”, “version two point three” → “version 2.3”, “twenty twenty six” → “2026”. Sentences never start with a digit and “one of them” is left alone.'
-  },
-  {
-    value: 'all',
-    label: 'Always',
-    hint: 'Every number becomes digits (“five apples” → “5 apples”). Code editors and terminals always use this.'
-  }
-]
-
-const FREEDOMS: Level<LlmFreedom>[] = [
-  {
-    value: 'strict',
-    label: 'Strict',
-    hint: 'Punctuation, casing, spelling, mis-hearings, hesitation and self-corrections only. Any other change the model makes is reverted to your words.'
-  },
-  {
-    value: 'balanced',
-    label: 'Balanced',
-    hint: 'Also grammar slips (“we was” → “we were”), missing articles and informal spellings. Rephrasing, synonyms and politeness changes (“can” → “could”) are reverted.'
-  },
-  {
-    value: 'natural',
-    label: 'Natural',
-    hint: 'The model may smooth awkward phrasing so it reads the way you would write it. Names, numbers, negations and every point you made are still protected.'
-  }
-]
-
-const STRUCTURES: Level<LlmStructure>[] = [
-  {
-    value: 'keep',
-    label: 'Keep layout',
-    hint: 'The model preserves your line breaks and paragraphs exactly.'
-  },
-  {
-    value: 'assist',
-    label: 'Assist',
-    hint: 'The model may lay out an enumeration as a list and start a new paragraph at a clear topic change. Lists must be enabled above; code editors and terminals always keep the layout.'
+    hint: 'The formatting model turns the raw transcript into what you meant to type: fillers, stumbles and self-corrections go, numbers and lists are written the way a person types them, and the result is checked so that nothing you said, and no number, is changed or lost. If the model misbehaves or is slow, the Light result goes in.'
   }
 ]
 
@@ -190,26 +62,16 @@ function LevelRow<T extends string>({
   title,
   levels,
   value,
-  onChange,
-  intro
+  onChange
 }: {
   title: React.ReactNode
   levels: Level<T>[]
   value: T
   onChange: (v: T) => void
-  intro?: string
 }): React.JSX.Element {
   const current = levels.find((l) => l.value === value)
   return (
-    <SettingRow
-      title={title}
-      description={
-        <>
-          {intro && <span className="block">{intro}</span>}
-          <span className="block">{current?.hint}</span>
-        </>
-      }
-    >
+    <SettingRow title={title} description={current?.hint}>
       <Segmented<T>
         value={value}
         onChange={onChange}
@@ -228,41 +90,6 @@ function useSyncedText(source: string): [string, (v: string) => void] {
     setText(source)
   }
   return [text, setText]
-}
-
-/** Comma-separated list editor that only writes back on blur/enter. */
-function ListInput({
-  value,
-  onSave,
-  placeholder
-}: {
-  value: string[]
-  onSave: (list: string[]) => void
-  placeholder?: string
-}): React.JSX.Element {
-  const joined = value.join(', ')
-  const [text, setText] = useSyncedText(joined)
-  const save = (): void => {
-    const list = [
-      ...new Set(
-        text
-          .split(/[,\n]/)
-          .map((s) => s.trim().toLowerCase())
-          .filter(Boolean)
-      )
-    ]
-    if (list.join(', ') !== joined) onSave(list)
-  }
-  return (
-    <Input
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={save}
-      onKeyDown={(e) => e.key === 'Enter' && save()}
-      placeholder={placeholder}
-      className="font-mono text-[13px]"
-    />
-  )
 }
 
 // ---- page ------------------------------------------------------------------------------------
@@ -284,7 +111,7 @@ export function StylePage(): React.JSX.Element {
         ? 'same'
         : 'custom'
   )
-  const [instructions, setInstructions] = useSyncedText(f.llm.instructions)
+  const [instructions, setInstructions] = useSyncedText(f.instructions)
   const serverOptions = inference.offersMurmur ? [MURMUR_LLM_PRESET, ...LLM_PRESETS] : LLM_PRESETS
 
   const discover = async (): Promise<void> => {
@@ -324,7 +151,7 @@ export function StylePage(): React.JSX.Element {
   }
   const saveInstructions = (): void => {
     const next = instructions.slice(0, LLM_INSTRUCTIONS_MAX)
-    if (next !== f.llm.instructions) void patch({ formatting: { llm: { instructions: next } } })
+    if (next !== f.instructions) void patch({ formatting: { instructions: next } })
   }
 
   const addRule = (): void => {
@@ -355,7 +182,7 @@ export function StylePage(): React.JSX.Element {
     <div className="space-y-8">
       <PageHeader
         title="Style"
-        description="How raw speech becomes finished text. Rules run instantly on every dictation; smart formatting adds a language model on top and checks its work against your words before anything is inserted."
+        description="How raw speech becomes finished text. The formatting model reads the destination on its own: chat stays casual, email gets full sentences, code editors keep identifiers exact, terminals get one line. What is left to choose is how it should sound and anything you want to tell it."
       />
 
       <Section title="Formatting">
@@ -371,140 +198,25 @@ export function StylePage(): React.JSX.Element {
           value={f.tone}
           onChange={(v) => void patch({ formatting: { tone: v } })}
         />
-      </Section>
-
-      <Section
-        title="Cleanup"
-        description="What you did not mean to type. Every option here is rule-based, runs in microseconds, and still applies when the model is off or unavailable."
-      >
         <SettingRow
-          title="Filler sounds"
-          description="um, uh, hmm and friends disappear; a sentence that opened with one is re-capitalized."
+          title="Your instructions"
+          description={`Told to the model on every dictation, ahead of the tone. Per-app rules below can add more. ${instructions.length}/${LLM_INSTRUCTIONS_MAX}`}
+          vertical
         >
-          <Switch
-            checked={f.removeFillers}
-            onCheckedChange={(v) => void patch({ formatting: { removeFillers: v } })}
-          />
-        </SettingRow>
-        {f.removeFillers && (
-          <SettingRow
-            title="Filler list"
-            description="Comma separated. Whole words only, so “umbrella” is safe."
-            vertical
-          >
-            <ListInput
-              value={f.fillerWords}
-              onSave={(list) => void patch({ formatting: { fillerWords: list } })}
-            />
-          </SettingRow>
-        )}
-        <LevelRow
-          title="Hesitation phrases"
-          levels={HESITATIONS}
-          value={f.hesitations}
-          onChange={(v) => void patch({ formatting: { hesitations: v } })}
-        />
-        {f.hesitations !== 'off' && (
-          <SettingRow
-            title="Your own hesitation phrases"
-            description="Comma separated. Removed wherever a pause marks them, like the built-in list: at the start of a sentence, wrapped in commas, or before punctuation."
-            vertical
-          >
-            <ListInput
-              value={f.hesitationPhrases}
-              onSave={(list) => void patch({ formatting: { hesitationPhrases: list } })}
-              placeholder="at the end of the day, to be fair, what I'm trying to say is"
-            />
-          </SettingRow>
-        )}
-        <LevelRow
-          title="Repetitions"
-          levels={REPETITIONS}
-          value={f.collapseRepeats ? f.repetitionScope : 'off'}
-          onChange={(v) =>
-            void patch({
-              formatting:
-                v === 'off'
-                  ? { collapseRepeats: false }
-                  : { collapseRepeats: true, repetitionScope: v }
-            })
-          }
-        />
-        <SettingRow
-          title="Self-corrections"
-          description="“Tuesday, no, Wednesday” keeps only Wednesday; “John, I mean, Jane” keeps Jane; “at 5, sorry, 6 pm” keeps 6 pm. Smart mode handles the trickier ones."
-        >
-          <Switch
-            checked={f.selfCorrections}
-            onCheckedChange={(v) => void patch({ formatting: { selfCorrections: v } })}
-          />
-        </SettingRow>
-      </Section>
-
-      <Section
-        title="Structure"
-        description="How the text is laid out. Lists and numbers are detected by rules from what you say; the destination app can override them (code and terminals never get lists and always get digits)."
-      >
-        <LevelRow
-          title="Lists"
-          levels={LISTS}
-          value={f.lists}
-          onChange={(v) => void patch({ formatting: { lists: v } })}
-        />
-        {f.lists !== 'off' && (
-          <>
-            <LevelRow
-              title="List style"
-              levels={LIST_STYLES}
-              value={f.listStyle}
-              onChange={(v) => void patch({ formatting: { listStyle: v } })}
-            />
-            {f.listStyle !== 'numbers' && (
-              <LevelRow
-                title="Bullet marker"
-                levels={MARKERS}
-                value={f.bulletMarker}
-                onChange={(v) => void patch({ formatting: { bulletMarker: v } })}
-              />
-            )}
-          </>
-        )}
-        <LevelRow
-          title="Numbers as digits"
-          levels={NUMBERS}
-          value={f.numbers}
-          onChange={(v) => void patch({ formatting: { numbers: v } })}
-        />
-        <SettingRow
-          title="Spoken commands"
-          description="“new line”, “new paragraph”, “scratch that”, “question mark”, “bullet point”, “number one”."
-        >
-          <Switch
-            checked={f.spokenCommands}
-            onCheckedChange={(v) => void patch({ formatting: { spokenCommands: v } })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="“Press enter” command"
-          description="End a dictation with “press enter” or “send it” to submit the message right away."
-        >
-          <Switch
-            checked={f.pressEnterCommand}
-            onCheckedChange={(v) => void patch({ formatting: { pressEnterCommand: v } })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="Capitalize sentences"
-          description="First letter of each sentence and list item, and the pronoun I."
-        >
-          <Switch
-            checked={f.autoCapitalize}
-            onCheckedChange={(v) => void patch({ formatting: { autoCapitalize: v } })}
+          <Textarea
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value.slice(0, LLM_INSTRUCTIONS_MAX))}
+            onBlur={saveInstructions}
+            placeholder={
+              'Use British spelling.\nWrite dates as 2026-09-06.\nNever use the Oxford comma.\nKeep my sign-off exactly as I say it.'
+            }
+            className="min-h-24 text-[13px]"
+            spellCheck={false}
           />
         </SettingRow>
         <SettingRow
           title="Trailing space"
-          description="Add a space after each dictation so the next one flows on naturally. Lists end with a line break instead."
+          description="Add a space after each dictation so the next one flows on naturally. Text that ends with a line break is left alone."
         >
           <Switch
             checked={f.trailingSpace}
@@ -514,11 +226,11 @@ export function StylePage(): React.JSX.Element {
       </Section>
 
       <Section
-        title="Smart formatting model"
+        title="Formatting model"
         description={
           murmurLlm
-            ? 'The formatting model that comes with your account. It receives the rule-based text, not the raw transcript, and its edits are reviewed word by word before anything is inserted.'
-            : 'An OpenAI-compatible chat model. Fast small models (Groq Llama 8B, gpt-4o-mini, Cerebras) keep the round-trip under a second. The model receives the rule-based text, not the raw transcript, and its edits are reviewed word by word.'
+            ? 'The formatting model that comes with your account. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted.'
+            : 'An OpenAI-compatible chat model. Fast small models (Groq Llama 8B, gpt-4o-mini, Cerebras) keep the round trip under a second. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted.'
         }
       >
         <SettingRow
@@ -591,67 +303,9 @@ export function StylePage(): React.JSX.Element {
             </SettingRow>
           </>
         )}
-        <LevelRow
-          title="How much may it change"
-          intro="Every level fixes punctuation, casing, spelling, mis-hearings, hesitation and self-corrections."
-          levels={FREEDOMS}
-          value={f.llm.freedom}
-          onChange={(v) => void patch({ formatting: { llm: { freedom: v } } })}
-        />
-        <LevelRow
-          title="Layout"
-          levels={STRUCTURES}
-          value={f.llm.structure}
-          onChange={(v) => void patch({ formatting: { llm: { structure: v } } })}
-        />
-        <SettingRow
-          title="Your instructions"
-          description={`Added to the model's instructions on every dictation and applied before tone. Per-app rules below can add more. ${instructions.length}/${LLM_INSTRUCTIONS_MAX}`}
-          vertical
-        >
-          <Textarea
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value.slice(0, LLM_INSTRUCTIONS_MAX))}
-            onBlur={saveInstructions}
-            placeholder={
-              'Use British spelling.\nWrite dates as 2026-09-06.\nNever use the Oxford comma.\nKeep my sign-off exactly as I say it.'
-            }
-            className="min-h-24 text-[13px]"
-            spellCheck={false}
-          />
-        </SettingRow>
-        <SettingRow
-          title="Worked examples"
-          description="Send three short before/after examples with every request. Small models follow them far better than rules; turn this off to save tokens on very slow connections."
-        >
-          <Switch
-            checked={f.llm.examples}
-            onCheckedChange={(v) => void patch({ formatting: { llm: { examples: v } } })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="Minimum length"
-          description="Skip the model for very short dictations; the rules are enough for “yes, sounds good”."
-        >
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              min={1}
-              max={50}
-              className="w-20 text-right"
-              value={f.llm.minWords}
-              onChange={(e) =>
-                void patch({
-                  formatting: { llm: { minWords: Math.max(1, Number(e.target.value)) } }
-                })
-              }
-            />
-            <span className="text-sm text-muted-foreground">words</span>
-          </div>
-        </SettingRow>
         <SettingRow
           title="Timeout"
-          description="If the model is slower than this, the rule-based result is inserted instead."
+          description="If the model is slower than this, the Light result is inserted instead."
         >
           <div className="flex items-center gap-2">
             <Input
@@ -706,8 +360,8 @@ export function StylePage(): React.JSX.Element {
       >
         {f.appRules.length === 0 ? (
           <div className="py-2 text-[13px] text-muted-foreground">
-            No rules. Examples: “slack” → casual, no lists; “Code.exe” → strict model, digits
-            always; “outlook” → professional with extra instructions.
+            No rules. Examples: “slack” → casual; “Code.exe” → formatting off; “outlook” →
+            professional with extra instructions.
           </div>
         ) : (
           f.appRules.map((r) => (
@@ -800,27 +454,6 @@ function RuleEditor({
           onChange={(v) => onChange(r.id, { formatting: v })}
           width="w-32"
         />
-        <RuleSelect
-          label="Lists"
-          value={r.lists}
-          options={LISTS.map(({ value, label }) => ({ value, label }))}
-          onChange={(v) => onChange(r.id, { lists: v })}
-          width="w-32"
-        />
-        <RuleSelect
-          label="Numbers"
-          value={r.numbers}
-          options={NUMBERS.map(({ value, label }) => ({ value, label }))}
-          onChange={(v) => onChange(r.id, { numbers: v })}
-          width="w-32"
-        />
-        <RuleSelect
-          label="Model freedom"
-          value={r.freedom}
-          options={FREEDOMS.map(({ value, label }) => ({ value, label }))}
-          onChange={(v) => onChange(r.id, { freedom: v })}
-          width="w-36"
-        />
         <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
           Trailing space
           <Select
@@ -857,17 +490,17 @@ function RuleEditor({
 // ---- playground ------------------------------------------------------------------------------
 
 const SAMPLE =
-  'um so okay here are three things for today, first finish the the deck, second email the vendor about, you know, the pricing, and third book the flights for, I mean, twenty five people at five pm, no, six pm'
+  'um so okay here are three things for today, first finish the the deck, second email the vendor about, you know, the one million two hundred thousand dollar quote, and third book the flights for, I mean, twenty five people at five pm, no, six pm'
 
 function outcomeBadge(status: LlmStatus): React.JSX.Element {
   switch (status.outcome) {
     case 'used':
-      return <Badge variant="success">model used</Badge>
-    case 'partial':
-      return (
-        <Badge variant="success">
-          model used · {status.reverted} edit{status.reverted === 1 ? '' : 's'} reverted
+      return status.retriedAfter ? (
+        <Badge variant="success" title={`First answer rejected: ${status.retriedAfter}`}>
+          model used · after a strict retry
         </Badge>
+      ) : (
+        <Badge variant="success">model used</Badge>
       )
     case 'rejected':
       return <Badge variant="destructive">model rejected: {status.detail}</Badge>
@@ -911,13 +544,10 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
     }
   }
 
-  const reverted = out?.smart?.review?.filter((d) => !d.accept) ?? []
-  const accepted = out?.smart?.review?.filter((d) => d.accept) ?? []
-
   return (
     <Section
       title="Try it"
-      description="Paste a messy transcript to see exactly what the rules do, which settings apply for a given app, and what the model would change."
+      description="Paste a messy transcript to see what Light mode inserts, which settings apply for a given app, and what the model makes of it."
     >
       <div className="space-y-4 py-1">
         <Textarea
@@ -959,21 +589,14 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
               )}
               <Badge variant="secondary">tone {out.style.tone}</Badge>
               <Badge variant="secondary">mode {out.style.mode}</Badge>
-              <Badge variant="secondary">lists {out.style.lists}</Badge>
-              <Badge variant="secondary">numbers {out.style.numbers}</Badge>
-              <Badge variant="secondary">model {out.style.freedom}</Badge>
-              <Badge variant="secondary">layout {out.style.structure}</Badge>
             </div>
 
             <div>
               <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                <WandSparkles className="size-3.5" /> Rules
+                <WandSparkles className="size-3.5" /> Light
                 <span className="normal-case tracking-normal font-normal">
                   · {out.light.wordCount} words
                   {out.light.pressEnter && ' · presses Enter'}
-                  {out.light.isQuestion && ' · question'}
-                  {out.light.listRequested &&
-                    ` · ${out.light.listRequested === 'any' ? 'a' : out.light.listRequested} list requested`}
                 </span>
               </div>
               <div className="whitespace-pre-wrap rounded-lg bg-muted/60 px-3 py-2 text-[13px]">
@@ -999,9 +622,12 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
             {out.smart && (
               <div>
                 <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  <Sparkles className="size-3.5" /> Model
+                  <Sparkles className="size-3.5" /> Smart
                   <span className="normal-case tracking-normal font-normal">
                     · {out.smart.llmMs} ms
+                    {out.smart.status.attempts && out.smart.status.attempts > 1
+                      ? ` · ${out.smart.status.attempts} attempts`
+                      : ''}
                   </span>
                   {outcomeBadge(out.smart.status)}
                 </div>
@@ -1010,31 +636,17 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
                     {out.smart.text ?? out.smart.modelText}
                   </div>
                 )}
-                {out.smart.status.outcome === 'rejected' &&
-                  out.smart.modelText &&
-                  out.smart.text === undefined && (
-                    <p className="mt-1 text-[12px] text-muted-foreground">
-                      This is what the model returned; the rule-based text above would have been
-                      inserted.
-                    </p>
-                  )}
-                {!!out.smart.review?.length && (
-                  <div className="mt-2 space-y-1 text-[12px]">
-                    {[...reverted, ...accepted].map((d, i) => (
-                      <div key={i} className="flex flex-wrap items-baseline gap-2">
-                        <Badge
-                          variant={d.accept ? 'success' : 'destructive'}
-                          className="w-16 justify-center"
-                        >
-                          {d.accept ? 'kept' : 'reverted'}
-                        </Badge>
-                        <span className="font-mono text-muted-foreground line-through">
-                          {d.from || '∅'}
-                        </span>
-                        <span className="text-muted-foreground">→</span>
-                        <span className="font-mono">{d.to || '∅'}</span>
-                        <span className="text-muted-foreground">({d.why})</span>
-                      </div>
+                {out.smart.status.outcome === 'rejected' && out.smart.modelText && (
+                  <p className="mt-1 text-[12px] text-muted-foreground">
+                    This is what the model returned; the Light text above would have been inserted.
+                  </p>
+                )}
+                {out.smart.stages.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {out.smart.stages.map((s) => (
+                      <Badge key={s} variant="outline">
+                        {s}
+                      </Badge>
                     ))}
                   </div>
                 )}

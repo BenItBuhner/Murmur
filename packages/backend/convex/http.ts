@@ -1,7 +1,7 @@
 import { httpRouter } from 'convex/server'
 import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
-import { chatCompletions, models, transcriptions } from './gateway'
+import { chatCompletions, format, models, transcriptions } from './gateway'
 import { verifyClerkWebhook, WebhookVerificationError } from './lib/clerkWebhook'
 
 const http = httpRouter()
@@ -13,6 +13,8 @@ const http = httpRouter()
 http.route({ path: '/v1/models', method: 'GET', handler: models })
 http.route({ path: '/v1/audio/transcriptions', method: 'POST', handler: transcriptions })
 http.route({ path: '/v1/chat/completions', method: 'POST', handler: chatCompletions })
+/** Murmur-native: the transcript in, the text to insert out (see gateway.ts `format`). */
+http.route({ path: '/v1/format', method: 'POST', handler: format })
 
 /**
  * Clerk -> Convex user sync. Point a Clerk webhook endpoint at

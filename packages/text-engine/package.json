@@ -1,0 +1,25 @@
+{
+  "name": "@murmur/text-engine",
+  "version": "0.1.0",
+  "description": "Murmur text engine - turns a raw speech transcript into the text the speaker meant to type. Prompt, verifier and the few deterministic stages, shared by the desktop app and the Convex gateway and mirrored on Android.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "MURMUR_LIVE=1 vitest run eval",
+    "golden": "vitest run tests/golden.test.ts --update"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^4.0.0"
+  }
+}

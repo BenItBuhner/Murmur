@@ -1,60 +1,56 @@
-import type { CSSProperties, ElementType, ReactNode } from 'react'
+import type { ElementType, ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 
-export type SurfaceLevel = 'raised' | 'inset' | 'sunken' | 'ink' | 'overlay'
+/*
+ * The apps' surface roles, radius scale and spacing roles as one component, so a page says what a
+ * thing is rather than how it is drawn. Nesting is concentric on the 4px grid: a card (xl, 20px)
+ * padded tight (8px) holds md rows (12px); a card padded normally holds md wells and xs key caps.
+ * Every class is spelled out so Tailwind's scanner finds it.
+ */
+export type SurfaceRole = 'raised' | 'floating' | 'overlay' | 'well'
+export type SurfaceRadius = 'md' | 'lg' | 'xl' | '2xl'
+export type SurfacePadding = 'card' | 'card-tight' | 'none'
 
-/* Spelled out so Tailwind's scanner finds every utility (a template string would hide them). */
-const LEVEL_CLASS: Record<SurfaceLevel, string> = {
+const ROLE: Record<SurfaceRole, string> = {
   raised: 'surface-raised',
-  inset: 'surface-inset',
-  sunken: 'surface-sunken',
-  ink: 'surface-ink',
-  overlay: 'surface-overlay'
+  floating: 'surface-floating',
+  overlay: 'surface-overlay',
+  well: 'well'
 }
-
-type CssVars = CSSProperties & Record<`--${string}`, string>
+const RADIUS: Record<SurfaceRadius, string> = {
+  md: 'rounded-md',
+  lg: 'rounded-lg',
+  xl: 'rounded-xl',
+  '2xl': 'rounded-2xl'
+}
+const PADDING: Record<SurfacePadding, string> = {
+  card: 'p-card',
+  'card-tight': 'p-card-tight',
+  none: ''
+}
 
 interface SurfaceProps {
-  /** Outer corner radius in px. */
-  radius?: number
-  /** Padding in px; the inner radius children may use (`rounded-(--ri)`) is radius minus this. */
-  padding?: number
-  level?: SurfaceLevel
+  role?: SurfaceRole
+  radius?: SurfaceRadius
+  padding?: SurfacePadding
   as?: ElementType
-  className?: string
-  style?: CSSProperties
-  children?: ReactNode
   id?: string
+  className?: string
+  children?: ReactNode
 }
 
-/**
- * A sheet of paper. It knows its radius and padding, so anything set flush inside it can take the
- * concentric inner radius instead of reusing the outer one. Nest another Surface with
- * `radius={inner(radius, padding)}` and the corners stay parallel all the way down.
- */
 export function Surface({
-  radius = 32,
-  padding = 20,
-  level = 'raised',
+  role = 'raised',
+  radius = 'xl',
+  padding = 'card',
   as: Tag = 'div',
+  id,
   className,
-  style,
-  children,
-  id
+  children
 }: SurfaceProps) {
-  const vars: CssVars = { '--r': `${radius}px`, '--p': `${padding}px`, ...style }
   return (
-    <Tag
-      id={id}
-      className={cn('surface rounded-(--r) p-(--p)', LEVEL_CLASS[level], className)}
-      style={vars}
-    >
+    <Tag id={id} className={cn(ROLE[role], RADIUS[radius], PADDING[padding], className)}>
       {children}
     </Tag>
   )
-}
-
-/** The radius of something set inside a surface with `radius` and `padding`, never sharper than 4px. */
-export function inner(radius: number, padding: number): number {
-  return Math.max(4, radius - padding)
 }

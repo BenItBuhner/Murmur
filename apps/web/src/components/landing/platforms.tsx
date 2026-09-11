@@ -33,27 +33,25 @@ export function Platforms({ manifest }: { manifest: ReleaseManifest | null }) {
         title="A desktop app for Windows and Linux. A native app for Android."
         lede="Both check GitHub Releases for updates, verify every download against the release’s checksums and install it when you are not dictating. You download Murmur by hand exactly once."
       />
-      <div className="mt-12 grid gap-5 md:grid-cols-3">
+      <div className="mt-section grid gap-card md:grid-cols-3">
         {CARDS.map((card) => (
-          <Surface key={card.platform} radius={32} padding={20} className="flex flex-col">
-            <h3 className="serif-display text-[2rem]">{card.title}</h3>
-            <p className="mt-3 flex-1 text-[14.5px] leading-relaxed text-muted-foreground">
-              {card.body}
-            </p>
-            <p className="mt-4 text-[13px] text-muted-foreground/90">{card.formats}</p>
+          <Surface key={card.platform} className="flex flex-col">
+            <h3 className="serif-display text-heading">{card.title}</h3>
+            <p className="mt-3 flex-1 text-body text-muted-foreground">{card.body}</p>
+            <p className="mt-4 text-note text-muted-foreground/90">{card.formats}</p>
             <PlatformDownloadButton
               manifest={manifest}
               platform={card.platform}
-              className="mt-5 w-full"
+              className="mt-card w-full"
             />
           </Surface>
         ))}
       </div>
-      <p className="mt-6 text-[13.5px] text-muted-foreground">
+      <p className="mt-6 text-note text-muted-foreground">
         macOS builds (Apple silicon and Intel) ship with every release as well, marked experimental.{' '}
         <Link
           href="/download"
-          className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
+          className="text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
         >
           Every file, with checksums
         </Link>

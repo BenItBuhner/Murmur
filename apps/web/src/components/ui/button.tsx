@@ -2,29 +2,28 @@ import Link from 'next/link'
 import type { ComponentProps, ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 
-export type ButtonVariant =
-  'primary' | 'secondary' | 'ghost' | 'paper' | 'inverse' | 'inverse-ghost'
+/*
+ * Buttons are pills, as in the apps: filled (primary), tonal (a well that darkens on hover) and
+ * ghost (bare text); raised is a tonal button that sits on a well, lifted like the apps' switch
+ * thumb. None of them draws an edge.
+ */
+export type ButtonVariant = 'primary' | 'tonal' | 'raised' | 'ghost'
 export type ButtonSize = 'sm' | 'md' | 'lg'
 
-/* Pills, like every button in the app; the pill is the one shape that is not concentric with its parent. */
 const BASE =
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium transition-[background-color,color,transform,box-shadow] duration-200 active:scale-[0.985] outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-4 [&_svg]:shrink-0'
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium transition-[background-color,color,transform,box-shadow] duration-200 active:scale-[0.985] outline-none focus-visible:ring-2 focus-visible:ring-ring/35 disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-4 [&_svg]:shrink-0'
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-primary text-primary-foreground hover:bg-primary/88',
-  secondary: 'bg-secondary text-secondary-foreground hover:bg-accent',
-  ghost: 'text-muted-foreground hover:bg-accent hover:text-foreground',
-  paper: 'bg-card text-foreground shadow-raised hover:bg-accent',
-  /* On an ink surface the roles swap: paper button, ink text. */
-  inverse: 'bg-primary-foreground text-primary hover:bg-primary-foreground/90',
-  'inverse-ghost':
-    'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground'
+  tonal: 'well text-foreground hover:bg-accent',
+  raised: 'bg-card text-foreground shadow-raised hover:bg-accent',
+  ghost: 'text-muted-foreground hover:bg-accent hover:text-foreground'
 }
 
 const SIZES: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3.5 text-[13px]',
-  md: 'h-10 px-5 text-sm',
-  lg: 'h-12 px-6 text-[15px]'
+  sm: 'h-8 px-3.5 text-note',
+  md: 'h-9 px-4.5 text-body',
+  lg: 'h-12 px-7 text-lead'
 }
 
 export function buttonClasses(

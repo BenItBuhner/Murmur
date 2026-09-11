@@ -11,10 +11,10 @@ export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
       <Container className="grid items-center gap-14 lg:grid-cols-[1.05fr_1fr] lg:gap-12">
         <div className="stagger max-w-xl">
           <div className="eyebrow">Voice dictation · Windows, Linux, Android</div>
-          <h1 className="serif-display mt-5 text-[2.9rem] text-balance sm:text-[3.9rem] lg:text-[4.4rem]">
+          <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
             Hold a key. Speak. The words <em className="italic">land</em> where your cursor is.
           </h1>
-          <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-pretty text-muted-foreground sm:text-[18px]">
+          <p className="mt-6 max-w-lg text-lead text-pretty text-muted-foreground">
             Murmur turns what you say into clean, punctuated text and types it into whatever you are
             using: chat, email, a document, a code editor, a terminal. Fillers and false starts
             disappear, numbers come out the way you would type them, and nothing you said gets
@@ -24,11 +24,11 @@ export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
             <ButtonLink href="/download" size="lg">
               Download Murmur
             </ButtonLink>
-            <ButtonLink href="/#engine" variant="paper" size="lg">
+            <ButtonLink href="/#engine" variant="tonal" size="lg">
               How it works
             </ButtonLink>
           </div>
-          <p className="mt-6 text-[13px] text-muted-foreground">
+          <p className="mt-6 text-note text-muted-foreground">
             {manifest ? (
               <>
                 <a
@@ -44,14 +44,14 @@ export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
             Free to start, no card. MIT licensed,{' '}
             <a
               href={repoUrl()}
-              className="underline decoration-border underline-offset-4 hover:text-foreground"
+              className="underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
             >
               source on GitHub
             </a>
             .
           </p>
         </div>
-        <div className="animate-rise-in pt-6 lg:pt-0 [animation-delay:180ms]">
+        <div className="animate-rise-in pt-6 lg:pt-0 [animation-delay:160ms]">
           <TranscriptDemo />
         </div>
       </Container>

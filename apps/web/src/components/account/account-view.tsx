@@ -5,7 +5,8 @@ import { Authenticated, AuthLoading, Unauthenticated, useMutation, useQuery } fr
 import Link from 'next/link'
 import { useEffect, useSyncExternalStore } from 'react'
 import { Button, ButtonLink } from '@/components/ui/button'
-import { inner, Surface } from '@/components/ui/surface'
+import { Chip } from '@/components/ui/section'
+import { Surface } from '@/components/ui/surface'
 import {
   api,
   type DeviceDto,
@@ -50,9 +51,9 @@ export function AccountView() {
 
 function Placeholder() {
   return (
-    <Surface radius={32} padding={24} className="min-h-64 animate-pulse-soft">
-      <div className="h-4 w-40 rounded-(--ri) bg-secondary" />
-      <div className="mt-4 h-4 w-72 rounded-(--ri) bg-secondary" />
+    <Surface className="min-h-64 animate-pulse-soft">
+      <div className="well h-4 w-40 rounded-md" />
+      <div className="well mt-4 h-4 w-72 rounded-md" />
     </Surface>
   )
 }
@@ -61,13 +62,13 @@ function SignedOut() {
   return (
     <div className="grid items-start gap-8 lg:grid-cols-[1fr_auto]">
       <div className="max-w-lg">
-        <h2 className="serif-display text-[2rem]">Sign in to Murmur</h2>
-        <p className="mt-3 text-[15px] leading-relaxed text-muted-foreground">
+        <h2 className="serif-display text-heading">Sign in to Murmur</h2>
+        <p className="mt-3 text-lead text-muted-foreground">
           The same account the desktop and Android apps use. Your dictionary, snippets, style and
           stats follow it to every device; the model you dictate with and any keys of your own stay
           on the device.
         </p>
-        <ul className="mt-6 space-y-2.5 text-[14.5px] text-foreground/85">
+        <ul className="mt-6 space-y-2.5 text-body text-foreground/85">
           <li>See your plan and how much of this month’s allowance is used.</li>
           <li>Every device that has connected to the account.</li>
           <li>{PRICING.trialDays} days of Pro to start, no card; a free tier after that.</li>
@@ -93,9 +94,9 @@ function SignedInAccount() {
   const devices = useQuery(api.devices.list)
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-card">
       <ProfileCard user={me ?? null} />
-      <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+      <div className="grid gap-card lg:grid-cols-[1.15fr_0.85fr]">
         <PlanCard status={status ?? null} />
         <StatsCard stats={stats ?? null} />
       </div>
@@ -108,13 +109,13 @@ function ProfileCard({ user }: { user: UserDto | null }) {
   const clerk = useClerk()
   const name = user?.name || 'Your account'
   return (
-    <Surface radius={32} padding={20} className="flex flex-wrap items-center gap-4">
+    <Surface className="flex flex-wrap items-center gap-4">
       {user?.imageUrl ? (
         // Clerk profile images come from a third-party host that changes per instance.
         // eslint-disable-next-line @next/next/no-img-element
         <img src={user.imageUrl} alt="" className="size-12 rounded-full object-cover" />
       ) : (
-        <span className="inline-flex size-12 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+        <span className="well inline-flex size-12 items-center justify-center rounded-full text-muted-foreground">
           <svg
             width="20"
             height="20"
@@ -130,13 +131,13 @@ function ProfileCard({ user }: { user: UserDto | null }) {
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[17px] font-semibold tracking-tight">{name}</div>
+        <div className="truncate text-lead font-semibold tracking-tight">{name}</div>
         {user?.email && (
-          <div className="truncate text-[13.5px] text-muted-foreground">{user.email}</div>
+          <div className="truncate text-note text-muted-foreground">{user.email}</div>
         )}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" size="sm" onClick={() => void clerk.openUserProfile()}>
+        <Button variant="tonal" size="sm" onClick={() => void clerk.openUserProfile()}>
           Manage account
         </Button>
         <Button
@@ -158,26 +159,17 @@ function PlanCard({ status }: { status: InferenceStatus | null }) {
   const sttUsed = thisMonth?.sttSeconds ?? 0
   const tokensUsed = thisMonth?.llmTokens ?? 0
   const requests = (thisMonth?.sttRequests ?? 0) + (thisMonth?.llmRequests ?? 0)
-  const radius = 32
-  const padding = 20
 
   return (
-    <Surface radius={radius} padding={padding} className="flex flex-col">
-      <div className="flex items-start justify-between gap-4 px-1">
+    <Surface className="flex flex-col">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <div className="eyebrow">Plan</div>
-          <h2 className="serif-display mt-2 text-[2rem]">{plan === 'pro' ? 'Pro' : 'Free'}</h2>
+          <h2 className="serif-display mt-2 text-heading">{plan === 'pro' ? 'Pro' : 'Free'}</h2>
         </div>
-        <span
-          className={cn(
-            'rounded-full px-2.5 py-1 text-[11px] font-medium tracking-[0.06em] uppercase',
-            plan === 'pro' ? 'bg-success/12 text-success' : 'bg-secondary text-secondary-foreground'
-          )}
-        >
-          {plan}
-        </span>
+        <Chip tone={plan === 'pro' ? 'success' : 'well'}>{plan}</Chip>
       </div>
-      <p className="mt-2 px-1 text-[14px] leading-relaxed text-muted-foreground">
+      <p className="mt-2 text-body text-muted-foreground">
         {status
           ? status.available
             ? `Murmur’s speech and formatting models come with the account. ${Math.round(status.limits.sttSecondsPerMonth / 60)} minutes of transcription and ${formatNumber(status.limits.llmTokensPerMonth)} formatting tokens a month, up to ${status.limits.requestsPerMinute} requests a minute, clips up to ${Math.round(status.limits.maxClipSeconds / 60)} minutes.`
@@ -185,39 +177,37 @@ function PlanCard({ status }: { status: InferenceStatus | null }) {
           : 'Waiting for your account status…'}
       </p>
 
-      <div className="mt-5 grid gap-2">
+      <div className="mt-card grid gap-2">
         <Meter
           label={`Transcription in ${formatPeriod(period)}`}
           value={sttUsed}
           max={status?.limits.sttSecondsPerMonth ?? 0}
           display={`${formatAudioSeconds(sttUsed)} of ${status ? formatAudioSeconds(status.limits.sttSecondsPerMonth) : '—'}`}
-          radius={inner(radius, padding)}
         />
         <Meter
           label="Formatting tokens"
           value={tokensUsed}
           max={status?.limits.llmTokensPerMonth ?? 0}
           display={`${formatNumber(tokensUsed)} of ${status ? formatNumber(status.limits.llmTokensPerMonth) : '—'}`}
-          radius={inner(radius, padding)}
         />
-        <div className="flex items-baseline justify-between rounded-(--ri) bg-secondary px-4 py-3 text-[13.5px]">
+        <div className="well flex items-baseline justify-between rounded-md px-4 py-3 text-note">
           <span className="text-muted-foreground">Requests this month</span>
           <span className="font-medium tabular-nums">{formatNumber(requests)}</span>
         </div>
       </div>
 
       {plan !== 'pro' && (
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-(--ri) bg-primary px-4 py-3.5 text-primary-foreground">
+        <div className="well mt-card flex flex-wrap items-center justify-between gap-3 rounded-md px-4 py-3.5">
           <div>
-            <div className="text-[14.5px] font-medium">
+            <div className="text-body font-medium">
               Pro is {formatPrice(proPerMonth('yearly'))} a month, billed yearly
             </div>
-            <div className="text-[12.5px] text-primary-foreground/65">
+            <div className="text-meta text-muted-foreground">
               Or {formatPrice(PRICING.proMonthly)} monthly. Checkout opens here when billing goes
               live.
             </div>
           </div>
-          <ButtonLink href="/pricing" variant="inverse" size="sm">
+          <ButtonLink href="/pricing" size="sm">
             What Pro includes
           </ButtonLink>
         </div>
@@ -226,29 +216,27 @@ function PlanCard({ status }: { status: InferenceStatus | null }) {
   )
 }
 
+/* A meter: the label and figure over a track; the track is the one functional thin mark. */
 function Meter({
   label,
   value,
   max,
-  display,
-  radius
+  display
 }: {
   label: string
   value: number
   max: number
   display: string
-  radius: number
 }) {
   const ratio = max > 0 ? Math.min(1, value / max) : 0
   return (
-    <div className="rounded-(--ri) bg-secondary px-4 py-3">
-      <div className="flex items-baseline justify-between gap-4 text-[13.5px]">
+    <div className="well rounded-md px-4 py-3">
+      <div className="flex items-baseline justify-between gap-4 text-note">
         <span className="text-muted-foreground">{label}</span>
         <span className="font-medium tabular-nums">{display}</span>
       </div>
       <div
-        className="mt-2.5 h-1.5 overflow-hidden bg-card"
-        style={{ borderRadius: Math.max(2, radius - 16) }}
+        className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-input"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={max}
@@ -257,7 +245,7 @@ function Meter({
       >
         <div
           className={cn(
-            'h-full rounded-[inherit] transition-[width] duration-500',
+            'h-full rounded-full transition-[width] duration-500',
             ratio >= 0.9 ? 'bg-record' : 'bg-foreground/70'
           )}
           style={{ width: `${Math.round(ratio * 100)}%` }}
@@ -276,21 +264,19 @@ function StatsCard({ stats }: { stats: StatsDto | null }) {
     { label: 'Day streak', value: stats ? formatNumber(stats.streakDays) : '—' }
   ]
   return (
-    <Surface radius={32} padding={20}>
-      <div className="px-1">
-        <div className="eyebrow">Across your devices</div>
-        <h2 className="serif-display mt-2 text-[2rem]">Stats</h2>
-      </div>
-      <dl className="mt-5 grid grid-cols-2 gap-2">
+    <Surface>
+      <div className="eyebrow">Across your devices</div>
+      <h2 className="serif-display mt-2 text-heading">Stats</h2>
+      <dl className="mt-card grid grid-cols-2 gap-2">
         {items.map((item) => (
-          <div key={item.label} className="rounded-(--ri) bg-secondary px-4 py-3.5">
-            <dt className="text-[12.5px] text-muted-foreground">{item.label}</dt>
-            <dd className="serif-display mt-1 text-[1.75rem] tabular-nums">{item.value}</dd>
+          <div key={item.label} className="well rounded-md px-4 py-3.5">
+            <dt className="text-meta text-muted-foreground">{item.label}</dt>
+            <dd className="serif-display mt-1 text-numeral tabular-nums">{item.value}</dd>
           </div>
         ))}
       </dl>
       {stats?.lastSessionDay && (
-        <p className="mt-3 px-1 text-[12.5px] text-muted-foreground">
+        <p className="mt-3 text-meta text-muted-foreground">
           Last dictation on {stats.lastSessionDay}.
         </p>
       )}
@@ -307,40 +293,41 @@ const PLATFORM_NAMES: Record<DeviceDto['platform'], string> = {
   web: 'Web'
 }
 
+/* A list card: xl with tight padding, md rows. */
 function DevicesCard({ devices }: { devices: DeviceDto[] | null }) {
   const now = useNow()
   return (
-    <Surface radius={32} padding={20}>
-      <div className="px-1">
+    <Surface padding="card-tight">
+      <div className="px-3 pt-3 pb-4">
         <div className="eyebrow">Devices</div>
-        <h2 className="serif-display mt-2 text-[2rem]">Every install on this account</h2>
-        <p className="mt-2 text-[14px] leading-relaxed text-muted-foreground">
+        <h2 className="serif-display mt-2 text-heading">Every install on this account</h2>
+        <p className="mt-2 text-body text-muted-foreground">
           Removing a device is done from the app’s Account page; sign out on the device itself to
           end its session.
         </p>
       </div>
       {devices === null ? (
-        <div className="mt-5 h-14 rounded-(--ri) bg-secondary animate-pulse-soft" />
+        <div className="well h-14 rounded-md animate-pulse-soft" />
       ) : devices.length === 0 ? (
-        <div className="mt-5 rounded-(--ri) bg-secondary px-4 py-6 text-center text-[14px] text-muted-foreground">
+        <div className="well rounded-md px-4 py-6 text-center text-body text-muted-foreground">
           No device has signed in yet.{' '}
           <Link
             href="/download"
-            className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
+            className="text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
           >
             Download Murmur
           </Link>{' '}
           and sign in there.
         </div>
       ) : (
-        <ul className="mt-5 grid gap-2">
+        <ul className="grid gap-card-tight">
           {devices.map((device) => (
             <li
               key={device.deviceId}
-              className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 rounded-(--ri) bg-secondary px-4 py-3"
+              className="well flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 rounded-md px-4 py-3"
             >
-              <span className="text-[14.5px] font-medium">{device.name}</span>
-              <span className="text-[13px] text-muted-foreground tabular-nums">
+              <span className="text-body font-medium">{device.name}</span>
+              <span className="text-note text-muted-foreground tabular-nums">
                 {PLATFORM_NAMES[device.platform]} · Murmur {device.appVersion} · last seen{' '}
                 {formatRelative(device.lastSeenAt, now)}
               </span>

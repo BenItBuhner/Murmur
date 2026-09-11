@@ -18,7 +18,7 @@ const STEPS: Array<{ title: string; body: string; visual: ReactNode }> = [
     title: 'Say it the way you would say it',
     body: 'Fillers, stutters, false starts and “Tuesday, no, Wednesday” are yours to make. Spoken commands work too: new line, new paragraph, scratch that, quote and end quote.',
     visual: (
-      <p className="text-[13.5px] leading-snug text-muted-foreground" aria-hidden>
+      <p className="text-note text-muted-foreground" aria-hidden>
         “so, um, Tuesday, no, Wednesday works”
       </p>
     )
@@ -27,7 +27,7 @@ const STEPS: Array<{ title: string; body: string; visual: ReactNode }> = [
     title: 'It lands where your cursor is',
     body: 'Typed straight into the app you are in. Tone follows the destination: casual in chat, professional in email, exact identifiers in code editors, one line and no trailing period in a terminal.',
     visual: (
-      <p className="text-[13.5px] leading-snug" aria-hidden>
+      <p className="text-note" aria-hidden>
         Wednesday works.
         <span className="ml-0.5 inline-block h-[1.1em] w-px translate-y-[3px] bg-foreground/70 animate-pulse-soft" />
       </p>
@@ -43,22 +43,18 @@ export function HowItWorks() {
         title="Three things, and none of them is a menu."
         lede="Murmur is a Wispr Flow-style dictation tool: one shortcut, your voice, and text that is ready to send."
       />
-      <ol className="mt-12 grid gap-5 md:grid-cols-3">
+      <ol className="mt-section grid gap-card md:grid-cols-3">
         {STEPS.map((step, i) => (
           <li key={step.title}>
-            <Surface radius={32} padding={20} className="flex h-full flex-col">
-              <div className="flex h-24 items-center rounded-(--ri) bg-secondary px-5">
-                {step.visual}
-              </div>
-              <div className="mt-5 flex items-baseline gap-3">
-                <span className="serif-display text-[28px] text-muted-foreground/70 tabular-nums">
+            <Surface className="flex h-full flex-col">
+              <div className="well flex h-24 items-center rounded-md px-5">{step.visual}</div>
+              <div className="mt-card flex items-baseline gap-3">
+                <span className="serif-display text-heading text-muted-foreground/70 tabular-nums">
                   {String(i + 1).padStart(2, '0')}
                 </span>
-                <h3 className="text-[17px] font-semibold tracking-tight">{step.title}</h3>
+                <h3 className="text-lead font-semibold tracking-tight">{step.title}</h3>
               </div>
-              <p className="mt-2.5 text-[14.5px] leading-relaxed text-muted-foreground">
-                {step.body}
-              </p>
+              <p className="mt-2.5 text-body text-muted-foreground">{step.body}</p>
             </Surface>
           </li>
         ))}

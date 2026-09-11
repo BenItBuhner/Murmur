@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 
 /*
  * Clerk and Convex load on this page only, so the rest of the site ships no auth code and no
- * third-party requests. The Clerk appearance follows the site's ink and radius.
+ * third-party requests. The Clerk appearance follows the site's ink and the field radius (md).
  */
 export default function AccountPage() {
   const setup = accountsSetup()
@@ -23,22 +23,22 @@ export default function AccountPage() {
     <Section>
       <div className="max-w-2xl">
         <div className="eyebrow">Account</div>
-        <h1 className="serif-display mt-5 text-[2.9rem] text-balance sm:text-[4rem]">
+        <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
           One account, every device.
         </h1>
-        <p className="mt-5 text-[16px] leading-relaxed text-muted-foreground">
+        <p className="mt-5 text-lead text-muted-foreground">
           Your plan, this month’s usage of Murmur’s models, your stats and the devices that have
           signed in. Dictionary, snippets and style are edited in the apps and kept in step here.
         </p>
       </div>
-      <div className="mt-12">
+      <div className="mt-section">
         {setup.configured ? (
           <ClerkProvider
             publishableKey={clerkPublishableKey}
             appearance={{
               variables: {
                 colorPrimary: '#2b2926',
-                borderRadius: '0.875rem',
+                borderRadius: '0.75rem',
                 fontFamily: 'var(--font-sans)'
               }
             }}

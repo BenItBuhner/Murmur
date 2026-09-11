@@ -1,7 +1,7 @@
 import Link from 'next/link'
-import { Mark, Wordmark } from '@/components/mark'
 import { ButtonLink } from '@/components/ui/button'
 import { Container } from '@/components/ui/section'
+import { Wordmark } from '@/components/wordmark'
 import { NAV_LINKS } from '@/lib/site'
 
 export function SiteHeader() {
@@ -10,11 +10,10 @@ export function SiteHeader() {
       <Container className="flex h-16 items-center justify-between gap-4">
         <Link
           href="/"
-          className="flex items-center gap-2.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
           aria-label="Murmur home"
         >
-          <Mark size={26} />
-          <Wordmark className="translate-y-px" />
+          <Wordmark />
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
@@ -22,7 +21,7 @@ export function SiteHeader() {
             <Link
               key={item.href}
               href={item.href}
-              className="rounded-full px-3.5 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
+              className="rounded-full px-3.5 py-1.5 text-note font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
             >
               {item.label}
             </Link>

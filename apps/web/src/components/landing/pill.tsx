@@ -4,15 +4,16 @@ const BAR_DELAYS = ['0ms', '140ms', '280ms', '140ms', '0ms']
 const BAR_HEIGHTS = ['h-2.5', 'h-4', 'h-5', 'h-4', 'h-2.5']
 
 /**
- * The dictation pill as it floats over other apps while you speak: always dark, the five bars in
- * the recording coral. Purely decorative, hence hidden from assistive technology.
+ * The dictation pill as it floats over other apps while you speak: always dark, its own shadow
+ * with a light catch on top, the five bars in the recording coral. Decorative, so hidden from
+ * assistive technology.
  */
 export function DictationPill({ className }: { className?: string }) {
   return (
     <div
       aria-hidden
       className={cn(
-        'surface-overlay inline-flex h-12 items-center gap-3.5 rounded-full pr-5 pl-4',
+        'dictation-pill inline-flex h-12 items-center gap-3.5 rounded-full pr-5 pl-4',
         className
       )}
     >
@@ -25,8 +26,8 @@ export function DictationPill({ className }: { className?: string }) {
           />
         ))}
       </span>
-      <span className="text-[14px] font-medium tracking-tight">Listening</span>
-      <span className="text-[12px] text-overlay-foreground/55">release to insert</span>
+      <span className="text-body font-medium tracking-tight">Listening</span>
+      <span className="text-meta text-overlay-foreground/55">release to insert</span>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { Mark, Wordmark } from '@/components/mark'
 import { Container } from '@/components/ui/section'
+import { Wordmark } from '@/components/wordmark'
 import { latestDownloadBase, releasesUrl, repoUrl, SITE_TAGLINE } from '@/lib/site'
 
 const PRODUCT = [
@@ -11,6 +11,7 @@ const PRODUCT = [
   { href: '/account', label: 'Account' }
 ] as const
 
+/** The footer is the page's rail: one tonal step below the canvas, no rule between them. */
 export function SiteFooter() {
   const source = [
     { href: repoUrl(), label: 'Source on GitHub' },
@@ -19,15 +20,12 @@ export function SiteFooter() {
     { href: `${repoUrl()}/issues`, label: 'Report a problem' }
   ]
   return (
-    <footer className="mt-auto pt-16 pb-10 sm:pt-24">
+    <footer className="mt-auto bg-sidebar py-16">
       <Container>
         <div className="grid gap-12 sm:grid-cols-[1.4fr_1fr_1fr]">
           <div className="max-w-xs">
-            <div className="flex items-center gap-2.5">
-              <Mark size={24} />
-              <Wordmark className="text-[21px]" />
-            </div>
-            <p className="mt-4 text-[14px] leading-relaxed text-muted-foreground">{SITE_TAGLINE}</p>
+            <Wordmark />
+            <p className="mt-4 text-body text-muted-foreground">{SITE_TAGLINE}</p>
           </div>
           <FooterColumn title="Product">
             {PRODUCT.map((item) => (
@@ -48,7 +46,7 @@ export function SiteFooter() {
             ))}
           </FooterColumn>
         </div>
-        <div className="mt-14 flex flex-wrap items-center justify-between gap-3 text-[12.5px] text-muted-foreground">
+        <div className="mt-section flex flex-wrap items-center justify-between gap-3 text-meta text-muted-foreground">
           <span>MIT licensed. Windows, Linux and Android; macOS experimental.</span>
           <span>Recordings never leave your device.</span>
         </div>
@@ -61,7 +59,7 @@ function FooterColumn({ title, children }: { title: string; children: ReactNode 
   return (
     <div>
       <div className="eyebrow">{title}</div>
-      <ul className="mt-4 space-y-2.5 text-[14px] [&_.footer-link]:text-foreground/80 [&_.footer-link]:transition-colors [&_.footer-link:hover]:text-foreground">
+      <ul className="mt-4 space-y-2.5 text-body [&_.footer-link]:text-foreground/80 [&_.footer-link]:transition-colors [&_.footer-link:hover]:text-foreground">
         {children}
       </ul>
     </div>

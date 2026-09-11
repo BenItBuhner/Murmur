@@ -16,10 +16,10 @@ export default function PricingPage() {
       <Section className="pb-8 sm:pb-10">
         <div className="mx-auto max-w-2xl text-center">
           <div className="eyebrow">Pricing</div>
-          <h1 className="serif-display mt-5 text-[2.9rem] text-balance sm:text-[4rem]">
+          <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
             Free to start. {formatPrice(proPerMonth('yearly'))} a month if you stay.
           </h1>
-          <p className="mt-6 text-[17px] leading-relaxed text-pretty text-muted-foreground">
+          <p className="mt-6 text-lead text-pretty text-muted-foreground">
             Every account begins with {PRICING.trialDays} days of Pro and no card, then keeps a free
             tier. Pro is {formatPrice(PRICING.proMonthly)} a month or{' '}
             {formatPrice(PRICING.proYearly)} a year. And if you would rather bring your own speech
@@ -30,12 +30,12 @@ export default function PricingPage() {
 
       <Section className="pt-0 sm:pt-0">
         <Plans />
-        <p className="mx-auto mt-8 max-w-2xl text-center text-[13.5px] leading-relaxed text-muted-foreground">
+        <p className="mx-auto mt-8 max-w-2xl text-center text-note text-muted-foreground">
           Pro checkout is not open yet: today every account is on the free tier, and this page shows
           the plan it grows into. Prices in USD. Your plan and this month’s usage are on your{' '}
           <Link
             href="/account"
-            className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
+            className="text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
           >
             account page
           </Link>

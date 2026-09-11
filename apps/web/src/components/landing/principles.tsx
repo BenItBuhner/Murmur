@@ -27,20 +27,18 @@ export function Principles() {
         eyebrow="On your terms"
         title="Dictation hears everything you say. Murmur is built like it knows that."
       />
-      <dl className="mt-12 grid gap-x-12 gap-y-10 sm:grid-cols-2">
+      <dl className="mt-section grid gap-x-12 gap-y-10 sm:grid-cols-2">
         {PRINCIPLES.map((p) => (
           <div key={p.title} className="max-w-md">
-            <dt className="text-[17px] font-semibold tracking-tight">{p.title}</dt>
-            <dd className="mt-2 text-[15px] leading-relaxed text-pretty text-muted-foreground">
-              {p.body}
-            </dd>
+            <dt className="text-lead font-semibold tracking-tight">{p.title}</dt>
+            <dd className="mt-2 text-body text-pretty text-muted-foreground">{p.body}</dd>
           </div>
         ))}
       </dl>
-      <p className="mt-10 text-[14px] text-muted-foreground">
+      <p className="mt-10 text-body text-muted-foreground">
         <a
           href={repoUrl()}
-          className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
+          className="text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
         >
           Read the source
         </a>

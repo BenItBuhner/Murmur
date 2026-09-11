@@ -16,6 +16,9 @@ export const metadata: Metadata = {
 /* Prerendered; the release list refreshes from GitHub every ten minutes (REVALIDATE_SECONDS). */
 export const revalidate = 600
 
+const LINK =
+  'text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground'
+
 export default async function DownloadPage() {
   const manifest = await fetchLatestRelease()
   return (
@@ -23,7 +26,7 @@ export default async function DownloadPage() {
       <Section className="pb-10">
         <div className="max-w-2xl">
           <div className="eyebrow">Download</div>
-          <h1 className="serif-display mt-5 text-[2.9rem] text-balance sm:text-[4rem]">
+          <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
             {manifest ? (
               <>
                 Murmur <span className="tabular-nums">{manifest.version}</span>
@@ -32,31 +35,22 @@ export default async function DownloadPage() {
               'The latest Murmur'
             )}
           </h1>
-          <p className="mt-5 text-[16px] leading-relaxed text-muted-foreground">
+          <p className="mt-5 text-lead text-muted-foreground">
             {manifest ? (
               <>
                 {manifest.publishedAt && <>Released {formatDate(manifest.publishedAt)}. </>}
                 Both apps update themselves from here on: you download Murmur by hand once.{' '}
-                <a
-                  href={manifest.url}
-                  className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
-                >
+                <a href={manifest.url} className={LINK}>
                   Release notes
                 </a>
                 {' · '}
-                <a
-                  href={manifest.releasesUrl}
-                  className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
-                >
+                <a href={manifest.releasesUrl} className={LINK}>
                   All releases
                 </a>
                 {manifest.checksumsUrl && (
                   <>
                     {' · '}
-                    <a
-                      href={manifest.checksumsUrl}
-                      className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
-                    >
+                    <a href={manifest.checksumsUrl} className={LINK}>
                       SHA256SUMS.txt
                     </a>
                   </>
@@ -66,17 +60,11 @@ export default async function DownloadPage() {
               <>
                 GitHub could not be reached just now, so versions and sizes are missing. Every link
                 below still resolves to the current release.{' '}
-                <a
-                  href={releasesUrl()}
-                  className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
-                >
+                <a href={releasesUrl()} className={LINK}>
                   All releases
                 </a>
                 {' · '}
-                <a
-                  href={`${latestDownloadBase()}/SHA256SUMS.txt`}
-                  className="text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground"
-                >
+                <a href={`${latestDownloadBase()}/SHA256SUMS.txt`} className={LINK}>
                   SHA256SUMS.txt
                 </a>
               </>
@@ -96,13 +84,13 @@ export default async function DownloadPage() {
       </Section>
 
       <Section className="pt-0 sm:pt-0">
-        <div className="grid gap-5">
+        <div className="grid gap-card">
           {PLATFORMS.map((platform) => (
             <AssetList key={platform} manifest={manifest} platform={platform} />
           ))}
           <InstallCommands manifest={manifest} />
         </div>
-        <p className="mt-8 max-w-3xl text-[13.5px] leading-relaxed text-muted-foreground">
+        <p className="mt-8 max-w-3xl text-note text-muted-foreground">
           Every release ships a SHA256SUMS.txt; the apps verify each update against it before
           installing and refuse to install unattended without one.
           {manifest?.localOnly && (

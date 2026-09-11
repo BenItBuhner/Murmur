@@ -39,6 +39,9 @@ private const val MAX_SPRING_VELOCITY_DP = 900f
 /** Height of every state except the resting button. */
 private const val TALL_DP = 46f
 
+/** The edit panel's corner: the card radius of the app's token scale (Radii.card). */
+private const val PANEL_RADIUS_DP = 20f
+
 /** Widest a message pill gets (long error texts are ellipsized to fit). */
 private const val MESSAGE_MAX_W_DP = 300f
 
@@ -621,12 +624,15 @@ class OverlayPillView(context: Context) : View(context) {
         clipPath.rewind()
         clipPath.addRoundRect(scratchRect, radius, radius, Path.Direction.CW)
 
-        // Hairline ring (as on the desktop pill) so the button keeps an edge on a keyboard of its
-        // own brightness: light on a dark pill, dark on a light one.
-        strokePaint.color = ink(0x1A)
+        // A light catch along the top of the pill (as on the desktop pill): the one thin mark it
+        // keeps, so the button still reads as a surface on a keyboard of its own brightness.
+        strokePaint.color = ink(0x14)
         strokePaint.strokeWidth = dp(1f)
         scratchRect.inset(dp(0.5f), dp(0.5f))
+        canvas.save()
+        canvas.clipRect(drawn.left, drawn.top, drawn.right, drawn.top + drawn.height * 0.5f)
         canvas.drawRoundRect(scratchRect, radius - dp(0.5f), radius - dp(0.5f), strokePaint)
+        canvas.restore()
 
         if (crossfade && outgoingAlpha > 0.01f) {
             drawLayer(canvas, drawn, fromLook, outgoingAlpha, lerp(1f, 0.9f, smoothstep(0f, 0.42f, t)), now, dt)
@@ -993,10 +999,10 @@ class OverlayPillView(context: Context) : View(context) {
         val cx = box.right - dp(3f)
         val cy = box.top + dp(3f)
         paint.color = if (active) palette.accent else palette.chip
-        canvas.drawCircle(cx, cy, r, paint)
-        strokePaint.color = 0x33000000
-        strokePaint.strokeWidth = dp(1f)
-        canvas.drawCircle(cx, cy, r, strokePaint)
+        pillPaint.color = paint.color
+        pillPaint.setShadowLayer(dp(3f), 0f, dp(1f), 0x40000000)
+        canvas.drawCircle(cx, cy, r, pillPaint)
+        pillPaint.clearShadowLayer()
         badgeTextPaint.color = if (active) palette.onAccent else palette.onChip
         canvas.drawText(number.toString(), cx, cy + badgeTextPaint.textSize / 2.8f, badgeTextPaint)
         badgeTextPaint.color = palette.ink
@@ -1060,14 +1066,12 @@ class OverlayPillView(context: Context) : View(context) {
         val top = max(statusBarInset(), dp(24f)) + dp(8f)
         panelBottom = top + pad * 2 + chipH * 3 + rowGap * 3 + captionH
 
+        // The panel is a floating card: the card radius, a shadow, no outline.
         pillPaint.color = palette.panel
-        pillPaint.setShadowLayer(dp(10f), 0f, dp(4f), 0x66000000)
+        pillPaint.setShadowLayer(dp(14f), 0f, dp(6f), 0x59000000)
         scratchRect.set(left, top, right, panelBottom)
-        canvas.drawRoundRect(scratchRect, dp(20f), dp(20f), pillPaint)
+        canvas.drawRoundRect(scratchRect, dp(PANEL_RADIUS_DP), dp(PANEL_RADIUS_DP), pillPaint)
         pillPaint.clearShadowLayer()
-        strokePaint.color = ink(0x1F)
-        strokePaint.strokeWidth = dp(1f)
-        canvas.drawRoundRect(scratchRect, dp(20f), dp(20f), strokePaint)
 
         // Row 1: which spot, add / remove, Done.
         var y = top + pad
@@ -1149,6 +1153,7 @@ class OverlayPillView(context: Context) : View(context) {
         return box.right
     }
 
+    /** A chip in the edit chrome: a raised pill, lifted by its shadow rather than outlined. */
     private fun drawChip(canvas: Canvas, box: Box, label: String, bg: Int, fg: Int, isPressed: Boolean) {
         val drawn = if (isPressed) Box.centered(box.centerX, box.centerY, box.width * 0.94f, box.height * 0.94f) else box
         val r = drawn.height / 2f
@@ -1157,9 +1162,6 @@ class OverlayPillView(context: Context) : View(context) {
         scratchRect.set(drawn.left, drawn.top, drawn.right, drawn.bottom)
         canvas.drawRoundRect(scratchRect, r, r, pillPaint)
         pillPaint.clearShadowLayer()
-        strokePaint.color = ink(0x1F)
-        strokePaint.strokeWidth = dp(1f)
-        canvas.drawRoundRect(scratchRect, r, r, strokePaint)
         if (label.isNotEmpty()) {
             smallTextPaint.color = fg
             canvas.drawText(label, drawn.centerX - smallTextPaint.measureText(label) / 2f, drawn.centerY + smallTextPaint.textSize / 2.8f, smallTextPaint)

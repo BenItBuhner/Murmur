@@ -170,7 +170,7 @@ fun <T : Any> BackStackHost(
             transitionSpec = { tween(Duration, easing = StandardDecelerate) },
             label = "reveal"
         ) { if (it == EnterExitState.PreEnter) 0f else 1f }
-        // Like Stage: at night a hairline keeps the lifted surface's edge.
+        // The lifted surface keeps a light catch along its edge at night, like the pill.
         val edge = Murmur.colors.let { if (it.isDark) it.hairline else Color.Transparent }
         Box(
             when {
@@ -276,7 +276,7 @@ private fun Modifier.surface(lift: () -> Float, gesture: () -> BackGesture?, edg
     .graphicsLayer {
         val m = surfaceMotion(
             lift(), gesture(), size.width, size.height,
-            EdgeGap.toPx(), MaxTranslationY.toPx(), Radii.block.toPx()
+            EdgeGap.toPx(), MaxTranslationY.toPx(), Radii.card.toPx()
         )
         scaleX = m.scale
         scaleY = m.scale
@@ -294,7 +294,7 @@ private fun Modifier.surface(lift: () -> Float, gesture: () -> BackGesture?, edg
                 edge,
                 topLeft = Offset(stroke / 2, stroke / 2),
                 size = Size(size.width - stroke, size.height - stroke),
-                cornerRadius = CornerRadius((lerp(0f, Radii.block.toPx(), p) - stroke / 2).coerceAtLeast(0f)),
+                cornerRadius = CornerRadius((lerp(0f, Radii.card.toPx(), p) - stroke / 2).coerceAtLeast(0f)),
                 alpha = p,
                 style = Stroke(stroke)
             )

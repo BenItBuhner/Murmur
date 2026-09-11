@@ -1,0 +1,242 @@
+[
+  {
+    "id": "numbers/million-thousand",
+    "transcript": "the budget is one million two hundred thousand dollars",
+    "context": { "category": "email", "tone": "professional" },
+    "expect": { "matches": "\\$1,200,000|1\\.2 million dollars|\\$1\\.2 million|1,200,000 dollars" },
+    "good": "The budget is $1,200,000.",
+    "bad": ["The budget is one million $200,000.", "The budget is $1,200."]
+  },
+  {
+    "id": "numbers/hundreds-thousands-in-prose",
+    "transcript": "so we shipped three hundred and twenty units and the population is about three hundred and twenty thousand",
+    "context": { "category": "document", "tone": "neutral" },
+    "expect": { "contains": ["320 units", "320,000"] },
+    "good": "We shipped 320 units, and the population is about 320,000.",
+    "bad": ["We shipped 320 units, and the population is about 320."]
+  },
+  {
+    "id": "numbers/twelve-hundred",
+    "transcript": "twelve hundred units by friday",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "matches": "1,?200 units" },
+    "good": "1,200 units by Friday.",
+    "bad": ["12 hundred units by Friday."]
+  },
+  {
+    "id": "numbers/digit-run-phone",
+    "transcript": "call me at five five five one two one two and ask for extension one two three",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "matches": "555[- ]?1212", "contains": ["123"] },
+    "good": "Call me at 555-1212 and ask for extension 123.",
+    "bad": ["Call me at 555-1213 and ask for extension 123.", "Call me at 5551212."]
+  },
+  {
+    "id": "numbers/leading-zeros",
+    "transcript": "the code is zero zero zero seven",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "contains": ["0007"] },
+    "good": "The code is 0007.",
+    "bad": ["The code is 7.", "The code is 07."]
+  },
+  {
+    "id": "numbers/repeated-not-deduplicated",
+    "transcript": "the price was five thousand five thousand i said it twice",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "matches": "5,?000,? 5,?000" },
+    "good": "The price was 5,000, 5,000. I said it twice.",
+    "bad": ["The price was 5,000. I said it twice."]
+  },
+  {
+    "id": "numbers/counting",
+    "transcript": "count with me one two three four five six seven eight nine ten",
+    "context": { "category": "notes", "tone": "neutral" },
+    "expect": { "notMatches": "\\d{3,}" },
+    "good": "Count with me: one, two, three, four, five, six, seven, eight, nine, ten.",
+    "bad": ["Count with me: 123456789 10."]
+  },
+  {
+    "id": "numbers/version",
+    "transcript": "we are on version two point oh point one and node twenty two",
+    "context": { "category": "code", "tone": "neutral" },
+    "expect": { "contains": ["2.0.1", "22"] },
+    "good": "we are on version 2.0.1 and node 22",
+    "bad": ["We are on version 2 point oh point 1 and node 22."]
+  },
+  {
+    "id": "numbers/time-money-percent",
+    "transcript": "i need eleven hundred dollars by five thirty pm and its about forty two percent of the total",
+    "context": { "category": "email", "tone": "professional" },
+    "expect": { "matches": "\\$1,?100", "contains": ["5:30", "42%"] },
+    "good": "I need $1,100 by 5:30 pm, and it's about 42% of the total.",
+    "bad": ["I need $1,100 by 5:30 pm, and it's about 42 percent of 1,100."]
+  },
+  {
+    "id": "numbers/year-and-date",
+    "transcript": "the meeting is on march third twenty twenty four at ten to eleven",
+    "context": { "category": "email", "tone": "professional" },
+    "expect": { "contains": ["2024"], "matches": "March 3(rd)?" },
+    "good": "The meeting is on March 3rd, 2024 at 10 to 11.",
+    "bad": ["The meeting is on March 3rd, 2024 at 10:50."]
+  },
+  {
+    "id": "numbers/grand",
+    "transcript": "so basically we need forty two percent more revenue about three hundred grand",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "contains": ["42%"], "matches": "300k|300 grand|\\$300,000|300,000" },
+    "good": "We need 42% more revenue, about $300k.",
+    "bad": ["We need 42% more revenue, about $3,000."]
+  },
+  {
+    "id": "cleanup/fillers-stutters-correction",
+    "transcript": "um so hey sarah, uh can you send the the report to john on tuesday, no, wednesday? and cc me on it thanks",
+    "context": { "category": "chat", "tone": "casual", "app": "Slack" },
+    "expect": { "contains": ["Wednesday", "Sarah", "John"], "notContains": ["Tuesday", " um", "the the"], "notMatches": "\\buh\\b" },
+    "good": "Hey Sarah, can you send the report to John on Wednesday? And cc me on it, thanks.",
+    "bad": ["Hey Sarah, can you send the report to John on Tuesday? And cc me on it, thanks.", "Sure! Hey Sarah, can you send the report to John on Wednesday?"]
+  },
+  {
+    "id": "cleanup/hesitation-phrases",
+    "transcript": "I mean it was a hundred and fifty maybe a hundred and sixty people you know",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "contains": ["150", "160"], "notContains": ["you know"] },
+    "good": "It was 150, maybe 160 people.",
+    "bad": ["It was 150 people."]
+  },
+  {
+    "id": "cleanup/scratch-that",
+    "transcript": "send it tomorrow actually scratch that send it today",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "contains": ["today"], "notContains": ["tomorrow", "scratch"] },
+    "good": "Send it today.",
+    "bad": ["Send it tomorrow. Actually, scratch that. Send it today."]
+  },
+  {
+    "id": "cleanup/spoken-quotes",
+    "transcript": "she told me quote hands off end quote and left",
+    "context": { "category": "document", "tone": "neutral" },
+    "expect": { "matches": "[\"“]Hands off[.,]?[\"”]", "notContains": ["end quote"] },
+    "good": "She told me \"Hands off\" and left.",
+    "bad": ["She told me quote hands off end quote and left."]
+  },
+  {
+    "id": "cleanup/new-line-and-press-enter",
+    "transcript": "thanks a lot new line see you tomorrow press enter",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "contains": ["\n"], "notContains": ["press enter", "new line"], "pressEnter": true },
+    "good": "Thanks a lot.\nSee you tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "structure/enumeration-to-list",
+    "transcript": "okay so three things for today first finish the deck second email the vendor about pricing and third book the flights for next week",
+    "context": { "category": "notes", "tone": "neutral" },
+    "expect": { "matches": "(^|\\n)(1\\.|-) .*deck", "minLines": 3 },
+    "good": "Three things for today:\n1. Finish the deck\n2. Email the vendor about pricing\n3. Book the flights for next week",
+    "bad": ["Three things for today: finish the deck, email the vendor about pricing, and book the flights for next week, and also call 5 people."]
+  },
+  {
+    "id": "structure/numbered-by-speaker",
+    "transcript": "number one finish the deck number two email the vendor",
+    "context": { "category": "notes", "tone": "neutral" },
+    "expect": { "matches": "(^|\\n)1\\. ", "minLines": 2 },
+    "good": "1. Finish the deck\n2. Email the vendor",
+    "bad": []
+  },
+  {
+    "id": "guard/question-stays-question",
+    "transcript": "what time is the meeting tomorrow and do i need to bring anything",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "contains": ["?"], "notMatches": "^The meeting" },
+    "good": "What time is the meeting tomorrow, and do I need to bring anything?",
+    "bad": ["The meeting is at 10 am; bring your laptop."]
+  },
+  {
+    "id": "guard/instruction-stays-written",
+    "transcript": "write a short summary of the meeting and send it to the whole team by five pm",
+    "context": { "category": "email", "tone": "professional" },
+    "expect": { "matches": "^Write a short summary", "contains": ["5 pm"] },
+    "good": "Write a short summary of the meeting and send it to the whole team by 5 pm.",
+    "bad": ["Here is a short summary of the meeting: we discussed the roadmap and agreed on next steps."]
+  },
+  {
+    "id": "guard/deliberate-repetition-and-swearing",
+    "transcript": "no no no that is not what I fucking said very very slowly",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "matches": "[Nn]o, no, no", "contains": ["fucking"], "notMatches": "(^|[^,] )[Vv]ery slowly" },
+    "good": "No, no, no, that is not what I fucking said. Very, very slowly.",
+    "bad": ["No, that is not what I said. Very slowly."]
+  },
+  {
+    "id": "guard/negation-kept",
+    "transcript": "we should not ship on friday and I don't think we can make it anyway",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "contains": ["not ship", "don't think"] },
+    "good": "We should not ship on Friday, and I don't think we can make it anyway.",
+    "bad": ["We should ship on Friday, and I think we can make it anyway."]
+  },
+  {
+    "id": "destination/terminal",
+    "transcript": "git commit dash m fix the login bug",
+    "context": { "category": "terminal", "tone": "neutral" },
+    "expect": { "matches": "^git commit -m", "notMatches": "\\.$", "maxLines": 1 },
+    "good": "git commit -m \"fix the login bug\"",
+    "bad": ["Git commit dash m fix the login bug."]
+  },
+  {
+    "id": "destination/code-identifiers",
+    "transcript": "add a function called parse user id that returns null when the input is empty",
+    "context": { "category": "code", "tone": "neutral" },
+    "expect": { "notMatches": "[.!?]$", "contains": ["null"] },
+    "good": "add a function called parseUserId that returns null when the input is empty",
+    "bad": ["Here is the function:\n\nfunction parseUserId(input) { return input ? input : null }"]
+  },
+  {
+    "id": "context/mid-sentence-continuation",
+    "transcript": "probably go with the second option since it is like forty two percent cheaper",
+    "context": { "category": "document", "tone": "professional", "precedingText": "I think we should" },
+    "expect": { "matches": "^probably go with the second option", "contains": ["42%"], "notContains": ["I think we should"] },
+    "good": "probably go with the second option since it is 42% cheaper.",
+    "bad": ["I think we should probably go with the second option since it is 42% cheaper."]
+  },
+  {
+    "id": "context/dictionary-correction",
+    "transcript": "we moved the whisper flow deck to convex and used cube control to deploy",
+    "context": {
+      "category": "chat",
+      "tone": "casual",
+      "dictionary": [
+        { "word": "Wispr Flow", "aliases": ["whisper flow"] },
+        { "word": "Convex", "aliases": [] },
+        { "word": "kubectl", "aliases": ["cube control"] }
+      ]
+    },
+    "expect": { "contains": ["Wispr Flow", "Convex", "kubectl"], "notContains": ["whisper flow", "cube control"] },
+    "good": "We moved the Wispr Flow deck to Convex and used kubectl to deploy.",
+    "bad": []
+  },
+  {
+    "id": "context/keep-verbatim",
+    "transcript": "sign it with my sig and send it",
+    "context": { "category": "email", "tone": "professional", "keepVerbatim": ["my sig"] },
+    "expect": { "matches": "\\bmy sig\\b" },
+    "good": "Sign it with my sig and send it.",
+    "bad": ["Sign it with my signature and send it."]
+  },
+  {
+    "id": "context/instructions-british",
+    "transcript": "we need to finalize the color of the organization logo",
+    "context": { "category": "document", "tone": "professional", "instructions": "British spelling." },
+    "expect": { "contains": ["finalise", "colour", "organisation"] },
+    "good": "We need to finalise the colour of the organisation logo.",
+    "bad": []
+  },
+  {
+    "id": "language/pinned",
+    "transcript": "wir treffen uns morgen um zehn uhr dreißig im büro",
+    "context": { "category": "chat", "tone": "casual", "language": "de" },
+    "expect": { "contains": ["Büro"], "notMatches": "\\b(we|tomorrow|office)\\b" },
+    "good": "Wir treffen uns morgen um 10:30 Uhr im Büro.",
+    "bad": ["We meet tomorrow at 10:30 in the office."]
+  }
+]

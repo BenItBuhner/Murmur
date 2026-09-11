@@ -294,6 +294,87 @@ describe('InferenceRouter', () => {
     expect(await fresh.router.refreshedStt(ownStt, new SttError('nope', 'auth', 401))).toBeNull()
   })
 
+  it('formats through the gateway for Murmur models and refreshes a rejected token once', async () => {
+    const { router, requests } = harness(CLOUD, parseSettings({}), {
+      token: ['jwt-old', 'jwt-new']
+    })
+    const seen: Array<{ url: string; auth: string; body: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        const auth = (init.headers as Record<string, string>).Authorization
+        seen.push({ url, auth, body: JSON.parse(init.body as string) })
+        if (auth === 'Bearer jwt-old')
+          return new Response(
+            JSON.stringify({ error: { message: 'expired', code: 'unauthorized' } }),
+            {
+              status: 401
+            }
+          )
+        return new Response(
+          JSON.stringify({
+            text: 'The budget is $1,200,000.',
+            pressEnter: false,
+            status: { outcome: 'used', attempts: 1 },
+            llmMs: 412,
+            stages: ['llm'],
+            model: MURMUR_LLM_MODEL
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      })
+    )
+    const formatter = await router.formatter()
+    expect(formatter.source).toBe('murmur')
+    const input = {
+      transcript: 'the budget is one million two hundred thousand dollars',
+      mode: 'smart' as const,
+      context: { category: 'chat' as const, tone: 'casual' as const, dictionary: [] }
+    }
+    const result = await formatter.format(input)
+    expect(result.text).toBe('The budget is $1,200,000.')
+    expect(result.status).toEqual({ outcome: 'used', attempts: 1 })
+    expect(seen.map((x) => x.url)).toEqual([`${GATEWAY}/format`, `${GATEWAY}/format`])
+    expect(seen.map((x) => x.auth)).toEqual(['Bearer jwt-old', 'Bearer jwt-new'])
+    expect(seen[1].body).toEqual({ transcript: input.transcript, context: input.context })
+    expect(requests).toEqual([false, true])
+  })
+
+  it("runs the engine locally against the user's own model", async () => {
+    const { router } = harness(CLOUD, own(), { token: () => 'jwt' })
+    const seen: Array<{
+      url: string
+      body: { model: string; messages: Array<{ role: string; content: string }> }
+    }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        seen.push({ url, body: JSON.parse(init.body as string) })
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'The code is 0007.' }, finish_reason: 'stop' }]
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      })
+    )
+    const formatter = await router.formatter()
+    expect(formatter.source).toBe('custom')
+    const result = await formatter.format({
+      transcript: 'the code is zero zero zero seven',
+      mode: 'smart',
+      context: { category: 'unknown', tone: 'neutral', dictionary: [] }
+    })
+    expect(result.text).toBe('The code is 0007.')
+    expect(result.status.outcome).toBe('used')
+    expect(seen).toHaveLength(1)
+    expect(seen[0].url).toBe('https://api.groq.com/openai/v1/chat/completions')
+    expect(seen[0].body.model).toBe('llama-3.1-8b-instant')
+    expect(seen[0].body.messages.at(-1)?.content).toContain(
+      'Transcript:\nthe code is zero zero zero seven'
+    )
+  })
+
   it('does not retry an own-provider 401 with a Murmur token', async () => {
     const { router, requests } = harness(CLOUD, own(), { token: () => 'jwt' })
     vi.stubGlobal(

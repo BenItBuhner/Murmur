@@ -10,17 +10,22 @@ import {
   type TranscribeOutput
 } from '@core/stt'
 import type { LlmConfig } from '@core/llm/client'
-import { STT_BASE_PROMPT, buildSttPrompt } from '@core/text/dictionary'
-import { runPipeline, type PipelineOptions, type PipelineResult } from '@core/text/pipeline'
-import { buildCommandMessages, sanitizeLlmOutput } from '@core/text/llm-prompt'
-import { smartFormat } from '@core/text/smart-format'
 import {
+  STT_BASE_PROMPT,
+  buildCommandMessages,
+  buildSttPrompt,
   classifyApp,
+  cleanModelOutput,
+  countWords,
+  finish,
+  formatTranscript,
   resolveStyle,
   type AppContext,
+  type FormatContext,
+  type FormatInput,
+  type FormatResult,
   type ResolvedStyle
-} from '@core/text/app-context'
-import { countWords } from '@core/text/util'
+} from '@engine'
 import { MURMUR_ERROR_CODES } from '@shared/inference'
 import { sessionDurationLimitMs, type Settings } from '@shared/settings'
 import type {
@@ -89,9 +94,6 @@ export interface SessionDeps {
   overlay: { setState: (s: OverlayState) => void; playSound: (n: SoundName) => void }
   getActiveWindow: () => Promise<ActiveWindowInfo>
 }
-
-/** Placeholder the smart-formatting stage reads as "no model configured". */
-const NO_LLM: LlmConfig = { baseUrl: '', apiKey: '', model: '', timeoutMs: 8000 }
 
 /**
  * Orchestrates one dictation from hotkey to inserted text and records where the time went.
@@ -448,9 +450,9 @@ export class DictationController extends EventEmitter {
     }
 
     // 3. Text
-    const style = resolveStyle(s.formatting, app)
-    const pipelineOpts = this.pipelineOptions(s, style)
-    let final: PipelineResult
+    const style = resolveStyle(s.formatting, s.formatting.appRules, app)
+    let finalText = ''
+    let stages: string[] = []
     let llmUsed = false
     let llmStatus: LlmStatus | undefined
     let pressEnter = false
@@ -487,7 +489,7 @@ export class DictationController extends EventEmitter {
           buildCommandMessages({
             selection: sel.text,
             instruction: raw,
-            app,
+            category: app.category,
             dictionary: s.dictionary,
             language: s.stt.language
           }),
@@ -496,93 +498,79 @@ export class DictationController extends EventEmitter {
           }
         )
         timings.llmMs = Math.round(performance.now() - t)
-        const guard = sanitizeLlmOutput(res.text, sel.text)
-        if (!guard.text) throw new SttError('The model returned nothing', 'unknown')
-        final = {
-          text: guard.text,
-          pressEnter: false,
-          wordCount: countWords(guard.text),
-          snippetsExpanded: [],
-          stages: ['command'],
-          empty: false,
-          hints: {
-            list: { requested: null, explicit: false, markers: 0 },
-            listApplied: false,
-            isQuestion: false,
-            hasLineBreaks: guard.text.includes('\n')
-          }
-        }
+        const edited = cleanModelOutput(res.text, sel.text)
+        if (!edited) throw new SttError('The model returned nothing', 'unknown')
+        finalText = edited
+        stages = ['command']
         llmUsed = true
-        llmStatus = { outcome: 'used' }
+        llmStatus = { outcome: 'used', attempts: 1 }
         replaceSelection = true
       } catch (err) {
         timings.llmMs = Math.round(performance.now() - t)
         sel.restore()
         return failure(raw, resolved, friendlyError(err))
       }
+    } else if (style.mode === 'off') {
+      finalText = raw + (style.trailingSpace ? ' ' : '')
     } else {
       t = performance.now()
-      const light = runPipeline(raw, pipelineOpts)
-      timings.formatMs = Math.round(performance.now() - t)
-      final = light
-      pressEnter = light.pressEnter
-      // A formatting model that cannot be reached (signed out of Murmur, no token) is not an
-      // error for the dictation: the rule-based text goes in, and History says why.
-      let llm: LlmConfig = NO_LLM
-      let llmUnavailable: string | undefined
-      if (style.mode === 'smart') {
+      const input: FormatInput = {
+        transcript: raw,
+        mode: style.mode,
+        context: this.formatContext(s, style, app)
+      }
+      let formatted: FormatResult
+      if (style.mode !== 'smart') {
+        formatted = await formatTranscript(input, null)
+      } else {
+        // A formatting model that cannot be reached (signed out of Murmur, no token, gateway
+        // down) is not an error for the dictation: the rule-based text goes in, and History
+        // says why.
         try {
-          llm = (await this.deps.inference.llm()).cfg
+          const formatter = await this.deps.inference.formatter()
+          formatted = await formatter.format(input)
         } catch (err) {
-          llmUnavailable = friendlyError(err)
+          formatted = await formatTranscript(input, null)
+          formatted.status = { outcome: 'failed', detail: friendlyError(err), attempts: 0 }
         }
       }
-      const smart = await smartFormat(
-        {
-          light,
-          formatting: s.formatting,
-          dictionary: s.dictionary,
-          style,
-          app,
-          llm,
-          pipelineOpts,
-          language: s.stt.language
-        },
-        this.deps.inference.complete
-      )
-      timings.llmMs = smart.llmMs
-      llmStatus =
-        llmUnavailable && smart.status.outcome === 'skipped'
-          ? { outcome: 'skipped', detail: llmUnavailable }
-          : smart.status
-      final = smart.result
-      final.pressEnter = pressEnter
-      llmUsed = smart.status.outcome === 'used' || smart.status.outcome === 'partial'
-      if (smart.status.outcome === 'rejected')
+      const finished = finish(formatted.text, {
+        category: app.category,
+        dictionary: s.dictionary,
+        trailingSpace: style.trailingSpace,
+        snippets: s.snippets,
+        snippetContext: { now: new Date() }
+      })
+      timings.llmMs = formatted.llmMs
+      timings.formatMs = Math.max(0, Math.round(performance.now() - t) - formatted.llmMs)
+      pressEnter = formatted.pressEnter
+      finalText = finished.text
+      stages = [...formatted.stages, ...finished.stages]
+      llmStatus = formatted.status
+      llmUsed = formatted.status.outcome === 'used'
+      if (formatted.status.outcome === 'rejected')
         log.warn(
-          `LLM output rejected (${smart.status.detail}; finish=${smart.finishReason ?? '?'}); using deterministic text`
+          `model output rejected after ${formatted.status.attempts} attempt(s) (${formatted.status.detail}); using rule-based text`
         )
-      else if (smart.status.outcome === 'failed')
-        log.warn(`LLM formatting failed, using deterministic text: ${smart.status.detail}`)
-      else if (smart.status.outcome === 'partial')
+      else if (formatted.status.outcome === 'failed')
+        log.warn(`model formatting failed, using rule-based text: ${formatted.status.detail}`)
+      else if (formatted.status.retriedAfter)
         log.info(
-          `LLM review reverted ${smart.status.reverted} of ${(smart.status.accepted ?? 0) + (smart.status.reverted ?? 0)} edits`
+          `model answer used after a strict retry (first attempt: ${formatted.status.retriedAfter})`
         )
-      if (style.mode === 'off') {
-        final = { ...light, text: raw + (style.trailingSpace ? ' ' : ''), stages: [] }
-      }
     }
 
-    if (final.empty || !final.text) {
+    if (!finalText.trim()) {
       selectionRestore?.()
       return notice('Nothing to insert')
     }
+    const wordCount = countWords(finalText)
 
     // 4. Inject (serialized), or only copy when the text has nowhere to go right now.
     t = performance.now()
     const injectResult = job.inject
-      ? await this.enqueueInject(final.text, pressEnter, s, replaceSelection)
-      : await this.enqueueInject(final.text, false, s, false, 'clipboard')
+      ? await this.enqueueInject(finalText, pressEnter, s, replaceSelection)
+      : await this.enqueueInject(finalText, false, s, false, 'clipboard')
     timings.injectMs = Math.round(performance.now() - t)
     timings.totalMs = Math.round(performance.now() - stopAt)
     if (selectionRestore)
@@ -596,8 +584,8 @@ export class DictationController extends EventEmitter {
       createdAt: job.previous?.createdAt ?? Date.now(),
       mode: job.mode,
       rawText: raw,
-      finalText: final.text.trimEnd(),
-      wordCount: final.wordCount,
+      finalText: finalText.trimEnd(),
+      wordCount,
       speechMs: timings.recordMs,
       appName: windowInfo.app || windowInfo.title || undefined,
       provider: resolved.provider,
@@ -606,7 +594,7 @@ export class DictationController extends EventEmitter {
       injectionMethod: injectResult.method,
       llmUsed,
       llm: llmStatus,
-      stages: stt.resumed ? ['stt-resumed', ...final.stages] : final.stages,
+      stages: stt.resumed ? ['stt-resumed', ...stages] : stages,
       timings,
       error: injectResult.ok ? undefined : injectResult.error,
       recording,
@@ -616,7 +604,7 @@ export class DictationController extends EventEmitter {
     else this.deps.history.add(entry)
     this.updateStats(entry)
     log.info(
-      `session ${job.id.slice(0, 8)} done: ${final.wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : ''}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
+      `session ${job.id.slice(0, 8)} done: ${wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : ''}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
     )
     if (injectResult.ok) {
       this.deps.overlay.setState({
@@ -705,28 +693,17 @@ export class DictationController extends EventEmitter {
     return result
   }
 
-  /** Rule-based options for a destination; `style` carries the per-app and category overrides. */
-  pipelineOptions(s: Settings, style?: ResolvedStyle): PipelineOptions {
-    const f = s.formatting
+  /** What the model is told about this dictation besides the transcript. */
+  formatContext(s: Settings, style: ResolvedStyle, app: AppContext): FormatContext {
     return {
-      removeFillers: f.removeFillers,
-      fillerWords: f.fillerWords,
-      hesitations: f.hesitations,
-      hesitationPhrases: f.hesitationPhrases,
-      collapseRepeats: f.collapseRepeats,
-      repetitionScope: f.repetitionScope,
-      spokenCommands: f.spokenCommands,
-      selfCorrections: f.selfCorrections,
-      autoCapitalize: f.autoCapitalize,
-      trailingSpace: style?.trailingSpace ?? f.trailingSpace,
-      pressEnterCommand: f.pressEnterCommand,
-      lists: style?.lists ?? f.lists,
-      listStyle: f.listStyle,
-      bulletMarker: f.bulletMarker,
-      numbers: style?.numbers ?? f.numbers,
+      category: app.category,
+      app: app.app || undefined,
+      tone: style.tone,
+      language: s.stt.language,
+      instructions: style.instructions,
       dictionary: s.dictionary,
-      snippets: s.snippets,
-      snippetContext: { now: new Date() }
+      // Snippet triggers are expanded after the model; it must leave them alone.
+      keepVerbatim: s.snippets.map((x) => x.trigger)
     }
   }
 

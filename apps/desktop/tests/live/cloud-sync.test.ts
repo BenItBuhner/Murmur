@@ -229,13 +229,13 @@ describe.skipIf(!enabled)('cloud sync engine (live)', () => {
 
   it('syncs style preferences and dictation stats', async () => {
     settings.patch({
-      formatting: { tone: 'casual', fillerWords: ['um', 'uh'] },
+      formatting: { tone: 'casual', instructions: 'British spelling.' },
       stt: { language: 'en' }
     })
     await waitFor(() => engine.getStatus().phase === 'synced', 'preferences to flush')
     const prefs = await probe.query(api.preferences.get, {})
     expect(prefs?.formatting?.tone).toBe('casual')
-    expect(prefs?.formatting?.fillerWords).toEqual(['um', 'uh'])
+    expect(prefs?.formatting?.llmInstructions).toBe('British spelling.')
     expect(prefs?.language).toBe('en')
 
     // Another device changes the tone.

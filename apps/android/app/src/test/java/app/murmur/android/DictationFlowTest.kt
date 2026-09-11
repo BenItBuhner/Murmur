@@ -14,8 +14,8 @@ import app.murmur.android.service.InsertOutcome
 import app.murmur.android.service.TextInserter
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.SettingsStore
-import app.murmur.android.text.PipelineOptions
-import app.murmur.android.text.runPipeline
+import app.murmur.android.text.basicCleanup
+import app.murmur.android.text.prepareTranscript
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.mockwebserver.Dispatcher
@@ -43,7 +43,7 @@ private const val TRANSCRIPT = "um so hello from murmur this is a test"
 /**
  * The whole dictation, end to end, with only the microphone and the accessibility node lookup
  * swapped out: the bundled sample clip is sent over real HTTP to an in-process OpenAI-compatible
- * transcription endpoint, cleaned by the pipeline, and inserted into a real `EditText` through the
+ * transcription endpoint, tidied by the rule-based cleanup (Light mode), and inserted into a real `EditText` through the
  * same accessibility actions the service sends. This is the path that used to end with an empty
  * field and a green "Inserted" pill.
  */
@@ -128,7 +128,7 @@ class DictationFlowTest {
         assertEquals(DictationState.Success("Inserted"), outcome)
         assertEquals("exactly one transcription request: $requests", 1, requests.size)
         assertTrue("STT received the audio: $requests", requests[0].startsWith("POST /v1/audio/transcriptions ("))
-        val expected = runPipeline(TRANSCRIPT, PipelineOptions()).text
+        val expected = lightText()
         assertEquals("So hello from murmur this is a test ", expected)
         assertEquals(expected, field.text.toString())
         assertEquals(expected.length, field.selectionStart)
@@ -160,7 +160,7 @@ class DictationFlowTest {
         val retried = awaitOutcome(timeoutMs = 30_000)
 
         assertEquals(DictationState.Success("Inserted"), retried)
-        val expected = runPipeline(TRANSCRIPT, PipelineOptions()).text
+        val expected = lightText()
         assertEquals(expected, field.text.toString())
         val done = history.get(retryId)!!
         assertEquals(expected.trimEnd(), done.finalText)
@@ -188,11 +188,14 @@ class DictationFlowTest {
         assertEquals(DictationState.Success("Copied"), awaitOutcome(timeoutMs = 30_000))
         assertEquals("", field.text.toString())
         val done = HistoryStore.get(activity).get(retryId)!!
-        assertEquals(runPipeline(TRANSCRIPT, PipelineOptions()).text.trimEnd(), done.finalText)
+        assertEquals(lightText().trimEnd(), done.finalText)
         assertFalse(done.injected)
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        assertEquals(runPipeline(TRANSCRIPT, PipelineOptions()).text, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        assertEquals(lightText(), clipboard.primaryClip?.getItemAt(0)?.text?.toString())
     }
+
+    /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */
+    private fun lightText(): String = basicCleanup(prepareTranscript(TRANSCRIPT).text, emptyList()).text + " "
 
     /** Pump the main looper (the insertion hops onto it) until the pill settles on a result. */
     private fun awaitOutcome(timeoutMs: Long): DictationState {

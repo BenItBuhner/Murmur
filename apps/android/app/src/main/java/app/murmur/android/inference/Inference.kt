@@ -10,6 +10,10 @@ import app.murmur.android.llm.ChatMessage
 import app.murmur.android.llm.ChatResult
 import app.murmur.android.llm.LlmClient
 import app.murmur.android.llm.LlmConfig
+import app.murmur.android.text.Engine
+import app.murmur.android.text.FormatInput
+import app.murmur.android.text.FormatResult
+import app.murmur.android.text.ModelAnswer
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
@@ -96,6 +100,9 @@ class ResolvedStt(
 )
 
 data class ResolvedLlm(val source: InferenceSource, val cfg: LlmConfig)
+
+/** Where the formatting engine runs, and the function that runs it. */
+class Formatter(val source: InferenceSource, val format: suspend (FormatInput) -> FormatResult)
 
 /**
  * Decides, for every request, whether speech and formatting go to the instance's models or to the
@@ -202,6 +209,40 @@ class InferenceRouter(
                 return SttClient.transcribe(wav, prompt, cfg.copy(model = fallback))
             }
             throw e
+        }
+    }
+
+    /**
+     * The formatting stage for the current routing (desktop: `InferenceRouter.formatter`). Against
+     * a Murmur instance the whole engine runs on the gateway's `POST /v1/format`; with the user's
+     * own provider the Kotlin port of the engine runs here, with the model call going to that
+     * provider. Throws when Murmur models cannot be used right now (signed out, no token).
+     */
+    suspend fun formatter(): Formatter {
+        val resolved = llm()
+        val cfg = resolved.cfg
+        if (resolved.source == InferenceSource.MURMUR) {
+            return Formatter(InferenceSource.MURMUR) { input -> remoteFormat(cfg, input) }
+        }
+        if (cfg.baseUrl.isEmpty() || cfg.model.isEmpty()) {
+            return Formatter(InferenceSource.CUSTOM) { input -> Engine.formatTranscript(input, null) }
+        }
+        return Formatter(InferenceSource.CUSTOM) { input ->
+            Engine.formatTranscript(input) { messages, maxTokens ->
+                val res = complete(cfg, messages, maxTokens = maxTokens)
+                ModelAnswer(res.text, res.finishReason)
+            }
+        }
+    }
+
+    private suspend fun remoteFormat(cfg: LlmConfig, input: FormatInput): FormatResult {
+        val body = input.toJson()
+        return try {
+            FormatResult.fromJson(LlmClient.format(cfg, body))
+        } catch (e: SttException) {
+            if (e.kind != SttErrorKind.AUTH) throw e
+            Log.i(TAG, "session token rejected by the gateway; refreshing and retrying")
+            FormatResult.fromJson(LlmClient.format(cfg.copy(apiKey = sessionToken(true)), body))
         }
     }
 

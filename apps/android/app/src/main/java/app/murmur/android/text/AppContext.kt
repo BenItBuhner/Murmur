@@ -1,18 +1,19 @@
 package app.murmur.android.text
 
-import app.murmur.android.settings.ListsMode
-import app.murmur.android.settings.LlmFreedom
-import app.murmur.android.settings.LlmStructure
+import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
-import app.murmur.android.settings.NumbersMode
 import app.murmur.android.settings.Tone
 
 /**
- * Android flavour of the desktop app-context detection: instead of window titles we get
- * the package name of the app that owns the focused text field from the accessibility service.
+ * Android flavour of the desktop app-context detection (packages/text-engine/src/context.ts):
+ * instead of window titles we get the package name of the app that owns the focused text field
+ * from the accessibility service.
  */
 
-enum class AppCategory { CHAT, EMAIL, DOCUMENT, CODE, TERMINAL, BROWSER, NOTES, UNKNOWN }
+enum class AppCategory(val id: String) {
+    CHAT("chat"), EMAIL("email"), DOCUMENT("document"), CODE("code"), TERMINAL("terminal"),
+    BROWSER("browser"), NOTES("notes"), UNKNOWN("unknown")
+}
 
 private val PACKAGE_PATTERNS: List<Pair<AppCategory, Regex>> = listOf(
     AppCategory.CHAT to Regex(
@@ -54,47 +55,27 @@ fun autoTone(category: AppCategory): Tone = when (category) {
 fun resolveTone(globalTone: Tone, ctx: AppContext): Tone =
     if (globalTone != Tone.AUTO) globalTone else autoTone(ctx.category)
 
-/** Everything the text stages need to know about the destination, already merged (desktop: ResolvedStyle). */
+/** What the text stages need to know about the destination, already merged (desktop: ResolvedStyle). */
 data class FormatStyle(
     val tone: Tone,
-    val mode: app.murmur.android.settings.FormattingMode,
-    val lists: ListsMode,
-    val numbers: NumbersMode,
-    val freedom: LlmFreedom,
-    val structure: LlmStructure,
+    val mode: FormattingMode,
     val instructions: String,
-    val technical: Boolean
+    val trailingSpace: Boolean
 )
 
-/** Code editors and terminals never get lists, always get digits and a strict model that keeps the layout. */
-fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
-    val technical = ctx.category == AppCategory.CODE || ctx.category == AppCategory.TERMINAL
-    return FormatStyle(
-        tone = resolveTone(s.tone, ctx),
-        mode = s.formattingMode,
-        lists = if (technical) ListsMode.OFF else s.lists,
-        numbers = if (technical) NumbersMode.ALL else s.numbers,
-        freedom = if (technical) LlmFreedom.STRICT else s.llmFreedom,
-        structure = if (technical) LlmStructure.KEEP else s.llmStructure,
-        instructions = s.llmInstructions.trim(),
-        technical = technical
-    )
-}
+fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle = FormatStyle(
+    tone = resolveTone(s.tone, ctx),
+    mode = s.formattingMode,
+    instructions = s.llmInstructions.trim(),
+    trailingSpace = s.trailingSpace
+)
 
-fun toneDescription(tone: Tone): String = when (tone) {
-    Tone.CASUAL ->
-        "Casual and friendly: contractions are fine, keep it light, sentence fragments are acceptable in chat."
-    Tone.PROFESSIONAL -> "Professional and polished: complete sentences, correct grammar, no slang."
-    else -> "Neutral and clear: natural sentences, faithful to how the speaker talks."
-}
-
+/** Same wording as the TypeScript engine's `categoryHint`; part of the golden prompt contract. */
 fun categoryHint(category: AppCategory): String = when (category) {
     AppCategory.CHAT -> "a chat message"
     AppCategory.EMAIL -> "an email"
-    AppCategory.CODE ->
-        "a code editor (preserve identifiers, file names, and technical terms exactly; do not add prose punctuation to code)"
-    AppCategory.TERMINAL ->
-        "a terminal (likely a command; keep it on one line and do not add trailing punctuation)"
+    AppCategory.CODE -> "a code editor"
+    AppCategory.TERMINAL -> "a terminal"
     AppCategory.DOCUMENT -> "a document"
     AppCategory.NOTES -> "a notes app"
     AppCategory.BROWSER -> "a web page form field"

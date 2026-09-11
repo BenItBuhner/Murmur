@@ -23,12 +23,14 @@ import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.AppContext
-import app.murmur.android.text.PipelineOptions
-import app.murmur.android.text.buildFormatMessages
-import app.murmur.android.text.maxTokensFor
+import app.murmur.android.text.DictionaryTerm
+import app.murmur.android.text.Engine
+import app.murmur.android.text.FormatContext
+import app.murmur.android.text.FormatInput
+import app.murmur.android.text.FormatOutcome
+import app.murmur.android.text.basicCleanup
+import app.murmur.android.text.prepareTranscript
 import app.murmur.android.text.resolveStyle
-import app.murmur.android.text.runPipeline
-import app.murmur.android.text.sanitizeLlmOutput
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
 import app.murmur.android.ui.components.Hairline
@@ -127,30 +129,41 @@ fun TryItScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
     }
 }
 
-/** Full STT -> pipeline -> LLM round-trip on the bundled fixture, reporting real latencies. */
+/** Full STT -> engine round-trip on the bundled fixture, reporting real latencies. */
 private suspend fun runSampleTest(context: Context, s: MurmurSettings, router: InferenceRouter): String {
     val bytes = context.assets.open("fixtures/jfk.wav").use { it.readBytes() }
     val (pcm, rate) = Wav.decodePcm16(bytes)
     val wav = Wav.encodePcm16(Wav.resample(pcm, rate, SAMPLE_RATE), SAMPLE_RATE)
     val stt = router.transcribe(router.stt(), wav, null)
-    val light = runPipeline(stt.text, PipelineOptions(dictionary = s.dictionaryEntries))
+    val light = basicCleanup(prepareTranscript(stt.text).text, s.dictionaryEntries)
     var out = "Speech to text in ${stt.latencyMs} ms: ${light.text.trim()}"
-    val (llm, why) = if (s.formattingMode == FormattingMode.SMART) router.llmOrNull() else null to null
-    if (why != null) out += "\nFormatter skipped: $why"
-    if (llm != null && llm.cfg.baseUrl.isNotEmpty() && llm.cfg.model.isNotEmpty()) {
-        val app = AppContext("test", AppCategory.UNKNOWN)
-        val res = router.complete(
-            llm.cfg,
+    if (s.formattingMode != FormattingMode.SMART) return out
+    val app = AppContext("test", AppCategory.UNKNOWN)
+    val style = resolveStyle(s, app)
+    val input = FormatInput(
+        transcript = stt.text,
+        mode = FormattingMode.SMART,
+        context = FormatContext(
+            category = app.category,
+            tone = style.tone,
             // The bundled sample clip is English regardless of the dictation language setting.
-            buildFormatMessages(
-                light.text.trim(), s.dictionaryTerms, resolveStyle(s, app), app, light.hints, "en",
-                dictionaryAliases = s.dictionaryEntries.associate { it.word.trim() to it.aliases }
-            ),
-            maxTokens = maxTokensFor(light.text)
-        )
-        val guard = sanitizeLlmOutput(res.text, light.text)
-        out += if (guard.ok) "\nFormatted in ${res.latencyMs} ms: ${guard.text}"
-        else "\nFormatter output rejected (${guard.reason}); the deterministic text was kept."
+            language = "en",
+            instructions = style.instructions.takeIf { it.isNotEmpty() },
+            dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) }
+        ),
+        dictionary = s.dictionaryEntries
+    )
+    val formatted = try {
+        router.formatter().format(input)
+    } catch (e: Exception) {
+        return out + "\nFormatter skipped: ${friendlyMessage(e)}"
+    }
+    out += when (formatted.status.outcome) {
+        FormatOutcome.USED -> "\nFormatted in ${formatted.llmMs} ms" +
+            (formatted.status.retriedAfter?.let { " (after a strict retry: $it)" } ?: "") + ": ${formatted.text}"
+        FormatOutcome.REJECTED -> "\nFormatter output rejected (${formatted.status.detail}); the rule-based text was kept."
+        FormatOutcome.FAILED -> "\nFormatter failed (${formatted.status.detail}); the rule-based text was kept."
+        FormatOutcome.SKIPPED -> "\nFormatter skipped: ${formatted.status.detail}"
     }
     return out
 }

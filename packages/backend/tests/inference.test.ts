@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, internal } from '../convex/_generated/api'
 import {
+  MAX_TRANSCRIPT_CHARS,
   clipSeconds,
   describeUpstreamFailure,
   modelsPayload,
   multipartBoundary,
+  parseFormatRequest,
   parseMultipart,
   readUpstreams,
   subjectOf,
@@ -520,5 +522,148 @@ describe('managed inference gateway', () => {
     await t.run(async (ctx) => {
       expect(await ctx.db.query('inferenceUsage').collect()).toHaveLength(0)
     })
+  })
+})
+
+describe('POST /v1/format', () => {
+  const headers = { 'content-type': 'application/json' }
+  const chat = (content: string, finish = 'stop', tokens = 40): Response =>
+    jsonResponse({
+      choices: [{ message: { role: 'assistant', content }, finish_reason: finish }],
+      usage: { prompt_tokens: tokens - 5, completion_tokens: 5, total_tokens: tokens }
+    })
+  const body = (transcript: string, context: Record<string, unknown> = {}): RequestInit => ({
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ transcript, context: { category: 'chat', tone: 'casual', app: 'Slack', ...context } })
+  })
+
+  it('parses and bounds a client body', () => {
+    expect(parseFormatRequest('x')).toMatchObject({ ok: false })
+    expect(parseFormatRequest({})).toMatchObject({ ok: false, message: '"transcript" must be a string' })
+    const parsed = parseFormatRequest({
+      transcript: 'hello there',
+      context: {
+        category: 'bogus',
+        tone: 'shouty',
+        dictionary: [{ word: 'Wispr Flow', aliases: ['whisper flow', 7] }, 'nope', { word: '' }],
+        keepVerbatim: ['my sig', '', 3],
+        precedingText: 'I think',
+        language: 'de',
+        instructions: 'British spelling'
+      }
+    })
+    expect(parsed).toEqual({
+      ok: true,
+      request: {
+        transcript: 'hello there',
+        context: {
+          category: 'unknown',
+          tone: 'neutral',
+          app: undefined,
+          language: 'de',
+          precedingText: 'I think',
+          instructions: 'British spelling',
+          dictionary: [{ word: 'Wispr Flow', aliases: ['whisper flow'], fuzzy: false }],
+          keepVerbatim: ['my sig']
+        }
+      }
+    })
+    expect(parseFormatRequest({ transcript: 'x'.repeat(MAX_TRANSCRIPT_CHARS + 1) })).toMatchObject({ ok: false })
+  })
+
+  it('runs the engine against the instance model and bills the tokens', async () => {
+    stubEnv(LLM_ENV)
+    const calls = stubFetch(() => chat('The budget is $1,200,000.'))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const res = await asAda.fetch(
+      '/v1/format',
+      body('um the budget is one million two hundred thousand dollars', {
+        dictionary: [{ word: 'Sarah', aliases: [] }],
+        language: 'en'
+      })
+    )
+    expect(res.status).toBe(200)
+    const out = await res.json()
+    expect(out.text).toBe('The budget is $1,200,000.')
+    expect(out.status).toMatchObject({ outcome: 'used', attempts: 1 })
+    expect(out.model).toBe('murmur-format')
+    expect(out.pressEnter).toBe(false)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('https://llm.example.test/v1/chat/completions')
+    const sent = JSON.parse(calls[0].init.body as string)
+    expect(sent.model).toBe('llama-3.1-8b-instant')
+    expect(sent.messages[0].role).toBe('system')
+    const user = sent.messages[sent.messages.length - 1]
+    expect(user.role).toBe('user')
+    expect(user.content).toContain('Destination: a chat message (Slack). Tone: casual.')
+    expect(user.content).toContain('Language: English.')
+    expect(user.content).toContain('Dictionary: Sarah.')
+    expect(user.content).toContain('Transcript:\num the budget is one million two hundred thousand dollars')
+
+    const status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmRequests).toBe(1)
+    expect(status.usage.llmTokens).toBe(40)
+  })
+
+  it('retries once in strict mode when the verifier rejects, and falls back when it fails again', async () => {
+    stubEnv(LLM_ENV)
+    let n = 0
+    const calls = stubFetch(() => chat(n++ === 0 ? 'The code is 7.' : 'The code is 0007.'))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const good = await (await asAda.fetch('/v1/format', body('the code is zero zero zero seven'))).json()
+    expect(good.text).toBe('The code is 0007.')
+    expect(good.status).toMatchObject({ outcome: 'used', attempts: 2 })
+    expect(good.status.retriedAfter).toMatch(/^numbers-changed/)
+    expect(calls).toHaveLength(2)
+    expect(JSON.parse(calls[1].init.body as string).messages.at(-1).content).toContain('Strict:')
+    // One format request is one request for quota purposes, whatever the retries cost in tokens.
+    let status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmRequests).toBe(1)
+    expect(status.usage.llmTokens).toBe(80)
+
+    stubFetch(() => chat('The code is 7.'))
+    const bad = await (await asAda.fetch('/v1/format', body('um the code is zero zero zero seven'))).json()
+    expect(bad.status).toMatchObject({ outcome: 'rejected', attempts: 2 })
+    expect(bad.text).toBe('The code is zero zero zero seven')
+    expect(bad.modelText).toBe('The code is 7.')
+    status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmRequests).toBe(2)
+  })
+
+  it('reports an unreachable or failing upstream as a failed format, never a 5xx', async () => {
+    stubEnv(LLM_ENV)
+    stubFetch(() => jsonResponse({ error: { message: 'nope' } }, 500))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const res = await asAda.fetch('/v1/format', body('hello there everyone'))
+    expect(res.status).toBe(200)
+    const out = await res.json()
+    expect(out.status.outcome).toBe('failed')
+    expect(out.text).toBe('Hello there everyone')
+    // Nothing was billed for a request the provider never answered.
+    expect((await asAda.query(api.inference.status, {})).usage.llmRequests).toBe(1)
+  })
+
+  it('enforces sign-in, configuration, the body shape and the quota', async () => {
+    const t = setup()
+    expect((await t.fetch('/v1/format', body('hello'))).status).toBe(401)
+    const asAda = t.withIdentity(ada)
+    expect((await asAda.fetch('/v1/format', body('hello'))).status).toBe(503)
+    stubEnv(LLM_ENV)
+    stubFetch(() => chat('Hello.'))
+    expect((await asAda.fetch('/v1/format', { method: 'POST', headers, body: 'nope' })).status).toBe(400)
+    expect((await asAda.fetch('/v1/format', { method: 'POST', headers, body: JSON.stringify({ context: {} }) })).status).toBe(400)
+    expect((await asAda.fetch('/v1/format', body('hello there everyone'))).status).toBe(200)
+    await t.run(async (ctx) => {
+      const usage = await ctx.db.query('inferenceUsage').first()
+      await ctx.db.patch('inferenceUsage', usage!._id, { llmTokens: PLANS.free.llmTokensPerMonth })
+    })
+    const quota = await asAda.fetch('/v1/format', body('hello there everyone'))
+    expect(quota.status).toBe(429)
+    expect((await quota.json()).error.code).toBe('quota_exceeded')
   })
 })

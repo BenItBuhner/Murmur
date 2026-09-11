@@ -1,3 +1,5 @@
+import { autoTone } from '../../../text-engine/src/context'
+import type { AppCategory, DictionaryTerm, FormatContext, ResolvedTone } from '../../../text-engine/src/types'
 import type { Plan } from './plans'
 
 /**
@@ -310,4 +312,85 @@ export function describeUpstreamFailure(status: number, body: string): { status:
     // Passed through with the upstream's own words so clients can adapt (e.g. drop word timestamps).
     return { status: 400, code: 'bad_request', message: detail || `Provider rejected the request (HTTP ${status})` }
   return { status: 502, code: 'upstream_error', message: detail || `Provider error (HTTP ${status})` }
+}
+
+// ---- /v1/format -------------------------------------------------------------------------------
+
+/**
+ * Murmur's own formatting endpoint. Instead of a prompt the client sends the transcript and what
+ * the engine needs to know about the dictation; the gateway runs the text engine (prompt,
+ * verifier, retry, fallback) against the instance's model. Both apps share one implementation,
+ * and the instance can tune it without an app release.
+ */
+export interface FormatRequest {
+  transcript: string
+  context: FormatContext
+}
+
+const CATEGORIES = new Set<AppCategory>([
+  'chat',
+  'email',
+  'document',
+  'code',
+  'terminal',
+  'browser',
+  'notes',
+  'unknown'
+])
+const TONES = new Set<ResolvedTone>(['casual', 'neutral', 'professional'])
+
+export const MAX_TRANSCRIPT_CHARS = 40_000
+const MAX_DICTIONARY = 500
+const MAX_KEEP = 200
+const MAX_PRECEDING = 2_000
+const MAX_INSTRUCTIONS = 4_000
+
+const str = (value: unknown, max: number): string | undefined =>
+  typeof value === 'string' && value.trim() ? value.slice(0, max) : undefined
+
+/** Validate a client body into a `FormatRequest`, or explain what is wrong with it. */
+export function parseFormatRequest(input: unknown): { ok: true; request: FormatRequest } | { ok: false; message: string } {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    return { ok: false, message: 'Body must be a JSON object' }
+  const body = input as Record<string, unknown>
+  if (typeof body.transcript !== 'string') return { ok: false, message: '"transcript" must be a string' }
+  if (body.transcript.length > MAX_TRANSCRIPT_CHARS)
+    return { ok: false, message: `"transcript" is longer than ${MAX_TRANSCRIPT_CHARS} characters` }
+  const ctx = body.context && typeof body.context === 'object' && !Array.isArray(body.context)
+    ? (body.context as Record<string, unknown>)
+    : {}
+  const category = CATEGORIES.has(ctx.category as AppCategory) ? (ctx.category as AppCategory) : 'unknown'
+  const tone = TONES.has(ctx.tone as ResolvedTone) ? (ctx.tone as ResolvedTone) : autoTone(category)
+  const dictionary: DictionaryTerm[] = []
+  if (Array.isArray(ctx.dictionary)) {
+    for (const item of ctx.dictionary.slice(0, MAX_DICTIONARY)) {
+      if (!item || typeof item !== 'object') continue
+      const term = item as Record<string, unknown>
+      const word = str(term.word, 200)
+      if (!word) continue
+      const aliases = Array.isArray(term.aliases)
+        ? term.aliases.filter((a): a is string => typeof a === 'string').slice(0, 10)
+        : []
+      dictionary.push({ word, aliases, fuzzy: term.fuzzy === true })
+    }
+  }
+  const keepVerbatim = Array.isArray(ctx.keepVerbatim)
+    ? ctx.keepVerbatim.filter((k): k is string => typeof k === 'string' && !!k.trim()).slice(0, MAX_KEEP)
+    : undefined
+  return {
+    ok: true,
+    request: {
+      transcript: body.transcript,
+      context: {
+        category,
+        tone,
+        app: str(ctx.app, 200),
+        language: str(ctx.language, 16),
+        precedingText: str(ctx.precedingText, MAX_PRECEDING),
+        instructions: str(ctx.instructions, MAX_INSTRUCTIONS),
+        dictionary,
+        keepVerbatim
+      }
+    }
+  }
 }

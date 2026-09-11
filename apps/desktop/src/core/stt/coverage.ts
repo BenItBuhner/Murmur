@@ -1,6 +1,6 @@
 import { rmsDb } from '@core/audio/vad'
 import { encodeWavPcm16 } from '@core/audio/wav'
-import { countWords } from '@core/text/util'
+import { countWords } from '@engine'
 import type { TimedSpan, TranscribeOutput } from './types'
 
 /**

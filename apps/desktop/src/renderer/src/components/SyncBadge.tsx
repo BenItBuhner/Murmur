@@ -87,7 +87,7 @@ export function SyncCard(): React.JSX.Element | null {
       type="button"
       onClick={() => canRetry && void window.murmur.cloud.syncNow()}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-2 text-left shadow-xs transition-colors',
+        'surface-raised flex w-full items-center gap-2.5 rounded-md px-3.5 py-2.5 text-left transition-colors',
         canRetry ? 'hover:bg-accent' : 'cursor-default'
       )}
       title={hint}
@@ -102,7 +102,7 @@ export function SyncCard(): React.JSX.Element | null {
               : 'text-muted-foreground'
         }
       />
-      <span className="flex-1 text-[13px] font-medium">{label}</span>
+      <span className="flex-1 text-note font-medium">{label}</span>
       {canRetry && <RefreshCw className="size-3 text-muted-foreground" />}
     </button>
   )

@@ -49,7 +49,7 @@ export function AppearanceSettings(): React.JSX.Element {
             hint="Murmur's monochrome look"
             selected={g.accent === 'neutral'}
             onSelect={() => setAccent('neutral')}
-            className="border bg-[linear-gradient(135deg,var(--color-background)_50%,var(--color-foreground)_50%)]"
+            className="bg-[linear-gradient(135deg,var(--color-muted)_50%,var(--color-foreground)_50%)]"
           />
           <Swatch
             label="System"
@@ -61,7 +61,7 @@ export function AppearanceSettings(): React.JSX.Element {
             selected={g.accent === 'system'}
             onSelect={() => setAccent('system')}
             color={systemAccent ?? undefined}
-            className={cn(!systemAccent && 'border bg-muted text-muted-foreground')}
+            className={cn(!systemAccent && 'well text-muted-foreground')}
           >
             {!systemAccent && <Monitor className="size-3.5" />}
           </Swatch>
@@ -153,7 +153,7 @@ function Swatch({
       onClick={onSelect}
       style={color ? { backgroundColor: color } : undefined}
       className={cn(
-        'relative flex size-7 items-center justify-center rounded-full shadow-xs transition-[transform,box-shadow] outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-card',
+        'relative flex size-7 items-center justify-center rounded-full shadow-raised transition-[transform,box-shadow] outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-card',
         selected && 'ring-2 ring-primary ring-offset-2 ring-offset-card',
         className
       )}
@@ -226,17 +226,17 @@ function HexField({
   }
   return (
     <div className="flex items-center gap-2 pt-1">
-      <span className="size-4 rounded-full border shadow-xs" style={{ backgroundColor: value }} />
+      <span className="size-4 rounded-full shadow-raised" style={{ backgroundColor: value }} />
       <Input
         aria-label="Custom accent colour hex"
-        className="w-28 font-mono text-[13px]"
+        className="w-28 font-mono text-note"
         value={draft}
         spellCheck={false}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => e.key === 'Enter' && commit()}
       />
-      <span className="text-[12px] text-muted-foreground">#rrggbb</span>
+      <span className="text-meta text-muted-foreground">#rrggbb</span>
     </div>
   )
 }

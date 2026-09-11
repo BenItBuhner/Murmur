@@ -6,6 +6,7 @@ export function platformFor(p: string | undefined): KeyPlatform {
   return p === 'win32' ? 'win32' : p === 'darwin' ? 'darwin' : 'linux'
 }
 
+/** Key caps for a chord. The large size steps its radius up one notch with its height. */
 export function KeyCaps({
   keys,
   platform,
@@ -27,13 +28,13 @@ export function KeyCaps({
         <React.Fragment key={i}>
           <kbd
             className={cn(
-              size === 'lg' && 'h-9 min-w-9 px-2.5 text-[13px] rounded-lg',
-              size === 'sm' && 'h-5 min-w-5 px-1 text-[10px]'
+              size === 'lg' && 'h-9 min-w-9 rounded-sm px-2.5 text-note',
+              size === 'sm' && 'h-5 min-w-5 px-1 text-caption'
             )}
           >
             {p}
           </kbd>
-          {i < parts.length - 1 && <span className="text-muted-foreground/60 text-xs">+</span>}
+          {i < parts.length - 1 && <span className="text-xs text-muted-foreground/60">+</span>}
         </React.Fragment>
       ))}
     </span>

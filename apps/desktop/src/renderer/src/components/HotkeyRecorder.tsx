@@ -47,11 +47,12 @@ export function HotkeyRecorder({
 
   return (
     <div className="flex items-center gap-3">
+      {/* The chord sits in a well; recording lights the well up in the record colour. */}
       <div
         className={cn(
-          'flex h-10 min-w-44 items-center justify-center rounded-lg border bg-card px-3 transition-colors',
-          recording && 'border-record/60 ring-4 ring-record/15',
-          live && !live.valid && live.final && 'border-destructive/60'
+          'well flex h-10 min-w-44 items-center justify-center rounded-md px-3 transition-[background-color,box-shadow]',
+          recording && 'bg-record/10 ring-2 ring-record/40',
+          live && !live.valid && live.final && 'bg-destructive/10'
         )}
       >
         {recording ? (
@@ -63,7 +64,7 @@ export function HotkeyRecorder({
             </span>
           )
         ) : live && !live.valid && live.final ? (
-          <span className="text-[12px] text-destructive">{live.reason ?? 'Not allowed'}</span>
+          <span className="text-meta text-destructive">{live.reason ?? 'Not allowed'}</span>
         ) : (
           <KeyCaps keys={value} platform={platform} sideSensitive={sideSensitive} />
         )}

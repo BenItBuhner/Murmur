@@ -59,6 +59,10 @@ interface Props {
   children: React.ReactNode
 }
 
+/**
+ * The frame: a rail down the left one tone below the canvas (no rule between them), the page on
+ * the right. The active section is a raised pill that glides between items.
+ */
 export function Shell({
   route,
   onNavigate,
@@ -79,7 +83,7 @@ export function Shell({
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-56 shrink-0 flex-col border-r bg-sidebar">
+      <aside className="flex w-56 shrink-0 flex-col bg-sidebar">
         <div className={cn('flex items-center px-6', isWin ? 'h-10 drag-region' : 'h-16')}>
           <Wordmark />
         </div>
@@ -98,7 +102,7 @@ export function Shell({
                   onClick={() => onNavigate(item.id)}
                   aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'relative flex w-full items-center gap-2.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground',
+                    'relative flex w-full items-center gap-2.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground',
                     active && 'text-foreground [&>svg]:text-primary'
                   )}
                 >
@@ -106,7 +110,7 @@ export function Shell({
                     <motion.span
                       layoutId="nav-active"
                       transition={settle}
-                      className="absolute inset-0 -z-10 rounded-full bg-accent"
+                      className="surface-raised absolute inset-0 -z-10 rounded-full"
                       aria-hidden
                     />
                   )}
@@ -127,7 +131,7 @@ export function Shell({
       </aside>
       <main className="relative flex-1 min-w-0 overflow-hidden">
         {isWin && <div className="drag-region absolute inset-x-0 top-0 h-10" />}
-        <div ref={scroller} className="h-full overflow-y-auto px-12 pb-14 pt-12">
+        <div ref={scroller} className="h-full overflow-y-auto px-gutter pb-14 pt-12">
           <AnimatePresence mode="wait" initial={false} custom={direction}>
             <motion.div
               key={route}
@@ -162,6 +166,7 @@ function useDirection(route: Route): number {
   return directionBetween(ORDER, from, route)
 }
 
+/** The rail's foot: a small raised card with the live state of the button. */
 function StatusCard({
   state,
   enabled
@@ -184,8 +189,8 @@ function StatusCard({
         enabled ? void window.murmur.dictation.toggle() : void window.murmur.app.setEnabled(true)
       }
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-xl border bg-card px-3.5 py-2.5 text-left transition-[background-color,border-color,transform] duration-200 hover:bg-accent active:scale-[0.985]',
-        listening && 'border-record/40'
+        'surface-raised flex w-full items-center gap-2.5 rounded-md px-3.5 py-2.5 text-left transition-[background-color,box-shadow,transform] duration-200 hover:bg-accent active:scale-[0.985]',
+        listening && 'bg-record/10 hover:bg-record/14'
       )}
       title={listening ? 'Stop and insert' : 'Start hands-free dictation'}
     >
@@ -211,35 +216,16 @@ function StatusCard({
           )}
         />
       </span>
-      <Rolling text={label} className="flex-1 text-[13px] font-medium" />
+      <Rolling text={label} className="flex-1 text-note font-medium" />
       <Rolling
         text={listening ? 'click to stop' : enabled ? 'click to start' : 'click to resume'}
-        className="text-[11px] text-muted-foreground"
+        className="text-caption text-muted-foreground"
       />
     </button>
   )
 }
 
-/** The name, set in the display serif. */
+/** The name, set in the display serif. Murmur has no mark yet; the word is the mark. */
 export function Wordmark({ className }: { className?: string }): React.JSX.Element {
-  return <span className={cn('serif-display text-[23px] leading-none', className)}>Murmur</span>
-}
-
-export function Logo({ className }: { className?: string }): React.JSX.Element {
-  return (
-    <span
-      className={cn(
-        'inline-flex size-6 items-center justify-center rounded-[7px] bg-primary text-primary-foreground',
-        className
-      )}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-        <rect x="3" y="9" width="2.6" height="6" rx="1.3" />
-        <rect x="7.5" y="6" width="2.6" height="12" rx="1.3" />
-        <rect x="12" y="3.5" width="2.6" height="17" rx="1.3" />
-        <rect x="16.5" y="6" width="2.6" height="12" rx="1.3" />
-        <rect x="21" y="9" width="2.6" height="6" rx="1.3" transform="translate(-2 0)" />
-      </svg>
-    </span>
-  )
+  return <span className={cn('serif-display text-heading leading-none', className)}>Murmur</span>
 }

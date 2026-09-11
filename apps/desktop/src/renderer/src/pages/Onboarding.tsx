@@ -6,7 +6,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Input, Textarea } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Switch } from '@renderer/components/ui/switch'
-import { Badge, Segmented } from '@renderer/components/ui/misc'
+import { Badge, Banner, Segmented } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { HotkeyRecorder } from '@renderer/components/HotkeyRecorder'
 import { Appear, step as stepMotion } from '@renderer/components/motion'
@@ -89,7 +89,7 @@ export function Onboarding(): React.JSX.Element {
               key={s}
               className={cn(
                 'h-0.5 w-8 rounded-full transition-colors duration-300',
-                i <= index ? 'bg-primary' : 'bg-border'
+                i <= index ? 'bg-primary' : 'bg-input'
               )}
               title={TITLES[s]}
             />
@@ -112,10 +112,10 @@ export function Onboarding(): React.JSX.Element {
               <div className="mx-auto max-w-xl space-y-7 pt-12">
                 {returning ? (
                   <>
-                    <h1 className="serif-display text-[56px]">
+                    <h1 className="serif-display text-display">
                       Welcome back{firstName ? `, ${firstName}` : ''}.
                     </h1>
-                    <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
+                    <p className="max-w-md text-lead leading-relaxed text-muted-foreground">
                       Your account is already set up, so your dictionary, snippets and style are on
                       this computer now. Three quick device steps and you are dictating:{' '}
                       {inference.offersMurmur
@@ -133,12 +133,12 @@ export function Onboarding(): React.JSX.Element {
                   </>
                 ) : (
                   <>
-                    <h1 className="serif-display text-[64px]">
+                    <h1 className="serif-display text-display">
                       Speak.
                       <br />
                       <span className="italic text-muted-foreground">It types.</span>
                     </h1>
-                    <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
+                    <p className="max-w-md text-lead leading-relaxed text-muted-foreground">
                       Hold one key anywhere on your computer, say what you mean, let go. Murmur
                       transcribes it, cleans up the ums and self-corrections, and drops finished
                       text right where your cursor is.
@@ -176,7 +176,7 @@ export function Onboarding(): React.JSX.Element {
                 />
                 <ProvidersPage embedded onReady={setSttOk} />
                 {sttOk && (
-                  <p className="text-[13px] text-success">
+                  <p className="text-note text-success">
                     {murmurModels
                       ? 'Working. You can switch to your own provider any time under Models.'
                       : 'Working. You can tweak fallback models later under Models.'}
@@ -201,11 +201,11 @@ export function Onboarding(): React.JSX.Element {
                   title="Your shortcut"
                   description="This one key does both jobs. Keep the default or record your own."
                 />
-                <div className="rounded-2xl border bg-card p-5 space-y-5">
+                <div className="surface-raised rounded-xl p-card space-y-5">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm font-medium">Push to talk</div>
-                      <div className="text-[13px] text-muted-foreground">
+                      <div className="text-note text-muted-foreground">
                         Hold to record, release to insert
                       </div>
                     </div>
@@ -216,10 +216,10 @@ export function Onboarding(): React.JSX.Element {
                       sideSensitive={settings.hotkeys.sideSensitive}
                     />
                   </div>
-                  <div className="flex items-center justify-between border-t pt-5">
+                  <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm font-medium">Hands-free</div>
-                      <div className="text-[13px] text-muted-foreground">
+                      <div className="text-note text-muted-foreground">
                         How to lock a session without holding the key
                       </div>
                     </div>
@@ -243,7 +243,7 @@ export function Onboarding(): React.JSX.Element {
                   title="Try it"
                   description="Click into the box, then hold your shortcut and say something like “Hey, this is my first dictation, new line, pretty neat.”"
                 />
-                <div className="flex items-center justify-center gap-3 rounded-2xl border bg-card px-5 py-4">
+                <div className="surface-raised flex items-center justify-center gap-3 rounded-xl px-card py-4">
                   <span className="text-sm text-muted-foreground">Hold</span>
                   <KeyCaps
                     keys={settings.hotkeys.pushToTalk}
@@ -256,13 +256,13 @@ export function Onboarding(): React.JSX.Element {
                 <Textarea
                   autoFocus
                   placeholder="Your words will appear here…"
-                  className="min-h-36 text-[15px]"
+                  className="min-h-36 text-lead"
                 />
                 <Appear show={dictated}>
-                  <div className="flex items-center gap-2 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-sm">
+                  <Banner tone="success" className="flex items-center gap-2 py-3 text-sm">
                     <Check className="size-4 text-success" /> That is it. Murmur now lives in your
                     tray; this window can be closed.
-                  </div>
+                  </Banner>
                 </Appear>
               </div>
             )}
@@ -270,7 +270,7 @@ export function Onboarding(): React.JSX.Element {
         </AnimatePresence>
       </div>
 
-      <div className="flex items-center justify-between border-t px-8 py-4">
+      <div className="flex items-center justify-between px-8 pb-5 pt-3">
         <Button
           variant="ghost"
           onClick={() => setIndex((i) => Math.max(0, i - 1))}
@@ -334,12 +334,12 @@ function PersonalizeStep(): React.JSX.Element {
         description="These choices live in your account, so every device you sign in on picks them up. You only do this once."
       />
 
-      <div className="rounded-2xl border bg-card p-5 space-y-5">
+      <div className="surface-raised rounded-xl p-card space-y-5">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium">
             <BookA className="size-4" /> Teach Murmur your name
           </div>
-          <p className="text-[13px] text-muted-foreground">
+          <p className="text-note text-muted-foreground">
             Speech models often misspell names. Anything in your dictionary is spelled the way you
             wrote it, every time.
           </p>
@@ -355,7 +355,7 @@ function PersonalizeStep(): React.JSX.Element {
             </Button>
           </div>
         </div>
-        <div className="space-y-2 border-t pt-5">
+        <div className="space-y-2">
           <Label htmlFor="onb-terms">People, products and tools you say often</Label>
           <div className="flex gap-2">
             <Input
@@ -396,11 +396,11 @@ function PersonalizeStep(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="rounded-2xl border bg-card p-5 space-y-5">
+      <div className="surface-raised rounded-xl p-card space-y-5">
         <div className="flex items-center justify-between gap-6">
           <div>
             <div className="text-sm font-medium">Default tone</div>
-            <div className="text-[13px] text-muted-foreground">
+            <div className="text-note text-muted-foreground">
               Auto reads the app you are typing in: casual in chat, professional in email.
             </div>
           </div>
@@ -410,10 +410,10 @@ function PersonalizeStep(): React.JSX.Element {
             options={TONES}
           />
         </div>
-        <div className="flex items-center justify-between gap-6 border-t pt-5">
+        <div className="flex items-center justify-between gap-6">
           <div>
             <div className="text-sm font-medium">Sync dictation history</div>
-            <div className="text-[13px] text-muted-foreground">
+            <div className="text-note text-muted-foreground">
               Keep the text of your dictations in your account so History shows every device. Off by
               default; your dictionary and snippets sync either way.
             </div>
@@ -439,20 +439,20 @@ function useTravel(index: number): number {
 function Header({ title, description }: { title: string; description: string }): React.JSX.Element {
   return (
     <div>
-      <h1 className="serif-display text-[36px]">{title}</h1>
-      <p className="mt-2.5 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
+      <h1 className="serif-display text-title">{title}</h1>
+      <p className="mt-2.5 max-w-xl text-lead leading-relaxed text-muted-foreground">
         {description}
       </p>
     </div>
   )
 }
 
-/** Facts set as hairline rows rather than boxed bullets. */
+/** Facts set as a plain list with a check in front of each, spaced rather than ruled. */
 export function FeatureList({ items }: { items: string[] }): React.JSX.Element {
   return (
-    <ul className="divide-y border-y text-[14px]">
+    <ul className="space-y-1 text-sm">
       {items.map((t) => (
-        <li key={t} className="flex items-start gap-3.5 py-3.5">
+        <li key={t} className="flex items-start gap-3.5 py-2">
           <Check className="mt-0.5 size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
           <span>{t}</span>
         </li>

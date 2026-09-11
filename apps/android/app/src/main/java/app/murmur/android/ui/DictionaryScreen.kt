@@ -1,11 +1,9 @@
 package app.murmur.android.ui
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -14,15 +12,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.murmur.android.settings.DictionaryCodec
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.Field
-import app.murmur.android.ui.components.Group
-import app.murmur.android.ui.components.Hairline
+import app.murmur.android.ui.components.ListCard
+import app.murmur.android.ui.components.ListRow
+import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.PrimaryButton
 import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SectionGap
@@ -61,43 +60,43 @@ fun DictionaryEditor(store: SettingsStore) {
         aliases = ""
     }
 
-    Field(
-        value = word,
-        onValueChange = { word = it },
-        label = "Word or phrase",
-        placeholder = "Wispr Flow"
-    )
-    Spacer(Modifier.height(18.dp))
-    Field(
-        value = aliases,
-        onValueChange = { aliases = it },
-        label = "Sounds like",
-        placeholder = "whisper flow, wisper flow",
-        helper = "Optional. Ways it tends to be misheard, comma-separated; each is corrected to the word above."
-    )
-    Spacer(Modifier.height(22.dp))
-    PrimaryButton("Add to dictionary", onClick = ::add, enabled = word.isNotBlank(), modifier = Modifier.fillMaxWidth())
+    // The add form is a card; its fields are wells sunk into it.
+    Card {
+        Field(
+            value = word,
+            onValueChange = { word = it },
+            label = "Word or phrase",
+            placeholder = "Wispr Flow"
+        )
+        Spacer(Modifier.height(18.dp))
+        Field(
+            value = aliases,
+            onValueChange = { aliases = it },
+            label = "Sounds like",
+            placeholder = "whisper flow, wisper flow",
+            helper = "Optional. Ways it tends to be misheard, comma-separated; each is corrected to the word above."
+        )
+        Spacer(Modifier.height(20.dp))
+        PrimaryButton("Add to dictionary", onClick = ::add, enabled = word.isNotBlank(), modifier = Modifier.fillMaxWidth())
+    }
 
     SectionGap()
 
     val entries = settings.dictionaryEntries
-    Group(if (entries.isEmpty()) "Your words" else pluralize(entries.size, "word")) {
-        Spacer(Modifier.height(6.dp))
-        if (entries.isEmpty()) {
-            Text(
-                "Nothing yet. Start with your own name; speech models get it wrong more often than you would think.",
-                style = Murmur.type.bodySmall,
-                color = Murmur.colors.inkMuted,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        } else {
-            Column {
-                Hairline()
-                for (entry in entries) {
-                    DictionaryRow(entry) {
-                        store.update { s -> s.copy(dictionaryEntries = s.dictionaryEntries.filter { it.id != entry.id }) }
-                    }
-                    Hairline()
+    Overline(if (entries.isEmpty()) "Your words" else pluralize(entries.size, "word"))
+    Spacer(Modifier.height(10.dp))
+    if (entries.isEmpty()) {
+        Text(
+            "Nothing yet. Start with your own name; speech models get it wrong more often than you would think.",
+            style = Murmur.type.bodySmall,
+            color = Murmur.colors.inkMuted
+        )
+    } else {
+        // A list card: every word is a row one radius step in from the card.
+        ListCard {
+            for (entry in entries) {
+                DictionaryRow(entry) {
+                    store.update { s -> s.copy(dictionaryEntries = s.dictionaryEntries.filter { it.id != entry.id }) }
                 }
             }
         }
@@ -106,7 +105,7 @@ fun DictionaryEditor(store: SettingsStore) {
 
 @Composable
 private fun DictionaryRow(entry: DictionaryEntry, onRemove: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    ListRow {
         Column(Modifier.weight(1f)) {
             Text(entry.word, style = Murmur.type.headline, color = Murmur.colors.ink)
             if (entry.aliases.isNotEmpty()) {

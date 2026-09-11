@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -273,8 +272,7 @@ private fun Avatar(initial: Char, signedIn: Boolean) {
         Modifier
             .size(28.dp)
             .clip(CircleShape)
-            .background(if (signedIn) c.ember else c.paperRaised)
-            .border(1.dp, if (signedIn) Color.Transparent else c.hairlineStrong, CircleShape),
+            .background(if (signedIn) c.ember else c.paperRaised),
         contentAlignment = Alignment.Center
     ) {
         if (signedIn) {

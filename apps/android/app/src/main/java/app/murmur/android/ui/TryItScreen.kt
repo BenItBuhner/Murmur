@@ -33,7 +33,6 @@ import app.murmur.android.text.prepareTranscript
 import app.murmur.android.text.resolveStyle
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
-import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.Notice
 import app.murmur.android.ui.components.NoticeTone
 import app.murmur.android.ui.components.PrimaryButton
@@ -68,14 +67,10 @@ fun TryItScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
 
         SectionGap()
 
-        Group("Sample clip") {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Runs a bundled recording through your speech model and formatter and reports the real latencies, no microphone needed.",
-                style = Murmur.type.bodySmall,
-                color = Murmur.colors.inkSoft
-            )
-            Spacer(Modifier.height(18.dp))
+        Group(
+            "Sample clip",
+            description = "Runs a bundled recording through your speech model and formatter and reports the real latencies, no microphone needed."
+        ) {
             PrimaryButton(
                 text = if (testing) "Running…" else "Run the sample clip",
                 loading = testing,
@@ -114,16 +109,13 @@ fun TryItScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
         if (BuildConfig.DEBUG) {
             SectionGap()
 
-            Group("Without a microphone") {
-                Spacer(Modifier.height(6.dp))
-                Hairline()
+            Group("Without a microphone", rows = true) {
                 ToggleRow(
                     "Dictate the sample clip instead",
                     settings.useFixtureAudio,
                     { v -> store.update { s -> s.copy(useFixtureAudio = v) } },
                     description = "For emulators: the button runs the bundled clip through the whole pipeline (debug builds only)."
                 )
-                Hairline()
             }
         }
     }

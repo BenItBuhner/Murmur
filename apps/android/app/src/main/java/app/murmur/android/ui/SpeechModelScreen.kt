@@ -28,7 +28,6 @@ import app.murmur.android.ui.components.ChipRow
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
-import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.Notice
 import app.murmur.android.ui.components.NoticeTone
 import app.murmur.android.ui.components.Screen
@@ -86,7 +85,6 @@ fun SourceChooser(
     ownLabel: String = "Your own provider"
 ) {
     Group(title) {
-        Spacer(Modifier.height(6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Chip("Murmur models", selected = selected == InferenceSource.MURMUR, onClick = { onSelect(InferenceSource.MURMUR) })
             Chip(ownLabel, selected = selected == InferenceSource.CUSTOM, onClick = { onSelect(InferenceSource.CUSTOM) })
@@ -108,12 +106,10 @@ fun SourceChooser(
 @Composable
 private fun MurmurSpeechSummary(inference: InferenceView) {
     val c = Murmur.colors
-    Column {
-        Hairline()
+    Group(rows = true) {
         ControlRow("Model", description = "Provided by this Murmur instance for your account. Your dictionary still biases recognition.") {
             Text(inference.status?.models?.stt ?: Inference.STT_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
         }
-        Hairline()
         ControlRow(
             "Plan",
             description = when {
@@ -128,7 +124,6 @@ private fun MurmurSpeechSummary(inference: InferenceView) {
                 color = c.inkSoft
             )
         }
-        Hairline()
     }
 }
 
@@ -143,7 +138,6 @@ private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, show
     val kind = settings.sttKind
 
     Group("Provider") {
-        Spacer(Modifier.height(6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (k in SttKind.entries) {
                 Chip(k.displayName, selected = kind == k, onClick = {
@@ -167,7 +161,7 @@ private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, show
 
     SectionGap()
 
-    Column {
+    Group("Connection") {
         Field(
             value = settings.sttBaseUrl,
             onValueChange = { store.update { s -> s.copy(sttBaseUrl = it) } },
@@ -234,7 +228,6 @@ private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, show
     if (showAdvanced) {
         SectionGap()
         Group("Resilience") {
-            Spacer(Modifier.height(10.dp))
             Field(
                 value = settings.sttFallbackModel,
                 onValueChange = { store.update { s -> s.copy(sttFallbackModel = it) } },

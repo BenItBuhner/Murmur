@@ -20,21 +20,56 @@
 }
 
 /*
- * Colour tokens. The values below are the neutral palette and only cover the first frame: as soon
- * as the renderer mounts, ThemeProvider (hooks/useTheme.tsx) sets every token inline on <html>
- * from the user's appearance settings via shared/theme.ts. Add a token here, in @theme inline,
- * and in THEME_TOKENS so all three stay in step. Structure comes from hairlines and whitespace
- * rather than shadows and boxes, whatever the palette.
+ * Design tokens. Colour comes from shared/theme.ts at runtime (ThemeProvider sets every colour
+ * token inline on <html> from the appearance settings; the values below only cover the first
+ * frame). Shape, space, elevation and type are fixed here. The same names and values are mirrored
+ * in the Android app's Theme.kt.
+ *
+ * Structure comes from surfaces and space, not lines: a raised card on the canvas, a well sunk
+ * into a card, rows separated by rhythm. Borders are not drawn anywhere; edges come from tonal
+ * contrast and the three elevation levels.
  */
 :root {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif;
   --font-serif: 'Instrument Serif', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
-  --radius: 0.875rem;
   color-scheme: light;
 
-  --background: oklch(0.985 0.002 90);
+  /*
+   * Radius scale, in 4px steps like the spacing grid. Nested corners are concentric: a surface
+   * inset by p from a corner of radius r takes radius r - p, which always lands on this scale
+   * (a 12px row inside a 20px card with 8px padding; an 8px item inside a 12px menu with 4px
+   * padding). Nothing nested may be rounder than what holds it. Pills (buttons, badges, switches,
+   * the dictation pill) are fully round and sit outside the scale.
+   */
+  --radius-xs: 4px; /* key caps, code chips */
+  --radius-sm: 8px; /* menu items, small nested chips */
+  --radius-md: 12px; /* fields, selects, menus, tooltips, rows inside a card */
+  --radius-lg: 16px; /* a block inside a sheet, banners */
+  --radius-xl: 20px; /* cards, sections, tiles, empty states */
+  --radius-2xl: 24px; /* dialogs and sheets */
+
+  /* Spacing roles on the 4px grid. */
+  --space-card: 1.25rem; /* padding of a card or section (20px) */
+  --space-card-tight: 0.5rem; /* padding of a list card whose rows are surfaces (8px) */
+  --space-row: 0.875rem; /* vertical rhythm between rows of a section (14px) */
+  --space-section: 2rem; /* between the sections of a page (32px) */
+  --space-gutter: 3rem; /* page gutter (48px) */
+
+  /*
+   * Elevation. Raised: a card resting on the canvas. Floating: menus, popovers, tooltips, a card
+   * that lifts on hover. Overlay: dialogs and the dictation pill over other windows. Light mode
+   * casts soft warm shadows; dark mode lifts by tone and only keeps a thin light catch on top.
+   */
+  --elevation-raised: 0 1px 2px oklch(0.2 0.02 60 / 0.06), 0 2px 8px -2px oklch(0.2 0.02 60 / 0.05);
+  --elevation-floating:
+    0 1px 3px oklch(0.2 0.02 60 / 0.06), 0 8px 24px -6px oklch(0.2 0.02 60 / 0.16);
+  --elevation-overlay:
+    0 2px 6px oklch(0.2 0.02 60 / 0.08), 0 24px 56px -16px oklch(0.2 0.02 60 / 0.28);
+
+  /* Surface roles: canvas (background) < rail (sidebar) < raised (card) < floating (popover). */
+  --background: oklch(0.97 0.003 85);
   --foreground: oklch(0.2 0.01 60);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.2 0.01 60);
@@ -42,11 +77,13 @@
   --popover-foreground: oklch(0.2 0.01 60);
   --primary: oklch(0.22 0.01 60);
   --primary-foreground: oklch(0.985 0.002 90);
-  --secondary: oklch(0.955 0.004 80);
+  --secondary: oklch(0.945 0.004 80);
   --secondary-foreground: oklch(0.25 0.01 60);
-  --muted: oklch(0.955 0.004 80);
+  /* The well: fields and inset panels sunk into a card or the canvas. */
+  --muted: oklch(0.945 0.004 80);
   --muted-foreground: oklch(0.5 0.01 60);
-  --accent: oklch(0.94 0.005 80);
+  /* Hover and the active nav item. */
+  --accent: oklch(0.925 0.005 80);
   --accent-foreground: oklch(0.22 0.01 60);
   --destructive: oklch(0.6 0.2 25);
   --destructive-foreground: oklch(0.985 0 0);
@@ -57,7 +94,7 @@
   --success: oklch(0.65 0.16 150);
   --warning: oklch(0.75 0.16 75);
   --info: oklch(0.62 0.16 250);
-  --sidebar: oklch(0.965 0.003 85);
+  --sidebar: oklch(0.95 0.003 85);
   --chart-1: oklch(0.71 0.01 56);
   --chart-2: oklch(0.62 0.21 260);
   --chart-3: oklch(0.7 0.15 162);
@@ -76,39 +113,89 @@
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.16 0.004 60);
+  --elevation-raised: 0 1px 2px oklch(0 0 0 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.035);
+  --elevation-floating: 0 10px 28px -8px oklch(0 0 0 / 0.6), inset 0 1px 0 oklch(1 0 0 / 0.06);
+  --elevation-overlay: 0 24px 64px -12px oklch(0 0 0 / 0.75), inset 0 1px 0 oklch(1 0 0 / 0.07);
+  --background: oklch(0.15 0.004 60);
   --foreground: oklch(0.93 0.004 80);
-  --card: oklch(0.2 0.005 60);
+  --card: oklch(0.205 0.005 60);
   --card-foreground: oklch(0.93 0.004 80);
-  --popover: oklch(0.21 0.005 60);
+  --popover: oklch(0.245 0.005 60);
   --popover-foreground: oklch(0.93 0.004 80);
   --primary: oklch(0.93 0.004 80);
   --primary-foreground: oklch(0.18 0.005 60);
   --secondary: oklch(0.26 0.005 60);
   --secondary-foreground: oklch(0.93 0.004 80);
-  --muted: oklch(0.25 0.005 60);
+  --muted: oklch(0.26 0.005 60);
   --muted-foreground: oklch(0.68 0.008 70);
-  --accent: oklch(0.27 0.006 60);
+  --accent: oklch(0.275 0.006 60);
   --accent-foreground: oklch(0.93 0.004 80);
   --destructive: oklch(0.62 0.19 25);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.28 0.006 60);
+  --border: oklch(0.29 0.006 60);
   --input: oklch(0.3 0.006 60);
   --ring: oklch(0.6 0.01 60);
   --record: oklch(0.7 0.2 35);
   --success: oklch(0.7 0.15 150);
   --warning: oklch(0.8 0.15 75);
   --info: oklch(0.7 0.14 250);
-  --sidebar: oklch(0.14 0.004 60);
+  --sidebar: oklch(0.125 0.004 60);
 }
 
 @theme inline {
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
-  /* Paper does not cast shadows. Only floating layers (dialogs, popovers, the pill) keep theirs. */
+  /* The radius scale (rounded-xs … rounded-2xl). Larger Tailwind steps are not part of the system. */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-3xl: var(--radius-2xl);
+  --radius-4xl: var(--radius-2xl);
+  /*
+   * Spacing roles (p-card, px-gutter, space-y-section …). Every key here also becomes an
+   * `inline-<key>` utility, so none of them may be the name of a display value.
+   */
+  --spacing-card: var(--space-card);
+  --spacing-card-tight: var(--space-card-tight);
+  --spacing-row: var(--space-row);
+  --spacing-section: var(--space-section);
+  --spacing-gutter: var(--space-gutter);
+  /* Only the three elevation levels exist as shadows (shadow-raised, shadow-floating, shadow-overlay). */
   --shadow-2xs: 0 0 #0000;
   --shadow-xs: 0 0 #0000;
   --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: 0 0 #0000;
+  --shadow-xl: 0 0 #0000;
+  --shadow-2xl: 0 0 #0000;
+  --shadow-raised: var(--elevation-raised);
+  --shadow-floating: var(--elevation-floating);
+  --shadow-overlay: var(--elevation-overlay);
+  /*
+   * Type scale. Sans: caption 11, meta 12, note 13, body 14 (text-sm), lead 15. Serif display
+   * (with .serif-display): heading 24, numeral 32, title 36, display 56.
+   */
+  --text-caption: 11px;
+  --text-caption--line-height: 1.3;
+  --text-meta: 12px;
+  --text-meta--line-height: 1.35;
+  --text-note: 13px;
+  --text-note--line-height: 1.4;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-lead: 15px;
+  --text-lead--line-height: 1.55;
+  --text-heading: 24px;
+  --text-heading--line-height: 1.1;
+  --text-numeral: 32px;
+  --text-numeral--line-height: 1;
+  --text-title: 36px;
+  --text-title--line-height: 1.05;
+  --text-display: 56px;
+  --text-display--line-height: 1;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -147,10 +234,6 @@
   --color-overlay-error: var(--overlay-error);
   --color-overlay-error-foreground: var(--overlay-error-foreground);
   --color-overlay-disabled: var(--overlay-disabled);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
   --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
   --animate-bounce-dot: bounce-dot 1.1s ease-in-out infinite;
   --animate-fade-in: fade-in 160ms ease-out;
@@ -355,7 +438,7 @@
 
 /* Tracked uppercase label that introduces a group. */
 @utility eyebrow {
-  font-size: 11px;
+  font-size: var(--text-caption);
   line-height: 1;
   font-weight: 500;
   letter-spacing: 0.14em;
@@ -370,6 +453,32 @@
   letter-spacing: -0.015em;
   line-height: 1.05;
   font-feature-settings: normal;
+}
+
+/*
+ * Surface roles as utilities, so a screen says what a thing is rather than how it is drawn.
+ *   surface-raised    a card resting on the canvas (cards, sections, tiles, list cards)
+ *   surface-floating  a layer above the page (menus, popovers, tooltips)
+ *   surface-overlay   a dialog or sheet
+ *   well              a field or panel sunk into whatever holds it
+ */
+@utility surface-raised {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--elevation-raised);
+}
+@utility surface-floating {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--elevation-floating);
+}
+@utility surface-overlay {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--elevation-overlay);
+}
+@utility well {
+  background-color: var(--muted);
 }
 
 @layer base {
@@ -411,7 +520,8 @@
   .no-drag {
     -webkit-app-region: no-drag;
   }
+  /* A key cap: a small raised surface at the smallest radius, whatever it sits on. */
   kbd {
-    @apply inline-flex items-center justify-center rounded-md border border-input bg-card px-1.5 min-w-6 h-6 text-[11px] font-medium text-foreground;
+    @apply inline-flex items-center justify-center rounded-xs bg-card px-1.5 min-w-6 h-6 text-caption font-medium text-foreground shadow-raised;
   }
 }

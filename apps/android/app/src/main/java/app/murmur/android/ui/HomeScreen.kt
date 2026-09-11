@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,9 +45,10 @@ import app.murmur.android.ui.components.AttentionCard
 import app.murmur.android.ui.components.CountUp
 import app.murmur.android.ui.components.Dot
 import app.murmur.android.ui.components.EmptyFigure
+import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.Glyph
-import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.LatencyBar
+import app.murmur.android.ui.components.ListCard
 import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.PageMargin
 import app.murmur.android.ui.components.RecentRow
@@ -55,6 +58,8 @@ import app.murmur.android.ui.components.StatTile
 import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.components.Wordmark
 import app.murmur.android.ui.theme.Murmur
+import app.murmur.android.ui.theme.Radii
+import app.murmur.android.ui.theme.Space
 import app.murmur.android.update.UpdateManager
 import app.murmur.android.update.UpdatePhase
 
@@ -183,11 +188,11 @@ fun HomeScreen(
                 Column {
                     Spacer(Modifier.height(28.dp))
                     Overline("Worth knowing")
-                    Spacer(Modifier.height(6.dp))
-                    Hairline()
-                    for (line in insights) {
-                        Text(line, style = Murmur.type.body, color = c.ink, modifier = Modifier.padding(vertical = 13.dp))
-                        Hairline()
+                    Spacer(Modifier.height(10.dp))
+                    Card(padding = PaddingValues(horizontal = Space.card, vertical = Space.sm)) {
+                        for (line in insights) {
+                            Text(line, style = Murmur.type.body, color = c.ink, modifier = Modifier.padding(vertical = 9.dp))
+                        }
                     }
                 }
             }
@@ -213,14 +218,12 @@ fun HomeScreen(
                         Spacer(Modifier.weight(1f))
                         if (history.isNotEmpty()) TextLink("View all", onClick = { onOpen(Route.HISTORY) })
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Hairline()
+                    Spacer(Modifier.height(10.dp))
                     if (recent.isEmpty()) {
                         EmptyRecent(onTry = { onOpen(Route.TRY_IT) })
                     } else {
-                        for (entry in recent) {
-                            RecentRow(entry, onClick = { onOpen(Route.HISTORY) })
-                            Hairline()
+                        ListCard {
+                            for (entry in recent) RecentRow(entry, onClick = { onOpen(Route.HISTORY) })
                         }
                     }
                 }
@@ -230,8 +233,8 @@ fun HomeScreen(
                 Column {
                     Spacer(Modifier.height(36.dp))
                     Overline("Last dictation, where the time went")
-                    Spacer(Modifier.height(14.dp))
-                    last?.let { LatencyBar(it.timings) }
+                    Spacer(Modifier.height(10.dp))
+                    Card { last?.let { LatencyBar(it.timings) } }
                 }
             }
 
@@ -270,10 +273,18 @@ private fun StatsGrid(stats: DictationStats) {
     }
 }
 
+/** Nothing dictated yet: a well where the list will be. */
 @Composable
 private fun EmptyRecent(onTry: () -> Unit) {
     val c = Murmur.colors
-    Column(Modifier.fillMaxWidth().padding(vertical = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radii.card))
+            .background(c.paperRaised)
+            .padding(horizontal = Space.card, vertical = 26.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Text(
             "Nothing yet. Your dictations show up here with their timing breakdown.",
             style = Murmur.type.bodySmall,

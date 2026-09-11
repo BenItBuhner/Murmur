@@ -1,5 +1,33 @@
 import { clsx, type ClassValue } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+/**
+ * tailwind-merge only knows Tailwind's own scale names. Without these, `text-note` next to
+ * `text-muted-foreground` would be taken for two text colours and the first dropped. The names
+ * mirror the tokens in styles/globals.css.
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [
+        {
+          text: [
+            'caption',
+            'meta',
+            'note',
+            'body',
+            'lead',
+            'heading',
+            'numeral',
+            'title',
+            'display'
+          ]
+        }
+      ],
+      shadow: [{ shadow: ['raised', 'floating', 'overlay'] }]
+    }
+  }
+})
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))

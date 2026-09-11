@@ -3,8 +3,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { Loader2 } from 'lucide-react'
 import { Toaster } from 'sonner'
 import type { OverlayState } from '@shared/types'
-import { Shell, type Route } from './components/Shell'
-import { Logo } from './components/Shell'
+import { Shell, Wordmark, type Route } from './components/Shell'
 import { TooltipProvider } from './components/ui/misc'
 import { CloudProvider, useCloud } from './hooks/useCloud'
 import { SettingsProvider, useSettingsMaybe } from './hooks/useSettings'
@@ -138,10 +137,11 @@ function Root(): React.JSX.Element | null {
   )
 }
 
+/** The first frame of a cloud build while Clerk loads: the wordmark and a spinner, nothing else. */
 function Splash(): React.JSX.Element {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
-      <Logo className="size-10 rounded-xl [&>svg]:size-6" />
+    <div className="flex h-full flex-col items-center justify-center gap-5 text-muted-foreground">
+      <Wordmark className="text-title text-foreground" />
       <div className="flex items-center gap-2 text-sm">
         <Loader2 className="size-4 animate-spin" /> Starting Murmur…
       </div>

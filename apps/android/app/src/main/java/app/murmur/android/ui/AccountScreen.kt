@@ -1,7 +1,6 @@
 package app.murmur.android.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,7 +22,7 @@ import app.murmur.android.cloud.SyncStatus
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Dot
-import app.murmur.android.ui.components.Hairline
+import app.murmur.android.ui.components.Group
 import app.murmur.android.ui.components.PrimaryButton
 import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
@@ -91,8 +90,7 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
 
         SectionGap()
 
-        Column {
-            Hairline()
+        Group(rows = true) {
             ControlRow(
                 "${inference.planLabel} plan",
                 description = when {
@@ -105,7 +103,6 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
             ) {
                 Text(inference.minutesLabel ?: inference.planLabel, style = Murmur.type.labelSmall, color = c.inkSoft)
             }
-            Hairline()
             ControlRow("Sync", description = "Dictionary and style preferences. Your model choice and any API keys of your own stay on this phone.") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Dot(syncColor(status), size = 6.dp, pulsing = status.phase == SyncPhase.SYNCING)
@@ -113,15 +110,12 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
                     Text(syncLabel(status), style = Murmur.type.labelSmall, color = c.inkSoft)
                 }
             }
-            Hairline()
             ControlRow("Devices") {
                 Text(pluralize(status.devices.size, "device"), style = Murmur.type.labelSmall, color = c.inkSoft)
             }
-            Hairline()
             ControlRow("Dictionary") {
                 Text(pluralize(settings.dictionaryEntries.size, "word"), style = Murmur.type.labelSmall, color = c.inkSoft)
             }
-            Hairline()
         }
 
         Spacer(Modifier.height(28.dp))

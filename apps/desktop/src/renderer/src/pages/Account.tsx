@@ -42,21 +42,21 @@ export function AccountPage(): React.JSX.Element {
 
   if (!clerk.signedIn) {
     return (
-      <div className="space-y-8">
+      <div className="space-y-section">
         <PageHeader
           title="Account"
           description="Your Murmur account keeps your dictionary, snippets and style in step on every device."
         />
-        <div className="rounded-xl border bg-card p-6 shadow-xs">
+        <div className="surface-raised rounded-xl p-card">
           <div className="flex items-start gap-4">
-            <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <div className="well flex size-12 shrink-0 items-center justify-center rounded-full text-muted-foreground">
               <UserRound className="size-5" />
             </div>
             <div className="min-w-0 flex-1 space-y-1">
-              <div className="text-[15px] font-semibold tracking-tight">
+              <div className="text-lead font-semibold tracking-tight">
                 You are using Murmur without an account
               </div>
-              <p className="text-[13px] text-muted-foreground">
+              <p className="text-note text-muted-foreground">
                 Everything lives on this computer. Sign in to sync your {settings.dictionary.length}{' '}
                 dictionary {settings.dictionary.length === 1 ? 'word' : 'words'},{' '}
                 {settings.snippets.length} {settings.snippets.length === 1 ? 'snippet' : 'snippets'}{' '}
@@ -64,7 +64,7 @@ export function AccountPage(): React.JSX.Element {
                 merged into the account the first time you sign in.
               </p>
               {clerk.failed && (
-                <p className="text-[13px] text-destructive">
+                <p className="text-note text-destructive">
                   Murmur sign-in is unreachable right now; you can still sign in once you are back
                   online.
                 </p>
@@ -138,24 +138,24 @@ function SignedInAccount({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       <PageHeader
         title="Account"
         description="Your Murmur account keeps your dictionary, snippets and style in step on every device."
         actions={<SyncBadge />}
       />
 
-      <div className="flex items-center gap-4 rounded-xl border bg-card p-5 shadow-xs">
+      <div className="surface-raised flex items-center gap-4 rounded-xl p-card">
         {imageUrl ? (
           <img src={imageUrl} alt="" className="size-12 rounded-full object-cover" />
         ) : (
-          <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <div className="well flex size-12 items-center justify-center rounded-full text-muted-foreground">
             <UserRound className="size-5" />
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px] font-semibold tracking-tight">{name}</div>
-          {email && <div className="truncate text-[13px] text-muted-foreground">{email}</div>}
+          <div className="truncate text-lead font-semibold tracking-tight">{name}</div>
+          {email && <div className="truncate text-note text-muted-foreground">{email}</div>}
         </div>
         <Button variant="outline" size="sm" onClick={() => void clerkClient.openUserProfile()}>
           <Settings2 /> Manage account
@@ -190,7 +190,7 @@ function SignedInAccount({
             title="Used this month"
             description={`${inference.routing.stt === 'murmur' ? 'Murmur’s speech model is in use on this device.' : 'This device uses your own speech provider; the allowance is untouched by it.'}`}
           >
-            <span className="text-[13px] tabular-nums text-muted-foreground">
+            <span className="text-note tabular-nums text-muted-foreground">
               {minutesLabel(inference.minutes)} · {formatNumber(inference.tokensUsed)} tokens
             </span>
           </SettingRow>
@@ -234,7 +234,7 @@ function SignedInAccount({
             ].map((item) => (
               <div
                 key={item.label}
-                className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2 text-[13px] [&>svg]:size-4 [&>svg]:text-muted-foreground"
+                className="well flex items-center gap-2.5 rounded-md px-3.5 py-2.5 text-note [&>svg]:size-4 [&>svg]:text-muted-foreground"
               >
                 {item.icon}
                 <span className="flex-1">{item.label}</span>
@@ -242,7 +242,7 @@ function SignedInAccount({
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[12px] text-muted-foreground">
+          <p className="mt-2 text-meta text-muted-foreground">
             Your choice of speech model and any API keys of your own are device settings and are
             never uploaded.
           </p>
@@ -264,7 +264,7 @@ function SignedInAccount({
         description="Every install that has connected to your account. Removing one only forgets it here; sign out on the device itself to end its session."
       >
         {(status?.devices ?? []).length === 0 ? (
-          <div className="px-5 py-6 text-center text-[13px] text-muted-foreground">
+          <div className="py-4 text-center text-note text-muted-foreground">
             {status?.signedIn ? 'Waiting for the device list…' : 'Sign in to see your devices.'}
           </div>
         ) : (

@@ -128,7 +128,7 @@ class DictationFlowTest {
         assertEquals(DictationState.Success("Inserted"), outcome)
         assertEquals("exactly one transcription request: $requests", 1, requests.size)
         assertTrue("STT received the audio: $requests", requests[0].startsWith("POST /v1/audio/transcriptions ("))
-        val expected = basicCleanup(prepareTranscript(TRANSCRIPT).text, emptyList()).text + " "
+        val expected = lightText()
         assertEquals("So hello from murmur this is a test ", expected)
         assertEquals(expected, field.text.toString())
         assertEquals(expected.length, field.selectionStart)
@@ -160,7 +160,7 @@ class DictationFlowTest {
         val retried = awaitOutcome(timeoutMs = 30_000)
 
         assertEquals(DictationState.Success("Inserted"), retried)
-        val expected = runPipeline(TRANSCRIPT, PipelineOptions()).text
+        val expected = lightText()
         assertEquals(expected, field.text.toString())
         val done = history.get(retryId)!!
         assertEquals(expected.trimEnd(), done.finalText)
@@ -188,11 +188,14 @@ class DictationFlowTest {
         assertEquals(DictationState.Success("Copied"), awaitOutcome(timeoutMs = 30_000))
         assertEquals("", field.text.toString())
         val done = HistoryStore.get(activity).get(retryId)!!
-        assertEquals(runPipeline(TRANSCRIPT, PipelineOptions()).text.trimEnd(), done.finalText)
+        assertEquals(lightText().trimEnd(), done.finalText)
         assertFalse(done.injected)
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        assertEquals(runPipeline(TRANSCRIPT, PipelineOptions()).text, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        assertEquals(lightText(), clipboard.primaryClip?.getItemAt(0)?.text?.toString())
     }
+
+    /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */
+    private fun lightText(): String = basicCleanup(prepareTranscript(TRANSCRIPT).text, emptyList()).text + " "
 
     /** Pump the main looper (the insertion hops onto it) until the pill settles on a result. */
     private fun awaitOutcome(timeoutMs: Long): DictationState {

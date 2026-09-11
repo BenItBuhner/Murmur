@@ -175,5 +175,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       # `next build` prerenders every page and the release endpoints against the live GitHub
-      # Releases API; a rate-limited API only degrades the output, it never fails the build.
+      # Releases API; a rate-limited API only degrades the output, it never fails the build. The
+      # workflow token lifts the anonymous limit shared by the runner's IP.
       - run: npm run build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -66,7 +66,7 @@ export function DictionaryPage(): React.JSX.Element {
   }, [preview, settings.dictionary])
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       <PageHeader
         title="Dictionary"
         description={
@@ -77,7 +77,7 @@ export function DictionaryPage(): React.JSX.Element {
         actions={<SyncBadge />}
       />
 
-      <div className="rounded-xl border bg-card p-5 shadow-xs">
+      <div className="surface-raised rounded-xl p-card">
         <div className="grid gap-4 md:grid-cols-[1fr_1.4fr]">
           <div className="space-y-1.5">
             <Label htmlFor="dict-word">Word or phrase</Label>
@@ -101,7 +101,7 @@ export function DictionaryPage(): React.JSX.Element {
           </div>
         </div>
         <div className="mt-4 flex items-center justify-between">
-          <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <label className="flex items-center gap-2 text-note text-muted-foreground">
             <Switch checked={fuzzy} onCheckedChange={setFuzzy} /> Also fix near-misses (one or two
             letters off)
           </label>
@@ -118,9 +118,13 @@ export function DictionaryPage(): React.JSX.Element {
           description="Add the names of people, products and tools you say often. Capitalized names are fuzzy-matched automatically."
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-xs divide-y">
+        /* A list card: each word is a row one radius step in from the card (20 - 8 = 12). */
+        <div className="surface-raised rounded-xl p-card-tight">
           {settings.dictionary.map((d) => (
-            <div key={d.id} className="flex items-center gap-4 px-5 py-3">
+            <div
+              key={d.id}
+              className="flex items-center gap-4 rounded-md px-3 py-2.5 transition-colors hover:bg-accent/60"
+            >
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">{d.word}</div>
                 {d.aliases.length > 0 && (
@@ -134,7 +138,7 @@ export function DictionaryPage(): React.JSX.Element {
                 )}
               </div>
               <label
-                className="flex items-center gap-2 text-[12px] text-muted-foreground"
+                className="flex items-center gap-2 text-meta text-muted-foreground"
                 title="Correct near-miss spellings too"
               >
                 <Switch checked={d.fuzzy} onCheckedChange={(v) => void toggleFuzzy(d.id, v)} />{' '}
@@ -155,8 +159,8 @@ export function DictionaryPage(): React.JSX.Element {
 
       <section className="space-y-3">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight">Try the cleanup</h2>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
+          <h2 className="eyebrow">Try the cleanup</h2>
+          <p className="mt-2 text-note text-muted-foreground">
             Paste a raw transcript to see what the deterministic pass does with your dictionary,
             snippets and commands.
           </p>
@@ -168,8 +172,8 @@ export function DictionaryPage(): React.JSX.Element {
           className="min-h-16"
         />
         {previewOut && (
-          <div className="rounded-xl border bg-card px-4 py-3 shadow-xs animate-fade-in">
-            <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="surface-raised rounded-xl px-card py-4 animate-fade-in">
+            <div className="flex items-center gap-2 eyebrow">
               <Wand2 className="size-3.5" /> Result
               <span className="ml-auto flex flex-wrap gap-1 normal-case tracking-normal">
                 {previewOut.stages.map((s) => (

@@ -3,7 +3,7 @@ import { AlertTriangle } from 'lucide-react'
 import type { HandsFreeTrigger } from '@shared/settings'
 import { Switch } from '@renderer/components/ui/switch'
 import { Slider } from '@renderer/components/ui/slider'
-import { Segmented } from '@renderer/components/ui/misc'
+import { Banner, Segmented } from '@renderer/components/ui/misc'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { HotkeyRecorder } from '@renderer/components/HotkeyRecorder'
 import { platformFor } from '@renderer/components/KeyCaps'
@@ -16,14 +16,14 @@ export function ShortcutsPage(): React.JSX.Element {
   const fallback = info?.hookBackend === 'globalShortcut'
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       <PageHeader
         title="Shortcuts"
         description="One key does everything: hold it to talk, tap it to go hands-free. All bindings are global and work in any app."
       />
 
       {fallback && (
-        <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3 text-[13px]">
+        <Banner tone="warning" className="flex items-start gap-3 text-note">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <div>
             <div className="font-medium">Hold-to-talk is unavailable in this session</div>
@@ -36,7 +36,7 @@ export function ShortcutsPage(): React.JSX.Element {
               + Win cannot be registered — pick a combination that includes a regular key.
             </div>
           </div>
-        </div>
+        </Banner>
       )}
 
       <Section title="Dictation">
@@ -135,7 +135,7 @@ export function ShortcutsPage(): React.JSX.Element {
         </SettingRow>
       </Section>
 
-      <p className="text-[12px] text-muted-foreground">
+      <p className="text-meta text-muted-foreground">
         Rules: a shortcut needs a modifier or a function key, at most three keys, and cannot mix
         left and right versions of the same modifier. OS shortcuts like Ctrl+C or Alt+F4 are
         blocked. Middle click and mouse buttons 4+ can be used.

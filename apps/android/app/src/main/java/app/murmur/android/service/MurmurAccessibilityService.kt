@@ -223,8 +223,11 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         // the relay does not depend on where the touch window happens to be at that instant.
         val relay = TouchRelayView(this) { ev -> view.onScreenTouch(ev, ev.rawX, ev.rawY) }
         pill = view
-        canvasWindow = OverlayWindow(wm, view, touchable = false)
+        val canvas = OverlayWindow(wm, view, touchable = false)
+        canvasWindow = canvas
         touchWindow = OverlayWindow(wm, relay, touchable = true)
+        // A canvas the system would ease into place whenever it moves must not move at all.
+        view.canvasPinnedToScreen = !canvas.movesSeamlessly
         val s = settings.get()
         view.setPalette(PillTheme.resolve(this, s))
         view.configure(s.overlayShape, s.overlayLayout)
@@ -371,6 +374,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
  * One accessibility-overlay window placed in screen coordinates. A non-touchable window is skipped
  * by input dispatch entirely, so the pill's canvas can be as large as it likes without stealing
  * taps from the keyboard underneath it.
+ *
+ * WindowManager eases every window towards a new position over a few hundred milliseconds (its
+ * window-move animation) while the view inside has already drawn for the new origin, so a window
+ * that moves shows its contents flying in from wherever it used to be. That was the pill leaving
+ * its spot when picked up and after landing, every time the canvas switched between hugging the
+ * button and covering the screen. The windows opt out with the platform's own flag for windows
+ * that place themselves; with it, WindowManager also holds a combined move and resize back until
+ * the first frame drawn for it, so the switch cannot be seen at all.
  */
 private class OverlayWindow(private val wm: WindowManager, private val view: View, touchable: Boolean) {
     private val params = WindowManager.LayoutParams(
@@ -390,6 +401,9 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
     }
+
+    /** False when the system's move animation could not be turned off, so moving this window is visible. */
+    val movesSeamlessly: Boolean = params.disableMoveAnimation()
 
     var attached = false
         private set
@@ -419,6 +433,27 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
         } catch (_: Exception) {
         }
     }
+}
+
+/** `WindowManager.LayoutParams.PRIVATE_FLAG_NO_MOVE_ANIMATION`: never animate this window's position changes. */
+internal const val PRIVATE_FLAG_NO_MOVE_ANIMATION = 0x00000040
+
+/**
+ * Opt a window out of WindowManager's move animation. The flag is not public API, but it has kept
+ * this value since Android 4, `privateFlags` is on the platform's "unsupported" list rather than
+ * blocked from reflection, and it is what the system's own floating windows (bubbles, the
+ * magnifier, picture-in-picture) set.
+ *
+ * @return false when the field could not be reached, in which case the window still eases into
+ * every new position and its owner has to avoid moving it.
+ */
+internal fun WindowManager.LayoutParams.disableMoveAnimation(): Boolean = try {
+    val field = WindowManager.LayoutParams::class.java.getField("privateFlags")
+    field.setInt(this, field.getInt(this) or PRIVATE_FLAG_NO_MOVE_ANIMATION)
+    true
+} catch (e: Exception) {
+    Log.w(TAG, "overlay windows keep the system's move animation: privateFlags is out of reach", e)
+    false
 }
 
 /** Draws nothing; hands every touch to the pill, which does its own hit-testing in screen space. */

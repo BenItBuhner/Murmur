@@ -3,6 +3,7 @@ package app.murmur.android
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.view.WindowManager
 import android.widget.FrameLayout
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.Box
@@ -10,6 +11,8 @@ import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
+import app.murmur.android.service.PRIVATE_FLAG_NO_MOVE_ANIMATION
+import app.murmur.android.service.disableMoveAnimation
 import app.murmur.android.settings.AccentPreset
 import app.murmur.android.settings.OverlayShape
 import app.murmur.android.ui.theme.schemeFromSeed
@@ -35,10 +38,13 @@ private const val FRAME_MS = 8L
 private const val MORPH_MS = 340L
 
 /**
- * The windows the pill asks its host for. Moving a window and redrawing into it are not atomic on
- * Android, so the window the pill is drawn in must not move while the mic turns on and off: the
- * recording that motivated this showed the pill jumping 5 dp for a few frames at every idle
- * transition, once when the window grew for the morph and once when it was tightened afterwards.
+ * The windows the pill asks its host for. WindowManager eases a window towards every new position
+ * (its window-move animation) while the view inside has already drawn for the new origin, so a
+ * canvas that moves shows the pill flying in from wherever the window used to be: 5 dp for a few
+ * frames at every idle transition in the first recording, and from the far corner of the screen at
+ * the start and end of every drag in the second. The canvas therefore never moves while the mic
+ * turns on and off, the service turns the move animation off for the moments it must move, and a
+ * host that cannot do that pins the canvas to the screen instead.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -148,5 +154,49 @@ class OverlayPillWindowTest {
         view.setEditing(false); settle()
         assertTrue(host.canvas.last().approximately(resting))
         assertTrue(resting.encloses(host.touch.last()))
+    }
+
+    @Test
+    fun `a canvas pinned to the screen is placed once and never moves`() {
+        val screen = Box(0f, 0f, SCREEN_W.toFloat(), SCREEN_H.toFloat())
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        host = RecordingHost()
+        view = OverlayPillView(activity).apply {
+            this.host = this@OverlayPillWindowTest.host
+            canvasPinnedToScreen = true
+        }
+        activity.setContentView(view, FrameLayout.LayoutParams(SCREEN_W, SCREEN_H))
+        ShadowLooper.idleMainLooper()
+        view.configure(OverlayShape.PILL, OverlayLayout.DEFAULT)
+        view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP)
+        view.render(DictationState.Idle)
+        frames(10)
+        assertEquals(listOf(screen), host.canvas)
+
+        view.render(DictationState.Listening(0, 0.2f)); listen(500)
+        view.render(DictationState.Success("Inserted")); settle()
+        view.render(DictationState.Idle); settle()
+        view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP - 120); settle()
+        view.setEditing(true); settle()
+        view.setEditing(false); settle()
+        assertEquals("the canvas is the screen, once and for all: ${host.canvas}", listOf(screen), host.canvas)
+        // The touch window still does its job: it hugs the button at rest.
+        val idleTouch = host.touch.last()
+        assertTrue(idleTouch.width < SCREEN_W / 3f && idleTouch.height < 200f)
+        assertTrue(screen.encloses(idleTouch))
+    }
+
+    @Test
+    fun `the overlay windows opt out of the system's move animation`() {
+        val params = WindowManager.LayoutParams()
+        assertTrue(params.disableMoveAnimation())
+        val privateFlags = WindowManager.LayoutParams::class.java.getField("privateFlags")
+        assertEquals(PRIVATE_FLAG_NO_MOVE_ANIMATION, privateFlags.getInt(params) and PRIVATE_FLAG_NO_MOVE_ANIMATION)
+        // The hard-coded value is the platform's own, and setting it twice changes nothing.
+        val platformFlag = WindowManager.LayoutParams::class.java.getField("PRIVATE_FLAG_NO_MOVE_ANIMATION").getInt(null)
+        assertEquals(platformFlag, PRIVATE_FLAG_NO_MOVE_ANIMATION)
+        val once = privateFlags.getInt(params)
+        assertTrue(params.disableMoveAnimation())
+        assertEquals(once, privateFlags.getInt(params))
     }
 }

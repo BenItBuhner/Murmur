@@ -70,13 +70,15 @@ private const val RECORD = 0xFFFF5A36.toInt()
  * time-based morph: size, corner radius and colour interpolate while the old and new contents
  * cross-fade.
  *
- * The view lives in a *canvas* window that is never touchable and is sized for every state the
- * pill can take at its resting spot, so turning the mic on or off never moves or resizes it; it
- * covers the whole screen while the button is dragged, lands, or is edited (that is where the
- * ghost spots, guides and editor toolbar are drawn). Everything is drawn in screen coordinates
- * translated by the canvas window's origin, so the canvas may only ever change origin if the host
- * applies the move together with the frame drawn for it (see [Host.applyCanvasFrame]); a host
- * that cannot promise that pins the canvas to the whole screen instead ([canvasPinnedToScreen]).
+ * The view lives in a *canvas* window that is never touchable. Everything is drawn in screen
+ * coordinates translated by that window's origin, and Android does not move a window and redraw its
+ * contents in the same frame, so moving the canvas throws the pill across the screen for a few
+ * frames. The real host therefore pins the canvas to the whole screen the entire time the pill is
+ * shown ([canvasPinnedToScreen]), so it never moves or resizes and the pill is always drawn in a
+ * window whose origin never changes; the ghost spots, guides and editor toolbar drawn during a drag
+ * or in edit mode simply share that same full-screen canvas. (A host that instead sizes the canvas
+ * to the pill must grow it without ever changing its origin — see [Host.applyCanvasFrame].)
+ *
  * Taps at rest arrive through a separate, invisible *touch* window that hugs the pill. Android
  * delivers every later event of a gesture to the window that took its first touch, wherever the
  * finger goes, so that window is left exactly where it is until the finger lifts: a drag never
@@ -89,11 +91,12 @@ class OverlayPillView(context: Context) : View(context) {
     /** Owner of the two overlay windows this view drives (all frames in screen coordinates). */
     interface Host {
         /**
-         * The window the pill is drawn in. At rest it only grows and never moves while the mic
-         * turns on or off; it covers the screen while dragging, landing or editing. Must not be
-         * touchable, and must take a new origin without the system's window-move animation: the
-         * view draws for the new origin on the very next frame, so a window still easing towards
-         * it shows the pill flying in from wherever the window used to be.
+         * The window the pill is drawn in. Must not be touchable. Its origin must never change once
+         * shown: the view draws for the new origin on the very next frame, but Android moves the
+         * window's surface a few frames later, so the pill would appear to fly in from where the
+         * window used to be. The real host sidesteps this by leaving [canvasPinnedToScreen] on, so
+         * this frame is always the whole screen; a host that sizes the canvas to the pill instead
+         * may only ever grow it (never move its top-left corner).
          */
         fun applyCanvasFrame(frame: Box)
 
@@ -104,9 +107,12 @@ class OverlayPillView(context: Context) : View(context) {
     var host: Host? = null
 
     /**
-     * For a host whose canvas window cannot change origin unseen (see [Host.applyCanvasFrame]):
-     * the canvas covers the whole screen from the start and is never moved again, trading a larger
-     * window for a pill that stays exactly where it is drawn.
+     * Keep the canvas covering the whole screen the entire time the pill is shown, so it never
+     * moves or resizes. Android does not move a window and redraw its contents in the same frame,
+     * so a canvas that switched between hugging the button and covering the screen (at the start and
+     * end of a drag) threw the pill across the screen for a few frames; pinning trades a larger
+     * window for a pill that stays exactly where it is drawn. The accessibility service turns this
+     * on; a preview or test may leave it off to exercise the grow-only path.
      */
     var canvasPinnedToScreen = false
         set(value) {

@@ -3,7 +3,6 @@ package app.murmur.android
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.view.WindowManager
 import android.widget.FrameLayout
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.Box
@@ -11,8 +10,6 @@ import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
-import app.murmur.android.service.PRIVATE_FLAG_NO_MOVE_ANIMATION
-import app.murmur.android.service.disableMoveAnimation
 import app.murmur.android.settings.AccentPreset
 import app.murmur.android.settings.OverlayShape
 import app.murmur.android.ui.theme.schemeFromSeed
@@ -38,13 +35,12 @@ private const val FRAME_MS = 8L
 private const val MORPH_MS = 340L
 
 /**
- * The windows the pill asks its host for. WindowManager eases a window towards every new position
- * (its window-move animation) while the view inside has already drawn for the new origin, so a
- * canvas that moves shows the pill flying in from wherever the window used to be: 5 dp for a few
- * frames at every idle transition in the first recording, and from the far corner of the screen at
- * the start and end of every drag in the second. The canvas therefore never moves while the mic
- * turns on and off, the service turns the move animation off for the moments it must move, and a
- * host that cannot do that pins the canvas to the screen instead.
+ * The windows the pill asks its host for. Android does not move a window and redraw its contents in
+ * the same frame, so a canvas that moves shows the pill jumping in from wherever the window used to
+ * be: 5 dp for a few frames at every idle transition in the first recording, and across the whole
+ * screen at the start and end of every drag in the second. The real host pins the canvas to the
+ * whole screen so it never moves; a host that instead sizes it to the pill must only ever grow it,
+ * never changing its top-left corner.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -184,19 +180,5 @@ class OverlayPillWindowTest {
         val idleTouch = host.touch.last()
         assertTrue(idleTouch.width < SCREEN_W / 3f && idleTouch.height < 200f)
         assertTrue(screen.encloses(idleTouch))
-    }
-
-    @Test
-    fun `the overlay windows opt out of the system's move animation`() {
-        val params = WindowManager.LayoutParams()
-        assertTrue(params.disableMoveAnimation())
-        val privateFlags = WindowManager.LayoutParams::class.java.getField("privateFlags")
-        assertEquals(PRIVATE_FLAG_NO_MOVE_ANIMATION, privateFlags.getInt(params) and PRIVATE_FLAG_NO_MOVE_ANIMATION)
-        // The hard-coded value is the platform's own, and setting it twice changes nothing.
-        val platformFlag = WindowManager.LayoutParams::class.java.getField("PRIVATE_FLAG_NO_MOVE_ANIMATION").getInt(null)
-        assertEquals(platformFlag, PRIVATE_FLAG_NO_MOVE_ANIMATION)
-        val once = privateFlags.getInt(params)
-        assertTrue(params.disableMoveAnimation())
-        assertEquals(once, privateFlags.getInt(params))
     }
 }

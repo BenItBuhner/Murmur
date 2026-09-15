@@ -23,8 +23,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.background
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
@@ -51,10 +57,12 @@ import com.clerk.api.ui.ClerkTypographyDefaults
  *
  * Colour comes from the user's appearance settings (light/dark/system, wallpaper colours on
  * Android 12+, otherwise a Material 3 scheme grown from the chosen accent; see MurmurPalette.kt).
- * The screens read that scheme through a small set of editorial roles, [Paper]: the page, the ink
- * on it, hairlines, one accent. Structure comes from hairlines and whitespace rather than cards;
- * headlines and large numerals are set in an editorial serif, everything else in the system sans
- * so the app sits naturally next to the pill it controls.
+ * The screens read that scheme through a small set of editorial roles, [Paper]: the page, the
+ * cards resting on it, the wells sunk into them, the ink, one accent. Structure comes from
+ * surfaces and space rather than lines: nothing draws a border or a rule. Headlines and large
+ * numerals are set in an editorial serif, everything else in the system sans so the app sits
+ * naturally next to the pill it controls. Shape ([Radii]), space ([Space]) and elevation
+ * ([Elevation]) use the same names and values as the desktop app's styles/globals.css.
  */
 
 // ---- Material extras --------------------------------------------------------------------------
@@ -87,12 +95,22 @@ fun isDarkTheme(mode: ThemeMode): Boolean = when (mode) {
 
 // ---- editorial roles --------------------------------------------------------------------------
 
-/** The roles the screens are drawn with, resolved from the active Material scheme. */
+/**
+ * The roles the screens are drawn with, resolved from the active Material scheme.
+ *
+ * Surfaces form one hierarchy in both modes: the [paper] (canvas), a [card] resting on it, a
+ * [floating] layer above that (the drawer, menus), and the [paperRaised] well sunk into whichever
+ * of them holds it. Light mode steps down in tone from card to paper; dark mode steps up.
+ */
 @Immutable
 data class Paper(
-    /** Page background. */
+    /** Page background: the canvas. */
     val paper: Color,
-    /** A whisper above the paper: fields, chips, the toggle track. */
+    /** A raised surface resting on the paper: cards, tiles, sections, list cards. */
+    val card: Color,
+    /** A layer above the page: the drawer, menus and sheets. */
+    val floating: Color,
+    /** The well: fields, chips, the toggle track, panels sunk into a card or the paper. */
     val paperRaised: Color,
     /** Primary text and the fill of primary buttons. */
     val ink: Color,
@@ -100,9 +118,9 @@ data class Paper(
     val inkSoft: Color,
     /** Tertiary text, placeholders, disabled labels. */
     val inkMuted: Color,
-    /** Rules and resting borders. */
+    /** The one tone left for a thin mark that is not a rule: progress tracks, the focus ring. */
     val hairline: Color,
-    /** Borders that need a little more presence (toggle track, unselected chips). */
+    /** A stronger version of [hairline], for the resting toggle track. */
     val hairlineStrong: Color,
     /** The accent, used as a fill: the palette's primary, which the pill wears too. */
     val ember: Color,
@@ -121,10 +139,15 @@ data class Paper(
     val isDark: Boolean
 )
 
-/** Map the Material roles onto the editorial ones. */
+/**
+ * Map the Material roles onto the editorial ones. Light: paper tone 96, card tone 100 (white),
+ * well tone 94. Dark: paper tone 6, card tone 12, floating and well tone 17.
+ */
 fun paperFrom(scheme: ColorScheme, extras: MurmurColors, dark: Boolean): Paper = Paper(
-    paper = scheme.background,
-    paperRaised = if (dark) scheme.surfaceContainerLow else scheme.surfaceContainerLowest,
+    paper = if (dark) scheme.background else scheme.surfaceContainerLow,
+    card = if (dark) scheme.surfaceContainer else scheme.surfaceContainerLowest,
+    floating = if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest,
+    paperRaised = if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainer,
     ink = scheme.onBackground,
     inkSoft = scheme.onSurfaceVariant,
     inkMuted = scheme.outline,
@@ -210,10 +233,78 @@ object Murmur {
         @Composable @ReadOnlyComposable get() = LocalMurmurType.current
 }
 
-/** Radii used across the app. Buttons and chips are full pills; blocks are gently rounded. */
+/**
+ * Radius scale, in 4dp steps like the spacing grid, so nested corners stay concentric: a surface
+ * inset by p from a corner of radius r takes radius r - p ([nested]), which always lands on the
+ * scale. Nothing nested may be rounder than what holds it. Buttons, chips, badges, the toggle and
+ * the dictation pill are fully round and sit outside the scale.
+ */
 object Radii {
-    val field = 14.dp
-    val block = 22.dp
+    /** Key caps, the smallest nested chips. */
+    val xs = 4.dp
+    /** Menu items, small nested chips. */
+    val sm = 8.dp
+    /** Fields, menus, rows inside a card (card - cardTight). */
+    val md = 12.dp
+    /** A block inside a sheet. */
+    val lg = 16.dp
+    /** Cards, tiles, sections, list cards, the stage. */
+    val xl = 20.dp
+    /** Sheets and the drawer. */
+    val xxl = 24.dp
+
+    val field: Dp get() = md
+    val card: Dp get() = xl
+    val sheet: Dp get() = xxl
+
+    /** The radius of something inset by [inset] from a corner of radius [outer]; never sharper than [xs]. */
+    fun nested(outer: Dp, inset: Dp): Dp = (outer - inset).coerceAtLeast(xs)
+}
+
+/** Spacing roles on the 4dp grid. */
+object Space {
+    val xs = 4.dp
+    val sm = 8.dp
+    val md = 12.dp
+    val lg = 16.dp
+    val xl = 20.dp
+    val xxl = 24.dp
+    /** Padding of a card or section. */
+    val card = 16.dp
+    /** Padding of a list card whose rows are surfaces of their own. */
+    val cardTight = 8.dp
+    /** Vertical rhythm of a row inside a section. */
+    val row = 14.dp
+    /** Between the blocks of a screen. */
+    val block = 32.dp
+    /** The screen's side margin. */
+    val gutter = 24.dp
+}
+
+/**
+ * Elevation levels. Raised: a card resting on the paper. Floating: the drawer, menus, a lifted
+ * card. Overlay: the dictation pill over other apps. Light mode casts soft shadows; dark mode
+ * lifts by tone and the shadow only grounds the edge.
+ */
+object Elevation {
+    val flat = 0.dp
+    val raised = 2.dp
+    val floating = 8.dp
+    val overlay = 16.dp
+}
+
+/**
+ * A surface at one of the elevation levels: fill, shape and shadow in one place, so a screen says
+ * what a thing is rather than how it is drawn. Shadows are warm and light by day, deep at night.
+ */
+@Composable
+fun Modifier.surface(level: Dp, shape: Shape, color: Color = Murmur.colors.card): Modifier {
+    val dark = Murmur.colors.isDark
+    val shadow = if (dark) Color.Black.copy(alpha = 0.55f) else Color(0xFF2A2318).copy(alpha = 0.16f)
+    return this
+        .then(if (level > 0.dp) Modifier.shadow(level, shape, clip = false, ambientColor = shadow, spotColor = shadow) else Modifier)
+        .clip(shape)
+        .background(color)
 }
 
 /**
@@ -391,7 +482,8 @@ fun clerkTheme(): ClerkTheme {
         mutedForeground = c.inkSoft,
         muted = c.paperRaised,
         neutral = c.inkSoft,
-        border = c.hairlineStrong,
+        // Clerk draws borders around its fields; the well colour makes them read as fills.
+        border = c.paperRaised,
         ring = c.ink,
         secondaryButtonBackground = c.paperRaised,
         secondaryButtonForeground = c.ink,

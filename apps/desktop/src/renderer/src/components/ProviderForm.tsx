@@ -23,7 +23,10 @@ export interface ModelFieldProps {
   onDiscover: () => void
   discoverError?: string
   placeholder?: string
-  label?: string
+  /** Null when the row around the field already names it. */
+  label?: string | null
+  /** What the list holds, for the discovery note (speech lists put speech models first). */
+  kind?: 'stt' | 'llm'
 }
 
 /** Model picker that accepts discovered ids, preset suggestions, or anything typed by hand. */
@@ -36,7 +39,8 @@ export function ModelField({
   onDiscover,
   discoverError,
   placeholder,
-  label = 'Model'
+  label = 'Model',
+  kind = 'stt'
 }: ModelFieldProps): React.JSX.Element {
   const options = useMemo(() => {
     const set = new Set<string>()
@@ -50,10 +54,10 @@ export function ModelField({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <Label>{label}</Label>
+        {label && <Label>{label}</Label>}
         <button
           type="button"
-          className="text-[12px] text-muted-foreground hover:text-foreground"
+          className="ml-auto text-meta text-muted-foreground hover:text-foreground"
           onClick={() => setCustom((c) => !c)}
         >
           {custom ? 'Choose from list' : 'Type a model id'}
@@ -65,16 +69,16 @@ export function ModelField({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder ?? 'model-id'}
-            className="font-mono text-[13px]"
+            className="font-mono text-note"
           />
         ) : (
           <Select value={value || undefined} onValueChange={onChange}>
-            <SelectTrigger className="w-full font-mono text-[13px]">
+            <SelectTrigger className="w-full font-mono text-note">
               <SelectValue placeholder={placeholder ?? 'Select a model'} />
             </SelectTrigger>
             <SelectContent>
               {options.map((m) => (
-                <SelectItem key={m} value={m} className="font-mono text-[13px]">
+                <SelectItem key={m} value={m} className="font-mono text-note">
                   {m}
                 </SelectItem>
               ))}
@@ -90,16 +94,21 @@ export function ModelField({
           Discover
         </Button>
       </div>
-      {discoverError && <p className="text-[12px] text-destructive">{discoverError}</p>}
+      {discoverError && <p className="text-meta text-destructive">{discoverError}</p>}
       {discovered && !discoverError && (
-        <p className="text-[12px] text-muted-foreground">
-          {discovered.length} models found on the server; speech models are listed first.
+        <p className="text-meta text-muted-foreground">
+          {discovered.length} models found on the server
+          {kind === 'stt' ? '; speech models are listed first.' : '.'}
         </p>
       )}
     </div>
   )
 }
 
+/**
+ * The outcome of a connection test: a tinted block inside the section (the field radius), with
+ * the models the server offered as small key caps to click.
+ */
 export function TestResult({
   result,
   onPickModel
@@ -111,8 +120,8 @@ export function TestResult({
   return (
     <div
       className={cn(
-        'rounded-lg border px-3 py-2.5 text-[13px] animate-fade-in',
-        result.ok ? 'border-success/40 bg-success/5' : 'border-destructive/40 bg-destructive/5'
+        'rounded-md px-3.5 py-3 text-note animate-fade-in',
+        result.ok ? 'bg-success/12' : 'bg-destructive/10'
       )}
     >
       <div className="flex items-start gap-2">
@@ -134,7 +143,7 @@ export function TestResult({
                   key={m}
                   type="button"
                   onClick={() => onPickModel?.(m)}
-                  className="rounded-md border bg-card px-1.5 py-0.5 font-mono text-[12px] hover:bg-accent"
+                  className="surface-raised rounded-xs px-1.5 py-0.5 font-mono text-meta transition-colors hover:bg-accent"
                 >
                   {m}
                 </button>
@@ -189,7 +198,7 @@ export function SecretInput({
         }}
         onBlur={() => void save()}
         onKeyDown={(e) => e.key === 'Enter' && void save()}
-        className="font-mono text-[13px]"
+        className="font-mono text-note"
       />
       {saving && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
       {has && !dirty && !saving && <CheckCircle2 className="size-4 text-success" />}

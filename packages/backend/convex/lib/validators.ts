@@ -1,5 +1,6 @@
 import { v, type Infer } from 'convex/values'
-import { planValidator } from './plans'
+import { meterValidator } from './entitlements'
+import { billingIntervalValidator, planStateValidator, planValidator } from './plans'
 
 /**
  * Validators shared by the schema, the public function signatures and the tests. The wire shapes
@@ -18,14 +19,46 @@ export type Tone = Infer<typeof toneValidator>
 export const formattingModeValidator = v.union(v.literal('off'), v.literal('light'), v.literal('smart'))
 export type FormattingMode = Infer<typeof formattingModeValidator>
 
-export const hesitationLevelValidator = v.union(v.literal('off'), v.literal('light'), v.literal('thorough'))
-export const repetitionScopeValidator = v.union(v.literal('words'), v.literal('phrases'), v.literal('thorough'))
-export const listsModeValidator = v.union(v.literal('off'), v.literal('spoken'), v.literal('auto'))
-export const listStyleValidator = v.union(v.literal('auto'), v.literal('bullets'), v.literal('numbers'))
-export const bulletMarkerValidator = v.union(v.literal('-'), v.literal('•'), v.literal('*'))
-export const numbersModeValidator = v.union(v.literal('off'), v.literal('smart'), v.literal('all'))
-export const llmFreedomValidator = v.union(v.literal('strict'), v.literal('balanced'), v.literal('natural'))
-export const llmStructureValidator = v.union(v.literal('keep'), v.literal('assist'))
+/**
+ * Knobs of the rule-based cleanup the apps had before the text engine (v0.5). Existing preference
+ * documents and app rules still carry them, so they stay valid here; current clients neither send
+ * nor read them, and they are never used by the gateway.
+ */
+const hesitationLevelValidator = v.union(v.literal('off'), v.literal('light'), v.literal('thorough'))
+const repetitionScopeValidator = v.union(v.literal('words'), v.literal('phrases'), v.literal('thorough'))
+const listsModeValidator = v.union(v.literal('off'), v.literal('spoken'), v.literal('auto'))
+const listStyleValidator = v.union(v.literal('auto'), v.literal('bullets'), v.literal('numbers'))
+const bulletMarkerValidator = v.union(v.literal('-'), v.literal('•'), v.literal('*'))
+const numbersModeValidator = v.union(v.literal('off'), v.literal('smart'), v.literal('all'))
+const llmFreedomValidator = v.union(v.literal('strict'), v.literal('balanced'), v.literal('natural'))
+const llmStructureValidator = v.union(v.literal('keep'), v.literal('assist'))
+
+/** @deprecated Kept only so documents written by v0.4 clients keep validating. */
+export const legacyFormattingFields = {
+  removeFillers: v.optional(v.boolean()),
+  fillerWords: v.optional(v.array(v.string())),
+  hesitations: v.optional(hesitationLevelValidator),
+  hesitationPhrases: v.optional(v.array(v.string())),
+  collapseRepeats: v.optional(v.boolean()),
+  repetitionScope: v.optional(repetitionScopeValidator),
+  spokenCommands: v.optional(v.boolean()),
+  selfCorrections: v.optional(v.boolean()),
+  autoCapitalize: v.optional(v.boolean()),
+  pressEnterCommand: v.optional(v.boolean()),
+  lists: v.optional(listsModeValidator),
+  listStyle: v.optional(listStyleValidator),
+  bulletMarker: v.optional(bulletMarkerValidator),
+  numbers: v.optional(numbersModeValidator),
+  llmFreedom: v.optional(llmFreedomValidator),
+  llmStructure: v.optional(llmStructureValidator)
+}
+
+/** @deprecated As `legacyFormattingFields`, for per-app rules. */
+export const legacyAppRuleFields = {
+  lists: v.optional(listsModeValidator),
+  numbers: v.optional(numbersModeValidator),
+  freedom: v.optional(llmFreedomValidator)
+}
 
 export const platformValidator = v.union(
   v.literal('win32'),
@@ -43,29 +76,18 @@ export const dictationModeValidator = v.union(
   v.literal('command')
 )
 
-/** Style preferences that follow the user across devices. Provider connections and API keys never sync. */
+/**
+ * Style preferences that follow the user across devices: whether to format, how it should sound,
+ * the trailing space and the user's instructions for the model. Everything else the engine derives
+ * from the destination. Provider connections and API keys never sync.
+ */
 export const formattingPreferencesValidator = v.object({
   mode: v.optional(formattingModeValidator),
   tone: v.optional(toneValidator),
-  removeFillers: v.optional(v.boolean()),
-  fillerWords: v.optional(v.array(v.string())),
-  hesitations: v.optional(hesitationLevelValidator),
-  hesitationPhrases: v.optional(v.array(v.string())),
-  collapseRepeats: v.optional(v.boolean()),
-  repetitionScope: v.optional(repetitionScopeValidator),
-  spokenCommands: v.optional(v.boolean()),
-  selfCorrections: v.optional(v.boolean()),
-  autoCapitalize: v.optional(v.boolean()),
   trailingSpace: v.optional(v.boolean()),
-  pressEnterCommand: v.optional(v.boolean()),
-  lists: v.optional(listsModeValidator),
-  listStyle: v.optional(listStyleValidator),
-  bulletMarker: v.optional(bulletMarkerValidator),
-  numbers: v.optional(numbersModeValidator),
-  llmFreedom: v.optional(llmFreedomValidator),
-  llmStructure: v.optional(llmStructureValidator),
-  /** Free-form guidance for the smart-formatting model; provider connections never sync. */
-  llmInstructions: v.optional(v.string())
+  /** Free-form guidance for the formatting model. */
+  llmInstructions: v.optional(v.string()),
+  ...legacyFormattingFields
 })
 export type FormattingPreferences = Infer<typeof formattingPreferencesValidator>
 
@@ -132,10 +154,8 @@ export type SnippetInput = Infer<typeof snippetInputValidator>
 export const appRuleOverrides = {
   formatting: v.optional(formattingModeValidator),
   trailingSpace: v.optional(v.boolean()),
-  lists: v.optional(listsModeValidator),
-  numbers: v.optional(numbersModeValidator),
-  freedom: v.optional(llmFreedomValidator),
-  instructions: v.optional(v.string())
+  instructions: v.optional(v.string()),
+  ...legacyAppRuleFields
 }
 
 export const appRuleDtoValidator = v.object({
@@ -210,14 +230,48 @@ export const historyEntryDtoValidator = v.object({
 })
 export type HistoryEntryDto = Infer<typeof historyEntryDtoValidator>
 
+/** Stripe's subscription statuses, as the webhook reports them. */
+export const subscriptionStatusValidator = v.union(
+  v.literal('active'),
+  v.literal('trialing'),
+  v.literal('past_due'),
+  v.literal('canceled'),
+  v.literal('unpaid'),
+  v.literal('incomplete'),
+  v.literal('incomplete_expired'),
+  v.literal('paused')
+)
+export type SubscriptionStatus = Infer<typeof subscriptionStatusValidator>
+
+/** The subscription snapshot kept on the user row; billing webhooks are its only writer. */
+export const subscriptionValidator = v.object({
+  /** Stripe subscription id (`sub_…`). */
+  id: v.string(),
+  status: subscriptionStatusValidator,
+  priceId: v.string(),
+  interval: billingIntervalValidator,
+  /** End of the paid period, epoch ms. */
+  currentPeriodEnd: v.number(),
+  cancelAtPeriodEnd: v.boolean(),
+  /** Last failed invoice, epoch ms; cleared when the subscription is active again. */
+  paymentFailedAt: v.optional(v.number()),
+  /** `created` of the Stripe event that produced this snapshot (ms); older events are ignored. */
+  eventAt: v.number()
+})
+export type Subscription = Infer<typeof subscriptionValidator>
+
 export const userDtoValidator = v.object({
   id: v.id('users'),
   clerkId: v.string(),
   email: v.optional(v.string()),
   name: v.optional(v.string()),
   imageUrl: v.optional(v.string()),
-  /** Account tier deciding the managed-inference allowance (see lib/plans.ts). */
+  /** Tier whose limits apply (see lib/plans.ts); `pro` during the trial. */
   plan: planValidator,
+  /** Where the account is in its lifecycle: trial, residual free tier or paid. */
+  planState: planStateValidator,
+  /** When the 14-day trial ends or ended, epoch ms. */
+  trialEndsAt: v.optional(v.number()),
   onboardingCompletedAt: v.optional(v.number()),
   onboardingVersion: v.optional(v.number()),
   createdAt: v.number()
@@ -234,7 +288,10 @@ export const inferenceStatusValidator = v.object({
     stt: v.union(v.string(), v.null()),
     llm: v.union(v.string(), v.null())
   }),
+  /** Tier whose limits apply; `pro` during the trial. */
   plan: planValidator,
+  planState: planStateValidator,
+  trialEndsAt: v.union(v.number(), v.null()),
   limits: v.object({
     sttSecondsPerMonth: v.number(),
     llmTokensPerMonth: v.number(),
@@ -248,6 +305,53 @@ export const inferenceStatusValidator = v.object({
     sttRequests: v.number(),
     llmTokens: v.number(),
     llmRequests: v.number()
-  })
+  }),
+  /** Pro past its soft fair-use cap: /v1/format answers with rule-based text. */
+  formattingPaused: v.boolean(),
+  /** Where to pay; null for paying accounts and for instances without a site URL. */
+  upgradeUrl: v.union(v.string(), v.null()),
+  /** The site's account page (plan, usage, billing); null only for instances without a site URL. */
+  accountUrl: v.union(v.string(), v.null()),
+  /** The rolling week and the day the client asked about; null without a `day` argument. */
+  window: v.union(
+    v.object({
+      day: v.string(),
+      weekStart: v.string(),
+      words: v.number(),
+      sttSeconds: v.number(),
+      dictationsToday: v.number()
+    }),
+    v.null()
+  ),
+  /** Every limit that applies to the tier and where it stands; empty without a `day` argument. */
+  meters: v.array(meterValidator),
+  resets: v.union(
+    v.object({
+      day: v.number(),
+      week: v.union(v.number(), v.null()),
+      month: v.number()
+    }),
+    v.null()
+  )
 })
 export type InferenceStatus = Infer<typeof inferenceStatusValidator>
+
+/** The account's billing state as the web account page shows it. */
+export const billingStatusValidator = v.object({
+  /** Stripe keys and both prices are set on the deployment. */
+  configured: v.boolean(),
+  /** The account has a Stripe customer, so the Customer Portal can open. */
+  portalAvailable: v.boolean(),
+  upgradeUrl: v.union(v.string(), v.null()),
+  subscription: v.union(
+    v.object({
+      status: subscriptionStatusValidator,
+      interval: billingIntervalValidator,
+      currentPeriodEnd: v.number(),
+      cancelAtPeriodEnd: v.boolean(),
+      paymentFailedAt: v.union(v.number(), v.null())
+    }),
+    v.null()
+  )
+})
+export type BillingStatus = Infer<typeof billingStatusValidator>

@@ -9,22 +9,17 @@ import { cn } from '@renderer/lib/utils'
 
 // ---- Card -----------------------------------------------------------------------------------
 
+/** A raised surface on the canvas: the card radius, the card padding, the raised elevation. */
 function Card({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element {
-  return (
-    <div
-      data-slot="card"
-      className={cn('rounded-2xl border bg-card text-card-foreground', className)}
-      {...props}
-    />
-  )
+  return <div data-slot="card" className={cn('surface-raised rounded-xl', className)} {...props} />
 }
 function CardHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element {
-  return <div className={cn('flex flex-col gap-1 px-5 pt-5', className)} {...props} />
+  return <div className={cn('flex flex-col gap-1 px-card pt-card', className)} {...props} />
 }
 function CardTitle({ className, ...props }: React.ComponentProps<'h3'>): React.JSX.Element {
   return (
     <h3
-      className={cn('text-[15px] font-semibold leading-tight tracking-tight', className)}
+      className={cn('text-lead font-semibold leading-tight tracking-tight', className)}
       {...props}
     />
   )
@@ -33,22 +28,50 @@ function CardDescription({ className, ...props }: React.ComponentProps<'p'>): Re
   return <p className={cn('text-sm text-muted-foreground', className)} {...props} />
 }
 function CardContent({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element {
-  return <div className={cn('px-5 pb-5 pt-4', className)} {...props} />
+  return <div className={cn('px-card pb-card pt-4', className)} {...props} />
+}
+
+// ---- Banner ---------------------------------------------------------------------------------
+
+const bannerVariants = cva('rounded-xl px-card py-4', {
+  variants: {
+    tone: {
+      neutral: 'well text-foreground',
+      primary: 'bg-primary/8 text-foreground',
+      record: 'bg-record/10 text-foreground',
+      success: 'bg-success/12 text-foreground',
+      warning: 'bg-warning/14 text-foreground',
+      destructive: 'bg-destructive/10 text-foreground'
+    }
+  },
+  defaultVariants: { tone: 'neutral' }
+})
+
+/**
+ * Something the page wants to say in passing: a tinted block at the card radius with no edge and
+ * no elevation, so it reads as a note on the page rather than an object on it.
+ */
+function Banner({
+  className,
+  tone,
+  ...props
+}: React.ComponentProps<'div'> & VariantProps<typeof bannerVariants>): React.JSX.Element {
+  return <div data-slot="banner" className={cn(bannerVariants({ tone }), className)} {...props} />
 }
 
 // ---- Badge ----------------------------------------------------------------------------------
 
 const badgeVariants = cva(
-  'inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium w-fit whitespace-nowrap gap-1.5 [&>svg]:size-3',
+  'inline-flex shrink-0 items-center justify-center rounded-full px-2.5 py-0.5 text-caption font-medium w-fit whitespace-nowrap gap-1.5 [&>svg]:size-3',
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-primary text-primary-foreground',
-        secondary: 'border-transparent bg-secondary text-secondary-foreground',
-        outline: 'border-input text-muted-foreground',
-        success: 'border-transparent bg-success/12 text-success',
-        destructive: 'border-transparent bg-destructive/12 text-destructive',
-        record: 'border-transparent bg-record/12 text-record'
+        default: 'bg-primary text-primary-foreground',
+        secondary: 'bg-secondary text-secondary-foreground',
+        outline: 'well text-muted-foreground',
+        success: 'bg-success/12 text-success',
+        destructive: 'bg-destructive/12 text-destructive',
+        record: 'bg-record/12 text-record'
       }
     },
     defaultVariants: { variant: 'default' }
@@ -99,7 +122,7 @@ function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          'z-50 w-fit max-w-xs rounded-lg bg-foreground px-2.5 py-1.5 text-xs text-background shadow-md text-balance data-[state=delayed-open]:animate-layer-in data-[state=instant-open]:animate-fade-in data-[state=closed]:animate-layer-out',
+          'z-50 w-fit max-w-xs rounded-md bg-foreground px-2.5 py-1.5 text-xs text-background shadow-floating text-balance data-[state=delayed-open]:animate-layer-in data-[state=instant-open]:animate-fade-in data-[state=closed]:animate-layer-out',
           className
         )}
         {...props}
@@ -112,6 +135,12 @@ function TooltipContent({
 
 // ---- Tabs -----------------------------------------------------------------------------------
 
+/* A pill track sunk into its surface; the chosen option is an ink pill inside it (concentric). */
+const trackClass = 'well inline-flex h-9 items-center rounded-full p-[3px]'
+const optionClass =
+  'h-7 rounded-full px-3.5 text-note font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground'
+const activeOptionClass = 'bg-primary text-primary-foreground hover:text-primary-foreground'
+
 const Tabs = TabsPrimitive.Root
 function TabsList({
   className,
@@ -119,10 +148,7 @@ function TabsList({
 }: React.ComponentProps<typeof TabsPrimitive.List>): React.JSX.Element {
   return (
     <TabsPrimitive.List
-      className={cn(
-        'inline-flex h-9 w-fit items-center justify-center rounded-full border bg-card p-[3px] text-muted-foreground',
-        className
-      )}
+      className={cn(trackClass, 'w-fit justify-center text-muted-foreground', className)}
       {...props}
     />
   )
@@ -134,7 +160,8 @@ function TabsTrigger({
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-full border border-transparent px-3.5 text-[13px] font-medium whitespace-nowrap transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground',
+        optionClass,
+        'inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:hover:text-primary-foreground',
         className
       )}
       {...props}
@@ -163,13 +190,7 @@ function Segmented<T extends string>({
   className
 }: SegmentedProps<T>): React.JSX.Element {
   return (
-    <div
-      role="radiogroup"
-      className={cn(
-        'inline-flex h-9 items-center rounded-full border bg-card p-[3px] text-[13px]',
-        className
-      )}
-    >
+    <div role="radiogroup" className={cn(trackClass, className)}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -178,10 +199,7 @@ function Segmented<T extends string>({
           aria-checked={value === o.value}
           title={o.hint}
           onClick={() => onChange(o.value)}
-          className={cn(
-            'h-7 rounded-full px-3.5 font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground',
-            value === o.value && 'bg-primary text-primary-foreground hover:text-primary-foreground'
-          )}
+          className={cn(optionClass, value === o.value && activeOptionClass)}
         >
           {o.label}
         </button>
@@ -192,6 +210,7 @@ function Segmented<T extends string>({
 
 export {
   Badge,
+  Banner,
   Card,
   CardContent,
   CardDescription,

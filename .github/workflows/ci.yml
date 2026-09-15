@@ -36,6 +36,25 @@ jobs:
       - run: node --test scripts/release.test.mjs
       - run: bash -n scripts/install.sh
 
+  engine-check:
+    name: Text engine typecheck, lint, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/text-engine
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/text-engine/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      # Includes the offline eval corpus and the golden contract the Android port is pinned to.
+      - run: npm test
+
   backend-check:
     name: Backend typecheck, lint, test
     runs-on: ubuntu-latest
@@ -147,9 +166,46 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       # assembleRelease exercises the release signing config (debug-key fallback without secrets).
       - run: ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
+      # The JUnit XML and HTML reports, so a failing test can be read in full after the run.
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: murmur-android-test-reports
+          path: |
+            apps/android/app/build/test-results/testDebugUnitTest
+            apps/android/app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: murmur-android
           path: apps/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: ignore
           retention-days: 7
+
+  web-check:
+    name: Web typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      # The web typecheck resolves backend types from packages/backend/convex, like the desktop app.
+      - run: npm ci
+        working-directory: packages/backend
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      # `next build` prerenders every page and the release endpoints against the live GitHub
+      # Releases API; a rate-limited API only degrades the output, it never fails the build. The
+      # workflow token lifts the anonymous limit shared by the runner's IP.
+      - run: npm run build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

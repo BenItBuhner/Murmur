@@ -6,6 +6,14 @@ import {
   toSttError
 } from '@core/stt/types'
 
+import type {
+  ChatMessage,
+  ChatOptions as EngineChatOptions,
+  ChatResult as EngineChatResult
+} from '@engine'
+
+export type { ChatMessage }
+
 export interface LlmConfig {
   baseUrl: string
   apiKey: string
@@ -13,28 +21,24 @@ export interface LlmConfig {
   timeoutMs: number
 }
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string
-}
-
-export interface ChatOptions {
-  temperature?: number
-  maxTokens?: number
+export interface ChatOptions extends EngineChatOptions {
   signal?: AbortSignal
 }
 
-export interface ChatResult {
-  text: string
+export interface ChatResult extends EngineChatResult {
   latencyMs: number
   model: string
-  finishReason?: string
-  usage?: {
-    prompt_tokens?: number
-    completion_tokens?: number
+  usage?: EngineChatResult['usage'] & {
     completion_tokens_details?: { reasoning_tokens?: number }
   }
 }
+
+/** A chat completion against a given connection; the engine's `Complete` with the config bound. */
+export type Complete = (
+  cfg: LlmConfig,
+  messages: ChatMessage[],
+  opts?: ChatOptions
+) => Promise<ChatResult>
 
 /** Minimal OpenAI-compatible chat completion client (OpenAI, Groq, Ollama, LM Studio, proxies). */
 export async function chatComplete(

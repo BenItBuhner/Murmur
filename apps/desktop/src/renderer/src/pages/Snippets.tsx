@@ -48,7 +48,7 @@ export function SnippetsPage(): React.JSX.Element {
     patch({ snippets: settings.snippets.filter((s) => s.id !== id) })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader
         title="Snippets"
         description="Say a short cue and Murmur pastes the full text. Great for links, intros, addresses and replies you type all the time."
@@ -70,12 +70,15 @@ export function SnippetsPage(): React.JSX.Element {
           }
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-xs divide-y">
+        <div className="surface-raised rounded-xl p-card-tight">
           {settings.snippets.map((s) => (
-            <div key={s.id} className="flex items-start gap-4 px-5 py-3.5">
+            <div
+              key={s.id}
+              className="flex items-start gap-4 rounded-md px-3 py-3 transition-colors hover:bg-accent/60"
+            >
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">“{s.trigger}”</div>
-                <div className="mt-1 line-clamp-2 whitespace-pre-wrap text-[13px] text-muted-foreground">
+                <div className="mt-1 line-clamp-2 whitespace-pre-wrap text-note text-muted-foreground">
                   {s.content}
                 </div>
               </div>

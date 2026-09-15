@@ -1,13 +1,15 @@
-import { SttError, type SttConfig } from '@core/stt'
+import { SttError, combineSignals, errorFromResponse, toSttError, type SttConfig } from '@core/stt'
+import { formatTranscript, type FormatInput, type FormatResult } from '@engine'
 import {
   chatComplete,
   type ChatMessage,
   type ChatOptions,
   type ChatResult,
+  type Complete,
   type LlmConfig
 } from '@core/llm/client'
-import type { Complete } from '@core/text/smart-format'
 import type { CloudConfig } from '@shared/cloud'
+import { parseLimitNotice, type LimitNotice } from '@shared/limits'
 import {
   MURMUR_LLM_MODEL,
   MURMUR_PROVIDER,
@@ -62,6 +64,19 @@ export interface ResolvedLlm {
  * In local builds there is no instance: everything resolves to the user's own provider and no
  * Murmur endpoint is ever contacted.
  */
+/**
+ * The engine's result, plus the plan limit a Murmur instance applied when it answered with
+ * rule-based text instead of asking the model (a Pro account past its fair-use cap).
+ */
+export interface FormatOutcome extends FormatResult {
+  limit?: LimitNotice
+}
+
+export interface Formatter {
+  source: InferenceSource
+  format: (input: FormatInput) => Promise<FormatOutcome>
+}
+
 export class InferenceRouter {
   constructor(private readonly deps: RouterDeps) {}
 
@@ -180,6 +195,58 @@ export class InferenceRouter {
       log.info('session token rejected by the gateway; refreshing and retrying')
       const fresh = await this.sessionToken(true)
       return await chatComplete({ ...cfg, apiKey: fresh }, messages, opts)
+    }
+  }
+
+  /**
+   * The formatting stage for the current routing. Against a Murmur instance the whole engine
+   * (prompt, verifier, retry, fallback) runs on the gateway's `POST /v1/format`, so both apps
+   * share one implementation and the instance can tune it; with the user's own provider the same
+   * engine runs here, with the model call going to that provider.
+   */
+  async formatter(): Promise<Formatter> {
+    const resolved = await this.llm()
+    const cfg = resolved.cfg
+    if (resolved.source === 'murmur') {
+      return {
+        source: 'murmur',
+        format: (input) => this.remoteFormat(cfg, input)
+      }
+    }
+    if (!cfg.baseUrl || !cfg.model)
+      return { source: 'custom', format: (input) => formatTranscript(input, null) }
+    return {
+      source: 'custom',
+      format: (input) =>
+        formatTranscript(input, (messages, opts) => this.complete(cfg, messages, opts))
+    }
+  }
+
+  private async remoteFormat(cfg: LlmConfig, input: FormatInput): Promise<FormatOutcome> {
+    const call = async (apiKey: string): Promise<FormatOutcome> => {
+      let res: Response
+      try {
+        res = await fetch(`${cfg.baseUrl}/format`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ transcript: input.transcript, context: input.context }),
+          // The gateway may make two model round trips before answering.
+          signal: combineSignals(cfg.timeoutMs * 2 + 2000)
+        })
+      } catch (err) {
+        throw toSttError(err, 'Formatting request failed')
+      }
+      if (!res.ok) throw errorFromResponse(res.status, await res.text())
+      const json = (await res.json()) as FormatResult & { limit?: unknown }
+      const limit = parseLimitNotice(json.limit, json.status?.detail)
+      return { ...json, limit: limit ?? undefined }
+    }
+    try {
+      return await call(cfg.apiKey)
+    } catch (err) {
+      if (!(err instanceof SttError) || err.kind !== 'auth') throw err
+      log.info('session token rejected by the gateway; refreshing and retrying')
+      return await call(await this.sessionToken(true))
     }
   }
 

@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { describeInstallKind, kindCanSelfUpdate, type UpdateStatus } from '@shared/updates'
 import { Button } from '@renderer/components/ui/button'
-import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
+import { Badge, Banner } from '@renderer/components/ui/misc'
 import { Switch } from '@renderer/components/ui/switch'
 import { Appear } from '@renderer/components/motion'
 import { Section, SettingRow } from '@renderer/components/SettingRow'
@@ -286,7 +286,7 @@ function ProgressBar({ percent }: { percent: number }): React.JSX.Element {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(percent)}
-      className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+      className="well h-1.5 w-full overflow-hidden rounded-full"
     >
       <div
         className="h-full rounded-full bg-primary transition-[width] duration-200"
@@ -365,27 +365,25 @@ function UpdateCard({
   }
 
   return (
-    <Card className="border-primary/30 bg-primary/5">
-      <CardContent className="flex items-center justify-between gap-4 py-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            {title}
-            {release.prerelease && <Badge variant="secondary">Pre-release</Badge>}
+    <Banner tone="primary" className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          {title}
+          {release.prerelease && <Badge variant="secondary">Pre-release</Badge>}
+        </div>
+        <div className="text-note text-muted-foreground">{detail}</div>
+        {status.phase === 'downloading' && (
+          <div className="mt-2 w-64">
+            <ProgressBar percent={status.progress?.percent ?? 0} />
           </div>
-          <div className="text-[13px] text-muted-foreground">{detail}</div>
-          {status.phase === 'downloading' && (
-            <div className="mt-2 w-64">
-              <ProgressBar percent={status.progress?.percent ?? 0} />
-            </div>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="ghost" onClick={() => onNavigate('general')}>
-            Details <ArrowRight />
-          </Button>
-          {action}
-        </div>
-      </CardContent>
-    </Card>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button variant="ghost" onClick={() => onNavigate('general')}>
+          Details <ArrowRight />
+        </Button>
+        {action}
+      </div>
+    </Banner>
   )
 }

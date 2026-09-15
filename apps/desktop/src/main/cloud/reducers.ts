@@ -26,43 +26,23 @@ export interface AppRuleInput {
   tone: AppRule['tone']
   formatting?: AppRule['formatting']
   trailingSpace?: boolean
-  lists?: AppRule['lists']
-  numbers?: AppRule['numbers']
-  freedom?: AppRule['freedom']
   instructions?: string
   createdAt: number
 }
 
 /** The optional per-app overrides, copied only when set so `undefined` never reaches the wire. */
-const APP_RULE_OPTIONALS = [
-  'formatting',
-  'trailingSpace',
-  'lists',
-  'numbers',
-  'freedom',
-  'instructions'
-] as const
+const APP_RULE_OPTIONALS = ['formatting', 'trailingSpace', 'instructions'] as const
 
+/**
+ * The style preferences that follow the user across devices. The wire keeps the model
+ * instructions under `llmInstructions` (older clients read that name); locally they live at
+ * `formatting.instructions`. Fields older clients still send (fillers, hesitations, lists,
+ * numbers, ...) are ignored on the way in and never written on the way out.
+ */
 export interface SyncedFormatting {
   mode: Settings['formatting']['mode']
   tone: Settings['formatting']['tone']
-  removeFillers: boolean
-  fillerWords: string[]
-  hesitations: Settings['formatting']['hesitations']
-  hesitationPhrases: string[]
-  collapseRepeats: boolean
-  repetitionScope: Settings['formatting']['repetitionScope']
-  spokenCommands: boolean
-  selfCorrections: boolean
-  autoCapitalize: boolean
   trailingSpace: boolean
-  pressEnterCommand: boolean
-  lists: Settings['formatting']['lists']
-  listStyle: Settings['formatting']['listStyle']
-  bulletMarker: Settings['formatting']['bulletMarker']
-  numbers: Settings['formatting']['numbers']
-  llmFreedom: Settings['formatting']['llm']['freedom']
-  llmStructure: Settings['formatting']['llm']['structure']
   llmInstructions: string
 }
 
@@ -398,24 +378,8 @@ export function extractPreferences(s: Settings): SyncedPreferences {
     formatting: {
       mode: f.mode,
       tone: f.tone,
-      removeFillers: f.removeFillers,
-      fillerWords: [...f.fillerWords],
-      hesitations: f.hesitations,
-      hesitationPhrases: [...f.hesitationPhrases],
-      collapseRepeats: f.collapseRepeats,
-      repetitionScope: f.repetitionScope,
-      spokenCommands: f.spokenCommands,
-      selfCorrections: f.selfCorrections,
-      autoCapitalize: f.autoCapitalize,
       trailingSpace: f.trailingSpace,
-      pressEnterCommand: f.pressEnterCommand,
-      lists: f.lists,
-      listStyle: f.listStyle,
-      bulletMarker: f.bulletMarker,
-      numbers: f.numbers,
-      llmFreedom: f.llm.freedom,
-      llmStructure: f.llm.structure,
-      llmInstructions: f.llm.instructions
+      llmInstructions: f.instructions
     },
     language: s.stt.language,
     sync: { history: s.cloud.historySync }
@@ -456,30 +420,18 @@ export function mergePreferencePatches(
   }
 }
 
-/** A settings patch for the `formatting` section, with the model fields back in their nested home. */
+/** A settings patch for the `formatting` section. */
 export type FormattingPatch = Partial<
-  Omit<SyncedFormatting, 'llmFreedom' | 'llmStructure' | 'llmInstructions'>
-> & {
-  llm?: Partial<Pick<Settings['formatting']['llm'], 'freedom' | 'structure' | 'instructions'>>
-}
+  Pick<Settings['formatting'], 'mode' | 'tone' | 'trailingSpace' | 'instructions'>
+>
 
-const LLM_FIELDS = {
-  llmFreedom: 'freedom',
-  llmStructure: 'structure',
-  llmInstructions: 'instructions'
-} as const
-
-/** Wire shape (flat) -> settings shape (nested `llm`). */
+/** Wire shape -> settings shape. */
 export function toFormattingPatch(flat: Partial<SyncedFormatting>): FormattingPatch {
   const out: FormattingPatch = {}
-  for (const [key, value] of Object.entries(flat) as Array<[keyof SyncedFormatting, unknown]>) {
-    if (value === undefined) continue
-    if (key in LLM_FIELDS) {
-      out.llm = { ...(out.llm ?? {}), [LLM_FIELDS[key as keyof typeof LLM_FIELDS]]: value }
-    } else {
-      ;(out as Record<string, unknown>)[key] = value
-    }
-  }
+  if (flat.mode !== undefined) out.mode = flat.mode
+  if (flat.tone !== undefined) out.tone = flat.tone
+  if (flat.trailingSpace !== undefined) out.trailingSpace = flat.trailingSpace
+  if (flat.llmInstructions !== undefined) out.instructions = flat.llmInstructions
   return out
 }
 

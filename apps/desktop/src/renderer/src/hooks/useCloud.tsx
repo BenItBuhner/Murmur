@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { ClerkProvider, useAuth, useUser } from '@clerk/electron/react'
+import { ClerkProvider, useAuth, useClerk, useUser } from '@clerk/electron/react'
 import type { CloudConfig, RendererAuthState, SyncStatus } from '@shared/cloud'
 import type { ResolvedTheme } from '@shared/theme'
 
@@ -19,15 +19,24 @@ export interface ClerkView {
   imageUrl?: string
 }
 
+/** What a signed-in user can do with the session itself. */
+export interface SessionActions {
+  signOut: () => Promise<void>
+  /** Clerk's account dialog (profile, security, delete account); absent without Clerk. */
+  openUserProfile?: () => void
+}
+
 interface Ctx {
   config: CloudConfig | null
   status: SyncStatus | null
   clerk: ClerkView
   /** True when this build talks to a cloud instance at all. */
   enabled: boolean
+  actions: SessionActions
 }
 
 const NO_CLERK: ClerkView = { loaded: true, failed: false, signedIn: false }
+const NO_ACTIONS: SessionActions = { signOut: async () => {} }
 
 const CloudContext = createContext<Ctx | null>(null)
 
@@ -53,7 +62,34 @@ export function CloudProvider({
   if (!config) return null
   if (config.accountMode === 'off') {
     return (
-      <CloudContext.Provider value={{ config, status, clerk: NO_CLERK, enabled: false }}>
+      <CloudContext.Provider
+        value={{ config, status, clerk: NO_CLERK, enabled: false, actions: NO_ACTIONS }}
+      >
+        {children}
+      </CloudContext.Provider>
+    )
+  }
+  if (config.testAuth) {
+    // A dev build signed in through a token file: main owns the session, Clerk never mounts.
+    const { userId, email, name } = config.testAuth
+    return (
+      <CloudContext.Provider
+        value={{
+          config,
+          status,
+          clerk: {
+            loaded: true,
+            failed: false,
+            signedIn: true,
+            userId,
+            email,
+            name,
+            firstName: name?.split(/\s+/)[0]
+          },
+          enabled: true,
+          actions: NO_ACTIONS
+        }}
+      >
         {children}
       </CloudContext.Provider>
     )
@@ -66,7 +102,8 @@ export function CloudProvider({
             config,
             status,
             clerk: { loaded: false, failed: true, signedIn: false },
-            enabled: true
+            enabled: true,
+            actions: NO_ACTIONS
           }}
         >
           {children}
@@ -121,6 +158,7 @@ function ClerkBridge({
 }): React.JSX.Element {
   const { isLoaded, isSignedIn, userId, getToken } = useAuth()
   const { user } = useUser()
+  const clerkClient = useClerk()
   const [timedOut, setTimedOut] = useState(false)
   const latest = useRef({ isSignedIn: false, getToken })
   useEffect(() => {
@@ -185,9 +223,19 @@ function ClerkBridge({
     [isLoaded, failed, isSignedIn, userId, name, firstName, email, imageUrl]
   )
 
+  const actions = useMemo<SessionActions>(
+    () => ({
+      signOut: async () => {
+        await clerkClient.signOut()
+      },
+      openUserProfile: () => void clerkClient.openUserProfile()
+    }),
+    [clerkClient]
+  )
+
   const value = useMemo<Ctx>(
-    () => ({ config, status, clerk, enabled: true }),
-    [config, status, clerk]
+    () => ({ config, status, clerk, enabled: true, actions }),
+    [config, status, clerk, actions]
   )
   return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>
 }
@@ -213,24 +261,27 @@ export function clerkAppearance(theme: ResolvedTheme): {
       colorBackground: hex.card,
       colorText: hex['card-foreground'],
       colorTextSecondary: hex['muted-foreground'],
-      colorInputBackground: hex.card,
+      // Fields are wells, like Murmur's own.
+      colorInputBackground: hex.muted,
       colorInputText: hex['card-foreground'],
       colorNeutral: hex.foreground,
       colorDanger: hex.destructive,
       colorSuccess: hex.success,
-      borderRadius: '0.875rem',
+      // The field radius of the token scale (styles/globals.css).
+      borderRadius: '12px',
       fontFamily: 'var(--font-sans)',
       fontSize: '14px'
     },
     elements: {
       rootBox: 'w-full',
-      cardBox: 'w-full shadow-none border border-border rounded-2xl',
-      card: 'shadow-none bg-card px-6 py-6 gap-5',
-      headerTitle: 'serif-display text-[26px]',
-      headerSubtitle: 'text-[13px]',
+      // The form is a raised card at the card radius; no drawn edge.
+      cardBox: 'w-full surface-raised rounded-xl',
+      card: 'shadow-none bg-card px-card py-card gap-5',
+      headerTitle: 'serif-display text-heading',
+      headerSubtitle: 'text-note',
       formButtonPrimary: 'h-9 rounded-full text-sm font-medium shadow-none',
-      formFieldInput: 'h-9 rounded-xl shadow-none',
-      socialButtonsBlockButton: 'h-9 rounded-full shadow-none',
+      formFieldInput: 'h-9 rounded-md border-transparent shadow-none',
+      socialButtonsBlockButton: 'h-9 rounded-full shadow-none border-transparent bg-muted',
       // Murmur switches between sign in and sign up with its own tabs.
       footerAction: { display: 'none' }
     }

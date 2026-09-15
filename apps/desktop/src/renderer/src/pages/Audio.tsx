@@ -56,7 +56,7 @@ export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Eleme
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       {!embedded && (
         <PageHeader
           title="Microphone"

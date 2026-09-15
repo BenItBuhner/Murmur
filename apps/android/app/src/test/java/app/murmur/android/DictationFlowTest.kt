@@ -14,8 +14,8 @@ import app.murmur.android.service.InsertOutcome
 import app.murmur.android.service.TextInserter
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.SettingsStore
-import app.murmur.android.text.PipelineOptions
-import app.murmur.android.text.runPipeline
+import app.murmur.android.text.basicCleanup
+import app.murmur.android.text.prepareTranscript
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.mockwebserver.Dispatcher
@@ -43,7 +43,7 @@ private const val TRANSCRIPT = "um so hello from murmur this is a test"
 /**
  * The whole dictation, end to end, with only the microphone and the accessibility node lookup
  * swapped out: the bundled sample clip is sent over real HTTP to an in-process OpenAI-compatible
- * transcription endpoint, cleaned by the pipeline, and inserted into a real `EditText` through the
+ * transcription endpoint, tidied by the rule-based cleanup (Light mode), and inserted into a real `EditText` through the
  * same accessibility actions the service sends. This is the path that used to end with an empty
  * field and a green "Inserted" pill.
  */
@@ -57,6 +57,9 @@ class DictationFlowTest {
     /** How many transcription requests the "server" still answers with a 500 before working. */
     @Volatile private var failures = 0
 
+    /** How many transcription requests the "server" still refuses on the free plan's weekly words. */
+    @Volatile private var refusals = 0
+
     @Before
     fun startMockStt() {
         server.dispatcher = object : Dispatcher() {
@@ -66,6 +69,14 @@ class DictationFlowTest {
                 if (failures > 0) {
                     failures--
                     return MockResponse().setResponseCode(500).setBody("""{"error":{"message":"upstream exploded"}}""")
+                }
+                if (refusals > 0) {
+                    refusals--
+                    return MockResponse().setResponseCode(429).setHeader("Retry-After", "172800").setBody(
+                        """{"error":{"type":"murmur_gateway_error","code":"quota_exceeded","message":"This week's 500 free words are used up.",
+                           "limit":"wordsPerWeek","plan":"free","planState":"free","used":503,"allowed":500,
+                           "resetsAt":${System.currentTimeMillis() + 172_800_000L},"upgradeUrl":"https://murmur.app/account?upgrade=yearly"}}"""
+                    )
                 }
                 return MockResponse()
                     .setHeader("Content-Type", "application/json")
@@ -128,7 +139,7 @@ class DictationFlowTest {
         assertEquals(DictationState.Success("Inserted"), outcome)
         assertEquals("exactly one transcription request: $requests", 1, requests.size)
         assertTrue("STT received the audio: $requests", requests[0].startsWith("POST /v1/audio/transcriptions ("))
-        val expected = runPipeline(TRANSCRIPT, PipelineOptions()).text
+        val expected = lightText()
         assertEquals("So hello from murmur this is a test ", expected)
         assertEquals(expected, field.text.toString())
         assertEquals(expected.length, field.selectionStart)
@@ -160,7 +171,7 @@ class DictationFlowTest {
         val retried = awaitOutcome(timeoutMs = 30_000)
 
         assertEquals(DictationState.Success("Inserted"), retried)
-        val expected = runPipeline(TRANSCRIPT, PipelineOptions()).text
+        val expected = lightText()
         assertEquals(expected, field.text.toString())
         val done = history.get(retryId)!!
         assertEquals(expected.trimEnd(), done.finalText)
@@ -176,6 +187,40 @@ class DictationFlowTest {
     }
 
     @Test
+    fun `a plan limit keeps the recording, explains itself on the pill and retries once it has reset`() {
+        val (activity, field) = setUpField()
+        val history = HistoryStore.get(activity)
+        val recordings = RecordingStore.get(activity)
+        refusals = 1
+
+        DictationController.start(activity)
+        DictationController.stopAndInsert(activity)
+        val refused = awaitOutcome(timeoutMs = 30_000)
+
+        assertTrue("expected an error, got $refused", refused is DictationState.Error)
+        refused as DictationState.Error
+        assertEquals("This week's 500 free words are used up.", refused.message)
+        val limit = refused.limit
+        assertNotNull("the pill carries the limit", limit)
+        assertEquals("wordsPerWeek", limit!!.limit)
+        assertEquals(503.0, limit.used, 0.0)
+        assertEquals(500.0, limit.allowed, 0.0)
+        assertEquals("https://murmur.app/account?upgrade=yearly", limit.upgradeUrl)
+        val retryId = refused.retryId
+        assertNotNull("the recording survives the refusal", retryId)
+        val entry = history.get(retryId!!)!!
+        assertTrue(entry.retryable)
+        assertTrue(recordings.has(entry.recording))
+        assertEquals("", field.text.toString())
+
+        // The limit has reset (or the route changed): the same audio goes through untouched.
+        assertNull(DictationController.retry(activity, retryId, insert = true))
+        assertEquals(DictationState.Success("Inserted"), awaitOutcome(timeoutMs = 30_000))
+        assertEquals(lightText(), field.text.toString())
+        assertEquals(2, history.get(retryId)!!.attempts)
+    }
+
+    @Test
     fun `retry from History only copies the text and does not touch the field`() {
         val (activity, field) = setUpField()
         failures = 1
@@ -188,11 +233,14 @@ class DictationFlowTest {
         assertEquals(DictationState.Success("Copied"), awaitOutcome(timeoutMs = 30_000))
         assertEquals("", field.text.toString())
         val done = HistoryStore.get(activity).get(retryId)!!
-        assertEquals(runPipeline(TRANSCRIPT, PipelineOptions()).text.trimEnd(), done.finalText)
+        assertEquals(lightText().trimEnd(), done.finalText)
         assertFalse(done.injected)
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        assertEquals(runPipeline(TRANSCRIPT, PipelineOptions()).text, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        assertEquals(lightText(), clipboard.primaryClip?.getItemAt(0)?.text?.toString())
     }
+
+    /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */
+    private fun lightText(): String = basicCleanup(prepareTranscript(TRANSCRIPT).text, emptyList()).text + " "
 
     /** Pump the main looper (the insertion hops onto it) until the pill settles on a result. */
     private fun awaitOutcome(timeoutMs: Long): DictationState {

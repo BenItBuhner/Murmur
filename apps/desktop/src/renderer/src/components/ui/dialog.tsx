@@ -7,6 +7,7 @@ const Dialog = DialogPrimitive.Root
 const DialogTrigger = DialogPrimitive.Trigger
 const DialogClose = DialogPrimitive.Close
 
+/** A sheet: the largest radius, the overlay elevation, the card padding inside. */
 function DialogContent({
   className,
   children,
@@ -15,15 +16,19 @@ function DialogContent({
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/30 backdrop-blur-[2px] data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out" />
+      {/*
+        Centred by the layer keyframes alone (transform: translate(--layer-x, --layer-y)); a
+        translate utility on top would move it by its whole size, not half.
+      */}
       <DialogPrimitive.Content
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-2xl border bg-card p-7 shadow-xl sm:max-w-lg [--layer-x:-50%] [--layer-y:-50%] -translate-x-1/2 -translate-y-1/2 data-[state=open]:animate-layer-in data-[state=closed]:animate-layer-out',
+          'surface-overlay fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] gap-5 rounded-2xl p-6 sm:max-w-lg [--layer-x:-50%] [--layer-y:-50%] data-[state=open]:animate-layer-in data-[state=closed]:animate-layer-out',
           className
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute top-4 right-4 rounded-md p-1 opacity-60 transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring/40">
+        <DialogPrimitive.Close className="absolute top-4 right-4 flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40">
           <XIcon className="size-4" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
@@ -33,7 +38,7 @@ function DialogContent({
 }
 
 function DialogHeader({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element {
-  return <div className={cn('flex flex-col gap-1.5 text-left', className)} {...props} />
+  return <div className={cn('flex flex-col gap-2 pr-8 text-left', className)} {...props} />
 }
 function DialogFooter({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
@@ -49,7 +54,7 @@ function DialogTitle({
 }: React.ComponentProps<typeof DialogPrimitive.Title>): React.JSX.Element {
   return (
     <DialogPrimitive.Title
-      className={cn('serif-display text-[26px] leading-none', className)}
+      className={cn('serif-display text-heading leading-none', className)}
       {...props}
     />
   )

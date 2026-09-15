@@ -17,7 +17,8 @@ import {
   serveRenderer
 } from './cloud/clerk'
 import { buildRendererCsp } from './cloud/csp'
-import { CloudSync } from './cloud/sync-engine'
+import { CloudSync, type TokenSource } from './cloud/sync-engine'
+import { FileTokenSource, resolveTestAuth, TEST_AUTH_TOKEN_FILE } from './cloud/test-auth'
 import { TokenBridge } from './cloud/token-bridge'
 import { DictationController } from './dictation/session'
 import { HookService } from './hotkeys/hook'
@@ -56,7 +57,17 @@ if (process.platform === 'linux' && !process.env.MURMUR_KEEP_GPU) {
 
 // Cloud/account configuration is decided before `ready`: the Clerk bridge must register the
 // privileged `murmur://` scheme the packaged renderer is served from before the app is ready.
-const cloud = resolveCloudConfig(process.env, buildTimeCloudConfig())
+// A dev build may sign in through a token file instead of Clerk (live suites, end-to-end runs).
+const testAuth = resolveTestAuth(
+  process.env,
+  process.env[TEST_AUTH_TOKEN_FILE] && !app.isPackaged
+    ? readTextIfExists(process.env[TEST_AUTH_TOKEN_FILE])
+    : null,
+  !app.isPackaged
+)
+const cloud = resolveCloudConfig(process.env, buildTimeCloudConfig(), {
+  testAuth: testAuth?.identity ?? null
+})
 const cloudConfig = cloud.config
 const userDataPath = app.getPath('userData')
 let clerk: ClerkBridge | null = null
@@ -183,11 +194,13 @@ async function main(): Promise<void> {
   const recorder = new Recorder(overlay)
   const hook = new HookService(settings.get())
   const tokenBridge = new TokenBridge(() => getMainWindow()?.webContents ?? null)
+  // Session tokens: the renderer's Clerk session, or the test token file in a dev build.
+  const tokens: TokenSource = testAuth ? new FileTokenSource(testAuth.tokenFile) : tokenBridge
   const cloudSync = new CloudSync({
     config: cloudConfig,
     settings,
     history,
-    tokenBridge,
+    tokenBridge: tokens,
     userDataPath: userData,
     appVersion: app.getVersion(),
     platform: process.platform
@@ -200,7 +213,7 @@ async function main(): Promise<void> {
   const inference = new InferenceRouter({
     config: cloudConfig,
     settings,
-    token: (forceRefresh) => tokenBridge.request(forceRefresh),
+    token: (forceRefresh) => tokens.request(forceRefresh),
     signedIn: () => cloudSync.getStatus().signedIn,
     managedAvailable: () => cloudSync.getStatus().inference?.available
   })
@@ -321,6 +334,8 @@ async function main(): Promise<void> {
     quit
   })
   cloudSync.start()
+  // Under test auth there is no Clerk session to report; the token file is the session.
+  if (testAuth) cloudSync.setAuthState({ signedIn: true, ...testAuth.identity })
   updates.start()
 
   hook.on('action', (a) => controller.handle(a))
@@ -400,6 +415,15 @@ function packageRepositoryUrl(): string | undefined {
     return typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url
   } catch {
     return undefined
+  }
+}
+
+function readTextIfExists(path: string | undefined): string | null {
+  if (!path || !existsSync(path)) return null
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
   }
 }
 

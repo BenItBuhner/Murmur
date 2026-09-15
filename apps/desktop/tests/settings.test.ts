@@ -16,8 +16,9 @@ describe('settings schema', () => {
     expect(s.audio.keepMicWarm).toBe(true)
     expect(s.audio.limitDuration).toBe(false)
     expect(sessionDurationLimitMs(s.audio)).toBeNull()
-    expect(s.formatting.llm.minWords).toBe(4)
-    expect(s.formatting.fillerWords).toContain('um')
+    expect(s.formatting.mode).toBe('smart')
+    expect(s.formatting.instructions).toBe('')
+    expect(s.formatting.llm.timeoutMs).toBe(8000)
     expect(s.stt.kind).toBe('openai-compatible')
     expect(s.stats.totalWords).toBe(0)
     // Appearance defaults keep the original look until the user opts in.
@@ -138,6 +139,138 @@ describe('settings schema', () => {
       expect(parseSettings(fresh).stt.source).toBe('murmur')
       expect(migrateSettings(null)).toBeNull()
       expect(migrateSettings([1, 2])).toEqual([1, 2])
+    })
+
+    it('carries the model instructions over from a v2 file and drops the old cleanup knobs', () => {
+      const v2 = {
+        version: 2,
+        stt: { source: 'custom', baseUrl: 'https://api.groq.com/openai/v1', model: 'whisper-1' },
+        formatting: {
+          mode: 'smart',
+          tone: 'casual',
+          removeFillers: true,
+          fillerWords: ['um'],
+          hesitations: 'thorough',
+          numbers: 'all',
+          lists: 'off',
+          appRules: [
+            {
+              id: 'r',
+              match: 'slack',
+              tone: 'auto',
+              lists: 'off',
+              numbers: 'all',
+              freedom: 'strict'
+            }
+          ],
+          llm: {
+            source: 'custom',
+            model: 'llama-3.1-8b-instant',
+            instructions: 'British spelling.',
+            freedom: 'natural',
+            minWords: 4
+          }
+        }
+      }
+      const s = parseSettings(v2)
+      expect(s.version).toBe(SETTINGS_VERSION)
+      expect(s.formatting.instructions).toBe('British spelling.')
+      // The file also named a Groq model retired since; the v4 step swaps it in the same pass.
+      expect(s.formatting.llm.model).toBe('openai/gpt-oss-20b')
+      expect(s.formatting.appRules).toEqual([{ id: 'r', match: 'slack', tone: 'auto' }])
+      expect('numbers' in s.formatting).toBe(false)
+      expect('freedom' in s.formatting.llm).toBe(false)
+      expect('instructions' in s.formatting.llm).toBe(false)
+    })
+  })
+
+  describe('retired models (v4)', () => {
+    const groq = 'https://api.groq.com/openai/v1'
+
+    it('moves Groq speech and formatting models onto the recommended replacements', () => {
+      const v3 = {
+        version: 3,
+        stt: {
+          source: 'custom',
+          baseUrl: groq,
+          model: 'distil-whisper-large-v3-en',
+          fallbackModel: 'whisper-large-v3'
+        },
+        formatting: { llm: { source: 'custom', sameAsStt: true, model: 'llama-3.1-8b-instant' } }
+      }
+      const s = parseSettings(v3)
+      expect(s.version).toBe(SETTINGS_VERSION)
+      expect(s.stt.model).toBe('whisper-large-v3-turbo')
+      expect(s.stt.fallbackModel).toBe('whisper-large-v3')
+      expect(s.formatting.llm.model).toBe('openai/gpt-oss-20b')
+      // The retired 70B model has its own replacement; a retired fallback model is swapped too.
+      const big = parseSettings({
+        version: 3,
+        stt: {
+          baseUrl: groq,
+          model: 'whisper-large-v3-turbo',
+          fallbackModel: 'distil-whisper-large-v3-en'
+        },
+        formatting: { llm: { sameAsStt: true, model: 'llama-3.3-70b-versatile' } }
+      })
+      expect(big.stt.fallbackModel).toBe('whisper-large-v3-turbo')
+      expect(big.formatting.llm.model).toBe('openai/gpt-oss-120b')
+    })
+
+    it('judges the formatting model against the server it talks to', () => {
+      // A separate OpenAI formatting server: gpt-4.1-nano shuts down 2026-10-23.
+      const separate = parseSettings({
+        version: 3,
+        stt: { baseUrl: groq, model: 'whisper-large-v3-turbo' },
+        formatting: {
+          llm: { sameAsStt: false, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1-nano' }
+        }
+      })
+      expect(separate.formatting.llm.model).toBe('gpt-5.6-luna')
+      // The same id on another host (a proxy, a local server) is not Groq's to retire.
+      const proxy = parseSettings({
+        version: 3,
+        stt: { baseUrl: 'https://litellm.example.com/v1', model: 'distil-whisper-large-v3-en' },
+        formatting: { llm: { sameAsStt: true, model: 'llama-3.1-8b-instant' } }
+      })
+      expect(proxy.stt.model).toBe('distil-whisper-large-v3-en')
+      expect(proxy.formatting.llm.model).toBe('llama-3.1-8b-instant')
+      // "Same as speech" with a Groq speech server, even when a stale llm.baseUrl says otherwise.
+      const stale = parseSettings({
+        version: 3,
+        stt: { baseUrl: groq, model: 'whisper-large-v3-turbo' },
+        formatting: {
+          llm: {
+            sameAsStt: true,
+            baseUrl: 'http://127.0.0.1:11434/v1',
+            model: 'llama-3.1-8b-instant'
+          }
+        }
+      })
+      expect(stale.formatting.llm.model).toBe('openai/gpt-oss-20b')
+    })
+
+    it('runs once: a v4 file naming a retired id is the user’s own choice', () => {
+      const chosen = {
+        version: 4,
+        stt: { source: 'custom', baseUrl: groq, model: 'whisper-large-v3-turbo' },
+        formatting: { llm: { source: 'custom', sameAsStt: true, model: 'llama-3.1-8b-instant' } }
+      }
+      expect(migrateSettings(chosen)).toBe(chosen)
+      expect(parseSettings(chosen).formatting.llm.model).toBe('llama-3.1-8b-instant')
+      // Parsed settings are always at the current version, so the next write records the run.
+      const legacy = parseSettings({
+        version: 3,
+        stt: { baseUrl: groq, model: 'whisper-large-v3' }
+      })
+      expect(legacy.version).toBe(SETTINGS_VERSION)
+      expect(legacy.stt.model).toBe('whisper-large-v3')
+      // Nothing to swap: the input object is returned untouched.
+      const current = {
+        version: 3,
+        stt: { source: 'custom', baseUrl: groq, model: 'whisper-large-v3-turbo' }
+      }
+      expect(migrateSettings(current)).toBe(current)
     })
   })
 })

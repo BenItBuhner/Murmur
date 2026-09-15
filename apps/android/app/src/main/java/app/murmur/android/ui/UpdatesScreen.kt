@@ -1,9 +1,6 @@
 package app.murmur.android.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.unit.dp
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.Screen
@@ -16,8 +13,6 @@ fun UpdatesScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
         description = "New versions come straight from GitHub Releases and install once nothing is being dictated.",
         nav = nav
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            UpdatesSection(store, settings)
-        }
+        UpdatesSection(store, settings)
     }
 }

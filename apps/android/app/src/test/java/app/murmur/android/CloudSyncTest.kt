@@ -114,7 +114,8 @@ class CloudSyncTest {
         assertEquals(Tone.PROFESSIONAL, applied.tone)
         assertEquals(FormattingMode.LIGHT, applied.formattingMode)
         assertEquals("fr", applied.language)
-        assertTrue(applied.removeFillers) // untouched field keeps its local value
+        assertTrue(applied.trailingSpace) // untouched field keeps its local value
+        assertEquals("", applied.llmInstructions)
         assertNull(PreferencesDto().formatting)
     }
 }

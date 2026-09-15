@@ -5,7 +5,8 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/core/**/*",
-    "src/shared/**/*"
+    "src/shared/**/*",
+    "../../packages/text-engine/src/**/*"
   ],
   "compilerOptions": {
     "composite": true,
@@ -19,6 +20,8 @@
     "paths": {
       "@core/*": ["src/core/*"],
       "@shared/*": ["src/shared/*"],
+      "@engine": ["../../packages/text-engine/src/index.ts"],
+      "@engine/*": ["../../packages/text-engine/src/*"],
       "@backend/*": ["../../packages/backend/convex/*"]
     }
   }

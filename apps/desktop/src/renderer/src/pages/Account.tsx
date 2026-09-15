@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { useClerk } from '@clerk/electron/react'
 import {
   BookA,
   Clock3,
@@ -15,10 +14,20 @@ import {
   Zap
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CloudDevice } from '@shared/cloud'
+import type { CloudDevice, UsageMeter } from '@shared/cloud'
+import {
+  formatAudioSeconds,
+  formatResetTime,
+  legalLinks,
+  meterLabel,
+  meterValue,
+  planActions,
+  planStateLabel,
+  transcriptionPaused
+} from '@shared/limits'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
-import { Badge } from '@renderer/components/ui/misc'
+import { Badge, Banner } from '@renderer/components/ui/misc'
 import {
   Dialog,
   DialogContent,
@@ -30,9 +39,14 @@ import {
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { SyncBadge, syncLabel } from '@renderer/components/SyncBadge'
 import { useCloud } from '@renderer/hooks/useCloud'
-import { minutesLabel, planLabel, useInference } from '@renderer/hooks/useInference'
+import {
+  minutesLabel,
+  planTitle,
+  useInference,
+  type InferenceView
+} from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
-import { formatNumber, formatRelative } from '@renderer/lib/utils'
+import { cn, formatNumber, formatRelative } from '@renderer/lib/utils'
 
 export function AccountPage(): React.JSX.Element {
   const { clerk } = useCloud()
@@ -42,21 +56,21 @@ export function AccountPage(): React.JSX.Element {
 
   if (!clerk.signedIn) {
     return (
-      <div className="space-y-8">
+      <div className="space-y-section">
         <PageHeader
           title="Account"
           description="Your Murmur account keeps your dictionary, snippets and style in step on every device."
         />
-        <div className="rounded-xl border bg-card p-6 shadow-xs">
+        <div className="surface-raised rounded-xl p-card">
           <div className="flex items-start gap-4">
-            <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <div className="well flex size-12 shrink-0 items-center justify-center rounded-full text-muted-foreground">
               <UserRound className="size-5" />
             </div>
             <div className="min-w-0 flex-1 space-y-1">
-              <div className="text-[15px] font-semibold tracking-tight">
+              <div className="text-lead font-semibold tracking-tight">
                 You are using Murmur without an account
               </div>
-              <p className="text-[13px] text-muted-foreground">
+              <p className="text-note text-muted-foreground">
                 Everything lives on this computer. Sign in to sync your {settings.dictionary.length}{' '}
                 dictionary {settings.dictionary.length === 1 ? 'word' : 'words'},{' '}
                 {settings.snippets.length} {settings.snippets.length === 1 ? 'snippet' : 'snippets'}{' '}
@@ -64,7 +78,7 @@ export function AccountPage(): React.JSX.Element {
                 merged into the account the first time you sign in.
               </p>
               {clerk.failed && (
-                <p className="text-[13px] text-destructive">
+                <p className="text-note text-destructive">
                   Murmur sign-in is unreachable right now; you can still sign in once you are back
                   online.
                 </p>
@@ -100,21 +114,22 @@ function SignedInAccount({
   busy: string | null
   setBusy: (v: string | null) => void
 }): React.JSX.Element {
-  const { status, clerk, config } = useCloud()
+  const { status, clerk, config, actions } = useCloud()
   const { settings } = useSettings()
   const inference = useInference()
-  const clerkClient = useClerk()
 
   const user = status?.user
   const name = user?.name ?? clerk.name ?? 'Your account'
   const email = user?.email ?? clerk.email
   const imageUrl = user?.imageUrl ?? clerk.imageUrl
   const sync = status ? syncLabel(status) : null
+  // The legal pages sit next to the account page the instance sent; no site, no links.
+  const legal = legalLinks(inference.accountUrl)
 
   const signOut = async (): Promise<void> => {
     setBusy('signout')
     try {
-      await clerkClient.signOut()
+      await actions.signOut()
     } finally {
       setBusy(null)
     }
@@ -138,64 +153,36 @@ function SignedInAccount({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       <PageHeader
         title="Account"
         description="Your Murmur account keeps your dictionary, snippets and style in step on every device."
         actions={<SyncBadge />}
       />
 
-      <div className="flex items-center gap-4 rounded-xl border bg-card p-5 shadow-xs">
+      <div className="surface-raised flex items-center gap-4 rounded-xl p-card">
         {imageUrl ? (
           <img src={imageUrl} alt="" className="size-12 rounded-full object-cover" />
         ) : (
-          <div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <div className="well flex size-12 items-center justify-center rounded-full text-muted-foreground">
             <UserRound className="size-5" />
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px] font-semibold tracking-tight">{name}</div>
-          {email && <div className="truncate text-[13px] text-muted-foreground">{email}</div>}
+          <div className="truncate text-lead font-semibold tracking-tight">{name}</div>
+          {email && <div className="truncate text-note text-muted-foreground">{email}</div>}
         </div>
-        <Button variant="outline" size="sm" onClick={() => void clerkClient.openUserProfile()}>
-          <Settings2 /> Manage account
-        </Button>
+        {actions.openUserProfile && (
+          <Button variant="outline" size="sm" onClick={actions.openUserProfile}>
+            <Settings2 /> Manage account
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={signOut} disabled={busy === 'signout'}>
           <LogOut /> Sign out
         </Button>
       </div>
 
-      <Section
-        title="Plan"
-        description={
-          inference.managedAvailable
-            ? 'The speech and formatting models that come with your account. Choose your own provider instead under Models and Style; keys for those stay on this device.'
-            : 'This Murmur instance does not provide models of its own; connect your provider under Models.'
-        }
-      >
-        <SettingRow
-          title={`${planLabel(inference.plan)} plan`}
-          description={
-            inference.status
-              ? `${Math.round(inference.status.limits.sttSecondsPerMonth / 60)} minutes of transcription and ${formatNumber(inference.status.limits.llmTokensPerMonth)} formatting tokens a month, up to ${inference.status.limits.requestsPerMinute} requests a minute.`
-              : 'Waiting for your account status…'
-          }
-        >
-          <Badge variant={inference.plan === 'pro' ? 'success' : 'secondary'}>
-            {planLabel(inference.plan)}
-          </Badge>
-        </SettingRow>
-        {inference.status && inference.minutes && (
-          <SettingRow
-            title="Used this month"
-            description={`${inference.routing.stt === 'murmur' ? 'Murmur’s speech model is in use on this device.' : 'This device uses your own speech provider; the allowance is untouched by it.'}`}
-          >
-            <span className="text-[13px] tabular-nums text-muted-foreground">
-              {minutesLabel(inference.minutes)} · {formatNumber(inference.tokensUsed)} tokens
-            </span>
-          </SettingRow>
-        )}
-      </Section>
+      <PlanSection inference={inference} />
 
       <Section
         title="Sync"
@@ -234,7 +221,7 @@ function SignedInAccount({
             ].map((item) => (
               <div
                 key={item.label}
-                className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2 text-[13px] [&>svg]:size-4 [&>svg]:text-muted-foreground"
+                className="well flex items-center gap-2.5 rounded-md px-3.5 py-2.5 text-note [&>svg]:size-4 [&>svg]:text-muted-foreground"
               >
                 {item.icon}
                 <span className="flex-1">{item.label}</span>
@@ -242,7 +229,7 @@ function SignedInAccount({
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[12px] text-muted-foreground">
+          <p className="mt-2 text-meta text-muted-foreground">
             Your choice of speech model and any API keys of your own are device settings and are
             never uploaded.
           </p>
@@ -264,7 +251,7 @@ function SignedInAccount({
         description="Every install that has connected to your account. Removing one only forgets it here; sign out on the device itself to end its session."
       >
         {(status?.devices ?? []).length === 0 ? (
-          <div className="px-5 py-6 text-center text-[13px] text-muted-foreground">
+          <div className="py-4 text-center text-note text-muted-foreground">
             {status?.signedIn ? 'Waiting for the device list…' : 'Sign in to see your devices.'}
           </div>
         ) : (
@@ -317,6 +304,27 @@ function SignedInAccount({
             </Badge>
           </SettingRow>
         )}
+        {legal && (
+          <SettingRow
+            title="Privacy and terms"
+            description="What this instance does with your audio and text, and the terms of the service."
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void window.murmur.app.openExternal(legal.privacy)}
+            >
+              Privacy
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void window.murmur.app.openExternal(legal.terms)}
+            >
+              Terms
+            </Button>
+          </SettingRow>
+        )}
       </Section>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -339,6 +347,154 @@ function SignedInAccount({
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/** What the plan means for the account right now, in one sentence. */
+function planDescription(inference: InferenceView): string {
+  if (!inference.managedAvailable)
+    return 'This Murmur instance does not provide models of its own; connect your provider under Models.'
+  if (!inference.status) return 'Waiting for your account status…'
+  const stopped = transcriptionPaused(inference.meters)
+  switch (inference.planState) {
+    case 'trial':
+      return `${inference.trialDaysLeft === 1 ? '1 day' : `${inference.trialDaysLeft} days`} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one.`
+    case 'pro':
+      if (stopped)
+        return `Unlimited dictation within fair use. This month's ${formatAudioSeconds(stopped.allowed)} are used up, so Murmur's speech model rests until ${formatResetTime(stopped.resetsAt).replace(/^on /, '')}; your own provider under Models keeps dictating meanwhile.`
+      return inference.formattingPaused
+        ? 'Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules.'
+        : 'Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page.'
+    default:
+      return 'A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Models.'
+  }
+}
+
+/**
+ * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
+ * when it comes back, and the actions on it: Upgrade (the instance's upgrade page, sent only while
+ * an upgrade applies) and Manage plan (the web account page, for Pro and the trial). An instance
+ * without a site URL sends neither link and gets neither button.
+ */
+function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Element {
+  const open = (url: string | null): void => {
+    if (url) void window.murmur.app.openExternal(url)
+  }
+  const { upgrade, manage } = planActions(inference)
+  const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
+  // Transcription that has stopped outranks a paused formatting model: nothing is inserted at all.
+  const stopped = transcriptionPaused(inference.meters)
+  return (
+    <Section
+      title="Plan"
+      description={
+        inference.managedAvailable
+          ? 'The speech and formatting models that come with your account. Choose your own provider instead under Models and Style; keys for those stay on this device.'
+          : undefined
+      }
+    >
+      <SettingRow title={planTitle(inference.planState)} description={planDescription(inference)}>
+        <Badge
+          variant={
+            inference.planState === 'pro'
+              ? 'success'
+              : inference.planState === 'trial'
+                ? 'default'
+                : 'secondary'
+          }
+        >
+          {inference.planState === 'trial' && inference.trialDaysLeft > 0
+            ? `${inference.trialDaysLeft}d left`
+            : planStateLabel(inference.planState)}
+        </Badge>
+        {upgrade && (
+          <Button size="sm" onClick={() => open(upgrade)}>
+            <Sparkles /> Upgrade
+          </Button>
+        )}
+        {manage && (
+          <Button variant="outline" size="sm" onClick={() => open(manage)}>
+            <Settings2 /> Manage plan
+          </Button>
+        )}
+      </SettingRow>
+      {stopped ? (
+        <Banner tone="warning" className="my-2">
+          <div className="text-sm font-medium">
+            Transcription paused until {formatResetTime(stopped.resetsAt).replace(/^on /, '')}
+          </div>
+          <div className="text-note text-muted-foreground">
+            {`This month's ${formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up${inference.plan === 'pro' ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Models to keep dictating${inference.plan === 'pro' ? '.' : ', or upgrade for unlimited dictation.'}`}
+          </div>
+        </Banner>
+      ) : (
+        inference.formattingPaused &&
+        paused && (
+          <Banner tone="warning" className="my-2">
+            <div className="text-sm font-medium">
+              Formatting paused until {formatResetTime(paused.resetsAt).replace(/^on /, '')}
+            </div>
+            <div className="text-note text-muted-foreground">
+              Past {meterValue(paused).split(' of ')[1]} of transcription this month, Murmur inserts
+              your words with rule-based cleanup only (fair use). Nothing else changes.
+            </div>
+          </Banner>
+        )
+      )}
+      {inference.meters.length > 0
+        ? inference.meters.map((m) => <MeterRow key={m.limit} meter={m} />)
+        : inference.status &&
+          inference.minutes && (
+            <SettingRow
+              title="Used this month"
+              description={
+                inference.routing.stt === 'murmur'
+                  ? 'Murmur’s speech model is in use on this device.'
+                  : 'This device uses your own speech provider; the allowance is untouched by it.'
+              }
+            >
+              <span className="text-note tabular-nums text-muted-foreground">
+                {minutesLabel(inference.minutes)} · {formatNumber(inference.tokensUsed)} tokens
+              </span>
+            </SettingRow>
+          )}
+      {inference.meters.length > 0 && inference.routing.stt !== 'murmur' && (
+        <p className="pt-2 text-meta text-muted-foreground">
+          This device uses your own speech provider; only devices on Murmur’s models count here.
+        </p>
+      )}
+    </Section>
+  )
+}
+
+/** One allowance: a track that fills as it is used, the figure, and when it resets. */
+function MeterRow({ meter }: { meter: UsageMeter }): React.JSX.Element {
+  const share = meter.allowed > 0 ? Math.min(1, meter.used / meter.allowed) : 0
+  const reset = formatResetTime(meter.resetsAt)
+  return (
+    <SettingRow
+      title={meterLabel(meter.limit)}
+      description={
+        meter.exceeded
+          ? `Used up · more ${reset}`
+          : `Resets ${reset.startsWith('on ') ? reset.slice(3) : reset}`
+      }
+    >
+      <div className="flex w-56 items-center gap-3">
+        <div className="well h-1.5 flex-1 overflow-hidden rounded-full">
+          <div
+            className={cn(
+              'h-full rounded-full transition-[width] duration-500',
+              meter.exceeded ? 'bg-warning' : share >= 0.9 ? 'bg-record' : 'bg-primary'
+            )}
+            style={{ width: `${Math.max(2, share * 100)}%` }}
+          />
+        </div>
+        <span className="w-32 text-right text-meta tabular-nums text-muted-foreground">
+          {meterValue(meter)}
+        </span>
+      </div>
+    </SettingRow>
   )
 }
 

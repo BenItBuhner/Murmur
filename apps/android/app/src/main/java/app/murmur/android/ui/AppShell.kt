@@ -4,7 +4,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -52,7 +52,10 @@ import app.murmur.android.ui.components.GlyphIcon
 import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.PageMargin
 import app.murmur.android.ui.components.Wordmark
+import app.murmur.android.ui.theme.Elevation
 import app.murmur.android.ui.theme.Murmur
+import app.murmur.android.ui.theme.Radii
+import app.murmur.android.ui.theme.Space
 import kotlinx.coroutines.launch
 
 /** What the button at the top left of a screen does: open the sections, or go back. */
@@ -119,7 +122,8 @@ fun AppShell(
 /**
  * The sheet itself: wordmark, grouped sections, then whatever the caller puts at the bottom.
  * Material's sheet underneath gives it the predictive back gesture (it shrinks under the finger
- * and closes on release) and the "navigation menu" semantics; the paper and hairline are ours.
+ * and closes on release) and the "navigation menu" semantics; the surface is ours: a floating
+ * layer at the sheet radius, lifted by elevation rather than edged.
  */
 @Composable
 private fun Drawer(
@@ -130,17 +134,17 @@ private fun Drawer(
     footer: @Composable ColumnScope.() -> Unit
 ) {
     val c = Murmur.colors
-    val shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
+    val shape = RoundedCornerShape(topEnd = Radii.sheet, bottomEnd = Radii.sheet)
     val width = (LocalConfiguration.current.screenWidthDp.dp - 64.dp).coerceIn(240.dp, 320.dp)
     ModalDrawerSheet(
         drawerState = drawerState,
         modifier = Modifier
             .width(width)
             .fillMaxHeight()
-            .border(1.dp, if (c.isDark) c.hairline else Color.Transparent, shape)
+            .shadow(Elevation.floating, shape, clip = false)
             .testTag("drawer"),
         drawerShape = shape,
-        drawerContainerColor = c.paper,
+        drawerContainerColor = c.floating,
         drawerContentColor = c.ink,
         drawerTonalElevation = 0.dp
     ) {
@@ -206,7 +210,8 @@ private fun DrawerItem(section: Section, selected: Boolean, onClick: () -> Unit)
 
 /**
  * A line at the bottom of the drawer, like the desktop's status card: a dot, a label, a hint, and a
- * chevron when tapping it leads somewhere.
+ * chevron when tapping it leads somewhere. A well sunk into the sheet, one radius step in from its
+ * corner (sheet 24 - inset 12 = 12).
  */
 @Composable
 fun DrawerRow(
@@ -219,11 +224,12 @@ fun DrawerRow(
     onClick: (() -> Unit)? = null
 ) {
     val c = Murmur.colors
+    val shape = RoundedCornerShape(Radii.nested(Radii.sheet, Space.md))
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .border(1.dp, c.hairline, RoundedCornerShape(14.dp))
+            .clip(shape)
+            .background(c.paperRaised)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically

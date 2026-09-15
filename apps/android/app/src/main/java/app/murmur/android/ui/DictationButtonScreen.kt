@@ -73,7 +73,6 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
         SectionGap()
 
         Group("Shape") {
-            Spacer(Modifier.height(8.dp))
             Segmented(
                 options = listOf(Segment(OverlayShape.PILL, "Pill"), Segment(OverlayShape.CIRCLE, "Circle")),
                 selected = settings.overlayShape,
@@ -93,15 +92,11 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
 
         SectionGap()
 
-        Group("Spots") {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "The button rests on one of its spots. When it is in the way — a suggestion, a key — " +
-                    "drag it and let go: it snaps to the nearest spot, so it is always somewhere you chose.",
-                style = Murmur.type.bodySmall,
-                color = Murmur.colors.inkSoft
-            )
-            Spacer(Modifier.height(14.dp))
+        Group(
+            "Spots",
+            description = "The button rests on one of its spots. When it is in the way — a suggestion, a key — " +
+                "drag it and let go: it snaps to the nearest spot, so it is always somewhere you chose."
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 layout.spots.forEachIndexed { i, spot ->
                     SpotRow(index = i, spot = spot.describe(), active = i == layout.activeIndex)

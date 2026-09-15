@@ -17,7 +17,7 @@ import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
-import app.murmur.android.llm.LlmConfig
+import app.murmur.android.inference.LimitNotice
 import app.murmur.android.service.RecordingService
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.FormattingMode
@@ -30,17 +30,19 @@ import app.murmur.android.stt.adaptiveThreshold
 import app.murmur.android.stt.lastVoicedSec
 import app.murmur.android.stt.transcribeComplete
 import app.murmur.android.text.AppContext
-import app.murmur.android.text.PipelineOptions
+import app.murmur.android.text.DictionaryTerm
+import app.murmur.android.text.Engine
+import app.murmur.android.text.FormatContext
+import app.murmur.android.text.FormatInput
+import app.murmur.android.text.FormatOutcome
+import app.murmur.android.text.FormatResult
+import app.murmur.android.text.FormatStatus
 import app.murmur.android.text.STT_BASE_PROMPT
-import app.murmur.android.text.buildFormatMessages
 import app.murmur.android.text.buildSttPrompt
 import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
-import app.murmur.android.text.finalizeAfterLlm
-import app.murmur.android.text.maxTokensFor
+import app.murmur.android.text.finish
 import app.murmur.android.text.resolveStyle
-import app.murmur.android.text.runPipeline
-import app.murmur.android.text.sanitizeLlmOutput
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,18 +58,28 @@ private const val TAG = "MurmurDictation"
 
 /** How long an error that can be retried stays on the pill, waiting for the user. */
 private const val RETRY_HOLD_MS = 15_000L
+/** A limit refusal is read, not glanced at; a text inserted unformatted deserves a beat more too. */
+private const val LIMIT_HOLD_MS = 20_000L
+private const val SOFT_LIMIT_HOLD_MS = 5_000L
 
 sealed class DictationState {
     data object Idle : DictationState()
     data class Listening(val elapsedSec: Int, val level: Float) : DictationState()
     data class Processing(val label: String) : DictationState()
-    data class Success(val message: String) : DictationState()
+
+    /**
+     * [limit]: the text went in with rule-based cleanup only because the Murmur instance paused or
+     * refused the formatting model on a plan limit; the pill says so in passing.
+     */
+    data class Success(val message: String, val limit: LimitNotice? = null) : DictationState()
 
     /**
      * [retryId]: the history entry whose stored recording can be sent again. The pill then shows a
      * Retry button and stays up until the user acts on it (or gives up on them after a while).
+     * [limit]: the plan limit that refused the request; the pill explains it and offers Upgrade and
+     * the user's own provider as the ways forward, beside Retry.
      */
-    data class Error(val message: String, val retryId: String? = null) : DictationState()
+    data class Error(val message: String, val retryId: String? = null, val limit: LimitNotice? = null) : DictationState()
 }
 
 /** One run of the pipeline: a dictation that was just spoken, or a stored one sent again. */
@@ -95,12 +107,19 @@ interface TextSink {
 
     /** Package name of the app owning the focused field, for tone/context rules. */
     fun focusedPackage(): String
+
+    /**
+     * The text before the cursor in the focused field, when the platform can read it. The model
+     * continues it naturally (mid-sentence means no capital, an ongoing list keeps its markers).
+     */
+    suspend fun precedingText(): String? = null
 }
 
 /**
  * Orchestrates one dictation from pill tap to inserted text: record -> STT (with fallback
- * model retry) -> deterministic pipeline -> optional LLM formatting behind the sanitize
- * guard -> inject into the focused field. Mirrors the desktop session orchestrator.
+ * model retry) -> the text engine (the formatting model on the raw transcript, verified, with the
+ * rule-based cleanup as the fallback) -> inject into the focused field. Mirrors the desktop
+ * session orchestrator.
  */
 object DictationController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -109,10 +128,12 @@ object DictationController {
     private val _state = MutableStateFlow<DictationState>(DictationState.Idle)
     val state: StateFlow<DictationState> = _state
 
-    var sink: TextSink? = null
+    /** Set by the accessibility service (its thread) and read by the pipeline's coroutines. */
+    @Volatile var sink: TextSink? = null
 
     private var listeningJob: Job? = null
-    private var resetJob: Job? = null
+    /** Cancelled from the UI thread, replaced from the pipeline: a stale read lets an old job blank the pill early. */
+    @Volatile private var resetJob: Job? = null
     @Volatile private var startedAt = 0L
     /** When the user stopped listening; speech duration is [stoppedAt] - [startedAt]. */
     @Volatile private var stoppedAt = 0L
@@ -226,7 +247,7 @@ object DictationController {
                 val message = friendlyError(e)
                 val failed = run ?: Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = null)
                 recordFailure(appContext, settings, failed, raw = "", error = message)
-                showError(message, failed)
+                showError(message, failed, planLimitOf(e))
             } finally {
                 run?.let { releaseRecording(appContext, it) }
             }
@@ -272,7 +293,7 @@ object DictationController {
                 Log.e(TAG, "retry failed", e)
                 val message = friendlyError(e)
                 recordFailure(appContext, settings, run, raw = "", error = message)
-                showError(message, run)
+                showError(message, run, planLimitOf(e))
             } finally {
                 releaseRecording(appContext, run)
             }
@@ -338,86 +359,80 @@ object DictationController {
             return
         }
 
-        // 2. Deterministic pipeline (the destination decides lists/numbers: never lists in code or terminals)
+        // 2. Text. The engine gets the raw transcript plus everything it should know about the
+        // destination; against a Murmur instance it runs on the gateway, otherwise here.
         val focusedPackage = sink?.focusedPackage() ?: ""
         val app: AppContext = classifyPackage(focusedPackage)
         val style = resolveStyle(s, app)
         val formatStarted = System.currentTimeMillis()
-        val pipelineOpts = PipelineOptions(
-            removeFillers = s.removeFillers,
-            hesitations = s.hesitations,
-            hesitationPhrases = s.hesitationPhrases,
-            collapseRepeats = s.collapseRepeats,
-            repetitionScope = s.repetitionScope,
-            spokenCommands = s.spokenCommands,
-            selfCorrections = s.selfCorrections,
-            autoCapitalize = s.autoCapitalize,
-            trailingSpace = s.trailingSpace,
-            pressEnterCommand = s.spokenCommands,
-            lists = style.lists,
-            listStyle = s.listStyle,
-            bulletMarker = s.bulletMarker,
-            numbers = style.numbers,
-            dictionary = s.dictionaryEntries
-        )
-        val light = runPipeline(raw, pipelineOpts)
-        val formatMs = System.currentTimeMillis() - formatStarted
-        var final = light
-        val pressEnter = light.pressEnter
-
-        // 3. Optional LLM formatting behind the guard. The router picks the connection; a
-        // formatting model that cannot be reached (signed out of Murmur, no token) is not an error
-        // for the dictation: the rule-based text goes in and History says why.
-        var llmMs = 0L
+        var final: String
+        var pressEnter = false
+        var stages: List<String> = emptyList()
         var llm = LlmOutcome.SKIPPED
-        var llmDetail: String? = when {
-            s.formattingMode != FormattingMode.SMART -> "smart formatting off"
-            light.empty -> "nothing to format"
-            light.wordCount < s.llmMinWords -> "too short"
-            else -> null
-        }
-        var llmCfg: LlmConfig? = null
-        if (llmDetail == null) {
-            val (resolvedLlm, why) = router.llmOrNull()
-            llmCfg = resolvedLlm?.cfg?.takeIf { it.baseUrl.isNotEmpty() && it.model.isNotEmpty() }
-            if (llmCfg == null) llmDetail = why ?: "no model configured"
-        }
-        if (llmCfg != null) {
-            _state.value = DictationState.Processing("Formatting…")
-            val llmStarted = System.currentTimeMillis()
-            try {
-                val res = router.complete(
-                    llmCfg,
-                    buildFormatMessages(
-                        light.text.trim(), s.dictionaryTerms, style, app, light.hints, s.language,
-                        dictionaryAliases = s.dictionaryEntries.associate { it.word.trim() to it.aliases }
-                    ),
-                    maxTokens = maxTokensFor(light.text)
-                )
-                val guard = sanitizeLlmOutput(res.text, light.text)
-                if (guard.ok) {
-                    final = finalizeAfterLlm(guard.text, pipelineOpts).copy(pressEnter = pressEnter)
-                    llm = LlmOutcome.USED
-                    llmDetail = null
-                    Log.i(TAG, "llm formatting used (${res.latencyMs}ms)")
-                } else {
-                    llm = LlmOutcome.REJECTED
-                    llmDetail = guard.reason
-                    Log.w(TAG, "llm output rejected (${guard.reason}); using deterministic text")
+        var llmDetail: String? = null
+        var llmMs = 0L
+        // The text goes in, but the formatting model was paused or refused on a plan limit.
+        var softLimit: LimitNotice? = null
+        if (style.mode == FormattingMode.OFF) {
+            final = raw + if (style.trailingSpace) " " else ""
+            llmDetail = "formatting off"
+        } else {
+            val input = FormatInput(
+                transcript = raw,
+                mode = style.mode,
+                context = FormatContext(
+                    category = app.category,
+                    tone = style.tone,
+                    app = focusedPackage.takeIf { it.isNotBlank() && it != context.packageName },
+                    language = s.language,
+                    // A copy-only retry has no target field; what is focused is Murmur's own screen.
+                    precedingText = if (run.insert && style.mode == FormattingMode.SMART) runCatching { sink?.precedingText() }.getOrNull() else null,
+                    instructions = style.instructions.takeIf { it.isNotEmpty() },
+                    dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) }
+                ),
+                dictionary = s.dictionaryEntries
+            )
+            var formatted: FormatResult
+            if (style.mode != FormattingMode.SMART) {
+                formatted = Engine.formatTranscript(input, null)
+            } else {
+                _state.value = DictationState.Processing("Formatting…")
+                // A formatting model that cannot be reached (signed out of Murmur, no token, gateway
+                // down) or refused on a plan limit is not an error for the dictation: the rule-based
+                // text goes in and History says why. A Murmur instance past the fair-use cap answers
+                // with the rule-based text itself and says which limit paused the model.
+                formatted = try {
+                    router.formatter().format(input).also { softLimit = it.limit }
+                } catch (e: Exception) {
+                    Log.w(TAG, "formatting unavailable, using rule-based text: ${e.message}")
+                    softLimit = planLimitOf(e)
+                    Engine.formatTranscript(input, null)
+                        .copy(status = FormatStatus(FormatOutcome.FAILED, friendlyError(e), 0))
                 }
-            } catch (e: Exception) {
-                llm = LlmOutcome.FAILED
-                llmDetail = e.message ?: "request failed"
-                Log.w(TAG, "llm formatting failed, using deterministic text: ${e.message}")
             }
-            llmMs = System.currentTimeMillis() - llmStarted
+            val finished = finish(formatted.text, app.category, s.dictionaryEntries, style.trailingSpace)
+            final = finished.text
+            pressEnter = formatted.pressEnter
+            stages = formatted.stages + finished.stages
+            llmMs = formatted.llmMs
+            llm = when (formatted.status.outcome) {
+                FormatOutcome.USED -> LlmOutcome.USED
+                FormatOutcome.REJECTED -> LlmOutcome.REJECTED
+                FormatOutcome.FAILED -> LlmOutcome.FAILED
+                FormatOutcome.SKIPPED -> LlmOutcome.SKIPPED
+            }
+            llmDetail = formatted.status.detail ?: formatted.status.retriedAfter?.let { "used after a strict retry ($it)" }
+            when (formatted.status.outcome) {
+                FormatOutcome.USED -> Log.i(TAG, "model formatting used (${formatted.status.attempts} attempt(s), ${llmMs}ms)")
+                FormatOutcome.REJECTED -> Log.w(TAG, "model output rejected (${formatted.status.detail}); using rule-based text")
+                FormatOutcome.FAILED -> Log.w(TAG, "model formatting failed, using rule-based text: ${formatted.status.detail}")
+                FormatOutcome.SKIPPED -> Unit
+            }
         }
-        if (s.formattingMode == FormattingMode.OFF) {
-            final = light.copy(text = raw + if (s.trailingSpace) " " else "")
-        }
+        val formatMs = (System.currentTimeMillis() - formatStarted - llmMs).coerceAtLeast(0)
 
         val timings = StageTimings(recordMs = recordMs, sttMs = sttMs, formatMs = formatMs, llmMs = llmMs)
-        if (final.empty || final.text.isEmpty()) {
+        if (final.isBlank()) {
             recordFailure(context, s, run, raw, "Nothing to insert", timings, resolved.provider, resolved.cfg.model)
             showError("Nothing to insert", run)
             return
@@ -432,7 +447,8 @@ object DictationController {
         }
         _state.value = DictationState.Processing(if (run.insert) "Inserting…" else "Copying…")
         val injectStarted = System.currentTimeMillis()
-        val error = if (run.insert && currentSink != null) currentSink.insert(final.text, final.pressEnter) else copyToClipboard(context, final.text)
+        val error = if (run.insert && currentSink != null) currentSink.insert(final, pressEnter) else copyToClipboard(context, final)
+        val wordCount = countWords(final)
         val now = System.currentTimeMillis()
         // The audio stays with a successful dictation only if the user wants recordings kept.
         val recording = if (error == null && !s.keepRecordings) null else run.recording
@@ -440,8 +456,8 @@ object DictationController {
             id = run.id,
             createdAt = run.previous?.createdAt ?: now,
             rawText = raw,
-            finalText = if (error == null) final.text.trimEnd() else "",
-            wordCount = if (error == null) final.wordCount else 0,
+            finalText = if (error == null) final.trimEnd() else "",
+            wordCount = if (error == null) wordCount else 0,
             speechMs = recordMs,
             appName = if (run.insert) appLabel(context, focusedPackage) else run.previous?.appName,
             provider = resolved.provider,
@@ -450,7 +466,7 @@ object DictationController {
             llmUsed = llm == LlmOutcome.USED,
             llm = llm,
             llmDetail = llmDetail,
-            stages = final.stages,
+            stages = stages,
             timings = timings.copy(injectMs = now - injectStarted, totalMs = now - stoppedAt),
             error = error,
             recording = recording,
@@ -459,8 +475,11 @@ object DictationController {
         val history = HistoryStore.get(context)
         if (run.previous != null) history.replace(entry) else history.add(entry)
         if (error == null) {
-            Log.i(TAG, "${if (run.insert) "inserted" else "copied"} ${final.wordCount} words in ${entry.timings.totalMs}ms${if (run.attempts > 1) " (attempt ${run.attempts})" else ""}")
-            showTransient(DictationState.Success(if (run.insert) "Inserted" else "Copied"), 1500)
+            Log.i(TAG, "${if (run.insert) "inserted" else "copied"} $wordCount words in ${entry.timings.totalMs}ms${if (run.attempts > 1) " (attempt ${run.attempts})" else ""}")
+            showTransient(
+                DictationState.Success(if (run.insert) "Inserted" else "Copied", softLimit),
+                if (softLimit != null) SOFT_LIMIT_HOLD_MS else 1500
+            )
             SettingsStore.get(context).update { current ->
                 current.copy(stats = current.stats.record(entry.wordCount, entry.speechMs, DictationStats.localDay(now)))
             }
@@ -557,12 +576,21 @@ object DictationController {
 
     /**
      * A failure the user can do something about: when the audio was stored the pill offers to send
-     * it again and waits much longer for the answer than a plain message would.
+     * it again and waits much longer for the answer than a plain message would. A plan limit is
+     * explained on the pill, with the ways forward, and waits longer still.
      */
-    private fun showError(message: String, run: Run) {
+    private fun showError(message: String, run: Run, limit: LimitNotice? = null) {
         val retryId = run.id.takeIf { run.recording != null }
-        showTransient(DictationState.Error(message, retryId), if (retryId != null) RETRY_HOLD_MS else 2500)
+        val hold = when {
+            limit != null -> LIMIT_HOLD_MS
+            retryId != null -> RETRY_HOLD_MS
+            else -> 2500L
+        }
+        showTransient(DictationState.Error(message, retryId, limit), hold)
     }
+
+    /** The plan limit behind an error, when a Murmur instance refused (or paused) on one. */
+    fun planLimitOf(err: Throwable): LimitNotice? = (err as? SttException)?.planLimit
 
     private fun loadFixture(context: Context): ShortArray {
         val bytes = context.assets.open("fixtures/jfk.wav").use { it.readBytes() }

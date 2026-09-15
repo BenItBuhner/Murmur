@@ -6,7 +6,8 @@ import tailwindcss from '@tailwindcss/vite'
 const aliases = {
   '@renderer': resolve('src/renderer/src'),
   '@core': resolve('src/core'),
-  '@shared': resolve('src/shared')
+  '@shared': resolve('src/shared'),
+  '@engine': resolve('../../packages/text-engine/src')
 }
 
 export default defineConfig({

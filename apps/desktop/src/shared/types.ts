@@ -1,3 +1,4 @@
+import type { LimitNotice } from './limits'
 import type { InstallKind } from './updates'
 
 export type DictationMode = 'hold' | 'hands-free' | 'command'
@@ -17,6 +18,13 @@ export interface OverlayState {
    * Retry button and stays up until the user acts on it (or gives up on them after a while).
    */
   retryId?: string
+  /**
+   * A plan limit the Murmur instance applied to this dictation. On the error phase it is what
+   * refused the request (the pill explains it and offers Upgrade and the user's own provider next
+   * to Retry); on the success phase the text went in with rule-based cleanup only because the
+   * formatting model was paused or refused, and the pill says so quietly.
+   */
+  limit?: LimitNotice
 }
 
 export interface StageTimings {
@@ -33,21 +41,21 @@ export interface StageTimings {
 
 /**
  * What happened in the smart-formatting stage, so the History view can explain the result.
- *   used      the model's text was inserted as returned (after cleanup)
- *   partial   the model's text was inserted, but some edits were reverted to the spoken words
- *   rejected  the model's answer failed the guard rails; the rule-based text was inserted
+ *   used      the model's answer passed the verifier and was inserted
+ *   rejected  every attempt failed the verifier; the rule-based text was inserted
  *   failed    the request errored or timed out; the rule-based text was inserted
- *   skipped   the model was not asked (mode, too short, no model configured, snippet expanded)
+ *   skipped   the model was not asked (mode, too short, no model configured)
  */
-export type LlmOutcome = 'used' | 'partial' | 'rejected' | 'failed' | 'skipped'
+export type LlmOutcome = 'used' | 'rejected' | 'failed' | 'skipped'
 
 export interface LlmStatus {
   outcome: LlmOutcome
-  /** Guard reason, error message, or why it was skipped. */
+  /** Verifier reason, error message, or why it was skipped. */
   detail?: string
-  /** Edits accepted / reverted by the review (used and partial outcomes). */
-  accepted?: number
-  reverted?: number
+  /** Model round trips made. */
+  attempts?: number
+  /** Set when the first answer was rejected and a strict retry was needed. */
+  retriedAfter?: string
 }
 
 export interface HistoryEntry {
@@ -139,32 +147,26 @@ export interface PreviewRequest {
 }
 
 export interface PreviewResult {
+  /** The rule-based text: what "light" mode inserts and what every fallback inserts. */
   light: {
     text: string
     stages: string[]
     wordCount: number
     pressEnter: boolean
-    listRequested: 'bullets' | 'numbers' | 'any' | null
-    listApplied: boolean
-    isQuestion: boolean
   }
   style: {
     category: string
     ruleMatch?: string
     tone: string
     mode: string
-    lists: string
-    numbers: string
-    freedom: string
-    structure: string
   }
   smart?: {
     status: LlmStatus
-    /** Final text after the review and the finishing pass. */
+    /** Final text after the verifier and the finishing pass. */
     text?: string
-    /** Cleaned model output before the review. */
+    /** Cleaned model output of the last attempt. */
     modelText?: string
     llmMs: number
-    review?: Array<{ accept: boolean; why: string; from: string; to: string }>
+    stages: string[]
   }
 }

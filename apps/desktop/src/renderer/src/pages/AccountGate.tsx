@@ -48,24 +48,24 @@ export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX
       <div className="flex-1 overflow-y-auto px-8 pb-8">
         <div className="mx-auto grid max-w-4xl items-start gap-12 pt-6 md:grid-cols-[1fr_400px] animate-fade-in">
           <div className="space-y-7 pt-8">
-            <h1 className="serif-display text-[64px]">
+            <h1 className="serif-display text-display">
               Speak.
               <br />
               <span className="italic text-muted-foreground">It types.</span>
             </h1>
-            <p className="max-w-md text-[16px] leading-relaxed text-muted-foreground">
+            <p className="max-w-md text-lead leading-relaxed text-muted-foreground">
               Hold one key anywhere on your computer, say what you mean, let go. Murmur transcribes
               it, cleans up the ums and self-corrections, and drops finished text right where your
               cursor is.
             </p>
-            <ul className="max-w-md divide-y border-y text-[14px]">
+            <ul className="max-w-md space-y-1 text-sm">
               {[
                 { icon: BookA, text: 'One dictionary for every device you sign in on' },
                 { icon: Zap, text: 'Snippets, style rules and preferences follow you' },
                 { icon: Smartphone, text: 'Desktop and Android share the same account' },
                 { icon: KeyRound, text: 'Speech-model API keys never leave this device' }
               ].map((item) => (
-                <li key={item.text} className="flex items-center gap-3.5 py-3.5">
+                <li key={item.text} className="flex items-center gap-3.5 py-2">
                   <item.icon className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
                   {item.text}
                 </li>
@@ -89,7 +89,7 @@ export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX
             ) : (
               <>
                 <ClerkLoading>
-                  <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-2xl border bg-card text-sm text-muted-foreground">
+                  <div className="surface-raised flex h-72 flex-col items-center justify-center gap-3 rounded-xl text-sm text-muted-foreground">
                     <Loader2 className="size-5 animate-spin" /> Connecting to Murmur…
                   </div>
                 </ClerkLoading>
@@ -107,12 +107,12 @@ export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX
                 <Button variant="link" size="sm" onClick={onSkip}>
                   Continue without an account
                 </Button>
-                <p className="text-[12px] text-muted-foreground">
+                <p className="text-meta text-muted-foreground">
                   Everything stays on this device. You can sign in later from Account.
                 </p>
               </div>
             )}
-            <p className="px-2 text-center text-[12px] text-muted-foreground">
+            <p className="px-2 text-center text-meta text-muted-foreground">
               <Check className="mr-1 inline size-3" />
               Your account holds your dictionary, snippets and style. Recordings are sent only to
               the speech model you configure.
@@ -126,10 +126,10 @@ export function AccountGate({ mode, clerk, platform, onSkip }: Props): React.JSX
 
 function OfflineCard(): React.JSX.Element {
   return (
-    <div className="space-y-3 rounded-2xl border bg-card px-6 py-10 text-center">
+    <div className="surface-raised space-y-3 rounded-xl px-6 py-10 text-center">
       <WifiOff className="mx-auto size-6 text-muted-foreground" strokeWidth={1.5} />
-      <div className="serif-display text-[22px]">Can&apos;t reach Murmur sign-in</div>
-      <p className="text-[13px] text-muted-foreground">
+      <div className="serif-display text-heading">Can&apos;t reach Murmur sign-in</div>
+      <p className="text-note text-muted-foreground">
         Check your connection and try again. If you have signed in on this computer before, your
         dictionary keeps working offline once you are back in.
       </p>

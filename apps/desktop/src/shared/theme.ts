@@ -317,23 +317,26 @@ export function buildTheme(input: ThemeInput): ResolvedTheme {
   // Semantic hues lean slightly toward the seed (Material's harmonization).
   const hz = (hue: number): number => harmonizeHue(hue, seed ? h : null)
 
+  // Surface hierarchy (see styles/globals.css): the rail sits below the canvas, cards rise above
+  // it, floating layers above those; the well (muted) is sunk into whatever holds it. Light mode
+  // steps down in lightness from card to canvas to rail; dark mode steps up from rail to card.
   const c = {} as Record<ThemeToken, Oklch>
   if (!dark) {
-    c.background = surf(0.985, 0.002, 0.008, 90)
+    c.background = surf(0.97, 0.003, 0.01, 85)
     c.foreground = surf(0.2, 0.01, 0.02, 60)
     c.card = tinted ? ok(0.998, 0.003, h) : WHITE
     c['card-foreground'] = c.foreground
     c.popover = c.card
     c['popover-foreground'] = c.foreground
-    c.secondary = surf(0.955, 0.004, 0.018, 80)
+    c.secondary = surf(0.945, 0.004, 0.018, 80)
     c['secondary-foreground'] = surf(0.25, 0.01, 0.03, 60)
     c.muted = c.secondary
     c['muted-foreground'] = surf(0.5, 0.01, 0.03, 60)
-    c.accent = surf(0.94, 0.005, 0.028, 80)
+    c.accent = surf(0.925, 0.005, 0.028, 80)
     c['accent-foreground'] = surf(0.22, 0.01, 0.03, 60)
     c.border = surf(0.9, 0.005, 0.02, 80)
     c.input = c.border
-    c.sidebar = surf(0.965, 0.003, 0.012, 85)
+    c.sidebar = surf(0.95, 0.003, 0.014, 85)
     c.primary = seed ? ok(0.55, pc, h) : ok(0.22, 0.01, 60)
     c['primary-foreground'] = seed ? WHITE : ok(0.985, 0.002, 90)
     c.ring = seed ? ok(0.6, pc * 0.9, h) : ok(0.55, 0.02, 60)
@@ -343,21 +346,21 @@ export function buildTheme(input: ThemeInput): ResolvedTheme {
     c.warning = ok(0.75, 0.16, hz(75))
     c.info = ok(0.62, 0.16, hz(250))
   } else {
-    c.background = surf(0.16, 0.004, 0.012, 60)
+    c.background = surf(0.15, 0.004, 0.012, 60)
     c.foreground = surf(0.93, 0.004, 0.008, 80)
-    c.card = surf(0.2, 0.005, 0.014, 60)
+    c.card = surf(0.205, 0.005, 0.014, 60)
     c['card-foreground'] = c.foreground
-    c.popover = surf(0.21, 0.005, 0.014, 60)
+    c.popover = surf(0.245, 0.005, 0.014, 60)
     c['popover-foreground'] = c.foreground
     c.secondary = surf(0.26, 0.005, 0.016, 60)
     c['secondary-foreground'] = c.foreground
-    c.muted = surf(0.25, 0.005, 0.016, 60)
+    c.muted = surf(0.26, 0.005, 0.016, 60)
     c['muted-foreground'] = surf(0.68, 0.008, 0.02, 70)
-    c.accent = surf(0.27, 0.006, 0.02, 60)
+    c.accent = surf(0.275, 0.006, 0.02, 60)
     c['accent-foreground'] = c.foreground
-    c.border = surf(0.28, 0.006, 0.016, 60)
+    c.border = surf(0.29, 0.006, 0.016, 60)
     c.input = surf(0.3, 0.006, 0.016, 60)
-    c.sidebar = surf(0.14, 0.004, 0.012, 60)
+    c.sidebar = surf(0.125, 0.004, 0.012, 60)
     c.primary = seed ? ok(0.78, pc * 0.8, h) : ok(0.93, 0.004, 80)
     c['primary-foreground'] = seed ? ok(0.22, Math.min(0.05, pc * 0.4), h) : ok(0.18, 0.005, 60)
     c.ring = seed ? ok(0.72, pc * 0.7, h) : ok(0.6, 0.01, 60)

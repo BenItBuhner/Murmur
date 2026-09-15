@@ -2,18 +2,10 @@ package app.murmur.android.cloud
 
 import android.content.Context
 import android.content.SharedPreferences
-import app.murmur.android.settings.BulletMarker
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
-import app.murmur.android.settings.HesitationLevel
-import app.murmur.android.settings.ListStyle
-import app.murmur.android.settings.ListsMode
-import app.murmur.android.settings.LlmFreedom
-import app.murmur.android.settings.LlmStructure
 import app.murmur.android.settings.MurmurSettings
-import app.murmur.android.settings.NumbersMode
-import app.murmur.android.settings.RepetitionScope
 import app.murmur.android.settings.Tone
 import java.util.UUID
 import kotlinx.serialization.SerialName
@@ -46,6 +38,10 @@ data class UserDto(
     val imageUrl: String? = null,
     /** Account tier (`free` or `pro`), deciding the managed-inference allowance. */
     val plan: String = "free",
+    /** `trial`, `free` or `pro`; absent from an instance that predates plan states. */
+    val planState: String? = null,
+    /** Epoch ms; present once the account has been granted its trial. */
+    val trialEndsAt: Double? = null,
     val onboardingCompletedAt: Double? = null,
     val onboardingVersion: Double? = null,
     val createdAt: Double = 0.0
@@ -72,7 +68,36 @@ data class InferenceUsageDto(
     val llmRequests: Double = 0.0
 )
 
-/** What the instance offers the signed-in account in managed models, and how much is left (`inference:status`). */
+/** One limit that applies to the account's tier, with how much of it is used and when it next drops. */
+@Serializable
+data class UsageMeterDto(
+    val limit: String,
+    val used: Double = 0.0,
+    val allowed: Double = 0.0,
+    val exceeded: Boolean = false,
+    /** Epoch ms: when `used` next drops; if exceeded, when it drops under `allowed`. */
+    val resetsAt: Double = 0.0
+)
+
+/** The rolling windows the gateway computed for the UTC day the client passed. */
+@Serializable
+data class UsageWindowDto(
+    val day: String = "",
+    val weekStart: String = "",
+    val words: Double = 0.0,
+    val sttSeconds: Double = 0.0,
+    val dictationsToday: Double = 0.0
+)
+
+/** Next resets (epoch ms): UTC midnight, the oldest counted day leaving the week, the first of next month. */
+@Serializable
+data class UsageResetsDto(val day: Double = 0.0, val week: Double? = null, val month: Double = 0.0)
+
+/**
+ * What the instance offers the signed-in account in managed models, and how much is left
+ * (`inference:status`). The fields after `usage` arrive from an instance that meters plans; an
+ * older instance leaves them out, and the plan state then follows the tier.
+ */
 @Serializable
 data class InferenceStatusDto(
     /** The instance is configured with at least a managed speech model. */
@@ -80,7 +105,18 @@ data class InferenceStatusDto(
     val models: InferenceModelsDto = InferenceModelsDto(),
     val plan: String = "free",
     val limits: InferenceLimitsDto = InferenceLimitsDto(),
-    val usage: InferenceUsageDto = InferenceUsageDto()
+    val usage: InferenceUsageDto = InferenceUsageDto(),
+    val planState: String? = null,
+    val trialEndsAt: Double? = null,
+    /** Pro past the soft fair-use cap: `/v1/format` answers with rule-based text until the month resets. */
+    val formattingPaused: Boolean = false,
+    /** The web account page that starts an upgrade; null when the instance has no site URL. */
+    val upgradeUrl: String? = null,
+    /** The web account page itself (plan, invoices, cancellation); null when the instance has no site URL. */
+    val accountUrl: String? = null,
+    val window: UsageWindowDto? = null,
+    val meters: List<UsageMeterDto> = emptyList(),
+    val resets: UsageResetsDto? = null
 ) {
     /** Managed speech seconds used in [period], zero for any other month. */
     fun sttSecondsIn(period: String): Double = if (usage.period == period) usage.sttSeconds else 0.0
@@ -93,6 +129,29 @@ data class InferenceStatusDto(
             val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
             cal.timeInMillis = now
             return "%04d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1)
+        }
+
+        /** Current UTC calendar day as `YYYY-MM-DD`, the `day` the status query computes its windows for. */
+        fun currentUtcDay(now: Long = System.currentTimeMillis()): String {
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.timeInMillis = now
+            return "%04d-%02d-%02d".format(
+                cal.get(java.util.Calendar.YEAR),
+                cal.get(java.util.Calendar.MONTH) + 1,
+                cal.get(java.util.Calendar.DAY_OF_MONTH)
+            )
+        }
+
+        /** Milliseconds from [now] to the next UTC midnight, when the status has to be asked again. */
+        fun msUntilNextUtcDay(now: Long = System.currentTimeMillis()): Long {
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.timeInMillis = now
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+            return (cal.timeInMillis - now).coerceAtLeast(1L)
         }
     }
 }
@@ -108,27 +167,15 @@ data class DeviceDto(
     val createdAt: Double
 )
 
+/**
+ * The account's style preferences as the server holds them. Fields older clients still write
+ * (fillers, hesitations, lists, numbers, ...) are ignored on the way in and never written.
+ */
 @Serializable
 data class FormattingPreferencesDto(
     val mode: String? = null,
     val tone: String? = null,
-    val removeFillers: Boolean? = null,
-    val fillerWords: List<String>? = null,
-    val hesitations: String? = null,
-    val hesitationPhrases: List<String>? = null,
-    val collapseRepeats: Boolean? = null,
-    val repetitionScope: String? = null,
-    val spokenCommands: Boolean? = null,
-    val selfCorrections: Boolean? = null,
-    val autoCapitalize: Boolean? = null,
     val trailingSpace: Boolean? = null,
-    val pressEnterCommand: Boolean? = null,
-    val lists: String? = null,
-    val listStyle: String? = null,
-    val bulletMarker: String? = null,
-    val numbers: String? = null,
-    val llmFreedom: String? = null,
-    val llmStructure: String? = null,
     val llmInstructions: String? = null
 )
 
@@ -159,45 +206,16 @@ data class PreferencesDto(
 data class StylePreferences(
     val mode: String,
     val tone: String,
-    val removeFillers: Boolean,
-    val collapseRepeats: Boolean,
-    val spokenCommands: Boolean,
-    val selfCorrections: Boolean,
-    val autoCapitalize: Boolean,
     val trailingSpace: Boolean,
     val language: String,
-    // Added with the structured-cleanup release; defaults keep older persisted outbox entries decodable.
-    val hesitations: String = HesitationLevel.LIGHT.id,
-    val hesitationPhrases: List<String> = emptyList(),
-    val repetitionScope: String = RepetitionScope.PHRASES.id,
-    val lists: String = ListsMode.AUTO.id,
-    val listStyle: String = ListStyle.AUTO.id,
-    val bulletMarker: String = BulletMarker.DASH.id,
-    val numbers: String = NumbersMode.SMART.id,
-    val llmFreedom: String = LlmFreedom.BALANCED.id,
-    val llmStructure: String = LlmStructure.ASSIST.id,
     val llmInstructions: String = ""
 ) {
     companion object {
         fun of(s: MurmurSettings) = StylePreferences(
             mode = s.formattingMode.id,
             tone = s.tone.id,
-            removeFillers = s.removeFillers,
-            collapseRepeats = s.collapseRepeats,
-            spokenCommands = s.spokenCommands,
-            selfCorrections = s.selfCorrections,
-            autoCapitalize = s.autoCapitalize,
             trailingSpace = s.trailingSpace,
             language = s.language,
-            hesitations = s.hesitations.id,
-            hesitationPhrases = s.hesitationPhrases,
-            repetitionScope = s.repetitionScope.id,
-            lists = s.lists.id,
-            listStyle = s.listStyle.id,
-            bulletMarker = s.bulletMarker.id,
-            numbers = s.numbers.id,
-            llmFreedom = s.llmFreedom.id,
-            llmStructure = s.llmStructure.id,
             llmInstructions = s.llmInstructions
         )
     }
@@ -207,21 +225,7 @@ data class StylePreferences(
         val formatting = mapOf(
             "mode" to mode,
             "tone" to tone,
-            "removeFillers" to removeFillers,
-            "collapseRepeats" to collapseRepeats,
-            "spokenCommands" to spokenCommands,
-            "selfCorrections" to selfCorrections,
-            "autoCapitalize" to autoCapitalize,
             "trailingSpace" to trailingSpace,
-            "hesitations" to hesitations,
-            "hesitationPhrases" to hesitationPhrases,
-            "repetitionScope" to repetitionScope,
-            "lists" to lists,
-            "listStyle" to listStyle,
-            "bulletMarker" to bulletMarker,
-            "numbers" to numbers,
-            "llmFreedom" to llmFreedom,
-            "llmStructure" to llmStructure,
             "llmInstructions" to llmInstructions
         )
         val args = LinkedHashMap<String, Any?>()
@@ -237,21 +241,7 @@ fun applyRemotePreferences(s: MurmurSettings, remote: PreferencesDto): MurmurSet
     return s.copy(
         formattingMode = f?.mode?.let { FormattingMode.from(it) } ?: s.formattingMode,
         tone = f?.tone?.let { Tone.from(it) } ?: s.tone,
-        removeFillers = f?.removeFillers ?: s.removeFillers,
-        collapseRepeats = f?.collapseRepeats ?: s.collapseRepeats,
-        spokenCommands = f?.spokenCommands ?: s.spokenCommands,
-        selfCorrections = f?.selfCorrections ?: s.selfCorrections,
-        autoCapitalize = f?.autoCapitalize ?: s.autoCapitalize,
         trailingSpace = f?.trailingSpace ?: s.trailingSpace,
-        hesitations = f?.hesitations?.let { HesitationLevel.from(it) } ?: s.hesitations,
-        hesitationPhrases = f?.hesitationPhrases ?: s.hesitationPhrases,
-        repetitionScope = f?.repetitionScope?.let { RepetitionScope.from(it) } ?: s.repetitionScope,
-        lists = f?.lists?.let { ListsMode.from(it) } ?: s.lists,
-        listStyle = f?.listStyle?.let { ListStyle.from(it) } ?: s.listStyle,
-        bulletMarker = f?.bulletMarker?.let { BulletMarker.from(it) } ?: s.bulletMarker,
-        numbers = f?.numbers?.let { NumbersMode.from(it) } ?: s.numbers,
-        llmFreedom = f?.llmFreedom?.let { LlmFreedom.from(it) } ?: s.llmFreedom,
-        llmStructure = f?.llmStructure?.let { LlmStructure.from(it) } ?: s.llmStructure,
         llmInstructions = f?.llmInstructions ?: s.llmInstructions,
         language = remote.language ?: s.language
     )

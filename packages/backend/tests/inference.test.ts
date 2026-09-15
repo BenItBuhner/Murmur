@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, internal } from '../convex/_generated/api'
 import {
+  MAX_TRANSCRIPT_CHARS,
   clipSeconds,
   describeUpstreamFailure,
   modelsPayload,
   multipartBoundary,
+  parseFormatRequest,
   parseMultipart,
   readUpstreams,
   subjectOf,
@@ -12,87 +14,19 @@ import {
   upstreamModelFor,
   wavInfo
 } from '../convex/lib/inference'
-import { MAX_CLIP_SECONDS, PLANS, usagePeriod } from '../convex/lib/plans'
-import { ada, bob, setup } from './helpers'
-
-/** A PCM WAV header followed by `seconds` of silence. */
-function makeWav(seconds: number, sampleRate = 16_000, channels = 1, bits = 16): Uint8Array {
-  const dataBytes = Math.round(seconds * sampleRate * channels * (bits / 8))
-  const out = new Uint8Array(44 + dataBytes)
-  const view = new DataView(out.buffer)
-  const tag = (at: number, s: string): void => {
-    for (let i = 0; i < 4; i++) out[at + i] = s.charCodeAt(i)
-  }
-  tag(0, 'RIFF')
-  view.setUint32(4, 36 + dataBytes, true)
-  tag(8, 'WAVE')
-  tag(12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, channels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, (sampleRate * channels * bits) / 8, true)
-  view.setUint16(32, (channels * bits) / 8, true)
-  view.setUint16(34, bits, true)
-  tag(36, 'data')
-  view.setUint32(40, dataBytes, true)
-  // Bytes that look like multipart syntax must survive inside the binary part.
-  const marker = new TextEncoder().encode('\r\n--boundary--\r\n')
-  if (dataBytes > marker.length * 2) out.set(marker, 44 + Math.floor(dataBytes / 2))
-  return out
-}
-
-const STT_ENV = {
-  MURMUR_INFERENCE_STT_URL: 'https://stt.example.test/v1/',
-  MURMUR_INFERENCE_STT_KEY: 'sk-stt-secret',
-  MURMUR_INFERENCE_STT_MODEL: 'whisper-large-v3-turbo'
-}
-const LLM_ENV = {
-  MURMUR_INFERENCE_LLM_URL: 'https://llm.example.test/v1',
-  MURMUR_INFERENCE_LLM_KEY: 'sk-llm-secret',
-  MURMUR_INFERENCE_LLM_MODEL: 'llama-3.1-8b-instant',
-  MURMUR_INFERENCE_LLM_PRO_MODEL: 'llama-3.3-70b-versatile'
-}
-
-function stubEnv(vars: Record<string, string>): void {
-  for (const [k, v] of Object.entries(vars)) vi.stubEnv(k, v)
-}
-
-interface Captured {
-  url: string
-  init: RequestInit
-}
-
-/** Replace global fetch with a recorder that answers with `respond`. */
-function stubFetch(respond: (url: string, init: RequestInit) => Response | Promise<Response>): Captured[] {
-  const calls: Captured[] = []
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
-      calls.push({ url, init })
-      return await respond(url, init)
-    })
-  )
-  return calls
-}
-
-const jsonResponse = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-
-async function sttRequest(wav: Uint8Array, extra: Record<string, string | string[]> = {}, model = 'murmur-transcribe'): Promise<RequestInit> {
-  const form = new FormData()
-  form.append('file', new Blob([wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
-  form.append('model', model)
-  for (const [k, v] of Object.entries(extra)) for (const value of Array.isArray(v) ? v : [v]) form.append(k, value)
-  // Let the platform serialize the multipart body and pick the boundary, as the apps do.
-  const req = new Request('https://client.test/', { method: 'POST', body: form })
-  return {
-    method: 'POST',
-    headers: { 'content-type': req.headers.get('content-type')! },
-    body: await req.arrayBuffer()
-  }
-}
+import { MAX_CLIP_SECONDS, PLANS, TRIAL_MS, usagePeriod } from '../convex/lib/plans'
+import {
+  LLM_ENV,
+  STT_ENV,
+  ada,
+  bob,
+  jsonResponse,
+  makeWav,
+  setup,
+  sttRequest,
+  stubEnv,
+  stubFetch
+} from './helpers'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -111,9 +45,9 @@ describe('inference helpers', () => {
       model: 'whisper-large-v3-turbo',
       proModel: undefined
     })
-    expect(both.llm?.proModel).toBe('llama-3.3-70b-versatile')
-    expect(upstreamModelFor(both.llm!, 'free')).toBe('llama-3.1-8b-instant')
-    expect(upstreamModelFor(both.llm!, 'pro')).toBe('llama-3.3-70b-versatile')
+    expect(both.llm?.proModel).toBe('openai/gpt-oss-120b')
+    expect(upstreamModelFor(both.llm!, 'free')).toBe('openai/gpt-oss-20b')
+    expect(upstreamModelFor(both.llm!, 'pro')).toBe('openai/gpt-oss-120b')
     expect(upstreamModelFor(both.stt!, 'pro')).toBe('whisper-large-v3-turbo')
     expect(modelsPayload(both).data.map((m) => m.id)).toEqual(['murmur-transcribe', 'murmur-format'])
     expect(modelsPayload(readUpstreams(STT_ENV)).data.map((m) => m.id)).toEqual(['murmur-transcribe'])
@@ -228,18 +162,42 @@ describe('managed inference gateway', () => {
     expect(status.plan).toBe('free')
   })
 
-  it('lists the managed models and the free allowance for a fresh account', async () => {
+  it('lists the managed models and the trial (Pro) allowance for a fresh account', async () => {
     const t = setup()
     const asAda = t.withIdentity(ada)
     const models = await (await asAda.fetch('/v1/models')).json()
     expect(models.data.map((m: { id: string }) => m.id)).toEqual(['murmur-transcribe', 'murmur-format'])
+    const before = Date.now()
+    await asAda.mutation(api.users.ensure, {})
     const status = await asAda.query(api.inference.status, {})
     expect(status).toMatchObject({
       available: true,
       models: { stt: 'murmur-transcribe', llm: 'murmur-format' },
-      plan: 'free',
-      limits: { ...PLANS.free, maxClipSeconds: MAX_CLIP_SECONDS },
-      usage: { period: '', sttSeconds: 0, sttRequests: 0, llmTokens: 0, llmRequests: 0 }
+      plan: 'pro',
+      planState: 'trial',
+      limits: {
+        sttSecondsPerMonth: PLANS.pro.sttSecondsPerMonth,
+        llmTokensPerMonth: PLANS.pro.llmTokensPerMonth,
+        requestsPerMinute: PLANS.pro.requestsPerMinute,
+        maxClipSeconds: MAX_CLIP_SECONDS
+      },
+      usage: { period: '', sttSeconds: 0, sttRequests: 0, llmTokens: 0, llmRequests: 0 },
+      formattingPaused: false,
+      upgradeUrl: null,
+      accountUrl: null,
+      window: null,
+      meters: [],
+      resets: null
+    })
+    expect(status.trialEndsAt).toBeGreaterThanOrEqual(before + TRIAL_MS)
+    // Without `day` nothing windowed is computed; the free-tier meters come with it (see entitlements.test.ts).
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    const free = await asAda.query(api.inference.status, {})
+    expect(free.limits).toEqual({
+      sttSecondsPerMonth: PLANS.free.sttSecondsPerMonth,
+      llmTokensPerMonth: PLANS.free.llmTokensPerMonth,
+      requestsPerMinute: PLANS.free.requestsPerMinute,
+      maxClipSeconds: PLANS.free.maxClipSeconds
     })
   })
 
@@ -353,7 +311,7 @@ describe('managed inference gateway', () => {
     const calls = stubFetch(() => jsonResponse({ text: 'ok', duration: 60 }))
     const t = setup()
     const asAda = t.withIdentity(ada)
-    const user = await asAda.mutation(api.users.ensure, {})
+    const user = await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
     const period = usagePeriod(Date.now())
     // Nearly out of minutes: the next 60 s clip does not fit.
     await t.run(async (ctx) => {
@@ -399,7 +357,7 @@ describe('managed inference gateway', () => {
 
     // A pro account has a larger allowance and is not throttled at the free rate.
     await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'pro' })
-    expect((await asAda.query(api.users.me, {}))?.plan).toBe('pro')
+    expect((await asAda.query(api.users.me, {}))).toMatchObject({ plan: 'pro', planState: 'pro' })
     const pro = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(5)))
     expect(pro.status).toBe(200)
     expect(calls).toHaveLength(1)
@@ -439,13 +397,14 @@ describe('managed inference gateway', () => {
     const calls = stubFetch(() =>
       jsonResponse({
         id: 'chatcmpl-1',
-        model: 'llama-3.1-8b-instant',
+        model: 'openai/gpt-oss-20b',
         choices: [{ message: { role: 'assistant', content: 'Hello there.' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 30, completion_tokens: 4, total_tokens: 34 }
       })
     )
     const t = setup()
     const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
     const res = await asAda.fetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -469,7 +428,7 @@ describe('managed inference gateway', () => {
     expect((calls[0].init.headers as Record<string, string>).authorization).toBe('Bearer sk-llm-secret')
     const sent = JSON.parse(calls[0].init.body as string)
     expect(sent).toEqual({
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-20b',
       stream: false,
       messages: [{ role: 'user', content: 'hello there' }],
       temperature: 0,
@@ -487,7 +446,7 @@ describe('managed inference gateway', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'murmur-format', messages: [{ role: 'user', content: 'again' }] })
     })
-    expect(JSON.parse(calls[1].init.body as string).model).toBe('llama-3.3-70b-versatile')
+    expect(JSON.parse(calls[1].init.body as string).model).toBe('openai/gpt-oss-120b')
   })
 
   it('rejects malformed chat requests', async () => {
@@ -520,5 +479,150 @@ describe('managed inference gateway', () => {
     await t.run(async (ctx) => {
       expect(await ctx.db.query('inferenceUsage').collect()).toHaveLength(0)
     })
+  })
+})
+
+describe('POST /v1/format', () => {
+  const headers = { 'content-type': 'application/json' }
+  const chat = (content: string, finish = 'stop', tokens = 40): Response =>
+    jsonResponse({
+      choices: [{ message: { role: 'assistant', content }, finish_reason: finish }],
+      usage: { prompt_tokens: tokens - 5, completion_tokens: 5, total_tokens: tokens }
+    })
+  const body = (transcript: string, context: Record<string, unknown> = {}): RequestInit => ({
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ transcript, context: { category: 'chat', tone: 'casual', app: 'Slack', ...context } })
+  })
+
+  it('parses and bounds a client body', () => {
+    expect(parseFormatRequest('x')).toMatchObject({ ok: false })
+    expect(parseFormatRequest({})).toMatchObject({ ok: false, message: '"transcript" must be a string' })
+    const parsed = parseFormatRequest({
+      transcript: 'hello there',
+      context: {
+        category: 'bogus',
+        tone: 'shouty',
+        dictionary: [{ word: 'Wispr Flow', aliases: ['whisper flow', 7] }, 'nope', { word: '' }],
+        keepVerbatim: ['my sig', '', 3],
+        precedingText: 'I think',
+        language: 'de',
+        instructions: 'British spelling'
+      }
+    })
+    expect(parsed).toEqual({
+      ok: true,
+      request: {
+        transcript: 'hello there',
+        context: {
+          category: 'unknown',
+          tone: 'neutral',
+          app: undefined,
+          language: 'de',
+          precedingText: 'I think',
+          instructions: 'British spelling',
+          dictionary: [{ word: 'Wispr Flow', aliases: ['whisper flow'], fuzzy: false }],
+          keepVerbatim: ['my sig']
+        }
+      }
+    })
+    expect(parseFormatRequest({ transcript: 'x'.repeat(MAX_TRANSCRIPT_CHARS + 1) })).toMatchObject({ ok: false })
+  })
+
+  it('runs the engine against the instance model and bills the tokens', async () => {
+    stubEnv(LLM_ENV)
+    const calls = stubFetch(() => chat('The budget is $1,200,000.'))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    const res = await asAda.fetch(
+      '/v1/format',
+      body('um the budget is one million two hundred thousand dollars', {
+        dictionary: [{ word: 'Sarah', aliases: [] }],
+        language: 'en'
+      })
+    )
+    expect(res.status).toBe(200)
+    const out = await res.json()
+    expect(out.text).toBe('The budget is $1,200,000.')
+    expect(out.status).toMatchObject({ outcome: 'used', attempts: 1 })
+    expect(out.model).toBe('murmur-format')
+    expect(out.pressEnter).toBe(false)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('https://llm.example.test/v1/chat/completions')
+    const sent = JSON.parse(calls[0].init.body as string)
+    expect(sent.model).toBe('openai/gpt-oss-20b')
+    expect(sent.messages[0].role).toBe('system')
+    const user = sent.messages[sent.messages.length - 1]
+    expect(user.role).toBe('user')
+    expect(user.content).toContain('Destination: a chat message (Slack). Tone: casual.')
+    expect(user.content).toContain('Language: English.')
+    expect(user.content).toContain('Dictionary: Sarah.')
+    expect(user.content).toContain('Transcript:\num the budget is one million two hundred thousand dollars')
+
+    const status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmRequests).toBe(1)
+    expect(status.usage.llmTokens).toBe(40)
+  })
+
+  it('retries once in strict mode when the verifier rejects, and falls back when it fails again', async () => {
+    stubEnv(LLM_ENV)
+    let n = 0
+    const calls = stubFetch(() => chat(n++ === 0 ? 'The code is 7.' : 'The code is 0007.'))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const good = await (await asAda.fetch('/v1/format', body('the code is zero zero zero seven'))).json()
+    expect(good.text).toBe('The code is 0007.')
+    expect(good.status).toMatchObject({ outcome: 'used', attempts: 2 })
+    expect(good.status.retriedAfter).toMatch(/^numbers-changed/)
+    expect(calls).toHaveLength(2)
+    expect(JSON.parse(calls[1].init.body as string).messages.at(-1).content).toContain('Strict:')
+    // One format request is one request for quota purposes, whatever the retries cost in tokens.
+    let status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmRequests).toBe(1)
+    expect(status.usage.llmTokens).toBe(80)
+
+    stubFetch(() => chat('The code is 7.'))
+    const bad = await (await asAda.fetch('/v1/format', body('um the code is zero zero zero seven'))).json()
+    expect(bad.status).toMatchObject({ outcome: 'rejected', attempts: 2 })
+    expect(bad.text).toBe('The code is zero zero zero seven')
+    expect(bad.modelText).toBe('The code is 7.')
+    status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmRequests).toBe(2)
+  })
+
+  it('reports an unreachable or failing upstream as a failed format, never a 5xx', async () => {
+    stubEnv(LLM_ENV)
+    stubFetch(() => jsonResponse({ error: { message: 'nope' } }, 500))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const res = await asAda.fetch('/v1/format', body('hello there everyone'))
+    expect(res.status).toBe(200)
+    const out = await res.json()
+    expect(out.status.outcome).toBe('failed')
+    expect(out.text).toBe('Hello there everyone')
+    // Nothing was billed for a request the provider never answered.
+    expect((await asAda.query(api.inference.status, {})).usage.llmRequests).toBe(1)
+  })
+
+  it('enforces sign-in, configuration, the body shape and the quota', async () => {
+    const t = setup()
+    expect((await t.fetch('/v1/format', body('hello'))).status).toBe(401)
+    const asAda = t.withIdentity(ada)
+    expect((await asAda.fetch('/v1/format', body('hello'))).status).toBe(503)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    stubEnv(LLM_ENV)
+    stubFetch(() => chat('Hello.'))
+    expect((await asAda.fetch('/v1/format', { method: 'POST', headers, body: 'nope' })).status).toBe(400)
+    expect((await asAda.fetch('/v1/format', { method: 'POST', headers, body: JSON.stringify({ context: {} }) })).status).toBe(400)
+    expect((await asAda.fetch('/v1/format', body('hello there everyone'))).status).toBe(200)
+    await t.run(async (ctx) => {
+      const usage = await ctx.db.query('inferenceUsage').first()
+      await ctx.db.patch('inferenceUsage', usage!._id, { llmTokens: PLANS.free.llmTokensPerMonth })
+    })
+    const quota = await asAda.fetch('/v1/format', body('hello there everyone'))
+    expect(quota.status).toBe(429)
+    expect((await quota.json()).error.code).toBe('quota_exceeded')
   })
 })

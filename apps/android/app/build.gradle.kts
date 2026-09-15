@@ -13,7 +13,7 @@ fun envOrProp(name: String): String =
 
 // Single source of truth for the Android version. Bump it with `npm run release -- <version>` from
 // the repo root, which keeps it in sync with the desktop app and the README download links.
-val murmurVersion = "0.4.0"
+val murmurVersion = "0.5.0"
 
 // Android needs a monotonically increasing integer versionCode. Derive it from the semver so nothing
 // has to be bumped by hand: 1.2.3 -> 1_020_399, 1.2.3-beta.4 -> 1_020_304. Pre-releases sort below
@@ -115,6 +115,18 @@ android {
         unitTests.isReturnDefaultValues = true
         // Robolectric (TextInserterTest) needs the merged manifest and resources.
         unitTests.isIncludeAndroidResources = true
+        // A failure prints its whole assertion (the state the flow ended in, not just the line),
+        // so a CI log is enough to read it, and the app's logcat goes to the test's standard
+        // output, which the JUnit report keeps (the console stays quiet).
+        unitTests.all {
+            it.systemProperty("robolectric.logging", "stdout")
+            it.testLogging {
+                events("failed", "skipped")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                showStackTraces = true
+                showCauses = true
+            }
+        }
     }
 }
 

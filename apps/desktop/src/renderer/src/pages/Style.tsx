@@ -179,7 +179,7 @@ export function StylePage(): React.JSX.Element {
   const modelReady = inference.llmReady
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       <PageHeader
         title="Style"
         description="How raw speech becomes finished text. The formatting model reads the destination on its own: chat stays casual, email gets full sentences, code editors keep identifiers exact, terminals get one line. What is left to choose is how it should sound and anything you want to tell it."
@@ -210,7 +210,7 @@ export function StylePage(): React.JSX.Element {
             placeholder={
               'Use British spelling.\nWrite dates as 2026-09-06.\nNever use the Oxford comma.\nKeep my sign-off exactly as I say it.'
             }
-            className="min-h-24 text-[13px]"
+            className="min-h-24 text-note"
             spellCheck={false}
           />
         </SettingRow>
@@ -278,7 +278,7 @@ export function StylePage(): React.JSX.Element {
                       void patch({ formatting: { llm: { baseUrl: e.target.value.trim() } } })
                     }
                     placeholder="https://api.example.com/v1"
-                    className="font-mono text-[13px]"
+                    className="font-mono text-note"
                     spellCheck={false}
                   />
                 </SettingRow>
@@ -333,7 +333,7 @@ export function StylePage(): React.JSX.Element {
               {testing ? <Loader2 className="animate-spin" /> : <Play />} Run test
             </Button>
             {!modelReady && (
-              <span className="text-[13px] text-muted-foreground">
+              <span className="text-note text-muted-foreground">
                 {murmurLlm ? 'Sign in first.' : 'Choose a server and model first.'}
               </span>
             )}
@@ -359,7 +359,7 @@ export function StylePage(): React.JSX.Element {
         }
       >
         {f.appRules.length === 0 ? (
-          <div className="py-2 text-[13px] text-muted-foreground">
+          <div className="py-2 text-note text-muted-foreground">
             No rules. Examples: “slack” → casual; “Code.exe” → formatting off; “outlook” →
             professional with extra instructions.
           </div>
@@ -391,7 +391,7 @@ function RuleSelect<T extends string>({
   width?: string
 }): React.JSX.Element {
   return (
-    <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+    <label className="flex flex-col gap-1.5 eyebrow">
       {label}
       <Select
         value={value ?? 'inherit'}
@@ -454,7 +454,7 @@ function RuleEditor({
           onChange={(v) => onChange(r.id, { formatting: v })}
           width="w-32"
         />
-        <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <label className="flex flex-col gap-1.5 eyebrow">
           Trailing space
           <Select
             value={r.trailingSpace === undefined ? 'inherit' : r.trailingSpace ? 'on' : 'off'}
@@ -481,7 +481,7 @@ function RuleEditor({
           if (next !== (r.instructions ?? '')) onChange(r.id, { instructions: next || undefined })
         }}
         placeholder="Extra model instructions for this app only, e.g. “Keep it to one short paragraph.”"
-        className="text-[13px]"
+        className="text-note"
       />
     </div>
   )
@@ -553,12 +553,12 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
         <Textarea
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          className="min-h-24 text-[13px]"
+          className="min-h-24 text-note"
           placeholder="Type or paste a raw transcript…"
           spellCheck={false}
         />
         <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <label className="flex items-center gap-2 text-note text-muted-foreground">
             As if dictating into
             <Input
               value={app}
@@ -580,7 +580,7 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
 
         {out && (
           <>
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <div className="flex flex-wrap items-center gap-1.5 text-caption">
               <Badge variant="outline">
                 {out.style.category === 'unknown' ? 'text field' : out.style.category}
               </Badge>
@@ -592,21 +592,21 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
             </div>
 
             <div>
-              <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              <div className="mb-1.5 flex items-center gap-2 eyebrow">
                 <WandSparkles className="size-3.5" /> Light
                 <span className="normal-case tracking-normal font-normal">
                   · {out.light.wordCount} words
                   {out.light.pressEnter && ' · presses Enter'}
                 </span>
               </div>
-              <div className="whitespace-pre-wrap rounded-lg bg-muted/60 px-3 py-2 text-[13px]">
+              <div className="well whitespace-pre-wrap rounded-md px-3.5 py-2.5 text-note">
                 {out.light.text || (
                   <span className="text-muted-foreground">(nothing to insert)</span>
                 )}
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {out.light.stages.length === 0 ? (
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     No stage changed the text.
                   </span>
                 ) : (
@@ -621,7 +621,7 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
 
             {out.smart && (
               <div>
-                <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="mb-1.5 flex items-center gap-2 eyebrow">
                   <Sparkles className="size-3.5" /> Smart
                   <span className="normal-case tracking-normal font-normal">
                     · {out.smart.llmMs} ms
@@ -632,12 +632,12 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
                   {outcomeBadge(out.smart.status)}
                 </div>
                 {(out.smart.text || out.smart.modelText) && (
-                  <div className="whitespace-pre-wrap rounded-lg bg-muted/60 px-3 py-2 text-[13px]">
+                  <div className="well whitespace-pre-wrap rounded-md px-3.5 py-2.5 text-note">
                     {out.smart.text ?? out.smart.modelText}
                   </div>
                 )}
                 {out.smart.status.outcome === 'rejected' && out.smart.modelText && (
-                  <p className="mt-1 text-[12px] text-muted-foreground">
+                  <p className="mt-1 text-meta text-muted-foreground">
                     This is what the model returned; the Light text above would have been inserted.
                   </p>
                 )}

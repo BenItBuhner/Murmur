@@ -112,14 +112,14 @@ export function MicMeter({
           <span
             key={i}
             className={cn(
-              'h-full flex-1 rounded-[2px] transition-colors duration-75',
-              i < lit ? (i > segments * 0.85 ? 'bg-record' : 'bg-success') : 'bg-muted',
+              'h-full flex-1 rounded-full transition-colors duration-75',
+              i < lit ? (i > segments * 0.85 ? 'bg-record' : 'bg-success') : 'bg-input',
               i === thresholdIdx && 'ring-1 ring-foreground/50'
             )}
           />
         ))}
       </div>
-      <div className="flex justify-between text-[11px] text-muted-foreground tabular-nums">
+      <div className="flex justify-between text-caption text-muted-foreground tabular-nums">
         <span>
           {error ? (
             <span className="text-destructive">{error}</span>

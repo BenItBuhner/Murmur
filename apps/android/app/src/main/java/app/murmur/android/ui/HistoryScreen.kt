@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import android.media.MediaPlayer
 import androidx.compose.material3.Text
@@ -38,8 +36,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -56,16 +54,22 @@ import app.murmur.android.history.RecordingsInfo
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.EmphasizedAccelerate
 import app.murmur.android.ui.components.EmphasizedDecelerate
+import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.Field
-import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.LatencyBar
 import app.murmur.android.ui.components.LazyScreen
 import app.murmur.android.ui.components.Overline
+import app.murmur.android.ui.components.RowCardPadding
+import app.murmur.android.ui.components.Tag
 import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.components.ToggleRow
+import app.murmur.android.ui.components.Well
 import app.murmur.android.ui.components.entryMeta
+import app.murmur.android.ui.theme.Elevation
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
+import app.murmur.android.ui.theme.Space
+import app.murmur.android.ui.theme.surface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -212,7 +216,6 @@ fun HistoryScreen(store: HistoryStore, settings: SettingsStore, recordings: Reco
                 Field(value = query, onValueChange = { query = it }, placeholder = "Search dictations")
                 Spacer(Modifier.height(20.dp))
             }
-            Hairline()
         }
     ) {
         when {
@@ -255,7 +258,7 @@ fun HistoryScreen(store: HistoryStore, settings: SettingsStore, recordings: Reco
     }
 }
 
-/** The "Keep recordings" switch with how much the recordings take and a way to delete them all. */
+/** The "Keep recordings" switch with how much the recordings take and a way to delete them all: one card. */
 @Composable
 private fun RecordingsRow(
     keep: Boolean,
@@ -266,14 +269,14 @@ private fun RecordingsRow(
     onClear: () -> Unit
 ) {
     val c = Murmur.colors
-    Column(Modifier.fillMaxWidth()) {
+    Card(padding = RowCardPadding) {
         ToggleRow(
             title = "Keep recordings",
             description = "Store the audio of every dictation with its entry, to play it back or send it again. Off, only failed dictations keep their audio until they succeed. Recordings never leave this phone.",
             checked = keep,
             onCheckedChange = onKeepChange
         )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (info.count == 0) "No recordings stored"
                 else "${pluralize(info.count, "recording")}, ${formatBytes(info.bytes)}",
@@ -301,11 +304,16 @@ private fun RecordingsRow(
     }
 }
 
+/** Nothing to list: a well where the entries will be. */
 @Composable
 private fun EmptyHistory(title: String, description: String) {
     val c = Murmur.colors
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 40.dp),
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radii.card))
+            .background(c.paperRaised)
+            .padding(horizontal = Space.card, vertical = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(title, style = Murmur.type.displaySmall, color = c.ink)
@@ -315,8 +323,9 @@ private fun EmptyHistory(title: String, description: String) {
 }
 
 /**
- * One dictation. Collapsed: the text and a line of facts. Expanded: the raw transcript when it
- * differs, the timing bar, the stages that touched the text, and what to do with it.
+ * One dictation, a card of its own. Collapsed: the text and a line of facts. Expanded: the raw
+ * transcript when it differs, the timing bar, the stages that touched the text, and what to do
+ * with it.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -335,12 +344,18 @@ private fun HistoryRow(
     modifier: Modifier = Modifier
 ) {
     val c = Murmur.colors
-    Column(modifier.fillMaxWidth()) {
+    val shape = RoundedCornerShape(Radii.card)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(bottom = Space.sm)
+            .surface(if (expanded) Elevation.floating else Elevation.raised, shape)
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .clickable(role = Role.Button, onClick = onToggle)
-                .padding(vertical = 14.dp)
+                .padding(horizontal = Space.card, vertical = Space.card)
         ) {
             if (entry.failed && entry.finalText.isEmpty()) {
                 Text(entry.error ?: "Failed", style = Murmur.type.body, color = c.clay)
@@ -389,20 +404,11 @@ private fun HistoryRow(
             enter = fadeIn(tween(200, delayMillis = 60)) + expandVertically(tween(300, easing = EmphasizedDecelerate)),
             exit = fadeOut(tween(100)) + shrinkVertically(tween(240, easing = EmphasizedAccelerate))
         ) {
-            Column(Modifier.padding(bottom = 18.dp)) {
+            Column(Modifier.padding(start = Space.card, end = Space.card, bottom = Space.card)) {
                 if (entry.rawText.isNotBlank() && entry.rawText.trim() != entry.finalText.trim()) {
                     Overline("What was heard")
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        entry.rawText,
-                        style = Murmur.type.bodySmall,
-                        color = c.inkSoft,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(c.paperRaised, RoundedCornerShape(Radii.field))
-                            .border(1.dp, c.hairline, RoundedCornerShape(Radii.field))
-                            .padding(horizontal = 14.dp, vertical = 12.dp)
-                    )
+                    Well { Text(entry.rawText, style = Murmur.type.bodySmall, color = c.inkSoft) }
                     Spacer(Modifier.height(18.dp))
                 }
                 if (!entry.failed && entry.timings.totalMs > 0) {
@@ -440,21 +446,5 @@ private fun HistoryRow(
                 }
             }
         }
-        Hairline()
     }
-}
-
-/** A small outlined label for a stage or an outcome. */
-@Composable
-private fun Tag(text: String, color: Color = Murmur.colors.inkSoft) {
-    Text(
-        text,
-        style = Murmur.type.labelSmall,
-        color = color,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .border(1.dp, if (color == Murmur.colors.inkSoft) Murmur.colors.hairline else color.copy(alpha = 0.4f), CircleShape)
-            .padding(horizontal = 9.dp, vertical = 2.dp)
-    )
 }

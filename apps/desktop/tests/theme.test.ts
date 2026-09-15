@@ -102,16 +102,32 @@ describe('buildTheme', () => {
     }
   })
 
-  it('reproduces the original neutral palette when there is no seed', () => {
+  it('reproduces the neutral palette when there is no seed', () => {
     const light = buildTheme({ mode: 'light', seed: null, tinted: true })
-    expect(light.vars.background).toBe('oklch(0.985 0.002 90)')
+    expect(light.vars.background).toBe('oklch(0.97 0.003 85)')
     expect(light.vars.primary).toBe('oklch(0.22 0.01 60)')
     expect(light.vars.card).toBe('oklch(1 0 0)')
     expect(light.tinted).toBe(false)
     const dark = buildTheme({ mode: 'dark', seed: null, tinted: false })
-    expect(dark.vars.background).toBe('oklch(0.16 0.004 60)')
+    expect(dark.vars.background).toBe('oklch(0.15 0.004 60)')
     expect(dark.vars.primary).toBe('oklch(0.93 0.004 80)')
-    expect(dark.vars.sidebar).toBe('oklch(0.14 0.004 60)')
+    expect(dark.vars.sidebar).toBe('oklch(0.125 0.004 60)')
+  })
+
+  it('keeps the surface hierarchy in order in both modes', () => {
+    for (const seed of [null, '#3b82f6']) {
+      // Light: rail below canvas below card; the well is sunk into the card.
+      const light = buildTheme({ mode: 'light', seed, tinted: !!seed })
+      expect(light.colors.sidebar.l).toBeLessThan(light.colors.background.l)
+      expect(light.colors.background.l).toBeLessThan(light.colors.card.l)
+      expect(light.colors.muted.l).toBeLessThan(light.colors.card.l)
+      // Dark: the same order, lifted by tone instead: rail, canvas, card, then floating layers.
+      const dark = buildTheme({ mode: 'dark', seed, tinted: !!seed })
+      expect(dark.colors.sidebar.l).toBeLessThan(dark.colors.background.l)
+      expect(dark.colors.background.l).toBeLessThan(dark.colors.card.l)
+      expect(dark.colors.card.l).toBeLessThan(dark.colors.popover.l)
+      expect(dark.colors.card.l).toBeLessThan(dark.colors.muted.l)
+    }
   })
 
   it('colours the primary role from the seed and keeps its foreground legible', () => {
@@ -131,7 +147,7 @@ describe('buildTheme', () => {
   it('tints surfaces only when asked, and only with a seed', () => {
     const neutral = buildTheme({ mode: 'light', seed: '#ec4899', tinted: false })
     expect(neutral.colors.background.c).toBeLessThan(0.005)
-    expect(neutral.colors.background.h).toBe(90)
+    expect(neutral.colors.background.h).toBe(85)
     const tinted = buildTheme({ mode: 'light', seed: '#ec4899', tinted: true })
     expect(tinted.colors.background.c).toBeGreaterThan(0.005)
     expect(Math.abs(hueDelta(tinted.colors.background.h, hexToOklch('#ec4899').h))).toBeLessThan(1)

@@ -8,10 +8,8 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,9 +25,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.murmur.android.service.MurmurAccessibilityService
+import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Dot
-import app.murmur.android.ui.components.Hairline
+import app.murmur.android.ui.components.RowCardPadding
 import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.theme.Murmur
@@ -82,15 +81,14 @@ fun PermissionList() {
         LaunchedEffect(Unit) { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     }
 
-    Column(Modifier.fillMaxWidth()) {
-        Hairline()
+    // The three grants in one card, set apart by rhythm.
+    Card(padding = RowCardPadding) {
         PermissionRow(
             title = "Microphone",
             description = "Recorded only while the button is listening.",
             granted = micGranted,
             onGrant = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
         )
-        Hairline()
         PermissionRow(
             title = "Display over other apps",
             description = "Lets the dictation button float beside any keyboard.",
@@ -101,14 +99,12 @@ fun PermissionList() {
                 )
             }
         )
-        Hairline()
         PermissionRow(
             title = "Accessibility service",
             description = "Inserts the finished text into the field you are typing in. Murmur reads nothing else on screen.",
             granted = permissions.accessibility,
             onGrant = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         )
-        Hairline()
     }
 }
 

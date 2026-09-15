@@ -52,7 +52,7 @@ export function GeneralPage(): React.JSX.Element {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       <PageHeader title="General" />
 
       <Section title="Language">

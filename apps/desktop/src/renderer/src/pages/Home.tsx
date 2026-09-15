@@ -4,7 +4,7 @@ import { ArrowRight, Clock3, Flame, Gauge, Type } from 'lucide-react'
 import type { HistoryEntry, OverlayState } from '@shared/types'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/input'
-import { Badge, Card, CardContent } from '@renderer/components/ui/misc'
+import { Badge, Banner, Card, CardContent } from '@renderer/components/ui/misc'
 import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { Appear, CountUp, Rolling, arrive, item, leave, list } from '@renderer/components/motion'
 import { UpdateBanner } from '@renderer/components/Updates'
@@ -64,14 +64,14 @@ export function HomePage({
   const lastLatency = useMemo(() => recent.find((e) => !e.error)?.timings, [recent])
 
   return (
-    <div className="space-y-9">
+    <div className="space-y-section">
       <div className="flex items-start justify-between gap-6">
         <div>
-          <h1 className="serif-display text-[40px]">
+          <h1 className="serif-display text-title">
             {greeting}
             {firstName ? `, ${firstName}` : ''}.
           </h1>
-          <p className="mt-2.5 text-[15px] text-muted-foreground">
+          <p className="mt-2.5 text-lead text-muted-foreground">
             Click into any text field, hold your shortcut, speak, let go.
           </p>
         </div>
@@ -100,32 +100,30 @@ export function HomePage({
       </div>
 
       <Appear show={!configured}>
-        <Card className="border-record/40 bg-record/5">
-          <CardContent className="flex items-center justify-between gap-4 py-4">
-            <div>
-              <div className="text-sm font-medium">
-                {murmurModels
-                  ? 'Sign in to use Murmur’s speech model'
-                  : 'Connect a speech model to start dictating'}
-              </div>
-              <div className="text-[13px] text-muted-foreground">
-                {murmurModels
-                  ? 'Your account includes speech and formatting models. Or connect your own provider under Models.'
-                  : 'Murmur needs a transcription endpoint. OpenAI, Groq, Deepgram, or any local whisper server works.'}
-              </div>
+        <Banner tone="record" className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium">
+              {murmurModels
+                ? 'Sign in to use Murmur’s speech model'
+                : 'Connect a speech model to start dictating'}
             </div>
-            <Button onClick={() => onNavigate(murmurModels ? 'account' : 'providers')}>
-              {murmurModels ? 'Account' : 'Set up'} <ArrowRight />
-            </Button>
-          </CardContent>
-        </Card>
+            <div className="text-note text-muted-foreground">
+              {murmurModels
+                ? 'Your account includes speech and formatting models. Or connect your own provider under Models.'
+                : 'Murmur needs a transcription endpoint. OpenAI, Groq, Deepgram, or any local whisper server works.'}
+            </div>
+          </div>
+          <Button onClick={() => onNavigate(murmurModels ? 'account' : 'providers')}>
+            {murmurModels ? 'Account' : 'Set up'} <ArrowRight />
+          </Button>
+        </Banner>
       </Appear>
 
       <UpdateBanner onNavigate={onNavigate} />
 
       <div className="grid gap-4 md:grid-cols-[1.4fr_1fr]">
         <Card>
-          <CardContent className="space-y-5 pt-5">
+          <CardContent className="space-y-5 pt-card">
             <div className="flex items-center justify-between">
               <div className="text-sm font-medium">Hold to dictate</div>
               <KeyCaps
@@ -165,13 +163,13 @@ export function HomePage({
                 />
               </div>
             )}
-            <div className="border-t pt-4">
-              <div className="mb-2 text-[13px] text-muted-foreground">
+            <div className="pt-1">
+              <div className="mb-2 text-note text-muted-foreground">
                 Practice here — click the box, hold the shortcut and say something.
               </div>
               <Textarea
                 placeholder="Your words will appear here…"
-                className="min-h-24 resize-none text-[15px]"
+                className="min-h-24 resize-none text-lead"
               />
             </div>
           </CardContent>
@@ -210,11 +208,12 @@ export function HomePage({
           </Button>
         </div>
         {recent.length === 0 ? (
-          <div className="rounded-2xl border px-6 py-12 text-center text-[13px] text-muted-foreground">
+          <div className="well rounded-xl px-6 py-12 text-center text-note text-muted-foreground">
             Nothing yet. Your dictations show up here with their timing breakdown.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border bg-card">
+          /* A list card: tight padding, and each row a surface one radius step in (20 - 8 = 12). */
+          <div className="surface-raised rounded-xl p-card-tight">
             {/* Rows arrive one after another; entries dictated while this page is open slide in at the top. */}
             <AnimatePresence>
               {recent.map((e, i) => (
@@ -226,18 +225,18 @@ export function HomePage({
                   initial="initial"
                   animate="enter"
                   exit={{ opacity: 0, height: 0, transition: { duration: 0.18, ease: leave } }}
-                  className="overflow-hidden border-b last:border-b-0"
+                  className="overflow-hidden rounded-md transition-colors hover:bg-accent/60"
                 >
-                  <div className="flex items-start gap-4 px-5 py-4">
+                  <div className="flex items-start gap-4 px-3 py-3">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[15px]">
+                      <div className="truncate text-lead">
                         {e.error ? (
                           <span className="text-destructive">{e.error}</span>
                         ) : (
                           e.finalText
                         )}
                       </div>
-                      <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <div className="mt-1 flex items-center gap-2 text-caption text-muted-foreground">
                         <span>{formatRelative(e.createdAt)}</span>
                         {e.appName && <span>· {e.appName}</span>}
                         <span>· {e.wordCount} words</span>
@@ -278,13 +277,13 @@ function Stat({
   return (
     <motion.div variants={item}>
       <Card className="h-full">
-        <CardContent className="pt-5">
-          <div className="flex items-center gap-2 text-[12px] text-muted-foreground [&>svg]:size-3.5 [&>svg]:stroke-[1.75]">
+        <CardContent className="pt-card">
+          <div className="flex items-center gap-2 text-meta text-muted-foreground [&>svg]:size-3.5 [&>svg]:stroke-[1.75]">
             {icon}
             {label}
           </div>
-          <div className="serif-display mt-3 text-[34px] tabular-nums">{children}</div>
-          {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
+          <div className="serif-display mt-3 text-numeral tabular-nums">{children}</div>
+          {hint && <div className="mt-1 text-caption text-muted-foreground">{hint}</div>}
         </CardContent>
       </Card>
     </motion.div>
@@ -293,9 +292,16 @@ function Stat({
 
 /**
  * Where a dictation's time went, stage by stage. The bar grows in from the left the first time it
- * is shown, and its segments glide to their new shares when it is fed another dictation.
+ * is shown, and its segments glide to their new shares when it is fed another dictation. On its
+ * own it is a card; `nested` inside another card it becomes a well one radius step in.
  */
-export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Element {
+export function LatencyBar({
+  t,
+  nested
+}: {
+  t: HistoryEntry['timings']
+  nested?: boolean
+}): React.JSX.Element {
   const parts = [
     { label: 'Silence trim', ms: t.vadMs, color: 'bg-chart-1' },
     { label: 'Speech to text', ms: t.sttMs, color: 'bg-chart-2' },
@@ -305,8 +311,10 @@ export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Ele
   ].filter((p) => p.ms > 0)
   const total = Math.max(1, t.totalMs)
   return (
-    <div className="rounded-2xl border bg-card p-5">
-      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+    <div className={nested ? 'well rounded-md p-4' : 'surface-raised rounded-xl p-card'}>
+      <div
+        className={`flex h-2 w-full overflow-hidden rounded-full ${nested ? 'bg-input' : 'bg-muted'}`}
+      >
         {parts.map((p, i) => (
           <motion.div
             key={p.label}
@@ -318,7 +326,7 @@ export function LatencyBar({ t }: { t: HistoryEntry['timings'] }): React.JSX.Ele
           />
         ))}
       </div>
-      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-muted-foreground">
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-meta text-muted-foreground">
         {parts.map((p) => (
           <span key={p.label} className="inline-flex items-center gap-1.5">
             <span className={`size-2 rounded-full ${p.color}`} /> {p.label}{' '}

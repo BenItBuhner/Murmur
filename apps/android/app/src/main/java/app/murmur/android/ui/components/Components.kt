@@ -8,7 +8,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -83,11 +82,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.murmur.android.ui.TopNav
 import app.murmur.android.ui.TopNavButton
+import app.murmur.android.ui.theme.Elevation
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
+import app.murmur.android.ui.theme.Space
+import app.murmur.android.ui.theme.surface
 
 /** Horizontal margin every screen shares. */
-val PageMargin = 24.dp
+val PageMargin = Space.gutter
 
 // ---- glyphs ---------------------------------------------------------------------------------
 // Drawn rather than imported so the few icons the app needs share one weight and one voice.
@@ -101,6 +103,21 @@ fun Chevron(color: Color, modifier: Modifier = Modifier, size: Dp = 16.dp) {
             moveTo(w * 0.38f, h * 0.24f)
             lineTo(w * 0.64f, h * 0.5f)
             lineTo(w * 0.38f, h * 0.76f)
+        }
+        drawPath(p, color, style = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** A chevron pointing down: something opens below. */
+@Composable
+fun ChevronDown(color: Color, modifier: Modifier = Modifier, size: Dp = 16.dp) {
+    Canvas(modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val p = Path().apply {
+            moveTo(w * 0.24f, h * 0.38f)
+            lineTo(w * 0.5f, h * 0.64f)
+            lineTo(w * 0.76f, h * 0.38f)
         }
         drawPath(p, color, style = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
@@ -185,6 +202,7 @@ fun Dot(color: Color, modifier: Modifier = Modifier, size: Dp = 7.dp, pulsing: B
 
 // ---- text -----------------------------------------------------------------------------------
 
+/** The name, set in the display serif. Murmur has no mark yet; the word is the mark. */
 @Composable
 fun Wordmark(modifier: Modifier = Modifier) {
     Text("Murmur", style = Murmur.type.headline, color = Murmur.colors.ink, modifier = modifier)
@@ -194,11 +212,6 @@ fun Wordmark(modifier: Modifier = Modifier) {
 @Composable
 fun Overline(text: String, modifier: Modifier = Modifier, color: Color = Murmur.colors.inkSoft) {
     Text(text.uppercase(), style = Murmur.type.overline, color = color, modifier = modifier)
-}
-
-@Composable
-fun Hairline(modifier: Modifier = Modifier, color: Color = Murmur.colors.hairline) {
-    Box(modifier.fillMaxWidth().height(1.dp).background(color))
 }
 
 /** Screen title with an optional one-line description under it. */
@@ -241,11 +254,95 @@ fun Statistic(value: String, label: String, modifier: Modifier = Modifier) {
     }
 }
 
+// ---- surfaces -------------------------------------------------------------------------------
+
+/**
+ * A raised card on the paper: the card radius, the card padding, the raised elevation. Rows
+ * inside it are set apart by rhythm alone.
+ */
+@Composable
+fun Card(
+    modifier: Modifier = Modifier,
+    padding: PaddingValues = PaddingValues(Space.card),
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val shape = RoundedCornerShape(Radii.card)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .surface(Elevation.raised, shape)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(padding),
+        content = content
+    )
+}
+
+/**
+ * A card that holds a list: tight padding, and each row a surface one radius step in
+ * ([Radii.md] = card - cardTight), so the corners stay concentric.
+ */
+@Composable
+fun ListCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(modifier, padding = PaddingValues(Space.cardTight), content = content)
+}
+
+/** One row of a [ListCard]: rounded to the nested radius, with room for a tap. */
+@Composable
+fun ListRow(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    verticalAlignment: Alignment.Vertical = Alignment.CenterVertically,
+    content: @Composable RowScope.() -> Unit
+) {
+    val shape = RoundedCornerShape(Radii.nested(Radii.card, Space.cardTight))
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(horizontal = Space.md, vertical = Space.md),
+        verticalAlignment = verticalAlignment,
+        content = content
+    )
+}
+
+/** A well: a panel sunk into whatever holds it, at the field radius. */
+@Composable
+fun Well(modifier: Modifier = Modifier, padding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 12.dp), content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radii.md))
+            .background(Murmur.colors.paperRaised)
+            .padding(padding),
+        content = content
+    )
+}
+
+/** A small filled label for a stage or an outcome: a well with round ends, tinted when it carries a meaning. */
+@Composable
+fun Tag(text: String, color: Color = Murmur.colors.inkSoft, modifier: Modifier = Modifier) {
+    val c = Murmur.colors
+    val tinted = color != c.inkSoft
+    Text(
+        text,
+        style = Murmur.type.labelSmall,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .clip(CircleShape)
+            .background(if (tinted) color.copy(alpha = 0.14f) else c.paperRaised)
+            .padding(horizontal = 9.dp, vertical = 3.dp)
+    )
+}
+
 // ---- rows -----------------------------------------------------------------------------------
 
 /**
- * One line of an index: what it is, what it is currently set to, and a chevron. Rows are laid
- * out edge to edge and separated by [Hairline]s by the caller.
+ * One line of an index: what it is, what it is currently set to, and a chevron. Rows sit inside
+ * a card and are set apart by rhythm.
  */
 @Composable
 fun NavRow(
@@ -260,7 +357,7 @@ fun NavRow(
         modifier
             .fillMaxWidth()
             .clickable(onClick = onClick, role = Role.Button)
-            .padding(vertical = 18.dp),
+            .padding(vertical = Space.row),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
@@ -281,7 +378,7 @@ fun NavRow(
 /** A row that says something (a feature, a fact) with a small check in front of it. */
 @Composable
 fun FeatureRow(text: String, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().padding(vertical = 13.dp), verticalAlignment = Alignment.Top) {
+    Row(modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.Top) {
         Check(Murmur.colors.inkSoft, Modifier.padding(top = 3.dp))
         Spacer(Modifier.width(14.dp))
         Text(text, style = Murmur.type.body, color = Murmur.colors.ink)
@@ -296,7 +393,7 @@ fun ControlRow(
     modifier: Modifier = Modifier,
     control: @Composable RowScope.() -> Unit
 ) {
-    Row(modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(vertical = Space.row), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = Murmur.type.title, color = Murmur.colors.ink)
             if (description != null) {
@@ -329,11 +426,11 @@ fun ToggleRow(
     }
 }
 
-/** Minimal switch: ink track when on, hairline track when off, paper thumb. */
+/** Minimal switch: an ink track when on, a deeper well when off, a raised paper thumb. */
 @Composable
 fun Toggle(checked: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true) {
     val c = Murmur.colors
-    val track by animateColorAsState(if (checked) c.ink else c.hairlineStrong, tween(220), label = "track")
+    val track by animateColorAsState(if (checked) c.ink else c.hairlineStrong.copy(alpha = 0.55f), tween(220), label = "track")
     val offset by animateDpAsState(if (checked) 21.dp else 3.dp, tween(220, easing = FastOutSlowInEasing), label = "thumb")
     Box(
         modifier
@@ -346,7 +443,7 @@ fun Toggle(checked: Boolean, modifier: Modifier = Modifier, enabled: Boolean = t
             Modifier
                 .offset(x = offset, y = 3.dp)
                 .size(22.dp)
-                .background(c.paper, CircleShape)
+                .surface(Elevation.raised, CircleShape, color = c.card)
         )
     }
 }
@@ -355,7 +452,7 @@ fun Toggle(checked: Boolean, modifier: Modifier = Modifier, enabled: Boolean = t
 
 data class Segment<T>(val value: T, val label: String)
 
-/** Equal-width options in a pill; the ink indicator slides to the selection. */
+/** Equal-width options in a well; the ink indicator slides to the selection (a pill in a pill). */
 @Composable
 fun <T> Segmented(
     options: List<Segment<T>>,
@@ -370,7 +467,6 @@ fun <T> Segmented(
             .fillMaxWidth()
             .height(42.dp)
             .background(c.paperRaised, CircleShape)
-            .border(1.dp, c.hairline, CircleShape)
             .padding(3.dp)
     ) {
         val segment = maxWidth / options.size
@@ -394,16 +490,16 @@ fun <T> Segmented(
     }
 }
 
+/** A choice in a set: a well when resting, ink when chosen. */
 @Composable
 fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = Murmur.colors
-    val bg by animateColorAsState(if (selected) c.ink else Color.Transparent, tween(180), label = "chip")
+    val bg by animateColorAsState(if (selected) c.ink else c.paperRaised, tween(180), label = "chip")
     val fg by animateColorAsState(if (selected) c.paper else c.ink, tween(180), label = "chipText")
     Box(
         modifier
             .clip(CircleShape)
             .background(bg)
-            .border(1.dp, if (selected) Color.Transparent else c.hairlineStrong, CircleShape)
             .selectable(selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 9.dp)
     ) {
@@ -421,6 +517,7 @@ fun ChipRow(items: List<String>, selected: String, modifier: Modifier = Modifier
 
 // ---- input ----------------------------------------------------------------------------------
 
+/** A field is a well at the field radius. Focus draws the one ring the app allows itself. */
 @Composable
 fun Field(
     value: String,
@@ -439,7 +536,8 @@ fun Field(
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     var reveal by remember { mutableStateOf(false) }
-    val border by animateColorAsState(if (focused) c.ink else c.hairline, tween(160), label = "border")
+    val ring by animateColorAsState(if (focused) c.ink.copy(alpha = 0.6f) else Color.Transparent, tween(160), label = "ring")
+    val shape = RoundedCornerShape(Radii.field)
     Column(modifier) {
         if (label != null) {
             Overline(label)
@@ -448,8 +546,8 @@ fun Field(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(c.paperRaised, RoundedCornerShape(Radii.field))
-                .border(1.dp, border, RoundedCornerShape(Radii.field))
+                .background(c.paperRaised, shape)
+                .border(1.5.dp, ring, shape)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top
         ) {
@@ -519,7 +617,6 @@ fun PrimaryButton(
             .height(52.dp)
             .clip(CircleShape)
             .background(fill)
-            .then(if (!enabled) Modifier.border(1.dp, c.hairline, CircleShape) else Modifier)
             .clickable(enabled = enabled && !loading, role = Role.Button, onClick = onClick)
             .padding(horizontal = 24.dp),
         horizontalArrangement = Arrangement.Center,
@@ -533,6 +630,7 @@ fun PrimaryButton(
     }
 }
 
+/** The tonal button: a well with round ends, no edge. */
 @Composable
 fun SecondaryButton(
     text: String,
@@ -548,7 +646,7 @@ fun SecondaryButton(
         modifier
             .height(if (compact) 36.dp else 46.dp)
             .clip(CircleShape)
-            .border(BorderStroke(1.dp, if (enabled) c.hairlineStrong else c.hairline), CircleShape)
+            .background(c.paperRaised)
             .clickable(enabled = enabled && !loading, role = Role.Button, onClick = onClick)
             .padding(horizontal = if (compact) 16.dp else 22.dp),
         horizontalArrangement = Arrangement.Center,
@@ -589,12 +687,10 @@ fun GlyphButton(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Co
     )
 }
 
-// ---- surfaces -------------------------------------------------------------------------------
-
 /**
- * The keyboard-like block the live dictation button is shown on: near-black at night, keyboard grey
- * by day, so the pill previews over the brightness it will actually float on. At night a hairline
- * keeps its edge.
+ * The keyboard-like block the live dictation button is shown on: near-black at night, keyboard
+ * grey by day, so the pill previews over the brightness it will actually float on. A sunk
+ * surface at the card radius; no edge.
  */
 @Composable
 fun Stage(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
@@ -602,9 +698,8 @@ fun Stage(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Uni
     Box(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Radii.block))
-            .background(c.stage)
-            .border(1.dp, if (c.isDark) c.hairline else Color.Transparent, RoundedCornerShape(Radii.block)),
+            .clip(RoundedCornerShape(Radii.card))
+            .background(c.stage),
         content = content
     )
 }
@@ -663,7 +758,7 @@ fun Screen(
         Column(Modifier.padding(horizontal = PageMargin)) {
             Spacer(Modifier.height(12.dp))
             Heading(title, description)
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(Space.block))
             content()
             Spacer(Modifier.height(40.dp))
         }
@@ -703,7 +798,7 @@ fun LazyScreen(
                 Column {
                     Spacer(Modifier.height(12.dp))
                     Heading(title, description)
-                    Spacer(Modifier.height(if (header != null) 24.dp else 32.dp))
+                    Spacer(Modifier.height(if (header != null) 24.dp else Space.block))
                     header?.invoke(this)
                 }
             }
@@ -715,17 +810,33 @@ fun LazyScreen(
 /** Vertical rhythm between groups on a screen. */
 @Composable
 fun SectionGap() {
-    Spacer(Modifier.height(36.dp))
+    Spacer(Modifier.height(Space.block))
 }
 
-/** A group label followed by its rows. */
+/**
+ * A group: an overline, an optional line of context, and a raised card holding the content.
+ * The card is what sets a group apart; nothing is ruled. [rows] trims the card's vertical
+ * padding for content made of [ControlRow]s, which bring their own rhythm.
+ */
 @Composable
-fun Group(label: String? = null, content: @Composable ColumnScope.() -> Unit) {
+fun Group(
+    label: String? = null,
+    description: String? = null,
+    rows: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit
+) {
     Column(Modifier.fillMaxWidth()) {
         if (label != null) {
             Overline(label)
-            Spacer(Modifier.height(6.dp))
+            if (description != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(description, style = Murmur.type.bodySmall, color = Murmur.colors.inkSoft)
+            }
+            Spacer(Modifier.height(10.dp))
         }
-        content()
+        Card(padding = if (rows) RowCardPadding else PaddingValues(Space.card), content = content)
     }
 }
+
+/** Card padding for content made of rows: the rows' own rhythm supplies the rest. */
+val RowCardPadding = PaddingValues(horizontal = Space.card, vertical = Space.xs)

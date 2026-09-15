@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@renderer/components/ui/select'
-import { Badge } from '@renderer/components/ui/misc'
+import { Badge, Banner } from '@renderer/components/ui/misc'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { ModelField, SecretInput, TestResult } from '@renderer/components/ProviderForm'
 import { LanguageSelect } from '@renderer/components/LanguageSelect'
@@ -39,7 +39,7 @@ export function ProvidersPage({
   const murmur = inference.routing.stt === 'murmur'
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-section">
       {!embedded && (
         <PageHeader
           title="Models"
@@ -59,10 +59,10 @@ export function ProvidersPage({
         />
       )}
       {inference.cloudEnabled && !inference.managedAvailable && (
-        <p className="rounded-lg border border-dashed px-4 py-3 text-[13px] text-muted-foreground">
+        <Banner tone="neutral" className="text-note text-muted-foreground">
           This Murmur instance does not provide speech models of its own, so Murmur uses the
           provider you connect here.
-        </p>
+        </Banner>
       )}
 
       {murmur ? (
@@ -105,7 +105,7 @@ export function ProvidersPage({
       </Section>
 
       {!embedded && (
-        <div className="flex flex-wrap gap-2 text-[12px] text-muted-foreground">
+        <div className="flex flex-wrap gap-2 text-meta text-muted-foreground">
           {murmur ? (
             <>
               <Badge variant="outline">murmur</Badge>
@@ -162,6 +162,7 @@ function SourceChooser({
       icon: <KeyRound />
     }
   ]
+  // The choice shows as elevation: the selected source is a raised card, the other a well.
   return (
     <div role="radiogroup" aria-label="Speech model source" className="grid gap-3 sm:grid-cols-2">
       {options.map((o) => {
@@ -174,17 +175,17 @@ function SourceChooser({
             aria-checked={selected}
             onClick={() => onChange(o.value)}
             className={cn(
-              'flex flex-col gap-2 rounded-2xl border bg-card p-4 text-left transition-colors duration-200 hover:bg-accent/50',
-              selected && 'border-primary ring-1 ring-primary'
+              'flex flex-col gap-2 rounded-xl p-card text-left transition-[background-color,box-shadow] duration-200',
+              selected ? 'surface-raised' : 'well text-muted-foreground hover:bg-accent'
             )}
           >
             <div className="flex items-center gap-2 text-sm font-medium [&>svg]:size-4 [&>svg]:text-muted-foreground">
               {o.icon}
-              <span className="flex-1">{o.title}</span>
+              <span className={cn('flex-1', selected && 'text-foreground')}>{o.title}</span>
               {selected && <Check className="size-4 text-primary" />}
             </div>
-            <p className="text-[13px] leading-relaxed text-muted-foreground">{o.description}</p>
-            {o.meta && <span className="text-[12px] text-muted-foreground">{o.meta}</span>}
+            <p className="text-note leading-relaxed text-muted-foreground">{o.description}</p>
+            {o.meta && <span className="text-meta text-muted-foreground">{o.meta}</span>}
           </button>
         )
       })}
@@ -238,7 +239,7 @@ function MurmurSpeechSection({
           </Badge>
           {minutes && (
             <>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+              <div className="well h-1.5 flex-1 overflow-hidden rounded-full">
                 <div
                   className={cn(
                     'h-full rounded-full',
@@ -247,7 +248,7 @@ function MurmurSpeechSection({
                   style={{ width: `${Math.max(2, share * 100)}%` }}
                 />
               </div>
-              <span className="text-[12px] tabular-nums text-muted-foreground">
+              <span className="text-meta tabular-nums text-muted-foreground">
                 {minutesLabel(minutes)}
               </span>
             </>
@@ -264,7 +265,7 @@ function MurmurSpeechSection({
             {testing ? <Loader2 className="animate-spin" /> : <Play />} Run test
           </Button>
           {!inference.signedIn && (
-            <span className="text-[13px] text-muted-foreground">Sign in first.</span>
+            <span className="text-note text-muted-foreground">Sign in first.</span>
           )}
         </div>
         {result && (
@@ -359,7 +360,7 @@ function OwnProviderSection({ onReady }: { onReady?: (ok: boolean) => void }): R
           value={stt.baseUrl}
           onChange={(e) => void patch({ stt: { baseUrl: e.target.value.trim() } })}
           placeholder="https://api.example.com/v1"
-          className="font-mono text-[13px]"
+          className="font-mono text-note"
           spellCheck={false}
         />
       </SettingRow>
@@ -416,7 +417,7 @@ function OwnProviderSection({ onReady }: { onReady?: (ok: boolean) => void }): R
             {testing ? <Loader2 className="animate-spin" /> : <Play />} Run test
           </Button>
           {!configured && (
-            <span className="text-[13px] text-muted-foreground">
+            <span className="text-note text-muted-foreground">
               Enter a base URL and model first.
             </span>
           )}

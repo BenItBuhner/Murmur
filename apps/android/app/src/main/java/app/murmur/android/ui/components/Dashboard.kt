@@ -2,7 +2,6 @@ package app.murmur.android.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,26 +33,27 @@ import app.murmur.android.history.StageTimings
 import app.murmur.android.ui.formatCount
 import app.murmur.android.ui.formatRelative
 import app.murmur.android.ui.pluralize
+import app.murmur.android.ui.theme.Elevation
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
+import app.murmur.android.ui.theme.Space
+import app.murmur.android.ui.theme.surface
 
 /*
  * The pieces the home screen is built from: stat tiles, the cards that ask for attention, a row of
- * recent history, and the bar that shows where a dictation's time went. Hairlines and paper, like
- * the rest of the app; the desktop's cards translated into Murmur's own language.
+ * recent history, and the bar that shows where a dictation's time went. Raised cards on the paper,
+ * like the rest of the app; the desktop's cards in Murmur's own language.
  */
 
-/** A hairline-bordered block, the Android answer to the desktop's cards. */
+/** A raised tile, the Android answer to the desktop's cards. */
 @Composable
 fun Tile(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
-    val c = Murmur.colors
-    val shape = RoundedCornerShape(Radii.block)
+    val shape = RoundedCornerShape(Radii.card)
     Box(
         modifier
-            .clip(shape)
-            .border(1.dp, c.hairline, shape)
+            .surface(Elevation.raised, shape)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-            .padding(18.dp)
+            .padding(Space.card)
     ) { content() }
 }
 
@@ -91,21 +91,21 @@ fun EmptyFigure() {
 }
 
 /**
- * Something that needs the user before dictation works (or an update waiting): a tinted card in
- * the accent with one line of why and where tapping it leads.
+ * Something that needs the user before dictation works (or an update waiting): a block tinted in
+ * the accent at the card radius, with one line of why and where tapping it leads. A tint, not a
+ * card: it is a note on the page, not an object on it.
  */
 @Composable
 fun AttentionCard(title: String, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = Murmur.colors
-    val shape = RoundedCornerShape(Radii.field + 2.dp)
+    val shape = RoundedCornerShape(Radii.card)
     Row(
         modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(c.ember.copy(alpha = if (c.isDark) 0.14f else 0.09f))
-            .border(1.dp, c.ember.copy(alpha = 0.35f), shape)
+            .background(c.ember.copy(alpha = if (c.isDark) 0.16f else 0.1f))
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = Space.card, vertical = Space.card),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
@@ -118,23 +118,20 @@ fun AttentionCard(title: String, description: String, onClick: () -> Unit, modif
     }
 }
 
-/** One recent dictation: the text, then when, where and how long. */
+/** One recent dictation: the text, then when, where and how long. A row of a [ListCard]. */
 @Composable
 fun RecentRow(entry: HistoryEntry, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val c = Murmur.colors
-    Column(
-        modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-            .padding(vertical = 14.dp)
-    ) {
-        if (entry.failed && entry.finalText.isEmpty()) {
-            Text(entry.error ?: "Failed", style = Murmur.type.body, color = c.clay, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        } else {
-            Text(entry.finalText, style = Murmur.type.body, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    ListRow(modifier, onClick = onClick) {
+        Column(Modifier.weight(1f)) {
+            if (entry.failed && entry.finalText.isEmpty()) {
+                Text(entry.error ?: "Failed", style = Murmur.type.body, color = c.clay, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            } else {
+                Text(entry.finalText, style = Murmur.type.body, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(entryMeta(entry), style = Murmur.type.labelSmall, color = c.inkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Spacer(Modifier.height(5.dp))
-        Text(entryMeta(entry), style = Murmur.type.labelSmall, color = c.inkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -165,7 +162,7 @@ fun latencyParts(t: StageTimings): List<LatencyPart> {
 
 /**
  * Where the time went between the stop tap and the inserted text: one bar split by stage, drawn in
- * from the left the first time it appears, with a legend underneath.
+ * from the left the first time it appears, with a legend underneath. The track is a well.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -180,8 +177,7 @@ fun LatencyBar(t: StageTimings, modifier: Modifier = Modifier) {
                 .fillMaxWidth()
                 .height(8.dp)
                 .clip(CircleShape)
-                .background(c.paperRaised)
-                .border(1.dp, c.hairline, CircleShape)
+                .background(c.hairline.copy(alpha = 0.6f))
         ) {
             var x = 0f
             val gap = 1.5.dp.toPx()

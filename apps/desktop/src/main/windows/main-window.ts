@@ -41,9 +41,10 @@ export interface ChromeColors {
 
 /** Neutral defaults used until the renderer reports the palette it actually resolved. */
 export function defaultChrome(theme: 'light' | 'dark'): ChromeColors {
+  // The canvas colours of the neutral palette (shared/theme.ts), so the first frame matches.
   return theme === 'dark'
-    ? { background: '#0f0f10', foreground: '#e7e5e4' }
-    : { background: '#fafaf9', foreground: '#1c1917' }
+    ? { background: '#1c1b1a', foreground: '#e7e5e4' }
+    : { background: '#f5f4f2', foreground: '#1c1917' }
 }
 
 export function createMainWindow(chrome: ChromeColors): BrowserWindow {

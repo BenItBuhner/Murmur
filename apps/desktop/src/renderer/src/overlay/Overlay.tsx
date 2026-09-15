@@ -170,12 +170,14 @@ export function Overlay({
         onPointerEnter={interactive ? () => onHover?.(true) : undefined}
         onPointerLeave={interactive ? () => onHover?.(false) : undefined}
         className={cn(
-          'overlay-pill relative overflow-hidden rounded-full text-[13px] font-medium text-overlay-foreground',
+          'overlay-pill relative overflow-hidden rounded-full text-note font-medium text-overlay-foreground',
+          // The pill floats over other windows: the overlay elevation, and a thin light catch on
+          // its top edge rather than an outline, so it reads as a surface with a light on it.
           idle
             ? micError
               ? 'bg-destructive/70 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
               : 'bg-overlay/60 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
-            : 'shadow-[0_6px_24px_rgba(0,0,0,0.35),0_0_0_1px_rgba(255,255,255,0.08)_inset]',
+            : 'shadow-[0_6px_24px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]',
           !idle && 'bg-overlay/95',
           phase === 'error' && 'bg-overlay-error/95',
           phase === 'success' && 'bg-overlay-success/95',
@@ -256,7 +258,7 @@ function Contents({
           </div>
           <span className="tabular-nums text-overlay-foreground/70">{elapsedLabel}</span>
           {label && (
-            <span className="flex items-center gap-1 rounded-full bg-overlay-foreground/10 px-2 py-0.5 text-[11px] text-overlay-foreground/85 animate-fade-in">
+            <span className="flex items-center gap-1 rounded-full bg-overlay-foreground/10 px-2 py-0.5 text-caption text-overlay-foreground/85 animate-fade-in">
               {state.locked && !command && <LockIcon />}
               {label}
             </span>
@@ -306,7 +308,7 @@ function Contents({
           <button
             type="button"
             onClick={() => onRetry?.(retryId)}
-            className="flex h-7 items-center gap-1.5 rounded-full bg-overlay-foreground/15 px-3 text-[12px] font-semibold text-overlay-foreground transition-colors hover:bg-overlay-foreground/28 active:bg-overlay-foreground/35"
+            className="flex h-7 items-center gap-1.5 rounded-full bg-overlay-foreground/15 px-3 text-meta font-semibold text-overlay-foreground transition-colors hover:bg-overlay-foreground/28 active:bg-overlay-foreground/35"
           >
             <RetryIcon /> Retry
           </button>

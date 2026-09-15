@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import app.murmur.android.cloud.AccountMode
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.ui.components.FeatureRow
-import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.PageMargin
 import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.components.Wordmark
@@ -67,17 +66,13 @@ fun AccountGateScreen(config: CloudConfig, onSkip: () -> Unit) {
             style = Murmur.type.body,
             color = c.inkSoft
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
         Column {
-            Hairline()
             FeatureRow("One dictionary for every device you sign in on")
-            Hairline()
             FeatureRow("Style and tone preferences follow you")
-            Hairline()
             FeatureRow("Speech-model keys never leave this phone")
-            Hairline()
         }
-        Spacer(Modifier.height(36.dp))
+        Spacer(Modifier.height(32.dp))
         if (!ready) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(16.dp), color = c.inkSoft, strokeWidth = 1.5.dp)

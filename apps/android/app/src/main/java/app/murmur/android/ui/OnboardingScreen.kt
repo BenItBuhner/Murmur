@@ -34,7 +34,6 @@ import app.murmur.android.ui.components.ChipRow
 import app.murmur.android.ui.components.FeatureRow
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
-import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.Heading
 import app.murmur.android.ui.components.PageMargin
 import app.murmur.android.ui.components.PrimaryButton
@@ -132,26 +131,21 @@ fun OnboardingScreen(
                         }
                         Spacer(Modifier.height(28.dp))
                         PillPreview(settings, height = 128.dp)
-                        Spacer(Modifier.height(28.dp))
+                        Spacer(Modifier.height(24.dp))
                         Column {
-                            Hairline()
                             FeatureRow("Tap to talk, tap again to finish")
-                            Hairline()
                             FeatureRow(
                                 if (inference.offersMurmur) "Speech and formatting models included with your account, or bring your own"
                                 else "Your own speech model: OpenAI, Groq, Deepgram, or a local whisper server"
                             )
-                            Hairline()
                             FeatureRow(
                                 if (signedIn) "Your dictionary and style sync to every device you sign in on"
                                 else "A personal dictionary for names and jargon"
                             )
-                            Hairline()
                             FeatureRow(
                                 if (signedIn) "Your own API keys, if you use any, stay on this phone"
                                 else "Nothing stored anywhere but this phone"
                             )
-                            Hairline()
                         }
                     }
                     Step.PERSONALIZE -> PersonalizeStep(store, firstName)
@@ -175,7 +169,6 @@ fun OnboardingScreen(
                         SpeechModelForm(store, settings, showAdvanced = false)
                         SectionGap()
                         Group("Language") {
-                            Spacer(Modifier.height(10.dp))
                             LanguagePicker(store, settings)
                         }
                     }
@@ -184,7 +177,7 @@ fun OnboardingScreen(
             }
         }
 
-        Hairline()
+        // The action bar: set apart by space, and by the button in it, not by a rule.
         Row(
             Modifier.fillMaxWidth().padding(horizontal = PageMargin, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -211,14 +204,10 @@ private fun PersonalizeStep(store: SettingsStore, firstName: String?) {
         "These choices live in your account, so every device you sign in on picks them up. You only do this once."
     )
     Spacer(Modifier.height(32.dp))
-    Group("Names, products and tools you say often") {
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Speech models misspell names. Anything in your dictionary is spelled the way you wrote it.",
-            style = Murmur.type.bodySmall,
-            color = c.inkSoft
-        )
-        Spacer(Modifier.height(16.dp))
+    Group(
+        "Names, products and tools you say often",
+        description = "Speech models misspell names. Anything in your dictionary is spelled the way you wrote it."
+    ) {
         Field(
             value = terms,
             onValueChange = { terms = it },
@@ -246,7 +235,6 @@ private fun PersonalizeStep(store: SettingsStore, firstName: String?) {
     }
     SectionGap()
     Group("Default tone") {
-        Spacer(Modifier.height(8.dp))
         ChipRow(
             items = Tone.entries.map { it.displayName },
             selected = settings.tone.displayName,

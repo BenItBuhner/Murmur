@@ -213,24 +213,27 @@ export function clerkAppearance(theme: ResolvedTheme): {
       colorBackground: hex.card,
       colorText: hex['card-foreground'],
       colorTextSecondary: hex['muted-foreground'],
-      colorInputBackground: hex.card,
+      // Fields are wells, like Murmur's own.
+      colorInputBackground: hex.muted,
       colorInputText: hex['card-foreground'],
       colorNeutral: hex.foreground,
       colorDanger: hex.destructive,
       colorSuccess: hex.success,
-      borderRadius: '0.875rem',
+      // The field radius of the token scale (styles/globals.css).
+      borderRadius: '12px',
       fontFamily: 'var(--font-sans)',
       fontSize: '14px'
     },
     elements: {
       rootBox: 'w-full',
-      cardBox: 'w-full shadow-none border border-border rounded-2xl',
-      card: 'shadow-none bg-card px-6 py-6 gap-5',
-      headerTitle: 'serif-display text-[26px]',
-      headerSubtitle: 'text-[13px]',
+      // The form is a raised card at the card radius; no drawn edge.
+      cardBox: 'w-full surface-raised rounded-xl',
+      card: 'shadow-none bg-card px-card py-card gap-5',
+      headerTitle: 'serif-display text-heading',
+      headerSubtitle: 'text-note',
       formButtonPrimary: 'h-9 rounded-full text-sm font-medium shadow-none',
-      formFieldInput: 'h-9 rounded-xl shadow-none',
-      socialButtonsBlockButton: 'h-9 rounded-full shadow-none',
+      formFieldInput: 'h-9 rounded-md border-transparent shadow-none',
+      socialButtonsBlockButton: 'h-9 rounded-full shadow-none border-transparent bg-muted',
       // Murmur switches between sign in and sign up with its own tabs.
       footerAction: { display: 'none' }
     }

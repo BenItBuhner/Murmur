@@ -1,9 +1,9 @@
 package app.murmur.android.ui
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,7 +25,6 @@ import app.murmur.android.ui.components.ChipRow
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
-import app.murmur.android.ui.components.Hairline
 import app.murmur.android.ui.components.Notice
 import app.murmur.android.ui.components.NoticeTone
 import app.murmur.android.ui.components.Screen
@@ -67,7 +66,6 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
         nav = nav
     ) {
         Group("Formatting") {
-            Spacer(Modifier.height(8.dp))
             Segmented(
                 options = FormattingMode.entries.map { Segment(it, it.displayName) },
                 selected = settings.formattingMode,
@@ -88,7 +86,6 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
         SectionGap()
 
         Group("Tone") {
-            Spacer(Modifier.height(8.dp))
             ChipRow(
                 items = Tone.entries.map { it.displayName },
                 selected = settings.tone.displayName,
@@ -115,16 +112,12 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                 singleLine = false,
                 minLines = 3
             )
-            Spacer(Modifier.height(14.dp))
-            Column {
-                Hairline()
-                ToggleRow(
-                    "Trailing space", settings.trailingSpace,
-                    { v -> store.update { s -> s.copy(trailingSpace = v) } },
-                    description = "Leave a space after the text so the next dictation continues naturally"
-                )
-                Hairline()
-            }
+            Spacer(Modifier.height(6.dp))
+            ToggleRow(
+                "Trailing space", settings.trailingSpace,
+                { v -> store.update { s -> s.copy(trailingSpace = v) } },
+                description = "Leave a space after the text so the next dictation continues naturally"
+            )
         }
 
         if (settings.formattingMode == FormattingMode.SMART) {
@@ -150,8 +143,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                 )
                 SectionGap()
             }
-            if (inference.routing.murmurLlm) Column {
-                Hairline()
+            if (inference.routing.murmurLlm) Group(if (inference.offersMurmur) null else "Formatting model", rows = true) {
                 ControlRow(
                     "Model",
                     description = if (inference.signedIn) "Provided by this Murmur instance on the ${inference.planLabel} plan. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted."
@@ -159,19 +151,16 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                 ) {
                     Text(inference.status?.models?.llm ?: Inference.LLM_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
                 }
-                Hairline()
             } else Group(if (inference.offersMurmur) null else "Formatting model") {
-                Spacer(Modifier.height(6.dp))
-                Hairline()
                 ToggleRow(
                     "Same server as speech", settings.llmSameAsStt,
                     { v -> store.update { s -> s.copy(llmSameAsStt = v) } },
                     description = if (settings.sttSource == InferenceSource.MURMUR && inference.offersMurmur)
                         "Follow the speech model, which is Murmur's right now"
-                    else "Reuse the speech provider's URL and key"
+                    else "Reuse the speech provider's URL and key",
+                    modifier = Modifier.padding(top = 0.dp)
                 )
-                Hairline()
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(10.dp))
                 if (!settings.llmSameAsStt) {
                     Field(
                         value = settings.llmBaseUrl,

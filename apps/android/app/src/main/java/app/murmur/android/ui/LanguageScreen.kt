@@ -1,11 +1,9 @@
 package app.murmur.android.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.unit.dp
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.ui.components.Group
 import app.murmur.android.ui.components.Screen
 
 /** The dictation language: one setting for the speech model and the formatting model, synced with the account. */
@@ -20,7 +18,7 @@ fun LanguageScreen(store: SettingsStore, settings: MurmurSettings, synced: Boole
         },
         nav = nav
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Group("Recognition") {
             LanguagePicker(store, settings)
         }
     }

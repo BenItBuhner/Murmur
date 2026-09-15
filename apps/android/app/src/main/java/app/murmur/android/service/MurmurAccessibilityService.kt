@@ -56,6 +56,8 @@ private const val TARGET_LOOKUP_RETRY_MS = 90L
  * events (the keyboard actually appearing or leaving) always scan.
  */
 private const val WINDOW_SCAN_MIN_INTERVAL_MS = 120L
+/** How much of the field before the cursor the formatting model is shown. */
+private const val PRECEDING_TEXT_MAX = 600
 
 /**
  * The Wispr Flow pattern on Android: whenever the keyboard comes up, a floating dictation
@@ -272,6 +274,19 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     override fun focusedPackage(): String {
         val root = rootInActiveWindow
         return root?.packageName?.toString() ?: lastPackage
+    }
+
+    /**
+     * What is already in the field before the cursor, so the model can continue it (no capital
+     * mid-sentence, an ongoing list keeps its markers, the same language). Read on the main thread
+     * like every other node interrogation; null when there is no field or the field hides its text.
+     */
+    override suspend fun precedingText(): String? = withContext(Dispatchers.Main.immediate) {
+        val node = runCatching { findEditableTarget() }.getOrNull() ?: return@withContext null
+        if (node.isPassword || node.isShowingHintText) return@withContext null
+        val text = node.text?.toString()?.takeIf { it.isNotEmpty() } ?: return@withContext null
+        val caret = node.textSelectionStart.takeIf { it in 0..text.length } ?: text.length
+        text.substring(0, caret).takeIf { it.isNotBlank() }?.takeLast(PRECEDING_TEXT_MAX)
     }
 
     /**

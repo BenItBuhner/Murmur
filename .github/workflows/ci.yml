@@ -36,6 +36,25 @@ jobs:
       - run: node --test scripts/release.test.mjs
       - run: bash -n scripts/install.sh
 
+  engine-check:
+    name: Text engine typecheck, lint, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/text-engine
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/text-engine/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      # Includes the offline eval corpus and the golden contract the Android port is pinned to.
+      - run: npm test
+
   backend-check:
     name: Backend typecheck, lint, test
     runs-on: ubuntu-latest

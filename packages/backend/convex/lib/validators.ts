@@ -18,14 +18,46 @@ export type Tone = Infer<typeof toneValidator>
 export const formattingModeValidator = v.union(v.literal('off'), v.literal('light'), v.literal('smart'))
 export type FormattingMode = Infer<typeof formattingModeValidator>
 
-export const hesitationLevelValidator = v.union(v.literal('off'), v.literal('light'), v.literal('thorough'))
-export const repetitionScopeValidator = v.union(v.literal('words'), v.literal('phrases'), v.literal('thorough'))
-export const listsModeValidator = v.union(v.literal('off'), v.literal('spoken'), v.literal('auto'))
-export const listStyleValidator = v.union(v.literal('auto'), v.literal('bullets'), v.literal('numbers'))
-export const bulletMarkerValidator = v.union(v.literal('-'), v.literal('•'), v.literal('*'))
-export const numbersModeValidator = v.union(v.literal('off'), v.literal('smart'), v.literal('all'))
-export const llmFreedomValidator = v.union(v.literal('strict'), v.literal('balanced'), v.literal('natural'))
-export const llmStructureValidator = v.union(v.literal('keep'), v.literal('assist'))
+/**
+ * Knobs of the rule-based cleanup the apps had before the text engine (v0.5). Existing preference
+ * documents and app rules still carry them, so they stay valid here; current clients neither send
+ * nor read them, and they are never used by the gateway.
+ */
+const hesitationLevelValidator = v.union(v.literal('off'), v.literal('light'), v.literal('thorough'))
+const repetitionScopeValidator = v.union(v.literal('words'), v.literal('phrases'), v.literal('thorough'))
+const listsModeValidator = v.union(v.literal('off'), v.literal('spoken'), v.literal('auto'))
+const listStyleValidator = v.union(v.literal('auto'), v.literal('bullets'), v.literal('numbers'))
+const bulletMarkerValidator = v.union(v.literal('-'), v.literal('•'), v.literal('*'))
+const numbersModeValidator = v.union(v.literal('off'), v.literal('smart'), v.literal('all'))
+const llmFreedomValidator = v.union(v.literal('strict'), v.literal('balanced'), v.literal('natural'))
+const llmStructureValidator = v.union(v.literal('keep'), v.literal('assist'))
+
+/** @deprecated Kept only so documents written by v0.4 clients keep validating. */
+export const legacyFormattingFields = {
+  removeFillers: v.optional(v.boolean()),
+  fillerWords: v.optional(v.array(v.string())),
+  hesitations: v.optional(hesitationLevelValidator),
+  hesitationPhrases: v.optional(v.array(v.string())),
+  collapseRepeats: v.optional(v.boolean()),
+  repetitionScope: v.optional(repetitionScopeValidator),
+  spokenCommands: v.optional(v.boolean()),
+  selfCorrections: v.optional(v.boolean()),
+  autoCapitalize: v.optional(v.boolean()),
+  pressEnterCommand: v.optional(v.boolean()),
+  lists: v.optional(listsModeValidator),
+  listStyle: v.optional(listStyleValidator),
+  bulletMarker: v.optional(bulletMarkerValidator),
+  numbers: v.optional(numbersModeValidator),
+  llmFreedom: v.optional(llmFreedomValidator),
+  llmStructure: v.optional(llmStructureValidator)
+}
+
+/** @deprecated As `legacyFormattingFields`, for per-app rules. */
+export const legacyAppRuleFields = {
+  lists: v.optional(listsModeValidator),
+  numbers: v.optional(numbersModeValidator),
+  freedom: v.optional(llmFreedomValidator)
+}
 
 export const platformValidator = v.union(
   v.literal('win32'),
@@ -43,29 +75,18 @@ export const dictationModeValidator = v.union(
   v.literal('command')
 )
 
-/** Style preferences that follow the user across devices. Provider connections and API keys never sync. */
+/**
+ * Style preferences that follow the user across devices: whether to format, how it should sound,
+ * the trailing space and the user's instructions for the model. Everything else the engine derives
+ * from the destination. Provider connections and API keys never sync.
+ */
 export const formattingPreferencesValidator = v.object({
   mode: v.optional(formattingModeValidator),
   tone: v.optional(toneValidator),
-  removeFillers: v.optional(v.boolean()),
-  fillerWords: v.optional(v.array(v.string())),
-  hesitations: v.optional(hesitationLevelValidator),
-  hesitationPhrases: v.optional(v.array(v.string())),
-  collapseRepeats: v.optional(v.boolean()),
-  repetitionScope: v.optional(repetitionScopeValidator),
-  spokenCommands: v.optional(v.boolean()),
-  selfCorrections: v.optional(v.boolean()),
-  autoCapitalize: v.optional(v.boolean()),
   trailingSpace: v.optional(v.boolean()),
-  pressEnterCommand: v.optional(v.boolean()),
-  lists: v.optional(listsModeValidator),
-  listStyle: v.optional(listStyleValidator),
-  bulletMarker: v.optional(bulletMarkerValidator),
-  numbers: v.optional(numbersModeValidator),
-  llmFreedom: v.optional(llmFreedomValidator),
-  llmStructure: v.optional(llmStructureValidator),
-  /** Free-form guidance for the smart-formatting model; provider connections never sync. */
-  llmInstructions: v.optional(v.string())
+  /** Free-form guidance for the formatting model. */
+  llmInstructions: v.optional(v.string()),
+  ...legacyFormattingFields
 })
 export type FormattingPreferences = Infer<typeof formattingPreferencesValidator>
 
@@ -132,10 +153,8 @@ export type SnippetInput = Infer<typeof snippetInputValidator>
 export const appRuleOverrides = {
   formatting: v.optional(formattingModeValidator),
   trailingSpace: v.optional(v.boolean()),
-  lists: v.optional(listsModeValidator),
-  numbers: v.optional(numbersModeValidator),
-  freedom: v.optional(llmFreedomValidator),
-  instructions: v.optional(v.string())
+  instructions: v.optional(v.string()),
+  ...legacyAppRuleFields
 }
 
 export const appRuleDtoValidator = v.object({

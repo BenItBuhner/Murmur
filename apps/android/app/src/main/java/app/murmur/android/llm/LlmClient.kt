@@ -95,6 +95,30 @@ object LlmClient {
         }
     }
 
+    /**
+     * Murmur's own formatting endpoint (`POST /v1/format` on the gateway): the transcript and its
+     * context in, the engine's result out. Only ever called against a Murmur instance.
+     */
+    suspend fun format(cfg: LlmConfig, body: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        val base = normalizeBaseUrl(cfg.baseUrl)
+        if (base.isEmpty()) throw SttException("No LLM base URL configured", SttErrorKind.BAD_REQUEST)
+        val req = Request.Builder()
+            .url("$base/format")
+            .header("Content-Type", "application/json")
+            .apply { if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}") }
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        try {
+            // The gateway may make two model round trips before answering.
+            client(cfg.timeoutMs * 2 + 2000).newCall(req).execute().use { r ->
+                if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
+                JSONObject(r.body?.string() ?: "{}")
+            }
+        } catch (e: Exception) {
+            throw toSttException(e, "Formatting request failed")
+        }
+    }
+
     suspend fun listModels(baseUrl: String, apiKey: String): List<String> = withContext(Dispatchers.IO) {
         val base = normalizeBaseUrl(baseUrl)
         if (base.isEmpty()) throw SttException("No LLM base URL configured", SttErrorKind.BAD_REQUEST)

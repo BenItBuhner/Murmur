@@ -16,8 +16,9 @@ describe('settings schema', () => {
     expect(s.audio.keepMicWarm).toBe(true)
     expect(s.audio.limitDuration).toBe(false)
     expect(sessionDurationLimitMs(s.audio)).toBeNull()
-    expect(s.formatting.llm.minWords).toBe(4)
-    expect(s.formatting.fillerWords).toContain('um')
+    expect(s.formatting.mode).toBe('smart')
+    expect(s.formatting.instructions).toBe('')
+    expect(s.formatting.llm.timeoutMs).toBe(8000)
     expect(s.stt.kind).toBe('openai-compatible')
     expect(s.stats.totalWords).toBe(0)
     // Appearance defaults keep the original look until the user opts in.
@@ -138,6 +139,47 @@ describe('settings schema', () => {
       expect(parseSettings(fresh).stt.source).toBe('murmur')
       expect(migrateSettings(null)).toBeNull()
       expect(migrateSettings([1, 2])).toEqual([1, 2])
+    })
+
+    it('carries the model instructions over from a v2 file and drops the old cleanup knobs', () => {
+      const v2 = {
+        version: 2,
+        stt: { source: 'custom', baseUrl: 'https://api.groq.com/openai/v1', model: 'whisper-1' },
+        formatting: {
+          mode: 'smart',
+          tone: 'casual',
+          removeFillers: true,
+          fillerWords: ['um'],
+          hesitations: 'thorough',
+          numbers: 'all',
+          lists: 'off',
+          appRules: [
+            {
+              id: 'r',
+              match: 'slack',
+              tone: 'auto',
+              lists: 'off',
+              numbers: 'all',
+              freedom: 'strict'
+            }
+          ],
+          llm: {
+            source: 'custom',
+            model: 'llama-3.1-8b-instant',
+            instructions: 'British spelling.',
+            freedom: 'natural',
+            minWords: 4
+          }
+        }
+      }
+      const s = parseSettings(v2)
+      expect(s.version).toBe(SETTINGS_VERSION)
+      expect(s.formatting.instructions).toBe('British spelling.')
+      expect(s.formatting.llm.model).toBe('llama-3.1-8b-instant')
+      expect(s.formatting.appRules).toEqual([{ id: 'r', match: 'slack', tone: 'auto' }])
+      expect('numbers' in s.formatting).toBe(false)
+      expect('freedom' in s.formatting.llm).toBe(false)
+      expect('instructions' in s.formatting.llm).toBe(false)
     })
   })
 })

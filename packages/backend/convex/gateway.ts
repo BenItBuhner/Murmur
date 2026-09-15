@@ -1,5 +1,7 @@
 import { internal } from './_generated/api'
 import { httpAction, type ActionCtx } from './_generated/server'
+import { formatTranscript } from '../../text-engine/src/format'
+import type { ChatMessage, ChatOptions, ChatResult } from '../../text-engine/src/types'
 import {
   MAX_COMPLETION_TOKENS,
   MURMUR_MODELS,
@@ -9,13 +11,15 @@ import {
   gatewayError,
   modelsPayload,
   multipartBoundary,
+  parseFormatRequest,
   parseMultipart,
   readUpstreams,
   subjectOf,
   tokensUsed,
   upstreamModelFor,
   wavInfo,
-  type MultipartFile
+  type MultipartFile,
+  type Upstream
 } from './lib/inference'
 
 /**
@@ -209,3 +213,110 @@ export const chatCompletions = httpAction(async (ctx, request) => {
   // The upstream model is the instance's business; clients asked for the Murmur alias.
   return new Response(JSON.stringify({ ...json, model: MURMUR_MODELS.llm }), { status: 200, headers: JSON_HEADERS })
 })
+
+/**
+ * Murmur's formatting endpoint: the transcript and the dictation's context in, the text to insert
+ * out. The text engine (packages/text-engine) builds the prompt, verifies the answer, retries once
+ * in strict mode and falls back to its rule-based cleanup; every model round trip is billed.
+ *
+ *   POST /v1/format
+ *   { transcript, context: { category, tone, app?, language?, precedingText?, instructions?,
+ *                           dictionary?: [{ word, aliases }], keepVerbatim?: [] } }
+ *   -> { text, pressEnter, status, modelText?, llmMs, stages, model }
+ */
+export const format = httpAction(async (ctx, request) => {
+  const identity = await identityOf(ctx)
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  const upstream = readUpstreams(process.env).llm
+  if (!upstream)
+    return gatewayError(503, 'not_configured', 'This Murmur instance does not offer a managed formatting model')
+
+  let input: unknown
+  try {
+    input = await request.json()
+  } catch {
+    return gatewayError(400, 'bad_request', 'Body must be JSON')
+  }
+  const parsed = parseFormatRequest(input)
+  if (!parsed.ok) return gatewayError(400, 'bad_request', parsed.message)
+
+  const gate = await ctx.runMutation(internal.inference.authorize, { clerkId: identity.subject, kind: 'llm' })
+  if (!gate.ok) return gatewayError(gate.status, gate.code, gate.message, retryHeaders(gate.retryAfterSec))
+
+  const model = upstreamModelFor(upstream, gate.plan)
+  let tokens = 0
+  let calls = 0
+  const started = Date.now()
+  const complete = async (messages: ChatMessage[], opts: ChatOptions): Promise<ChatResult> => {
+    calls++
+    const res = await upstreamChat(upstream, model, messages, opts)
+    tokens += res.tokens
+    return res.result
+  }
+  const formatted = await formatTranscript(
+    { transcript: parsed.request.transcript, mode: 'smart', context: parsed.request.context },
+    complete
+  )
+  if (calls > 0) await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'llm', tokens })
+  console.log(
+    `[gateway] format plan=${gate.plan} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} tokens=${tokens} ms=${Date.now() - started}`
+  )
+  return new Response(JSON.stringify({ ...formatted, model: MURMUR_MODELS.llm }), { status: 200, headers: JSON_HEADERS })
+})
+
+class UpstreamError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string
+  ) {
+    super(message)
+  }
+}
+
+/** One chat completion against the instance's model; throws an `UpstreamError` the engine reports as a failure. */
+async function upstreamChat(
+  upstream: Upstream,
+  model: string,
+  messages: ChatMessage[],
+  opts: ChatOptions
+): Promise<{ result: ChatResult; tokens: number }> {
+  const body = JSON.stringify({
+    model,
+    messages,
+    temperature: opts.temperature ?? 0,
+    max_tokens: Math.max(1, Math.min(MAX_COMPLETION_TOKENS, Math.floor(opts.maxTokens ?? 1024))),
+    stream: false
+  })
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
+  let res: Response
+  try {
+    res = await fetch(`${upstream.baseUrl}/chat/completions`, { method: 'POST', headers, body })
+  } catch (err) {
+    console.error('[gateway] llm upstream unreachable', err instanceof Error ? err.message : err)
+    throw new UpstreamError('Could not reach the model provider behind this instance', 502, 'upstream_error')
+  }
+  const text = await res.text()
+  if (!res.ok) {
+    const failure = describeUpstreamFailure(res.status, text)
+    console.warn(`[gateway] llm upstream ${res.status} -> ${failure.status} ${failure.code}`)
+    throw new UpstreamError(failure.message, failure.status, failure.code)
+  }
+  let json: {
+    choices?: Array<{ message?: { content?: string | Array<{ text?: string }> }; finish_reason?: string }>
+    usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
+  }
+  try {
+    json = JSON.parse(text)
+  } catch {
+    throw new UpstreamError('The model provider returned a malformed answer', 502, 'upstream_error')
+  }
+  const choice = json.choices?.[0]
+  const content = choice?.message?.content
+  const answer = Array.isArray(content) ? content.map((c) => c.text ?? '').join('') : (content ?? '')
+  return {
+    result: { text: answer, finishReason: choice?.finish_reason, model, usage: json.usage },
+    tokens: tokensUsed(json.usage, body.length, text.length)
+  }
+}

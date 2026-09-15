@@ -2,11 +2,11 @@ package app.murmur.android
 
 import app.murmur.android.settings.DictionaryCodec
 import app.murmur.android.settings.DictionaryEntry
-import app.murmur.android.text.PipelineOptions
 import app.murmur.android.text.applyDictionary
 import app.murmur.android.text.editDistance
-import app.murmur.android.text.finalizeAfterLlm
-import app.murmur.android.text.runPipeline
+import app.murmur.android.text.AppCategory
+import app.murmur.android.text.basicCleanup
+import app.murmur.android.text.finish
 import app.murmur.android.text.soundKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -94,12 +94,12 @@ class DictionaryTest {
     }
 
     @Test
-    fun `pipeline enforces the dictionary before punctuation and after the LLM`() {
-        val opts = PipelineOptions(dictionary = listOf(wispr, convex))
-        val result = runPipeline("um so we moved to convex from whisper flow", opts)
-        assertEquals("So we moved to Convex from Wispr Flow ", result.text)
+    fun `the rule-based cleanup and the finishing pass both enforce the dictionary`() {
+        val dictionary = listOf(wispr, convex)
+        val result = basicCleanup("um so we moved to convex from whisper flow", dictionary)
+        assertEquals("So we moved to Convex from Wispr Flow", result.text)
         assertTrue(result.stages.contains("dictionary"))
-        assertEquals("We moved to Convex. ", finalizeAfterLlm("We moved to convex.", opts).text)
+        assertEquals("We moved to Convex. ", finish("We moved to convex.", AppCategory.UNKNOWN, dictionary, trailingSpace = true).text)
     }
 
     @Test

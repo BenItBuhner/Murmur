@@ -13,10 +13,7 @@ import { getSttProvider } from '@core/stt'
 import { chatComplete, listChatModels } from '@core/llm/client'
 import { decodeWavPcm16, encodeWavPcm16 } from '@core/audio/wav'
 import { analyze, trimSilence } from '@core/audio/vad'
-import { buildSttPrompt } from '@core/text/dictionary'
-import { buildFormatMessages, maxTokensFor, sanitizeLlmOutput } from '@core/text/llm-prompt'
-import { runPipeline } from '@core/text/pipeline'
-import { classifyApp, resolveStyle } from '@core/text/app-context'
+import { buildSttPrompt, classifyApp, formatTranscript, resolveStyle } from '@engine'
 import { defaultSettings } from '@shared/settings'
 
 const baseUrl = process.env.MURMUR_BASE_URL ?? ''
@@ -51,9 +48,7 @@ describe.skipIf(!enabled)('live endpoint', () => {
     const res = await provider.transcribe(
       {
         wav,
-        prompt: buildSttPrompt([
-          { id: '1', word: 'Americans', aliases: [], fuzzy: false, createdAt: 0 }
-        ])
+        prompt: buildSttPrompt([{ word: 'Americans', aliases: [] }])
       },
       {
         kind: 'openai-compatible',
@@ -118,50 +113,36 @@ describe.skipIf(!enabled)('live endpoint', () => {
   })
 
   it.skipIf(!llmModel)(
-    'smart-formats a messy transcript with the LLM and passes the guard',
+    'smart-formats a messy transcript with the LLM and passes the verifier',
     async () => {
       const raw =
-        'um so hey can you uh send the report to john on tuesday no wednesday and um also like cc sarah on it thanks'
-      const light = runPipeline(raw, {
-        removeFillers: true,
-        fillerWords: ['um', 'uh'],
-        hesitations: 'light',
-        hesitationPhrases: [],
-        collapseRepeats: true,
-        repetitionScope: 'phrases',
-        spokenCommands: true,
-        selfCorrections: true,
-        autoCapitalize: true,
-        trailingSpace: false,
-        pressEnterCommand: true,
-        lists: 'auto',
-        listStyle: 'auto',
-        bulletMarker: '-',
-        numbers: 'smart',
-        dictionary: [],
-        snippets: []
-      })
+        'um so hey can you uh send the report to john on tuesday no wednesday and um also like cc sarah on it about the one million two hundred thousand dollar quote thanks'
       const app = classifyApp('slack.exe', 'general - Slack')
-      const messages = buildFormatMessages({
-        raw: light.text,
-        dictionary: [{ id: '1', word: 'Sarah', aliases: [], fuzzy: false, createdAt: 0 }],
-        style: resolveStyle({ ...defaultSettings().formatting, tone: 'casual' }, app),
-        app,
-        hints: light.hints
-      })
-      const res = await chatComplete(
-        { baseUrl, apiKey, model: llmModel, timeoutMs: 30000 },
-        messages,
-        { maxTokens: maxTokensFor(raw) }
+      const f = { ...defaultSettings().formatting, tone: 'casual' as const }
+      const style = resolveStyle(f, f.appRules, app)
+      const cfg = { baseUrl, apiKey, model: llmModel, timeoutMs: 30000 }
+      const result = await formatTranscript(
+        {
+          transcript: raw,
+          mode: 'smart',
+          context: {
+            category: app.category,
+            app: app.app,
+            tone: style.tone,
+            language: 'auto',
+            dictionary: [{ word: 'Sarah', aliases: [] }]
+          }
+        },
+        (messages, opts) => chatComplete(cfg, messages, opts)
       )
-      const guard = sanitizeLlmOutput(res.text, raw)
       console.log(
-        `[live] llm=${llmModel} latency=${res.latencyMs}ms light="${light.text}" smart="${guard.text}" ok=${guard.ok}`
+        `[live] llm=${llmModel} latency=${result.llmMs}ms status=${JSON.stringify(result.status)} text="${result.text}"`
       )
-      expect(guard.ok).toBe(true)
-      expect(guard.text).toMatch(/Wednesday/)
-      expect(guard.text).not.toMatch(/\bum\b|\buh\b|Tuesday/i)
-      expect(guard.text).toMatch(/Sarah/)
+      expect(result.status.outcome).toBe('used')
+      expect(result.text).toMatch(/Wednesday/)
+      expect(result.text).not.toMatch(/\bum\b|\buh\b|Tuesday/i)
+      expect(result.text).toMatch(/Sarah/)
+      expect(result.text).toMatch(/1,200,000|1\.2 million/)
     }
   )
 

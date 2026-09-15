@@ -123,11 +123,7 @@ function PlanCard({ tier, billing }: { tier: Tier; billing: Billing }) {
       >
         {tier.cta.label}
       </ButtonLink>
-      {tier.id === 'pro' && (
-        <p className="mt-3 text-center text-meta text-muted-foreground">
-          New accounts start with {PRICING.trialDays} days of Pro before paying anything.
-        </p>
-      )}
+      <p className="mt-3 text-center text-meta text-pretty text-muted-foreground">{tier.note}</p>
     </Surface>
   )
 }

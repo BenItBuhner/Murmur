@@ -40,6 +40,8 @@ export interface Tier {
   summary: string
   features: string[]
   cta: { label: string; href: '/download' | '/account' }
+  /** One line under the button, so the three cards end the same way. */
+  note: string
 }
 
 export const TIERS: readonly Tier[] = [
@@ -53,7 +55,8 @@ export const TIERS: readonly Tier[] = [
       'Dictionary, snippets and style, on this device',
       'Nothing leaves the device but the clip being transcribed'
     ],
-    cta: { label: 'Download', href: '/download' }
+    cta: { label: 'Download', href: '/download' },
+    note: 'No account and no Murmur server in the path. Free for as long as you like.'
   },
   {
     id: 'free',
@@ -65,7 +68,8 @@ export const TIERS: readonly Tier[] = [
       'Dictionary, snippets, style and stats in step on every device',
       `Clips up to a minute, ${PRICING.freeDictationsPerDay} dictations a day`
     ],
-    cta: { label: 'Create a free account', href: '/account' }
+    cta: { label: 'Create a free account', href: '/account' },
+    note: `No card at sign-up. Pro for ${PRICING.trialDays} days, then the free tier, which never expires.`
   },
   {
     id: 'pro',
@@ -78,7 +82,8 @@ export const TIERS: readonly Tier[] = [
       'Dictation history synced across devices, opt-in',
       'Cancel any time; you keep the free tier'
     ],
-    cta: { label: 'Upgrade to Pro', href: '/account' }
+    cta: { label: 'Upgrade to Pro', href: '/account' },
+    note: `New accounts start with ${PRICING.trialDays} days of Pro before paying anything.`
   }
 ]
 

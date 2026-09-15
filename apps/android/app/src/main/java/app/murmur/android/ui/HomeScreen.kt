@@ -260,7 +260,9 @@ fun planLine(inference: InferenceView, now: Long = System.currentTimeMillis()): 
     if (!inference.routing.murmurStt && inference.planState != "trial") return null
     return when (inference.planState) {
         "trial" -> "Pro trial · ${if (inference.trialDaysLeft == 1) "last day" else "${inference.trialDaysLeft} days left"}"
-        "free" -> inference.meters.firstOrNull { it.limit == "wordsPerWeek" }?.let { words ->
+        "free" -> Limits.transcriptionPaused(inference.meters)?.let { stopped ->
+            "Free plan · this month's transcription is used up · more ${Limits.formatResetTime(stopped.resetsAt.toLong(), now)}"
+        } ?: inference.meters.firstOrNull { it.limit == "wordsPerWeek" }?.let { words ->
             if (words.exceeded) "Free plan · this week's words are used up · more ${Limits.formatResetTime(words.resetsAt.toLong(), now)}"
             else "Free plan · ${Limits.meterValue(words)} this week"
         }

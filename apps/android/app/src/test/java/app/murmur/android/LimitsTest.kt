@@ -269,6 +269,16 @@ class LimitsTest {
         val stopped = pro.copy(status = pro.status?.copy(meters = listOf(soft, hard)))
         assertEquals("Pro · transcription paused until 1 Oct (fair use)", planLine(stopped, NOW))
         assertNull(planLine(pro.copy(status = pro.status?.copy(formattingPaused = false, meters = emptyList())), NOW))
+
+        // The free tier: the week's words, unless the month's transcription has run out first.
+        val words = UsageMeterDto("wordsPerWeek", 312.0, 500.0, resetsAt = (NOW + 2 * DAY).toDouble())
+        val minutes = UsageMeterDto("sttSecondsPerMonth", 7_260.0, 7_200.0, exceeded = true, resetsAt = (NOW + 18 * DAY).toDouble())
+        val free = pro.copy(status = InferenceStatusDto(plan = "free", planState = "free", meters = listOf(words)), plan = "free", planState = "free")
+        assertEquals("Free plan · 312 of 500 words this week", planLine(free, NOW))
+        assertEquals(
+            "Free plan · this month's transcription is used up · more on 1 Oct",
+            planLine(free.copy(status = free.status?.copy(meters = listOf(words, minutes))), NOW)
+        )
     }
 
     @Test

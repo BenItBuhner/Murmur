@@ -39,12 +39,14 @@ export function PlanCard({
   status,
   billing,
   now,
-  upgrade
+  upgrade,
+  className
 }: {
   status: InferenceStatus | null
   billing: BillingStatus | null
   now: number
   upgrade: BillingInterval | null
+  className?: string
 }) {
   const state = status?.planState ?? 'free'
   const period = usagePeriod(now)
@@ -54,7 +56,7 @@ export function PlanCard({
   const notice = status ? exhaustedNotice(status, now) : null
 
   return (
-    <Surface className="flex flex-col">
+    <Surface className={cn('flex flex-col', className)}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="eyebrow">Plan</div>
@@ -99,7 +101,7 @@ export function PlanCard({
       {status && state !== 'pro' && (
         <UpgradePanel billing={billing} initial={upgrade ?? 'year'} state={state} />
       )}
-      {status && state === 'pro' && <BillingPanel billing={billing} />}
+      {status && state === 'pro' && billing && <BillingPanel billing={billing} />}
     </Surface>
   )
 }
@@ -332,7 +334,7 @@ function IntervalToggle({
 }
 
 /** Stripe's Customer Portal: card, interval, invoices, cancellation. */
-function BillingPanel({ billing }: { billing: BillingStatus | null }) {
+function BillingPanel({ billing }: { billing: BillingStatus }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const createPortal = useAction(api.billing.createPortalSession)
@@ -347,7 +349,6 @@ function BillingPanel({ billing }: { billing: BillingStatus | null }) {
       setPending(false)
     }
   }
-  if (!billing) return null
   return (
     <div className="well mt-card flex flex-wrap items-center justify-between gap-3 rounded-md px-4 py-3.5">
       <div>

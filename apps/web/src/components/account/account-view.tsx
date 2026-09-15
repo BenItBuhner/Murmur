@@ -8,8 +8,20 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { CheckoutNotice, PlanCard } from '@/components/account/plan-card'
 import { Button } from '@/components/ui/button'
 import { Surface } from '@/components/ui/surface'
-import { api, type DeviceDto, type StatsDto, type UserDto } from '@/lib/backend-api'
-import { checkoutOutcome, upgradeIntent, usageDayUtc } from '@/lib/entitlements'
+import {
+  api,
+  type BillingStatus,
+  type DeviceDto,
+  type InferenceStatus,
+  type StatsDto,
+  type UserDto
+} from '@/lib/backend-api'
+import {
+  checkoutOutcome,
+  upgradeIntent,
+  usageDayUtc,
+  type BillingInterval
+} from '@/lib/entitlements'
 import { formatNumber, formatRelative } from '@/lib/format'
 import { PRICING } from '@/lib/pricing'
 
@@ -47,10 +59,11 @@ function Placeholder() {
   )
 }
 
+/* The invitation in the seven main columns, Clerk's sign-in card in the five beside it. */
 function SignedOut() {
   return (
-    <div className="grid items-start gap-8 lg:grid-cols-[1fr_auto]">
-      <div className="max-w-lg">
+    <div className="grid items-center gap-8 lg:grid-cols-split lg:gap-x-12">
+      <div>
         <h2 className="serif-display text-heading">Sign in to Murmur</h2>
         <p className="mt-3 text-lead text-muted-foreground">
           The same account the desktop and Android apps use. Your dictionary, snippets, style and
@@ -80,8 +93,7 @@ function SignedInAccount() {
 
   const now = useNow()
   const params = useSearchParams()
-  const upgrade = upgradeIntent(params.get('upgrade'))
-  const checkout = checkoutOutcome(params.get('checkout'))
+  const clerk = useClerk()
 
   const me = useQuery(api.users.me)
   // The backend keys daily usage by UTC day; passing it keeps the query stable within a day.
@@ -91,58 +103,124 @@ function SignedInAccount() {
   const devices = useQuery(api.devices.list)
 
   return (
+    <AccountDashboard
+      me={me ?? null}
+      status={status ?? null}
+      billing={billing ?? null}
+      stats={stats ?? null}
+      devices={devices ?? null}
+      now={now}
+      upgrade={upgradeIntent(params.get('upgrade'))}
+      checkout={checkoutOutcome(params.get('checkout'))}
+      onManageAccount={() => void clerk.openUserProfile()}
+      onSignOut={() => void clerk.signOut({ redirectUrl: '/account' })}
+    />
+  )
+}
+
+export interface AccountDashboardProps {
+  me: UserDto | null
+  status: InferenceStatus | null
+  billing: BillingStatus | null
+  stats: StatsDto | null
+  devices: DeviceDto[] | null
+  now: number
+  upgrade: BillingInterval | null
+  checkout: 'success' | 'cancelled' | null
+  onManageAccount: () => void
+  onSignOut: () => void
+}
+
+/*
+ * The signed-in page on the page grid: the plan, which carries the most (meters, upgrade or
+ * billing), fills the seven main columns; the profile, the stats and the devices stack in the five
+ * beside it, so both columns end close together. Below lg everything is one column in the order
+ * profile, plan, stats, devices; the desktop placement is explicit so that order is also the DOM
+ * order. Everything here is data in, so the layout can be rendered without a backend.
+ */
+export function AccountDashboard({
+  me,
+  status,
+  billing,
+  stats,
+  devices,
+  now,
+  upgrade,
+  checkout,
+  onManageAccount,
+  onSignOut
+}: AccountDashboardProps) {
+  return (
     <div className="grid gap-card">
       {checkout && <CheckoutNotice outcome={checkout} planState={status?.planState ?? null} />}
-      <ProfileCard user={me ?? null} />
-      <div className="grid gap-card lg:grid-cols-[1.15fr_0.85fr]">
-        <PlanCard status={status ?? null} billing={billing ?? null} now={now} upgrade={upgrade} />
-        <StatsCard stats={stats ?? null} />
+      <div className="grid gap-card lg:grid-cols-split lg:items-start">
+        <ProfileCard
+          user={me}
+          onManageAccount={onManageAccount}
+          onSignOut={onSignOut}
+          className="lg:col-start-2 lg:row-start-1"
+        />
+        <PlanCard
+          status={status}
+          billing={billing}
+          now={now}
+          upgrade={upgrade}
+          className="lg:col-start-1 lg:row-start-1 lg:row-span-3"
+        />
+        <StatsCard stats={stats} className="lg:col-start-2 lg:row-start-2" />
+        <DevicesCard devices={devices} now={now} className="lg:col-start-2 lg:row-start-3" />
       </div>
-      <DevicesCard devices={devices ?? null} />
     </div>
   )
 }
 
-function ProfileCard({ user }: { user: UserDto | null }) {
-  const clerk = useClerk()
+function ProfileCard({
+  user,
+  onManageAccount,
+  onSignOut,
+  className
+}: {
+  user: UserDto | null
+  onManageAccount: () => void
+  onSignOut: () => void
+  className?: string
+}) {
   const name = user?.name || 'Your account'
   return (
-    <Surface className="flex flex-wrap items-center gap-4">
-      {user?.imageUrl ? (
-        // Clerk profile images come from a third-party host that changes per instance.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={user.imageUrl} alt="" className="size-12 rounded-full object-cover" />
-      ) : (
-        <span className="well inline-flex size-12 items-center justify-center rounded-full text-muted-foreground">
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-          >
-            <circle cx="12" cy="8" r="4" />
-            <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
-          </svg>
-        </span>
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-lead font-semibold tracking-tight">{name}</div>
-        {user?.email && (
-          <div className="truncate text-note text-muted-foreground">{user.email}</div>
+    <Surface className={className}>
+      <div className="flex items-center gap-4">
+        {user?.imageUrl ? (
+          // Clerk profile images come from a third-party host that changes per instance.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={user.imageUrl} alt="" className="size-12 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span className="well inline-flex size-12 shrink-0 items-center justify-center rounded-full text-muted-foreground">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+            >
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+            </svg>
+          </span>
         )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-lead font-semibold tracking-tight">{name}</div>
+          {user?.email && (
+            <div className="truncate text-note text-muted-foreground">{user.email}</div>
+          )}
+        </div>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="tonal" size="sm" onClick={() => void clerk.openUserProfile()}>
+      <div className="mt-card flex flex-wrap gap-2">
+        <Button variant="tonal" size="sm" onClick={onManageAccount}>
           Manage account
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void clerk.signOut({ redirectUrl: '/account' })}
-        >
+        <Button variant="ghost" size="sm" onClick={onSignOut}>
           Sign out
         </Button>
       </div>
@@ -150,7 +228,7 @@ function ProfileCard({ user }: { user: UserDto | null }) {
   )
 }
 
-function StatsCard({ stats }: { stats: StatsDto | null }) {
+function StatsCard({ stats, className }: { stats: StatsDto | null; className?: string }) {
   const minutes = stats ? Math.round(stats.totalSpeechMs / 60_000) : 0
   const items = [
     { label: 'Words dictated', value: stats ? formatNumber(stats.totalWords) : '—' },
@@ -159,7 +237,7 @@ function StatsCard({ stats }: { stats: StatsDto | null }) {
     { label: 'Day streak', value: stats ? formatNumber(stats.streakDays) : '—' }
   ]
   return (
-    <Surface>
+    <Surface className={className}>
       <div className="eyebrow">Across your devices</div>
       <h2 className="serif-display mt-2 text-heading">Stats</h2>
       <dl className="mt-card grid grid-cols-2 gap-2">
@@ -189,10 +267,17 @@ const PLATFORM_NAMES: Record<DeviceDto['platform'], string> = {
 }
 
 /* A list card: xl with tight padding, md rows. */
-function DevicesCard({ devices }: { devices: DeviceDto[] | null }) {
-  const now = useNow()
+function DevicesCard({
+  devices,
+  now,
+  className
+}: {
+  devices: DeviceDto[] | null
+  now: number
+  className?: string
+}) {
   return (
-    <Surface padding="card-tight">
+    <Surface padding="card-tight" className={className}>
       <div className="px-3 pt-3 pb-4">
         <div className="eyebrow">Devices</div>
         <h2 className="serif-display mt-2 text-heading">Every install on this account</h2>

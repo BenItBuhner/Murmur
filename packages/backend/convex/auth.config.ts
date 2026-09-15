@@ -12,6 +12,23 @@
  * suites (apps/desktop/tests/live, the Android live tests) sign in without a Clerk instance. The
  * tokens carry the same `aud: "convex"` and `sub` claims Clerk's template would.
  */
+
+/**
+ * An environment variable the deployment may not have. While this file is evaluated, reading an
+ * unset variable through `process.env` does not yield undefined: the backend raises
+ * AuthConfigMissingEnvironmentVariable and the push fails, and `in` / `Object.keys` never see
+ * deployment variables. The raise is an ordinary exception, so catching it is the one way to make
+ * a variable optional here; verified against the local backend both ways (set: the provider is
+ * pushed; unset: the push succeeds without it).
+ */
+function optional(name: string): string | undefined {
+  try {
+    return process.env[name]
+  } catch {
+    return undefined
+  }
+}
+
 const providers: Array<Record<string, string | undefined>> = [
   {
     domain: process.env.CLERK_JWT_ISSUER_DOMAIN,
@@ -19,12 +36,14 @@ const providers: Array<Record<string, string | undefined>> = [
   }
 ]
 
-if (process.env.MURMUR_TEST_JWT_ISSUER && process.env.MURMUR_TEST_JWKS_URL) {
+const testIssuer = optional('MURMUR_TEST_JWT_ISSUER')
+const testJwks = optional('MURMUR_TEST_JWKS_URL')
+if (testIssuer && testJwks) {
   providers.push({
     type: 'customJwt',
     applicationID: 'convex',
-    issuer: process.env.MURMUR_TEST_JWT_ISSUER,
-    jwks: process.env.MURMUR_TEST_JWKS_URL,
+    issuer: testIssuer,
+    jwks: testJwks,
     algorithm: 'RS256'
   })
 }

@@ -245,6 +245,18 @@ class LimitsTest {
     }
 
     @Test
+    fun `the privacy and terms pages sit next to the account page the instance sent`() {
+        assertEquals("https://murmur.app", Limits.siteOrigin(ACCOUNT))
+        assertEquals("http://127.0.0.1:3000", Limits.siteOrigin("http://127.0.0.1:3000/account"))
+        assertEquals("https://murmur.app/privacy" to "https://murmur.app/terms", Limits.legalLinks(ACCOUNT))
+        // No site URL on the instance, or something that is not a web page: no links to show.
+        assertNull(Limits.legalLinks(null))
+        assertNull(Limits.legalLinks(""))
+        assertNull(Limits.legalLinks("not a url"))
+        assertNull(Limits.legalLinks("javascript:alert(1)"))
+    }
+
+    @Test
     fun `the Home line says what Pro has run out of`() {
         val soft = UsageMeterDto("fairUseSttSecondsPerMonth", 108_100.0, 108_000.0, exceeded = true, resetsAt = (NOW + 18 * DAY).toDouble())
         val hard = UsageMeterDto("sttSecondsPerMonth", 216_000.0, 216_000.0, exceeded = true, resetsAt = (NOW + 18 * DAY).toDouble())

@@ -11,7 +11,9 @@ import {
   parseLimitNotice,
   planActions,
   planStateLabel,
+  legalLinks,
   planStateOf,
+  siteOrigin,
   transcriptionPaused,
   trialDaysLeft,
   usageMeters,
@@ -325,6 +327,21 @@ describe('plan state', () => {
       upgrade: null,
       manage: null
     })
+  })
+
+  it('finds the privacy and terms pages next to the account page the instance sent', () => {
+    expect(siteOrigin(ACCOUNT)).toBe('https://murmur.app')
+    expect(siteOrigin('http://127.0.0.1:3000/account')).toBe('http://127.0.0.1:3000')
+    expect(legalLinks(ACCOUNT)).toEqual({
+      privacy: 'https://murmur.app/privacy',
+      terms: 'https://murmur.app/terms'
+    })
+    // No site URL on the instance, or something that is not a web page: no links to show.
+    expect(legalLinks(null)).toBeNull()
+    expect(legalLinks(undefined)).toBeNull()
+    expect(legalLinks('')).toBeNull()
+    expect(legalLinks('not a url')).toBeNull()
+    expect(legalLinks('javascript:alert(1)')).toBeNull()
   })
 
   it('counts trial days the way the contract does', () => {

@@ -18,6 +18,7 @@ import type { CloudDevice, UsageMeter } from '@shared/cloud'
 import {
   formatAudioSeconds,
   formatResetTime,
+  legalLinks,
   meterLabel,
   meterValue,
   planActions,
@@ -122,6 +123,8 @@ function SignedInAccount({
   const email = user?.email ?? clerk.email
   const imageUrl = user?.imageUrl ?? clerk.imageUrl
   const sync = status ? syncLabel(status) : null
+  // The legal pages sit next to the account page the instance sent; no site, no links.
+  const legal = legalLinks(inference.accountUrl)
 
   const signOut = async (): Promise<void> => {
     setBusy('signout')
@@ -299,6 +302,27 @@ function SignedInAccount({
             <Badge variant="outline">
               {config.accountMode === 'required' ? 'account required' : 'account optional'}
             </Badge>
+          </SettingRow>
+        )}
+        {legal && (
+          <SettingRow
+            title="Privacy and terms"
+            description="What this instance does with your audio and text, and the terms of the service."
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void window.murmur.app.openExternal(legal.privacy)}
+            >
+              Privacy
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void window.murmur.app.openExternal(legal.terms)}
+            >
+              Terms
+            </Button>
           </SettingRow>
         )}
       </Section>

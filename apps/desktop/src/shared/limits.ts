@@ -30,6 +30,28 @@ export interface PlanLinks {
 }
 
 /**
+ * The instance's website, read off the account page it sent (`${MURMUR_SITE_URL}/account`); null
+ * when the instance has no site. The legal pages live next to it (contract §6).
+ */
+export function siteOrigin(accountUrl: string | null | undefined): string | null {
+  if (!accountUrl) return null
+  try {
+    const url = new URL(accountUrl)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+/** The privacy policy and terms of the instance's site, or null without a site. */
+export function legalLinks(
+  accountUrl: string | null | undefined
+): { privacy: string; terms: string } | null {
+  const origin = siteOrigin(accountUrl)
+  return origin ? { privacy: `${origin}/privacy`, terms: `${origin}/terms` } : null
+}
+
+/**
  * The buttons the plan row shows: Upgrade for anyone who could, Manage plan for anyone who has a
  * plan to manage (Pro, and a trial that will become one). Each only when the instance sent its
  * page; an instance without a site URL sends null and gets no button.

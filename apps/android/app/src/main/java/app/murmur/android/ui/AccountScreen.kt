@@ -19,13 +19,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.SyncPhase
@@ -42,11 +47,14 @@ import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.components.Tag
+import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Paper
 import app.murmur.android.ui.theme.Radii
 import app.murmur.android.ui.theme.Space
+import app.murmur.android.ui.theme.clerkTheme
 import com.clerk.api.Clerk
+import com.clerk.ui.userprofile.UserProfileView
 import kotlinx.coroutines.launch
 
 fun syncLabel(status: SyncStatus): String = when (status.phase) {
@@ -96,6 +104,8 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
     val name = status.user?.name
         ?: listOfNotNull(user?.firstName, user?.lastName).joinToString(" ").ifBlank { "Your account" }
     val email = status.user?.email ?: user?.primaryEmailAddress?.emailAddress
+    // Clerk's account sheet (profile, security, delete account), the desktop's "Manage account".
+    var profileOpen by remember { mutableStateOf(false) }
     AccountContent(
         config = config,
         status = status,
@@ -104,8 +114,18 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
         settings = settings,
         nav = nav,
         onSyncNow = { sync.syncNow() },
-        onSignOut = { scope.launch { sync.signOut() } }
+        onSignOut = { scope.launch { sync.signOut() } },
+        onManageAccount = { profileOpen = true }
     )
+    if (profileOpen) {
+        val theme = clerkTheme()
+        Dialog(
+            onDismissRequest = { profileOpen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        ) {
+            UserProfileView(clerkTheme = theme, onDismiss = { profileOpen = false })
+        }
+    }
 }
 
 /** The signed-in Account screen, given everything it shows. */
@@ -118,10 +138,17 @@ fun AccountContent(
     settings: MurmurSettings,
     nav: TopNav,
     onSyncNow: () -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    /** Opens the identity provider's account sheet; null when there is none (previews, tests). */
+    onManageAccount: (() -> Unit)? = null
 ) {
     val c = Murmur.colors
+    val context = LocalContext.current
     val inference = rememberInferenceView(settings)
+    val legal = Limits.legalLinks(status.inference?.accountUrl)
+    val openUrl: (String) -> Unit = { url ->
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    }
 
     Screen(title = "Account", nav = nav) {
         Text(name, style = Murmur.type.displaySmall, color = c.ink)
@@ -156,6 +183,7 @@ fun AccountContent(
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SecondaryButton("Sync now", onClick = onSyncNow)
+            onManageAccount?.let { SecondaryButton("Manage account", onClick = it) }
             SecondaryButton("Sign out", onClick = onSignOut)
         }
 
@@ -164,6 +192,14 @@ fun AccountContent(
         Text("Instance", style = Murmur.type.overline, color = c.inkMuted)
         Spacer(Modifier.height(6.dp))
         Text(config.convexUrl, style = Murmur.type.bodySmall, color = c.inkMuted)
+        if (legal != null) {
+            // The legal pages sit next to the account page the instance sent; no site, no links.
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                TextLink("Privacy", onClick = { openUrl(legal.first) }, color = c.inkSoft)
+                TextLink("Terms", onClick = { openUrl(legal.second) }, color = c.inkSoft)
+            }
+        }
     }
 }
 

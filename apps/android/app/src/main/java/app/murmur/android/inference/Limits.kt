@@ -200,6 +200,26 @@ object Limits {
         meters.filter { it.limit in NAMES && it.limit != "maxClipSeconds" && it.limit != "requestsPerMinute" }
 
     /**
+     * The instance's website, read off the account page it sent (`${MURMUR_SITE_URL}/account`); null
+     * when the instance has no site. The legal pages live next to it (contract §6).
+     */
+    fun siteOrigin(accountUrl: String?): String? {
+        if (accountUrl.isNullOrBlank()) return null
+        return try {
+            val uri = java.net.URI(accountUrl.trim())
+            val scheme = uri.scheme?.lowercase()
+            if ((scheme != "https" && scheme != "http") || uri.host.isNullOrEmpty()) null
+            else "$scheme://${uri.host}" + (if (uri.port > 0) ":${uri.port}" else "")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** The privacy policy and terms of the instance's site (privacy to terms), or null without a site. */
+    fun legalLinks(accountUrl: String?): Pair<String, String>? =
+        siteOrigin(accountUrl)?.let { "$it/privacy" to "$it/terms" }
+
+    /**
      * The month's transcription meter once it has run out: Murmur's speech model refuses every clip
      * until it resets (Pro's hard fair-use cap, the free tier's monthly minutes). It outranks a paused
      * formatting model, which only matters while transcription still happens.

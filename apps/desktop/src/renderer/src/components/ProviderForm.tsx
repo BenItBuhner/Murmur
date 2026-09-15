@@ -23,7 +23,10 @@ export interface ModelFieldProps {
   onDiscover: () => void
   discoverError?: string
   placeholder?: string
-  label?: string
+  /** Null when the row around the field already names it. */
+  label?: string | null
+  /** What the list holds, for the discovery note (speech lists put speech models first). */
+  kind?: 'stt' | 'llm'
 }
 
 /** Model picker that accepts discovered ids, preset suggestions, or anything typed by hand. */
@@ -36,7 +39,8 @@ export function ModelField({
   onDiscover,
   discoverError,
   placeholder,
-  label = 'Model'
+  label = 'Model',
+  kind = 'stt'
 }: ModelFieldProps): React.JSX.Element {
   const options = useMemo(() => {
     const set = new Set<string>()
@@ -50,10 +54,10 @@ export function ModelField({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <Label>{label}</Label>
+        {label && <Label>{label}</Label>}
         <button
           type="button"
-          className="text-meta text-muted-foreground hover:text-foreground"
+          className="ml-auto text-meta text-muted-foreground hover:text-foreground"
           onClick={() => setCustom((c) => !c)}
         >
           {custom ? 'Choose from list' : 'Type a model id'}
@@ -93,7 +97,8 @@ export function ModelField({
       {discoverError && <p className="text-meta text-destructive">{discoverError}</p>}
       {discovered && !discoverError && (
         <p className="text-meta text-muted-foreground">
-          {discovered.length} models found on the server; speech models are listed first.
+          {discovered.length} models found on the server
+          {kind === 'stt' ? '; speech models are listed first.' : '.'}
         </p>
       )}
     </div>

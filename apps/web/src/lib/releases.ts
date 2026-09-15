@@ -334,10 +334,11 @@ export function recommendedAsset(
 }
 
 /**
- * Where /download/<platform> goes when GitHub cannot be reached: the stable alias, which GitHub
- * itself resolves to the latest release.
+ * The stable alias of the file most people want on `platform`, which GitHub itself resolves to the
+ * current stable release on every request. /download/<platform> redirects here, and a download
+ * button falls back to it when the release manifest is unavailable.
  */
-export function fallbackDownloadUrl(platform: Platform, repo = releasesRepo()): string {
+export function stableDownloadUrl(platform: Platform, repo = releasesRepo()): string {
   const entry = ASSET_CATALOG.find((e) => e.platform === platform && e.recommended)
   if (!entry) throw new Error(`No recommended asset for ${platform}`)
   return `${latestDownloadBase(repo)}/${entry.alias}`

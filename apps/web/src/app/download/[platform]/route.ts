@@ -1,20 +1,20 @@
 import { NextResponse } from 'next/server'
-import {
-  DOWNLOAD_PLATFORMS,
-  fallbackDownloadUrl,
-  fetchLatestRelease,
-  isDownloadPlatform,
-  recommendedAsset,
-  REVALIDATE_SECONDS
-} from '@/lib/releases'
+import { DOWNLOAD_PLATFORMS, isDownloadPlatform, stableDownloadUrl } from '@/lib/releases'
 
 /**
  * GET /download/{windows|linux|android}: redirect to the file most people want on that platform
- * from the latest release (the combined Windows installer, the x64 AppImage, the APK). When
- * GitHub cannot be read the redirect goes to the stable alias instead, which GitHub resolves to
- * the latest release itself, so the link never dead-ends.
+ * (the combined Windows installer, the x64 AppImage, the APK) through GitHub's stable alias,
+ * https://github.com/<repo>/releases/latest/download/<alias>, which GitHub resolves to the current
+ * stable release on every request. The redirect never names a version, so this route is plain
+ * static output: no GitHub API call, nothing to revalidate, correct the moment a release is
+ * published, on any host and any plan.
+ *
+ * It used to redirect to the versioned asset from the release manifest and revalidate every ten
+ * minutes. Prerendered per platform, each path revalidated on its own schedule behind an hour of
+ * stale-while-revalidate, so after v0.5.0 shipped /download/android kept sending people the
+ * debug-signed 0.4.0 APK long after the manifest and the other two redirects had moved on.
  */
-export const revalidate = 600 // REVALIDATE_SECONDS; Next needs the literal here
+export const dynamic = 'force-static'
 export const dynamicParams = false
 
 export function generateStaticParams(): Array<{ platform: string }> {
@@ -24,13 +24,9 @@ export function generateStaticParams(): Array<{ platform: string }> {
 export async function GET(_request: Request, ctx: { params: Promise<{ platform: string }> }) {
   const { platform } = await ctx.params
   if (!isDownloadPlatform(platform)) return new Response(null, { status: 404 })
-  const manifest = await fetchLatestRelease()
-  const asset = manifest ? recommendedAsset(manifest, platform) : null
-  const target = asset?.url ?? fallbackDownloadUrl(platform)
-  return NextResponse.redirect(target, {
+  return NextResponse.redirect(stableDownloadUrl(platform), {
     status: 302,
-    headers: {
-      'cache-control': `public, max-age=300, s-maxage=${REVALIDATE_SECONDS}, stale-while-revalidate=3600`
-    }
+    // The target only changes if the repository or the catalog does, i.e. with a deploy.
+    headers: { 'cache-control': 'public, max-age=3600, s-maxage=86400' }
   })
 }

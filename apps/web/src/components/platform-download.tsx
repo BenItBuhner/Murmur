@@ -1,7 +1,7 @@
 import { ButtonAnchor } from '@/components/ui/button'
 import { formatBytes } from '@/lib/format'
 import {
-  fallbackDownloadUrl,
+  stableDownloadUrl,
   PLATFORM_LABELS,
   type Platform,
   type ReleaseManifest
@@ -23,7 +23,7 @@ export function PlatformDownloadButton({
   className?: string
 }) {
   const asset = manifest?.platforms[platform].recommended ?? null
-  const href = asset?.url ?? fallbackDownloadUrl(platform)
+  const href = asset?.url ?? stableDownloadUrl(platform)
   return (
     <ButtonAnchor href={href} size={size} className={className} rel="noreferrer">
       <span>

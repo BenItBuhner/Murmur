@@ -9,7 +9,7 @@ import {
   buildManifest,
   CHECKSUMS_FILE,
   DOWNLOAD_PLATFORMS,
-  fallbackDownloadUrl,
+  stableDownloadUrl,
   INSTALL_HELPERS,
   isGitHubRelease,
   PLATFORMS,
@@ -147,19 +147,19 @@ describe('buildManifest', () => {
   })
 })
 
-describe('fallbackDownloadUrl', () => {
+describe('stableDownloadUrl', () => {
   it('points every download platform at its stable alias', () => {
-    expect(fallbackDownloadUrl('windows', REPO)).toBe(
+    expect(stableDownloadUrl('windows', REPO)).toBe(
       `https://github.com/${REPO}/releases/latest/download/Murmur-setup.exe`
     )
-    expect(fallbackDownloadUrl('linux', REPO)).toBe(
+    expect(stableDownloadUrl('linux', REPO)).toBe(
       `https://github.com/${REPO}/releases/latest/download/Murmur-x86_64.AppImage`
     )
-    expect(fallbackDownloadUrl('android', REPO)).toBe(
+    expect(stableDownloadUrl('android', REPO)).toBe(
       `https://github.com/${REPO}/releases/latest/download/Murmur-android.apk`
     )
     for (const platform of DOWNLOAD_PLATFORMS)
-      expect(fallbackDownloadUrl(platform, REPO)).toMatch(/^https:/)
+      expect(stableDownloadUrl(platform, REPO)).toMatch(/^https:/)
   })
 })
 

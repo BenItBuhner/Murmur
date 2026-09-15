@@ -30,6 +30,28 @@ export interface PlanLinks {
 }
 
 /**
+ * The instance's website, read off the account page it sent (`${MURMUR_SITE_URL}/account`); null
+ * when the instance has no site. The legal pages live next to it (contract §6).
+ */
+export function siteOrigin(accountUrl: string | null | undefined): string | null {
+  if (!accountUrl) return null
+  try {
+    const url = new URL(accountUrl)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+/** The privacy policy and terms of the instance's site, or null without a site. */
+export function legalLinks(
+  accountUrl: string | null | undefined
+): { privacy: string; terms: string } | null {
+  const origin = siteOrigin(accountUrl)
+  return origin ? { privacy: `${origin}/privacy`, terms: `${origin}/terms` } : null
+}
+
+/**
  * The buttons the plan row shows: Upgrade for anyone who could, Manage plan for anyone who has a
  * plan to manage (Pro, and a trial that will become one). Each only when the instance sent its
  * page; an instance without a site URL sends null and gets no button.
@@ -233,6 +255,15 @@ export function usageMeters(meters: UsageMeter[] | undefined): UsageMeter[] {
   return (meters ?? []).filter(
     (m) => m.limit !== 'maxClipSeconds' && m.limit !== 'requestsPerMinute'
   )
+}
+
+/**
+ * The month's transcription meter once it has run out: Murmur's speech model refuses every clip
+ * until it resets (Pro's hard fair-use cap, the free tier's monthly minutes). It outranks a paused
+ * formatting model, which only matters while transcription still happens.
+ */
+export function transcriptionPaused(meters: UsageMeter[] | undefined): UsageMeter | null {
+  return (meters ?? []).find((m) => m.limit === 'sttSecondsPerMonth' && m.exceeded) ?? null
 }
 
 export interface LimitCopy {

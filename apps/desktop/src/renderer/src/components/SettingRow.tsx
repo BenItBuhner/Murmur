@@ -35,7 +35,9 @@ export function SettingRow({
         )}
       </div>
       {children && (
-        <div className={cn('flex shrink-0 items-center gap-2', vertical && 'w-full')}>
+        // A vertical row's full-width children (a control row, then its result) stack rather than
+        // sitting side by side and overflowing the card.
+        <div className={cn('flex shrink-0 items-center gap-2', vertical && 'w-full flex-wrap')}>
           {children}
         </div>
       )}

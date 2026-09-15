@@ -11,7 +11,10 @@ import {
   parseLimitNotice,
   planActions,
   planStateLabel,
+  legalLinks,
   planStateOf,
+  siteOrigin,
+  transcriptionPaused,
   trialDaysLeft,
   usageMeters,
   type LimitNotice
@@ -251,6 +254,37 @@ describe('limit wording', () => {
     ])
     expect(usageMeters(undefined)).toEqual([])
   })
+
+  it('tells a stopped speech model (the monthly cap) apart from a paused formatting model', () => {
+    const soft: UsageMeter = {
+      limit: 'fairUseSttSecondsPerMonth',
+      used: 108_100,
+      allowed: 108_000,
+      exceeded: true,
+      resetsAt: NOW
+    }
+    const hard: UsageMeter = {
+      limit: 'sttSecondsPerMonth',
+      used: 216_000,
+      allowed: 216_000,
+      exceeded: true,
+      resetsAt: NOW
+    }
+    // Past the soft cap only formatting pauses; transcription carries on.
+    expect(transcriptionPaused([soft, { ...hard, used: 150_000, exceeded: false }])).toBeNull()
+    // Past the hard cap every clip is refused: the Account page and Home say so, not "formatting paused".
+    expect(transcriptionPaused([soft, hard])).toBe(hard)
+    // The free tier's monthly minutes stop transcription the same way.
+    const free: UsageMeter = {
+      limit: 'sttSecondsPerMonth',
+      used: 7_260,
+      allowed: 7_200,
+      exceeded: true,
+      resetsAt: NOW
+    }
+    expect(transcriptionPaused([free])).toBe(free)
+    expect(transcriptionPaused(undefined)).toBeNull()
+  })
 })
 
 describe('plan state', () => {
@@ -293,6 +327,21 @@ describe('plan state', () => {
       upgrade: null,
       manage: null
     })
+  })
+
+  it('finds the privacy and terms pages next to the account page the instance sent', () => {
+    expect(siteOrigin(ACCOUNT)).toBe('https://murmur.app')
+    expect(siteOrigin('http://127.0.0.1:3000/account')).toBe('http://127.0.0.1:3000')
+    expect(legalLinks(ACCOUNT)).toEqual({
+      privacy: 'https://murmur.app/privacy',
+      terms: 'https://murmur.app/terms'
+    })
+    // No site URL on the instance, or something that is not a web page: no links to show.
+    expect(legalLinks(null)).toBeNull()
+    expect(legalLinks(undefined)).toBeNull()
+    expect(legalLinks('')).toBeNull()
+    expect(legalLinks('not a url')).toBeNull()
+    expect(legalLinks('javascript:alert(1)')).toBeNull()
   })
 
   it('counts trial days the way the contract does', () => {

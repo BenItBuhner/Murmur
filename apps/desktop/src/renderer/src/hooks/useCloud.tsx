@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { ClerkProvider, useAuth, useUser } from '@clerk/electron/react'
+import { ClerkProvider, useAuth, useClerk, useUser } from '@clerk/electron/react'
 import type { CloudConfig, RendererAuthState, SyncStatus } from '@shared/cloud'
 import type { ResolvedTheme } from '@shared/theme'
 
@@ -19,15 +19,24 @@ export interface ClerkView {
   imageUrl?: string
 }
 
+/** What a signed-in user can do with the session itself. */
+export interface SessionActions {
+  signOut: () => Promise<void>
+  /** Clerk's account dialog (profile, security, delete account); absent without Clerk. */
+  openUserProfile?: () => void
+}
+
 interface Ctx {
   config: CloudConfig | null
   status: SyncStatus | null
   clerk: ClerkView
   /** True when this build talks to a cloud instance at all. */
   enabled: boolean
+  actions: SessionActions
 }
 
 const NO_CLERK: ClerkView = { loaded: true, failed: false, signedIn: false }
+const NO_ACTIONS: SessionActions = { signOut: async () => {} }
 
 const CloudContext = createContext<Ctx | null>(null)
 
@@ -53,7 +62,34 @@ export function CloudProvider({
   if (!config) return null
   if (config.accountMode === 'off') {
     return (
-      <CloudContext.Provider value={{ config, status, clerk: NO_CLERK, enabled: false }}>
+      <CloudContext.Provider
+        value={{ config, status, clerk: NO_CLERK, enabled: false, actions: NO_ACTIONS }}
+      >
+        {children}
+      </CloudContext.Provider>
+    )
+  }
+  if (config.testAuth) {
+    // A dev build signed in through a token file: main owns the session, Clerk never mounts.
+    const { userId, email, name } = config.testAuth
+    return (
+      <CloudContext.Provider
+        value={{
+          config,
+          status,
+          clerk: {
+            loaded: true,
+            failed: false,
+            signedIn: true,
+            userId,
+            email,
+            name,
+            firstName: name?.split(/\s+/)[0]
+          },
+          enabled: true,
+          actions: NO_ACTIONS
+        }}
+      >
         {children}
       </CloudContext.Provider>
     )
@@ -66,7 +102,8 @@ export function CloudProvider({
             config,
             status,
             clerk: { loaded: false, failed: true, signedIn: false },
-            enabled: true
+            enabled: true,
+            actions: NO_ACTIONS
           }}
         >
           {children}
@@ -121,6 +158,7 @@ function ClerkBridge({
 }): React.JSX.Element {
   const { isLoaded, isSignedIn, userId, getToken } = useAuth()
   const { user } = useUser()
+  const clerkClient = useClerk()
   const [timedOut, setTimedOut] = useState(false)
   const latest = useRef({ isSignedIn: false, getToken })
   useEffect(() => {
@@ -185,9 +223,19 @@ function ClerkBridge({
     [isLoaded, failed, isSignedIn, userId, name, firstName, email, imageUrl]
   )
 
+  const actions = useMemo<SessionActions>(
+    () => ({
+      signOut: async () => {
+        await clerkClient.signOut()
+      },
+      openUserProfile: () => void clerkClient.openUserProfile()
+    }),
+    [clerkClient]
+  )
+
   const value = useMemo<Ctx>(
-    () => ({ config, status, clerk, enabled: true }),
-    [config, status, clerk]
+    () => ({ config, status, clerk, enabled: true, actions }),
+    [config, status, clerk, actions]
   )
   return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>
 }

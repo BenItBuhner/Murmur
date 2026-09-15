@@ -58,6 +58,17 @@ export interface UsageResets {
   month: number
 }
 
+/**
+ * Who a development build is signed in as when `MURMUR_TEST_AUTH_TOKEN_FILE` stands in for Clerk
+ * (the live suites and end-to-end runs against a local backend that trusts a test issuer).
+ * Packaged builds never carry this.
+ */
+export interface TestAuthIdentity {
+  userId: string
+  email?: string
+  name?: string
+}
+
 export interface CloudConfig {
   accountMode: AccountMode
   convexUrl: string
@@ -66,6 +77,7 @@ export interface CloudConfig {
    * inference gateway lives. Empty in local builds.
    */
   convexSiteUrl: string
+  /** Empty when a test token file stands in for Clerk. */
   clerkPublishableKey: string
   /** Clerk Frontend API host derived from the publishable key, e.g. clerk.murmur.app. */
   clerkFrontendApiHost: string
@@ -73,6 +85,8 @@ export interface CloudConfig {
   deepLinkScheme: string
   /** Name of the Clerk JWT template that mints Convex tokens. */
   jwtTemplate: string
+  /** Present only in development builds signed in through a test token file instead of Clerk. */
+  testAuth?: TestAuthIdentity
 }
 
 /** What the renderer reports about the Clerk session. */

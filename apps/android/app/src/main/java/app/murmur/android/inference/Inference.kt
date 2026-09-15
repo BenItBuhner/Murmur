@@ -269,6 +269,16 @@ class InferenceRouter(
                 instance ?: create(context).also { instance = it }
             }
 
+        /**
+         * Test seam (like [app.murmur.android.dictation.DictationController.sink]): the router the
+         * controller resolves connections through, e.g. one whose session token comes from a file so
+         * the live suite can dictate through a real gateway without Clerk. Null restores the app's.
+         */
+        @androidx.annotation.VisibleForTesting
+        fun install(router: InferenceRouter?) {
+            synchronized(this) { instance = router }
+        }
+
         private fun create(context: Context): InferenceRouter {
             val app = context.applicationContext
             val config = (app as? MurmurApplication)?.cloudConfig ?: CloudConfig.OFF

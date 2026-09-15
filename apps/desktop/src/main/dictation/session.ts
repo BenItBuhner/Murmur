@@ -368,8 +368,12 @@ export class DictationController extends EventEmitter {
     // do, with Retry right there for when it has.
     const failure = (raw: string, resolved: ResolvedStt | null, err: unknown): ProcessOutcome => {
       const error = friendlyError(err)
+      const limit = planLimitOf(err)
+      log.warn(
+        `session ${job.id.slice(0, 8)} failed${limit ? ` on plan limit ${limit.limit}` : ''}: ${error}`
+      )
       this.recordFailure(job, raw, app, timings, resolved, error)
-      this.showError(error, job.recording ? job.id : undefined, planLimitOf(err))
+      this.showError(error, job.recording ? job.id : undefined, limit)
       return { ok: false, error, recorded: true }
     }
 

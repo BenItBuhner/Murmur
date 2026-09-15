@@ -298,6 +298,8 @@ export function StylePage(): React.JSX.Element {
                   onDiscover={discover}
                   discoverError={discoverError}
                   placeholder="e.g. openai/gpt-oss-20b"
+                  label={null}
+                  kind="llm"
                 />
               </div>
             </SettingRow>

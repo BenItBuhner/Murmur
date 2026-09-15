@@ -260,14 +260,21 @@ fun planLine(inference: InferenceView, now: Long = System.currentTimeMillis()): 
     if (!inference.routing.murmurStt && inference.planState != "trial") return null
     return when (inference.planState) {
         "trial" -> "Pro trial · ${if (inference.trialDaysLeft == 1) "last day" else "${inference.trialDaysLeft} days left"}"
-        "free" -> inference.meters.firstOrNull { it.limit == "wordsPerWeek" }?.let { words ->
+        "free" -> Limits.transcriptionPaused(inference.meters)?.let { stopped ->
+            "Free plan · this month's transcription is used up · more ${Limits.formatResetTime(stopped.resetsAt.toLong(), now)}"
+        } ?: inference.meters.firstOrNull { it.limit == "wordsPerWeek" }?.let { words ->
             if (words.exceeded) "Free plan · this week's words are used up · more ${Limits.formatResetTime(words.resetsAt.toLong(), now)}"
             else "Free plan · ${Limits.meterValue(words)} this week"
         }
-        else -> if (inference.formattingPaused) {
-            val paused = inference.meters.firstOrNull { it.limit == "fairUseSttSecondsPerMonth" }
-            "Pro · formatting paused${paused?.let { " until ${Limits.formatResetTime(it.resetsAt.toLong(), now).removePrefix("on ")}" } ?: ""} (fair use)"
-        } else null
+        else -> {
+            val stopped = Limits.transcriptionPaused(inference.meters)
+            if (stopped != null) {
+                "Pro · transcription paused until ${Limits.formatResetTime(stopped.resetsAt.toLong(), now).removePrefix("on ")} (fair use)"
+            } else if (inference.formattingPaused) {
+                val paused = inference.meters.firstOrNull { it.limit == "fairUseSttSecondsPerMonth" }
+                "Pro · formatting paused${paused?.let { " until ${Limits.formatResetTime(it.resetsAt.toLong(), now).removePrefix("on ")}" } ?: ""} (fair use)"
+            } else null
+        }
     }
 }
 

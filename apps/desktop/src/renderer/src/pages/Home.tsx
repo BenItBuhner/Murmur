@@ -12,7 +12,8 @@ import { useCloud } from '@renderer/hooks/useCloud'
 import { useInference, type InferenceView } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
-import { formatResetTime, meterValue } from '@shared/limits'
+import type { UsageMeter } from '@shared/cloud'
+import { formatResetTime, meterValue, transcriptionPaused } from '@shared/limits'
 import type { Route } from '@renderer/components/Shell'
 
 const TYPING_WPM = 40
@@ -284,10 +285,16 @@ function PlanLine({
     text = `Pro trial · ${days === 1 ? 'last day' : `${days} days left`}`
   } else if (inference.planState === 'free') {
     const words = inference.meters.find((m) => m.limit === 'wordsPerWeek')
-    if (words)
+    const stopped = transcriptionPaused(inference.meters)
+    if (stopped)
+      text = `Free plan · this month's transcription is used up · more ${formatResetTime(stopped.resetsAt)}`
+    else if (words)
       text = words.exceeded
         ? `Free plan · this week's words are used up · more ${formatResetTime(words.resetsAt)}`
         : `Free plan · ${meterValue(words)} this week`
+  } else if (transcriptionPaused(inference.meters)) {
+    const stopped = transcriptionPaused(inference.meters) as UsageMeter
+    text = `Pro · transcription paused until ${formatResetTime(stopped.resetsAt).replace(/^on /, '')} (fair use)`
   } else if (inference.formattingPaused) {
     const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
     text = `Pro · formatting paused${paused ? ` until ${formatResetTime(paused.resetsAt).replace(/^on /, '')}` : ''} (fair use)`

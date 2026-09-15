@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { useClerk } from '@clerk/electron/react'
 import {
   BookA,
   Clock3,
@@ -17,11 +16,14 @@ import {
 import { toast } from 'sonner'
 import type { CloudDevice, UsageMeter } from '@shared/cloud'
 import {
+  formatAudioSeconds,
   formatResetTime,
+  legalLinks,
   meterLabel,
   meterValue,
   planActions,
-  planStateLabel
+  planStateLabel,
+  transcriptionPaused
 } from '@shared/limits'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
@@ -112,21 +114,22 @@ function SignedInAccount({
   busy: string | null
   setBusy: (v: string | null) => void
 }): React.JSX.Element {
-  const { status, clerk, config } = useCloud()
+  const { status, clerk, config, actions } = useCloud()
   const { settings } = useSettings()
   const inference = useInference()
-  const clerkClient = useClerk()
 
   const user = status?.user
   const name = user?.name ?? clerk.name ?? 'Your account'
   const email = user?.email ?? clerk.email
   const imageUrl = user?.imageUrl ?? clerk.imageUrl
   const sync = status ? syncLabel(status) : null
+  // The legal pages sit next to the account page the instance sent; no site, no links.
+  const legal = legalLinks(inference.accountUrl)
 
   const signOut = async (): Promise<void> => {
     setBusy('signout')
     try {
-      await clerkClient.signOut()
+      await actions.signOut()
     } finally {
       setBusy(null)
     }
@@ -169,9 +172,11 @@ function SignedInAccount({
           <div className="truncate text-lead font-semibold tracking-tight">{name}</div>
           {email && <div className="truncate text-note text-muted-foreground">{email}</div>}
         </div>
-        <Button variant="outline" size="sm" onClick={() => void clerkClient.openUserProfile()}>
-          <Settings2 /> Manage account
-        </Button>
+        {actions.openUserProfile && (
+          <Button variant="outline" size="sm" onClick={actions.openUserProfile}>
+            <Settings2 /> Manage account
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={signOut} disabled={busy === 'signout'}>
           <LogOut /> Sign out
         </Button>
@@ -299,6 +304,27 @@ function SignedInAccount({
             </Badge>
           </SettingRow>
         )}
+        {legal && (
+          <SettingRow
+            title="Privacy and terms"
+            description="What this instance does with your audio and text, and the terms of the service."
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void window.murmur.app.openExternal(legal.privacy)}
+            >
+              Privacy
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void window.murmur.app.openExternal(legal.terms)}
+            >
+              Terms
+            </Button>
+          </SettingRow>
+        )}
       </Section>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -329,10 +355,13 @@ function planDescription(inference: InferenceView): string {
   if (!inference.managedAvailable)
     return 'This Murmur instance does not provide models of its own; connect your provider under Models.'
   if (!inference.status) return 'Waiting for your account status…'
+  const stopped = transcriptionPaused(inference.meters)
   switch (inference.planState) {
     case 'trial':
       return `${inference.trialDaysLeft === 1 ? '1 day' : `${inference.trialDaysLeft} days`} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one.`
     case 'pro':
+      if (stopped)
+        return `Unlimited dictation within fair use. This month's ${formatAudioSeconds(stopped.allowed)} are used up, so Murmur's speech model rests until ${formatResetTime(stopped.resetsAt).replace(/^on /, '')}; your own provider under Models keeps dictating meanwhile.`
       return inference.formattingPaused
         ? 'Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules.'
         : 'Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page.'
@@ -353,6 +382,8 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
   }
   const { upgrade, manage } = planActions(inference)
   const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
+  // Transcription that has stopped outranks a paused formatting model: nothing is inserted at all.
+  const stopped = transcriptionPaused(inference.meters)
   return (
     <Section
       title="Plan"
@@ -387,16 +418,28 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
           </Button>
         )}
       </SettingRow>
-      {inference.formattingPaused && paused && (
+      {stopped ? (
         <Banner tone="warning" className="my-2">
           <div className="text-sm font-medium">
-            Formatting paused until {formatResetTime(paused.resetsAt).replace(/^on /, '')}
+            Transcription paused until {formatResetTime(stopped.resetsAt).replace(/^on /, '')}
           </div>
           <div className="text-note text-muted-foreground">
-            Past {meterValue(paused).split(' of ')[1]} of transcription this month, Murmur inserts
-            your words with rule-based cleanup only (fair use). Nothing else changes.
+            {`This month's ${formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up${inference.plan === 'pro' ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Models to keep dictating${inference.plan === 'pro' ? '.' : ', or upgrade for unlimited dictation.'}`}
           </div>
         </Banner>
+      ) : (
+        inference.formattingPaused &&
+        paused && (
+          <Banner tone="warning" className="my-2">
+            <div className="text-sm font-medium">
+              Formatting paused until {formatResetTime(paused.resetsAt).replace(/^on /, '')}
+            </div>
+            <div className="text-note text-muted-foreground">
+              Past {meterValue(paused).split(' of ')[1]} of transcription this month, Murmur inserts
+              your words with rule-based cleanup only (fair use). Nothing else changes.
+            </div>
+          </Banner>
+        )
       )}
       {inference.meters.length > 0
         ? inference.meters.map((m) => <MeterRow key={m.limit} meter={m} />)

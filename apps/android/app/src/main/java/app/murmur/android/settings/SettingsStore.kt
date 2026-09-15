@@ -205,19 +205,31 @@ class SettingsStore(context: Context) {
     /** Emits (previous, next, origin) for every change so the sync engine can diff local edits. */
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<(MurmurSettings, MurmurSettings, SettingsOrigin) -> Unit>()
 
+    /** Serializes [update]: one read-modify-write-publish at a time. */
+    private val updateLock = Any()
+
     init {
         migrate()
     }
 
     fun get(): MurmurSettings = _flow.value
 
+    /**
+     * Apply [transform] to the current settings and publish the result. Atomic: updates arrive from
+     * the UI, the sync engine's scope and the dictation pipeline (stats, right after a dictation
+     * lands), and an unsynchronized read-modify-write let a slower one overwrite everything a
+     * faster one had just changed. Listeners run inside the same lock so they see every change in
+     * the order it was published; none of them blocks.
+     */
     fun update(origin: SettingsOrigin = SettingsOrigin.LOCAL, transform: (MurmurSettings) -> MurmurSettings) {
-        val previous = _flow.value
-        val next = transform(previous)
-        if (next == previous) return
-        write(next)
-        _flow.value = next
-        for (l in listeners) l(previous, next, origin)
+        synchronized(updateLock) {
+            val previous = _flow.value
+            val next = transform(previous)
+            if (next == previous) return
+            write(next)
+            _flow.value = next
+            for (l in listeners) l(previous, next, origin)
+        }
     }
 
     fun update(transform: (MurmurSettings) -> MurmurSettings) = update(SettingsOrigin.LOCAL, transform)

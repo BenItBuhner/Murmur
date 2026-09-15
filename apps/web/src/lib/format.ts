@@ -29,17 +29,6 @@ export function formatDate(iso: string): string {
   }).format(date)
 }
 
-/** Seconds of audio as the apps show them: `12 min`, `1 h 20 min`, `45 s`. */
-export function formatAudioSeconds(seconds: number): string {
-  const s = Math.max(0, Math.round(seconds))
-  if (s < 60) return `${s} s`
-  const minutes = Math.round(s / 60)
-  if (minutes < 60) return `${minutes} min`
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest ? `${hours} h ${rest} min` : `${hours} h`
-}
-
 /** Calendar month (UTC) as `YYYY-MM`, the key the backend files usage under. */
 export function usagePeriod(now: number): string {
   const d = new Date(now)

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  formatAudioSeconds,
   formatBytes,
   formatDate,
   formatPeriod,
@@ -36,14 +35,5 @@ describe('dates and periods', () => {
     expect(formatRelative(now - 5 * 60_000, now)).toBe('5 min ago')
     expect(formatRelative(now - 3 * 3_600_000, now)).toBe('3 h ago')
     expect(formatRelative(now - 2 * 86_400_000, now)).toBe('2 d ago')
-  })
-})
-
-describe('formatAudioSeconds', () => {
-  it('rounds to the unit the apps use', () => {
-    expect(formatAudioSeconds(45)).toBe('45 s')
-    expect(formatAudioSeconds(720)).toBe('12 min')
-    expect(formatAudioSeconds(4800)).toBe('1 h 20 min')
-    expect(formatAudioSeconds(7200)).toBe('2 h')
   })
 })

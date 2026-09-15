@@ -13,10 +13,11 @@ import {
   describeReset,
   displayedMeters,
   exhaustedNotice,
+  formatLocalDate,
   formatLongDate,
-  formatUtcDate,
   meterView,
   planLabel,
+  resetPoint,
   trialDaysLeft,
   type BillingInterval,
   type MeterView
@@ -127,7 +128,7 @@ function PlanSummary({
     return (
       <>
         {days === 0 ? 'Ends today' : days === 1 ? 'One day left' : `${days} days left`}
-        {status.trialEndsAt ? `, until ${formatUtcDate(status.trialEndsAt)}` : ''}. Everything Pro
+        {status.trialEndsAt ? `, until ${formatLocalDate(status.trialEndsAt)}` : ''}. Everything Pro
         has: unlimited words within fair use, clips up to{' '}
         {Math.round(status.limits.maxClipSeconds / 60)} minutes, {status.limits.requestsPerMinute}{' '}
         requests a minute. Then the free tier: {PRICING.freeWordsPerWeek} words a week, unless you
@@ -173,7 +174,11 @@ function Notice({ tone, children }: { tone: 'record' | 'warning'; children: Reac
   )
 }
 
-/* A meter: the label and figure over a track; the track is the one functional thin mark. */
+/*
+ * A meter: the label and figure over a track; the track is the one functional thin mark. The
+ * caption is the apps' ("Used up · more tomorrow at 1:00 am", "Resets Thu 1 Oct"), in the
+ * viewer's time zone.
+ */
 function MeterBar({ meter, now }: { meter: MeterView; now: number }) {
   return (
     <div className="well rounded-md px-4 py-3">
@@ -198,7 +203,9 @@ function MeterBar({ meter, now }: { meter: MeterView; now: number }) {
         />
       </div>
       <div className="mt-1.5 text-caption text-muted-foreground">
-        {meter.exceeded ? 'Frees up' : 'Moves'} {describeReset(meter.resetsAt, now)}
+        {meter.exceeded
+          ? `Used up · more ${describeReset(meter.resetsAt, now)}`
+          : `Resets ${resetPoint(meter.resetsAt, now)}`}
       </div>
     </div>
   )

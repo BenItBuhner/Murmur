@@ -271,7 +271,12 @@ MURMUR_LLM_MODEL=… npm run test:live` runs the corpus against a real model and
 `packages/backend/convex/_generated`, so run `npx convex dev` (or `npx convex codegen`) after
 changing backend functions and commit the result. `MURMUR_LIVE=1 npm run test:live -- tests/live/cloud-sync.test.ts`
 in `apps/desktop` drives the real sync engine against a Convex deployment that trusts a test JWT
-issuer (see the header of that file).
+issuer (see the header of that file). A development deployment trusts one when
+`MURMUR_TEST_JWT_ISSUER` and `MURMUR_TEST_JWKS_URL` are both set on it (never on production); with
+such a deployment a dev build of the desktop app signs in through `MURMUR_TEST_AUTH_TOKEN_FILE`
+(a file holding one of those tokens; packaged builds ignore it), and the Android
+`LiveGatewayTest` dictates through the real gateway with `MURMUR_GATEWAY_ORIGIN` and
+`MURMUR_TEST_JWT_FILE`.
 
 ## Releases
 

@@ -18,11 +18,12 @@ export function InstallCommands({ manifest }: { manifest: ReleaseManifest | null
         The scripts pick the right file for your machine from the latest release and verify it
         against the release’s checksums before installing.
       </p>
-      <div className="mt-card grid gap-2">
+      {/* The command wraps inside its well (min-w-0, wrap-anywhere) rather than widening the page. */}
+      <div className="mt-card grid grid-cols-[minmax(0,1fr)] gap-2">
         {commands.map((c) => (
-          <div key={c.label} className="well rounded-md px-4 py-3.5">
+          <div key={c.label} className="well min-w-0 rounded-md px-4 py-3.5">
             <div className="eyebrow">{c.label}</div>
-            <pre className="mt-2 overflow-x-auto font-mono text-note">
+            <pre className="mt-2 font-mono text-note whitespace-pre-wrap wrap-anywhere">
               <code>{c.code}</code>
             </pre>
           </div>

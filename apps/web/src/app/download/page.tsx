@@ -2,9 +2,9 @@ import type { Metadata } from 'next'
 import { AssetList } from '@/components/download/asset-list'
 import { InstallCommands } from '@/components/download/install-commands'
 import { PlatformDownloadButton } from '@/components/platform-download'
-import { Section } from '@/components/ui/section'
+import { PageHeader, Section } from '@/components/ui/section'
 import { formatDate } from '@/lib/format'
-import { DOWNLOAD_PLATFORMS, fetchLatestRelease, PLATFORMS } from '@/lib/releases'
+import { DOWNLOAD_PLATFORMS, fetchLatestRelease } from '@/lib/releases'
 import { latestDownloadBase, releasesUrl } from '@/lib/site'
 
 export const metadata: Metadata = {
@@ -24,22 +24,33 @@ export default async function DownloadPage() {
   return (
     <>
       <Section className="pb-10">
-        <div className="max-w-2xl">
-          <div className="eyebrow">Download</div>
-          <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
-            {manifest ? (
+        <PageHeader
+          eyebrow="Download"
+          title={
+            manifest ? (
               <>
                 Murmur <span className="tabular-nums">{manifest.version}</span>
               </>
             ) : (
               'The latest Murmur'
-            )}
-          </h1>
-          <p className="mt-5 text-lead text-muted-foreground">
-            {manifest ? (
+            )
+          }
+          lede={
+            manifest ? (
               <>
                 {manifest.publishedAt && <>Released {formatDate(manifest.publishedAt)}. </>}
-                Both apps update themselves from here on: you download Murmur by hand once.{' '}
+                Both apps update themselves from here on: you download Murmur by hand once.
+              </>
+            ) : (
+              <>
+                GitHub could not be reached just now, so versions and sizes are missing. Every link
+                below still resolves to the current release.
+              </>
+            )
+          }
+          meta={
+            manifest ? (
+              <>
                 <a href={manifest.url} className={LINK}>
                   Release notes
                 </a>
@@ -58,8 +69,6 @@ export default async function DownloadPage() {
               </>
             ) : (
               <>
-                GitHub could not be reached just now, so versions and sizes are missing. Every link
-                below still resolves to the current release.{' '}
                 <a href={releasesUrl()} className={LINK}>
                   All releases
                 </a>
@@ -68,27 +77,37 @@ export default async function DownloadPage() {
                   SHA256SUMS.txt
                 </a>
               </>
-            )}
-          </p>
-        </div>
-        <div className="mt-8 flex flex-wrap gap-3">
+            )
+          }
+        />
+        {/* One button per platform, each a third of the width: the row is as wide as the lists. */}
+        <div className="mt-section grid gap-3 sm:grid-cols-3">
           {DOWNLOAD_PLATFORMS.map((platform) => (
             <PlatformDownloadButton
               key={platform}
               manifest={manifest}
               platform={platform}
               size="lg"
+              className="w-full"
             />
           ))}
         </div>
       </Section>
 
       <Section className="pt-0 sm:pt-0">
-        <div className="grid gap-card">
-          {PLATFORMS.map((platform) => (
-            <AssetList key={platform} manifest={manifest} platform={platform} />
-          ))}
-          <InstallCommands manifest={manifest} />
+        {/*
+         * Two columns of list cards at desktop sizes: Windows beside Linux, then Android with the
+         * one-line installers under it beside macOS, so the columns end close together. Below lg
+         * everything stacks in that order.
+         */}
+        <div className="grid gap-card lg:grid-cols-2 lg:items-start">
+          <AssetList manifest={manifest} platform="windows" />
+          <AssetList manifest={manifest} platform="linux" />
+          <div className="grid gap-card">
+            <AssetList manifest={manifest} platform="android" />
+            <InstallCommands manifest={manifest} />
+          </div>
+          <AssetList manifest={manifest} platform="macos" />
         </div>
         <p className="mt-8 max-w-3xl text-note text-muted-foreground">
           Every release ships a SHA256SUMS.txt; the apps verify each update against it before

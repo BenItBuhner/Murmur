@@ -60,31 +60,26 @@ export function AssetList({
         <p className="mt-2 text-body text-muted-foreground">{NOTES[platform]}</p>
       </div>
 
+      {/* Two lines per row (file, then arch and size) so the row reads the same in a half-width card. */}
       <ul className="grid gap-card-tight">
         {rows.map((row) => (
           <li
             key={row.key}
-            className="well grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 rounded-md px-4 py-3 sm:grid-cols-[1fr_5.5rem_5rem_auto]"
+            className="well grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 rounded-md px-4 py-3"
           >
             <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2 text-body font-medium">
-                <span className="truncate">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-body font-medium">
+                <span>
                   {row.group}
                   <span className="text-muted-foreground"> · {row.label}</span>
                 </span>
                 {row.recommended && <Chip tone="card">recommended</Chip>}
               </div>
-              <div className="mt-0.5 truncate text-meta text-muted-foreground sm:hidden">
+              <div className="mt-0.5 text-meta text-muted-foreground tabular-nums">
                 {row.arch}
-                {row.size ? ` · ${row.size}` : ''}
+                {row.size ? ` · ${row.size}` : ' · latest release'}
               </div>
             </div>
-            <span className="hidden text-note text-muted-foreground tabular-nums sm:block">
-              {row.arch}
-            </span>
-            <span className="hidden text-note text-muted-foreground tabular-nums sm:block">
-              {row.size ?? 'latest'}
-            </span>
             <div className="flex items-center gap-1.5">
               <a
                 href={row.href}

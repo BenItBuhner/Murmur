@@ -171,9 +171,12 @@ fun AccountContent(
 fun planDescription(inference: InferenceView): String {
     if (!inference.managedAvailable) return "This Murmur instance does not provide models of its own; connect your provider under Speech model."
     if (inference.status == null) return "Waiting for your account status…"
+    val stopped = Limits.transcriptionPaused(inference.meters)
     return when (inference.planState) {
         "trial" -> "${if (inference.trialDaysLeft == 1) "1 day" else "${inference.trialDaysLeft} days"} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one."
-        "pro" -> if (inference.formattingPaused)
+        "pro" -> if (stopped != null)
+            "Unlimited dictation within fair use. This month's ${Limits.formatAudioSeconds(stopped.allowed)} are used up, so Murmur's speech model rests until ${Limits.formatResetTime(stopped.resetsAt.toLong()).removePrefix("on ")}; your own provider under Speech model keeps dictating meanwhile."
+        else if (inference.formattingPaused)
             "Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules."
         else
             "Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page."
@@ -196,6 +199,8 @@ fun PlanGroup(inference: InferenceView) {
     }
     val actions = inference.planActions
     val paused = inference.meters.firstOrNull { it.limit == "fairUseSttSecondsPerMonth" }
+    // Transcription that has stopped outranks a paused formatting model: nothing is inserted at all.
+    val stopped = Limits.transcriptionPaused(inference.meters)
     Group(rows = true) {
         ControlRow(inference.planTitle, description = planDescription(inference)) {
             Tag(
@@ -207,27 +212,19 @@ fun PlanGroup(inference: InferenceView) {
                 }
             )
         }
-        if (inference.formattingPaused && paused != null) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = Space.row)
-                    .clip(RoundedCornerShape(Radii.nested(Radii.card, Space.card)))
-                    .background(c.ember.copy(alpha = if (c.isDark) 0.16f else 0.1f))
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    "Formatting paused until ${Limits.formatResetTime(paused.resetsAt.toLong()).removePrefix("on ")}",
-                    style = Murmur.type.title,
-                    color = c.ink
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    "Past ${Limits.formatAudioSeconds(paused.allowed)} of transcription this month, Murmur inserts your words with rule-based cleanup only (fair use). Nothing else changes.",
-                    style = Murmur.type.bodySmall,
-                    color = c.inkSoft
-                )
-            }
+        if (stopped != null) {
+            PlanNotice(
+                title = "Transcription paused until ${Limits.formatResetTime(stopped.resetsAt.toLong()).removePrefix("on ")}",
+                detail = "This month's ${Limits.formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up" +
+                    (if (inference.plan == "pro") " (fair use)" else "") +
+                    "; dictations are refused until then. Connect your own provider under Speech model to keep dictating" +
+                    (if (inference.plan == "pro") "." else ", or upgrade for unlimited dictation.")
+            )
+        } else if (inference.formattingPaused && paused != null) {
+            PlanNotice(
+                title = "Formatting paused until ${Limits.formatResetTime(paused.resetsAt.toLong()).removePrefix("on ")}",
+                detail = "Past ${Limits.formatAudioSeconds(paused.allowed)} of transcription this month, Murmur inserts your words with rule-based cleanup only (fair use). Nothing else changes."
+            )
         }
         if (inference.meters.isNotEmpty()) {
             for (meter in inference.meters) MeterRow(meter)
@@ -253,6 +250,24 @@ fun PlanGroup(inference: InferenceView) {
                 actions.manage?.let { url -> SecondaryButton("Manage plan", onClick = { open(url) }) }
             }
         }
+    }
+}
+
+/** A tinted note inside the plan group: what is paused, until when, and what to do meanwhile. */
+@Composable
+private fun PlanNotice(title: String, detail: String) {
+    val c = Murmur.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = Space.row)
+            .clip(RoundedCornerShape(Radii.nested(Radii.card, Space.card)))
+            .background(c.ember.copy(alpha = if (c.isDark) 0.16f else 0.1f))
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Text(title, style = Murmur.type.title, color = c.ink)
+        Spacer(Modifier.height(3.dp))
+        Text(detail, style = Murmur.type.bodySmall, color = c.inkSoft)
     }
 }
 

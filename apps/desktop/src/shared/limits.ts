@@ -235,6 +235,15 @@ export function usageMeters(meters: UsageMeter[] | undefined): UsageMeter[] {
   )
 }
 
+/**
+ * The month's transcription meter once it has run out: Murmur's speech model refuses every clip
+ * until it resets (Pro's hard fair-use cap, the free tier's monthly minutes). It outranks a paused
+ * formatting model, which only matters while transcription still happens.
+ */
+export function transcriptionPaused(meters: UsageMeter[] | undefined): UsageMeter | null {
+  return (meters ?? []).find((m) => m.limit === 'sttSecondsPerMonth' && m.exceeded) ?? null
+}
+
 export interface LimitCopy {
   /** One line: what ran out. */
   title: string

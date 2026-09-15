@@ -12,6 +12,7 @@ import {
   planActions,
   planStateLabel,
   planStateOf,
+  transcriptionPaused,
   trialDaysLeft,
   usageMeters,
   type LimitNotice
@@ -250,6 +251,37 @@ describe('limit wording', () => {
       'llmTokensPerMonth'
     ])
     expect(usageMeters(undefined)).toEqual([])
+  })
+
+  it('tells a stopped speech model (the monthly cap) apart from a paused formatting model', () => {
+    const soft: UsageMeter = {
+      limit: 'fairUseSttSecondsPerMonth',
+      used: 108_100,
+      allowed: 108_000,
+      exceeded: true,
+      resetsAt: NOW
+    }
+    const hard: UsageMeter = {
+      limit: 'sttSecondsPerMonth',
+      used: 216_000,
+      allowed: 216_000,
+      exceeded: true,
+      resetsAt: NOW
+    }
+    // Past the soft cap only formatting pauses; transcription carries on.
+    expect(transcriptionPaused([soft, { ...hard, used: 150_000, exceeded: false }])).toBeNull()
+    // Past the hard cap every clip is refused: the Account page and Home say so, not "formatting paused".
+    expect(transcriptionPaused([soft, hard])).toBe(hard)
+    // The free tier's monthly minutes stop transcription the same way.
+    const free: UsageMeter = {
+      limit: 'sttSecondsPerMonth',
+      used: 7_260,
+      allowed: 7_200,
+      exceeded: true,
+      resetsAt: NOW
+    }
+    expect(transcriptionPaused([free])).toBe(free)
+    expect(transcriptionPaused(undefined)).toBeNull()
   })
 })
 

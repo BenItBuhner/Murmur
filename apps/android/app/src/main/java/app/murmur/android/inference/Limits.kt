@@ -200,6 +200,14 @@ object Limits {
         meters.filter { it.limit in NAMES && it.limit != "maxClipSeconds" && it.limit != "requestsPerMinute" }
 
     /**
+     * The month's transcription meter once it has run out: Murmur's speech model refuses every clip
+     * until it resets (Pro's hard fair-use cap, the free tier's monthly minutes). It outranks a paused
+     * formatting model, which only matters while transcription still happens.
+     */
+    fun transcriptionPaused(meters: List<UsageMeterDto>): UsageMeterDto? =
+        meters.firstOrNull { it.limit == "sttSecondsPerMonth" && it.exceeded }
+
+    /**
      * The calm version of a refusal: which limit it was, the allowance, and when it resets. A
      * formatting limit never loses text (the rule-based cleanup is inserted instead), so its copy
      * leads with that and gives the reason second.

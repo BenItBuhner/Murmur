@@ -10,6 +10,7 @@ import app.murmur.android.inference.Limits
 import app.murmur.android.inference.PlanActions
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.ui.InferenceView
+import app.murmur.android.ui.planLine
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.errorFromResponse
 import app.murmur.android.stt.parseErrorBody
@@ -196,6 +197,20 @@ class LimitsTest {
     }
 
     @Test
+    fun `a stopped speech model (the monthly cap) is told apart from a paused formatting model`() {
+        val soft = UsageMeterDto("fairUseSttSecondsPerMonth", 108_100.0, 108_000.0, exceeded = true, resetsAt = NOW.toDouble())
+        val hard = UsageMeterDto("sttSecondsPerMonth", 216_000.0, 216_000.0, exceeded = true, resetsAt = NOW.toDouble())
+        // Past the soft cap only formatting pauses; transcription carries on.
+        assertNull(Limits.transcriptionPaused(listOf(soft, hard.copy(used = 150_000.0, exceeded = false))))
+        // Past the hard cap every clip is refused: Account and Home say so, not "formatting paused".
+        assertEquals(hard, Limits.transcriptionPaused(listOf(soft, hard)))
+        // The free tier's monthly minutes stop transcription the same way.
+        val free = UsageMeterDto("sttSecondsPerMonth", 7_260.0, 7_200.0, exceeded = true, resetsAt = NOW.toDouble())
+        assertEquals(free, Limits.transcriptionPaused(listOf(free)))
+        assertNull(Limits.transcriptionPaused(emptyList()))
+    }
+
+    @Test
     fun `plan state comes from the instance, otherwise from the tier`() {
         assertEquals("trial", Limits.planStateOf(InferenceStatusDto(plan = "pro", planState = "trial"), null))
         assertEquals("pro", Limits.planStateOf(InferenceStatusDto(plan = "pro"), null))
@@ -227,6 +242,21 @@ class LimitsTest {
         )
         assertEquals(PlanActions(null, null), view.planActions)
         assertEquals(PlanActions(null, ACCOUNT), view.copy(status = view.status?.copy(accountUrl = ACCOUNT)).planActions)
+    }
+
+    @Test
+    fun `the Home line says what Pro has run out of`() {
+        val soft = UsageMeterDto("fairUseSttSecondsPerMonth", 108_100.0, 108_000.0, exceeded = true, resetsAt = (NOW + 18 * DAY).toDouble())
+        val hard = UsageMeterDto("sttSecondsPerMonth", 216_000.0, 216_000.0, exceeded = true, resetsAt = (NOW + 18 * DAY).toDouble())
+        val pro = InferenceView(
+            cloudEnabled = true, managedAvailable = true, routing = InferenceRouting(InferenceSource.MURMUR, InferenceSource.MURMUR),
+            signedIn = true, status = InferenceStatusDto(plan = "pro", planState = "pro", formattingPaused = true, meters = listOf(soft)),
+            plan = "pro", planState = "pro", trialDaysLeft = 0, sttReady = true, llmReady = true
+        )
+        assertEquals("Pro · formatting paused until 1 Oct (fair use)", planLine(pro, NOW))
+        val stopped = pro.copy(status = pro.status?.copy(meters = listOf(soft, hard)))
+        assertEquals("Pro · transcription paused until 1 Oct (fair use)", planLine(stopped, NOW))
+        assertNull(planLine(pro.copy(status = pro.status?.copy(formattingPaused = false, meters = emptyList())), NOW))
     }
 
     @Test

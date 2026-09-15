@@ -166,6 +166,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       # assembleRelease exercises the release signing config (debug-key fallback without secrets).
       - run: ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
+      # The JUnit XML and HTML reports, so a failing test can be read in full after the run.
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: murmur-android-test-reports
+          path: |
+            apps/android/app/build/test-results/testDebugUnitTest
+            apps/android/app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: murmur-android

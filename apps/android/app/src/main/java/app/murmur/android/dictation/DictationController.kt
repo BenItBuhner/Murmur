@@ -128,10 +128,12 @@ object DictationController {
     private val _state = MutableStateFlow<DictationState>(DictationState.Idle)
     val state: StateFlow<DictationState> = _state
 
-    var sink: TextSink? = null
+    /** Set by the accessibility service (its thread) and read by the pipeline's coroutines. */
+    @Volatile var sink: TextSink? = null
 
     private var listeningJob: Job? = null
-    private var resetJob: Job? = null
+    /** Cancelled from the UI thread, replaced from the pipeline: a stale read lets an old job blank the pill early. */
+    @Volatile private var resetJob: Job? = null
     @Volatile private var startedAt = 0L
     /** When the user stopped listening; speech duration is [stoppedAt] - [startedAt]. */
     @Volatile private var stoppedAt = 0L

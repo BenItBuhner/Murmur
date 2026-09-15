@@ -116,8 +116,10 @@ android {
         // Robolectric (TextInserterTest) needs the merged manifest and resources.
         unitTests.isIncludeAndroidResources = true
         // A failure prints its whole assertion (the state the flow ended in, not just the line),
-        // so a CI log is enough to read it.
+        // so a CI log is enough to read it, and the app's logcat goes to the test's standard
+        // output, which the JUnit report keeps (the console stays quiet).
         unitTests.all {
+            it.systemProperty("robolectric.logging", "stdout")
             it.testLogging {
                 events("failed", "skipped")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

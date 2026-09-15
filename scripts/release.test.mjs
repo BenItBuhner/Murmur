@@ -8,12 +8,15 @@ import {
   ASSETS,
   CHECKSUMS_FILE,
   INSTALL_HELPERS,
+  WHATS_NEW,
   downloadTable,
   isCloudRelease,
   knownReleaseFiles,
   latestDownloadBase,
+  parseSemver,
   readmeBlock,
-  releaseNotes
+  releaseNotes,
+  whatsNew
 } from './release.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -156,6 +159,41 @@ test('release notes omit the local-only callout when MURMUR_CLOUD_RELEASE=true',
       if (previous === undefined) delete process.env.MURMUR_CLOUD_RELEASE
       else process.env.MURMUR_CLOUD_RELEASE = previous
     }
+  })
+})
+
+test("the version in the repository has a What's new entry, and notes open with it", () => {
+  const ok = run(['check'])
+  assert.equal(ok.status, 0, ok.stderr + ok.stdout)
+  const version = /ok: all version files agree on (\S+)/.exec(ok.stdout)[1]
+  assert.ok(whatsNew(version), `WHATS_NEW has no entry for ${version}`)
+  assert.doesNotMatch(ok.stderr, /no What's new entry/)
+  for (const [key, bullets] of Object.entries(WHATS_NEW)) {
+    parseSemver(key)
+    assert.ok(Array.isArray(bullets) && bullets.length > 0, `${key} has no bullets`)
+    for (const bullet of bullets) assert.doesNotMatch(bullet, /\n/, `${key}: a bullet spans lines`)
+  }
+  withTempDir((dir) => {
+    writeFileSync(join(dir, `Murmur-${version}-setup.exe`), 'win')
+    const md = releaseNotes(REPO, version, dir)
+    const news = md.indexOf("## What's new")
+    assert.ok(news > 0, md)
+    assert.ok(news < md.indexOf('## Downloads'), "What's new comes before the downloads")
+    const opening = whatsNew(version)[0]
+      .slice(0, 20)
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    assert.match(md, new RegExp(`- ${opening}`))
+  })
+})
+
+test("notes warn, and still print, for a version without a What's new entry", () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'Murmur-0.1.0-setup.exe'), 'win')
+    const result = run(['notes', '0.1.0', dir])
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stderr, /no What's new entry for 0\.1\.0/)
+    assert.doesNotMatch(result.stdout, /## What's new/)
+    assert.match(result.stdout, /## Downloads/)
   })
 })
 

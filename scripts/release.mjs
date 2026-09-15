@@ -11,8 +11,10 @@
 //     Verify that all version files agree (and match the given tag). Used by CI.
 //
 //   node scripts/release.mjs notes <version> <assets-dir>
-//     Print release-notes markdown (download table + install notes) for the files in <assets-dir>.
-//     Used by the release workflow to fill in the GitHub release body.
+//     Print release-notes markdown (what's new, download table, install notes) for the files in
+//     <assets-dir>. Used by the release workflow to fill in the GitHub release body; the workflow
+//     appends GitHub's generated changelog after it. What a version ships is written in WHATS_NEW
+//     below, alongside the bump.
 //
 //   node scripts/release.mjs aliases <version> <assets-dir>
 //     Copy each built file to its stable (unversioned) name and add install.sh / install.ps1 so
@@ -131,6 +133,29 @@ const INSTALL_HELPERS = [
   { file: 'install.ps1', src: resolve(ROOT, 'scripts/install.ps1') }
 ]
 const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.file)]
+
+/**
+ * What each release ships, as the GitHub release opens: one entry per version, a list of markdown
+ * bullets, written with the version bump (`check` and `notes` warn when the version in the
+ * repository has none). `notes` renders the entry under "What's new" above the download table.
+ */
+const WHATS_NEW = {
+  '0.5.0': [
+    '**The text engine, rebuilt.** The formatting model now reads the raw transcript together with where the text is going, what is already before the cursor, your dictionary and your instructions, and a verifier holds its answer to checks that need no understanding of the text: not empty or chatty, most of your words kept, verbatim phrases intact, and exactly the same numbers in the same order ("one million two hundred thousand dollars" comes back as $1,200,000, never as "one million $200,000"). One strict retry, then the rule-based cleanup, and History says why. One implementation runs on the desktop, on Android and in the gateway.',
+    '**Design pass.** Both apps draw their structure with surfaces and space instead of lines: one radius scale on the 4px grid, three elevation levels, tonal fields and buttons, corners that stay concentric inside cards, and the serif wordmark instead of a placeholder icon. Nothing about how they behave changed.',
+    '**Plans and limits, explained in the apps.** Account shows where the account stands (Pro trial with the days left, Free, Pro), one meter per allowance with when it resets, and Upgrade or Manage plan. A refused dictation is explained on the pill (which limit, the allowance, when it comes back) with Retry and Use my own model, and the recording is kept. When the formatting model pauses for fair use the text is still inserted, tidied by rules, and the pill says so.',
+    "**Retired presets moved.** Groq retired `llama-3.1-8b-instant`, `llama-3.3-70b-versatile` and `distil-whisper-large-v3-en`, and OpenAI is shutting `gpt-4.1-nano` down: the presets now offer `openai/gpt-oss-20b`, `openai/gpt-oss-120b` and `gpt-5.6-luna`, and an install that still names a retired model on the provider's own host is moved to its replacement once, on both apps.",
+    '**Website.** Landing, pricing, download and account pages, privacy and terms, the release manifest (`/api/releases/latest`) and `/download/{windows,linux,android}` redirects that always point at the current release.',
+    '**Accounts, trial and billing backbone.** Every account starts a 14-day Pro trial with no card, then keeps a free tier of 500 words a week; Pro is $7.50 a month or $72 a year, unlimited within fair use; Stripe Checkout, the Customer Portal and its webhook; every limit enforced in the gateway with a structured refusal the apps can read. This is on for cloud builds connected to a Murmur instance; a local-only build keeps everything on the device.',
+    "**Found end to end, fixed.** Account and Home at the Pro hard cap said the formatting model was paused while every clip was refused; they now say transcription is paused until the reset, and the free tier's Home line says when its monthly minutes are spent. A refused or failed dictation is logged with its reason. Desktop: the Models connection test stays inside its card and Style has one Model label. Android: Manage account and the privacy and terms links on Account.",
+    "**Since 0.4.0 on the way here.** Retry a failed dictation from the pill or from History, with recordings kept (on by default); the Android drawer and dashboard Home with history and stats, and motion on both apps; the Android pill follows light and dark mode; cloud builds use the instance's models by default with your own provider as the alternative; dictation no longer stops itself after 300 seconds."
+  ]
+}
+
+/** The "What's new" bullets for `version`, or null when none were written. */
+function whatsNew(version) {
+  return WHATS_NEW[version] ?? null
+}
 
 // ---- helpers ----------------------------------------------------------------------------------
 
@@ -338,6 +363,9 @@ function releaseNotes(repo, version, dir) {
     'Hold a key (or tap a pill), speak, and clean text lands wherever your cursor is.',
     ''
   ]
+  const news = whatsNew(version)
+  if (news) md.push("## What's new", '', ...news.map((n) => `- ${n}`), '')
+  else warn(`no What's new entry for ${version} in scripts/release.mjs (WHATS_NEW)`)
   if (!isCloudRelease()) {
     md.push(
       '## Local-only build',
@@ -397,6 +425,11 @@ function check({ tag }) {
   const prerelease = version.includes('-')
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nprerelease=${prerelease}\n`)
+  }
+  if (!whatsNew(version)) {
+    warn(
+      `no What's new entry for ${version} in scripts/release.mjs (WHATS_NEW); the release will open with the download table`
+    )
   }
   console.log(`ok: all version files agree on ${version}${prerelease ? ' (pre-release)' : ''}`)
 }
@@ -567,11 +600,13 @@ export {
   CHECKSUMS_FILE,
   EXTRA_RELEASE_FILES,
   INSTALL_HELPERS,
+  WHATS_NEW,
   downloadTable,
   isCloudRelease,
   knownReleaseFiles,
   latestDownloadBase,
   parseSemver,
   readmeBlock,
-  releaseNotes
+  releaseNotes,
+  whatsNew
 }

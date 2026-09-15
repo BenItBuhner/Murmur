@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { useClerk } from '@clerk/electron/react'
 import {
   BookA,
   Clock3,
@@ -112,10 +111,9 @@ function SignedInAccount({
   busy: string | null
   setBusy: (v: string | null) => void
 }): React.JSX.Element {
-  const { status, clerk, config } = useCloud()
+  const { status, clerk, config, actions } = useCloud()
   const { settings } = useSettings()
   const inference = useInference()
-  const clerkClient = useClerk()
 
   const user = status?.user
   const name = user?.name ?? clerk.name ?? 'Your account'
@@ -126,7 +124,7 @@ function SignedInAccount({
   const signOut = async (): Promise<void> => {
     setBusy('signout')
     try {
-      await clerkClient.signOut()
+      await actions.signOut()
     } finally {
       setBusy(null)
     }
@@ -169,9 +167,11 @@ function SignedInAccount({
           <div className="truncate text-lead font-semibold tracking-tight">{name}</div>
           {email && <div className="truncate text-note text-muted-foreground">{email}</div>}
         </div>
-        <Button variant="outline" size="sm" onClick={() => void clerkClient.openUserProfile()}>
-          <Settings2 /> Manage account
-        </Button>
+        {actions.openUserProfile && (
+          <Button variant="outline" size="sm" onClick={actions.openUserProfile}>
+            <Settings2 /> Manage account
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={signOut} disabled={busy === 'signout'}>
           <LogOut /> Sign out
         </Button>

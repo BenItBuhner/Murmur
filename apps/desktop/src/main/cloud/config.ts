@@ -2,7 +2,8 @@ import {
   DEFAULT_DEEP_LINK_SCHEME,
   DEFAULT_JWT_TEMPLATE,
   type AccountMode,
-  type CloudConfig
+  type CloudConfig,
+  type TestAuthIdentity
 } from '@shared/cloud'
 
 /** Runtime overrides (developer convenience, mirrors MURMUR_BASE_URL for providers). */
@@ -27,6 +28,15 @@ export interface CloudBuildConfig {
 export interface ResolvedCloudConfig {
   config: CloudConfig
   warnings: string[]
+}
+
+export interface ResolveOptions {
+  /**
+   * A development build signed in through a test token file (see main/cloud/test-auth.ts): Clerk
+   * is not needed, so a missing publishable key no longer forces local mode, and the identity
+   * travels to the renderer on the config.
+   */
+  testAuth?: TestAuthIdentity | null
 }
 
 const ACCOUNT_MODES: readonly AccountMode[] = ['off', 'optional', 'required']
@@ -92,8 +102,13 @@ export function deriveConvexSiteUrl(convexUrl: string): string | null {
  * developer can point a local build at a staging instance, or force local mode with
  * MURMUR_ACCOUNT_MODE=off. Without a valid Convex URL and Clerk key the app is always local.
  */
-export function resolveCloudConfig(env: CloudEnv, build: CloudBuildConfig): ResolvedCloudConfig {
+export function resolveCloudConfig(
+  env: CloudEnv,
+  build: CloudBuildConfig,
+  options: ResolveOptions = {}
+): ResolvedCloudConfig {
   const warnings: string[] = []
+  const testAuth = options.testAuth ?? null
   const convexUrl = (env.MURMUR_CONVEX_URL ?? build.convexUrl ?? '').trim()
   const clerkPublishableKey = (
     env.MURMUR_CLERK_PUBLISHABLE_KEY ??
@@ -123,7 +138,7 @@ export function resolveCloudConfig(env: CloudEnv, build: CloudBuildConfig): Reso
 
   if (requestedMode === 'off') return { config: off, warnings }
 
-  const hasAny = !!convexUrl || !!clerkPublishableKey
+  const hasAny = !!convexUrl || !!clerkPublishableKey || !!testAuth
   if (!convexUrl || !isHttpUrl(convexUrl)) {
     if (hasAny)
       warnings.push(
@@ -131,12 +146,19 @@ export function resolveCloudConfig(env: CloudEnv, build: CloudBuildConfig): Reso
       )
     return { config: off, warnings }
   }
-  const clerkFrontendApiHost = frontendApiFromPublishableKey(clerkPublishableKey)
-  if (!clerkFrontendApiHost) {
+  let clerkFrontendApiHost = frontendApiFromPublishableKey(clerkPublishableKey) ?? ''
+  if (!clerkFrontendApiHost && !testAuth) {
     warnings.push(
       'Cloud disabled: MURMUR_CLERK_PUBLISHABLE_KEY / VITE_CLERK_PUBLISHABLE_KEY is missing or not a Clerk publishable key'
     )
     return { config: off, warnings }
+  }
+  if (testAuth) {
+    // The renderer never mounts Clerk in this mode, so its origin has no business in the CSP.
+    clerkFrontendApiHost = ''
+    warnings.push(
+      `Signed in as ${testAuth.userId} through MURMUR_TEST_AUTH_TOKEN_FILE; Clerk is bypassed (development only)`
+    )
   }
 
   let accountMode: AccountMode = 'required'
@@ -166,10 +188,11 @@ export function resolveCloudConfig(env: CloudEnv, build: CloudBuildConfig): Reso
       accountMode,
       convexUrl: convexUrl.replace(/\/+$/, ''),
       convexSiteUrl,
-      clerkPublishableKey,
+      clerkPublishableKey: testAuth ? '' : clerkPublishableKey,
       clerkFrontendApiHost,
       deepLinkScheme,
-      jwtTemplate: DEFAULT_JWT_TEMPLATE
+      jwtTemplate: DEFAULT_JWT_TEMPLATE,
+      ...(testAuth ? { testAuth } : {})
     },
     warnings
   }

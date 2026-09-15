@@ -27,7 +27,7 @@ export function SiteFooter() {
   return (
     <footer className="mt-auto bg-sidebar py-16">
       <Container>
-        <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
+        <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4">
           <div className="max-w-xs">
             <Wordmark />
             <p className="mt-4 text-body text-muted-foreground">{SITE_TAGLINE}</p>

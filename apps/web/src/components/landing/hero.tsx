@@ -8,7 +8,7 @@ import { TranscriptDemo } from './transcript-demo'
 export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
   return (
     <div className="pt-10 pb-8 sm:pt-16 sm:pb-12">
-      <Container className="grid items-center gap-14 lg:grid-cols-[1.05fr_1fr] lg:gap-12">
+      <Container className="grid items-center gap-14 lg:grid-cols-2 lg:gap-16">
         <div className="stagger max-w-xl">
           <div className="eyebrow">Voice dictation · Windows, Linux, Android</div>
           <h1 className="serif-display mt-5 text-title text-balance sm:text-display">

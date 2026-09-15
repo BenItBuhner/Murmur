@@ -9,7 +9,7 @@ export function AccountUnavailable({
   setup: Extract<AccountsSetup, { configured: false }>
 }) {
   return (
-    <div className="grid items-start gap-card lg:grid-cols-[1.2fr_0.8fr]">
+    <div className="grid items-start gap-card lg:grid-cols-split">
       <Surface>
         <h2 className="serif-display text-heading">Accounts are not switched on here yet</h2>
         <p className="mt-3 text-lead text-muted-foreground">

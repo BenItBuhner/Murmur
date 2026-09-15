@@ -1,11 +1,12 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { Section } from '@/components/ui/section'
+import { PageHeader, Section } from '@/components/ui/section'
 import { Surface } from '@/components/ui/surface'
 
 /*
  * A legal page in the site's voice: a serif title, a lede, then numbered sections with plain
- * prose. Structure comes from space and the one raised card that holds the text; no rules.
+ * prose. Structure comes from space and the one raised card that holds the text; no rules. The
+ * card and its table of contents share the article split of the page grid (8 + 4).
  */
 export interface LegalSection {
   id: string
@@ -30,22 +31,24 @@ export function LegalDocument({
 }) {
   return (
     <Section>
-      <div className="max-w-2xl">
-        <div className="eyebrow">{eyebrow}</div>
-        <h1 className="serif-display mt-5 text-title text-balance sm:text-display">{title}</h1>
-        <p className="mt-5 text-lead text-pretty text-muted-foreground">{lede}</p>
-        <p className="mt-3 text-meta text-muted-foreground">
-          Last updated {updated}. Also read the{' '}
-          <Link
-            href={related.href}
-            className="underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
-          >
-            {related.label}
-          </Link>
-          .
-        </p>
-      </div>
-      <div className="mt-section grid gap-card lg:grid-cols-[minmax(0,1fr)_16rem]">
+      <PageHeader
+        eyebrow={eyebrow}
+        title={title}
+        lede={lede}
+        meta={
+          <>
+            Last updated {updated}. Also read the{' '}
+            <Link
+              href={related.href}
+              className="underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
+            >
+              {related.label}
+            </Link>
+            .
+          </>
+        }
+      />
+      <div className="mt-section grid gap-card lg:grid-cols-article">
         <Surface as="article" className="legal-prose max-w-none">
           {sections.map((section, index) => (
             <section

@@ -26,10 +26,11 @@ export function Principles() {
       <SectionHeading
         eyebrow="On your terms"
         title="Dictation hears everything you say. Murmur is built like it knows that."
+        lede="Four commitments about where your words go, each one checkable in the source rather than promised in a policy."
       />
-      <dl className="mt-section grid gap-x-12 gap-y-10 sm:grid-cols-2">
+      <dl className="mt-section grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
         {PRINCIPLES.map((p) => (
-          <div key={p.title} className="max-w-md">
+          <div key={p.title}>
             <dt className="text-lead font-semibold tracking-tight">{p.title}</dt>
             <dd className="mt-2 text-body text-pretty text-muted-foreground">{p.body}</dd>
           </div>

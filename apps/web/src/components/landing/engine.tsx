@@ -42,7 +42,7 @@ export function Engine() {
         lede="Most dictation tools either trust a language model completely or fence it in with rules that break on the next sentence. Murmur gives the model the raw transcript and then holds its answer to a few invariants that can be checked without understanding the text."
       />
 
-      <div className="mt-section grid gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
+      <div className="mt-section grid gap-12 lg:grid-cols-split lg:gap-16">
         <ol className="space-y-10">
           {STAGES.map((stage, i) => (
             <li

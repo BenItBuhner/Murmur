@@ -141,6 +141,16 @@
   --spacing-section: var(--space-section);
   --spacing-gutter: var(--space-gutter);
 
+  /*
+   * The page grid: twelve columns across the container, and two named ways to divide them so
+   * every two-column layout on the site splits the width the same way (grid-cols-split,
+   * grid-cols-article). Card grids use equal columns (grid-cols-2/3/4).
+   *   split    7 + 5: a subject and its aside (section headers, the engine, the account page)
+   *   article  8 + 4: prose and its table of contents (the legal pages)
+   */
+  --grid-template-columns-split: minmax(0, 7fr) minmax(0, 5fr);
+  --grid-template-columns-article: minmax(0, 8fr) minmax(0, 4fr);
+
   /* Only the three elevation levels exist as shadows (plus the pill's own). */
   --shadow-2xs: 0 0 #0000;
   --shadow-xs: 0 0 #0000;

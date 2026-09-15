@@ -4,7 +4,7 @@ import { Suspense } from 'react'
 import { AccountView } from '@/components/account/account-view'
 import { AccountProviders } from '@/components/account/providers'
 import { AccountUnavailable } from '@/components/account/unavailable'
-import { Section } from '@/components/ui/section'
+import { PageHeader, Section } from '@/components/ui/section'
 import { Surface } from '@/components/ui/surface'
 import { accountsSetup, clerkPublishableKey, convexUrl } from '@/lib/env'
 
@@ -25,17 +25,11 @@ export default function AccountPage() {
   const setup = accountsSetup()
   return (
     <Section>
-      <div className="max-w-2xl">
-        <div className="eyebrow">Account</div>
-        <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
-          One account, every device.
-        </h1>
-        <p className="mt-5 text-lead text-muted-foreground">
-          Your plan and trial, your usage of Murmur’s models against each limit, billing, your stats
-          and the devices that have signed in. Dictionary, snippets and style are edited in the apps
-          and kept in step here.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Account"
+        title="One account, every device."
+        lede="Your plan and trial, your usage of Murmur’s models against each limit, billing, your stats and the devices that have signed in. Dictionary, snippets and style are edited in the apps and kept in step here."
+      />
       <div className="mt-section">
         {setup.configured ? (
           <ClerkProvider

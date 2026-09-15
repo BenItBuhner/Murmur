@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Faq } from '@/components/pricing/faq'
 import { Plans } from '@/components/pricing/plans'
-import { Section } from '@/components/ui/section'
+import { PageHeader, Section } from '@/components/ui/section'
 import { formatPrice, PRICING, proPerMonth } from '@/lib/pricing'
 
 export const metadata: Metadata = {
@@ -14,18 +14,19 @@ export default function PricingPage() {
   return (
     <>
       <Section className="pb-8 sm:pb-10">
-        <div className="mx-auto max-w-2xl text-center">
-          <div className="eyebrow">Pricing</div>
-          <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
-            Free to start. {formatPrice(proPerMonth('yearly'))} a month if you stay.
-          </h1>
-          <p className="mt-6 text-lead text-pretty text-muted-foreground">
-            Every account begins with {PRICING.trialDays} days of Pro and no card, then keeps a free
-            tier. Pro is {formatPrice(PRICING.proMonthly)} a month or{' '}
-            {formatPrice(PRICING.proYearly)} a year. And if you would rather bring your own speech
-            model, Murmur is free without an account at all.
-          </p>
-        </div>
+        <PageHeader
+          align="center"
+          eyebrow="Pricing"
+          title={<>Free to start. {formatPrice(proPerMonth('yearly'))} a month if you stay.</>}
+          lede={
+            <>
+              Every account begins with {PRICING.trialDays} days of Pro and no card, then keeps a
+              free tier. Pro is {formatPrice(PRICING.proMonthly)} a month or{' '}
+              {formatPrice(PRICING.proYearly)} a year. And if you would rather bring your own speech
+              model, Murmur is free without an account at all.
+            </>
+          }
+        />
       </Section>
 
       <Section className="pt-0 sm:pt-0">

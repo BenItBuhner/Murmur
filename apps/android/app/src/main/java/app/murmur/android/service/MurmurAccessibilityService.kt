@@ -234,6 +234,12 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         pill = view
         canvasWindow = OverlayWindow(wm, view, touchable = false)
         touchWindow = OverlayWindow(wm, relay, touchable = true)
+        // The visible canvas is pinned to the whole screen the entire time the pill is shown, so it
+        // never moves or resizes: WindowManager does not move a window and redraw its contents in
+        // the same frame, which is what threw the pill across the screen whenever the canvas
+        // switched between hugging the button and covering it. Drawing always happens in a window
+        // whose origin never changes. The invisible touch window still hugs the pill.
+        view.canvasPinnedToScreen = true
         val s = settings.get()
         view.setPalette(PillTheme.resolve(this, s))
         view.configure(s.overlayShape, s.overlayLayout)
@@ -412,6 +418,13 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
  * One accessibility-overlay window placed in screen coordinates. A non-touchable window is skipped
  * by input dispatch entirely, so the pill's canvas can be as large as it likes without stealing
  * taps from the keyboard underneath it.
+ *
+ * WindowManager does not move a window and redraw its contents in the same frame: the view draws
+ * for the new origin at once, while the surface eases (or, with the move animation off, still lags
+ * by a few frames) towards the new position, so a window that moves shows its contents jumping in
+ * from wherever it used to be. The visible canvas is therefore pinned to the whole screen and
+ * never moved (see [OverlayPillView.canvasPinnedToScreen]); only the invisible touch window is
+ * repositioned, and nothing is drawn in it.
  */
 private class OverlayWindow(private val wm: WindowManager, private val view: View, touchable: Boolean) {
     private val params = WindowManager.LayoutParams(

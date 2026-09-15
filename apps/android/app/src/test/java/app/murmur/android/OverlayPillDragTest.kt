@@ -262,6 +262,84 @@ class OverlayPillDragTest {
         assertTrue(host.touch.none { it == screen })
     }
 
+    /**
+     * Hold the finger still at (x, y) for longer than the fling tracker's window, so a release
+     * there carries no momentum and the landing spring has nothing left to do.
+     */
+    private fun rest(x: Float, y: Float) = repeat(16) {
+        touch(MotionEvent.ACTION_MOVE, x, y)
+        frames(1)
+    }
+
+    /** Draw frames until [ms] of clock have passed (a frame here is longer than FRAME_MS: the looper's vsync adds to it). */
+    private fun framesFor(ms: Long) {
+        val until = SystemClock.uptimeMillis() + ms
+        while (SystemClock.uptimeMillis() < until) frames(1)
+    }
+
+    @Test
+    fun `the canvas keeps the screen until the landing is over, fading ghosts included`() {
+        val (x0, y0) = spotCenter(0)
+        val (x1, y1) = spotCenter(1)
+        touch(MotionEvent.ACTION_DOWN, x0, y0)
+        // Carried dead onto the other spot and let go without momentum: the button has landed the
+        // moment the finger lifts, but the ghost spots are still fading out on the canvas.
+        moveTo(x0, y0, x1, y1, 8)
+        rest(x1, y1)
+        val placements = host.canvas.size
+        assertEquals(screen, host.canvas.last())
+        touch(MotionEvent.ACTION_UP, x1, y1)
+        framesFor(150L) // the ghosts fade for 220 ms (OverlayPillView.FLICK_GHOST_FADE_MS)
+        assertEquals("no canvas relayout while anything on it still moves: ${host.canvas}", placements, host.canvas.size)
+        settle()
+        assertEquals("one relayout, once everything on the canvas is still", placements + 1, host.canvas.size)
+        assertNotEquals(screen, host.canvas.last())
+        assertTrue(host.canvas.last().encloses(host.touch.last()))
+        assertTrue(host.touch.last().approximately(idleTouchBox(1), 1f))
+    }
+
+    @Test
+    fun `picking the button up again mid-landing carries on with the same canvas`() {
+        val (x0, y0) = spotCenter(0)
+        val (x1, y1) = spotCenter(1)
+        touch(MotionEvent.ACTION_DOWN, x0, y0)
+        moveTo(x0, y0, x1, y1, 8)
+        rest(x1, y1)
+        touch(MotionEvent.ACTION_UP, x1, y1)
+        framesFor(100L) // landed, ghosts still fading
+        val placements = host.canvas.size
+        touch(MotionEvent.ACTION_DOWN, x1, y1)
+        moveTo(x1, y1, x0, y0, 8)
+        rest(x0, y0)
+        assertEquals("the drag took over the screen-sized canvas", placements, host.canvas.size)
+        assertEquals(screen, host.canvas.last())
+        touch(MotionEvent.ACTION_UP, x0, y0)
+        settle()
+        assertEquals(listOf(1, 0), layoutChanges.map { it.activeIndex })
+        assertEquals(placements + 1, host.canvas.size)
+        assertTrue(host.touch.last().approximately(idleTouchBox(0), 1f))
+    }
+
+    @Test
+    fun `a canvas pinned to the screen stays put through a drag and its landing`() {
+        // What the service asks for when the system would ease the canvas into every new position.
+        view.canvasPinnedToScreen = true
+        frames(2)
+        assertEquals(screen, host.canvas.last())
+        val placements = host.canvas.size
+        val (x0, y0) = spotCenter(0)
+        val (x1, y1) = spotCenter(1)
+        touch(MotionEvent.ACTION_DOWN, x0, y0)
+        moveTo(x0, y0, x1 - 40f, y1 + 20f, 8)
+        touch(MotionEvent.ACTION_UP, x1 - 40f, y1 + 20f)
+        settle()
+        assertEquals(listOf(1), layoutChanges.map { it.activeIndex })
+        assertEquals("the canvas is never placed again", placements, host.canvas.size)
+        assertTrue("the touch window still hugs the button", host.touch.last().approximately(idleTouchBox(1), 1f))
+        dictate()
+        assertEquals(placements, host.canvas.size)
+    }
+
     @Test
     fun `it lands on the highlighted spot even when let go at speed`() {
         val (x0, y0) = spotCenter(0)

@@ -21,8 +21,8 @@ class OverlayGeometryTest {
     private val margin = OverlayGeometry.EDGE_MARGIN_DP * density
 
     @Test
-    fun `default anchor centres the button 30 dp above the keyboard`() {
-        val (x, y) = OverlayGeometry.anchorPoint(OverlayAnchor.DEFAULT, screenW, screenH, keyboardTop, density, 64 * density, 36 * density)
+    fun `the legacy anchor centres the button 30 dp above the keyboard`() {
+        val (x, y) = OverlayGeometry.anchorPoint(OverlayAnchor.LEGACY_DEFAULT, screenW, screenH, keyboardTop, density, 64 * density, 36 * density)
         assertEquals(540f, x, 0.01f)
         assertEquals(1500f - 30f * density, y, 0.01f)
     }
@@ -35,10 +35,10 @@ class OverlayGeometryTest {
 
     @Test
     fun `without a keyboard the offset is measured from a resting line near the bottom`() {
-        val (_, y) = OverlayGeometry.anchorPoint(OverlayAnchor.DEFAULT, screenW, screenH, null, density, 108f, 108f)
+        val (_, y) = OverlayGeometry.anchorPoint(OverlayAnchor.LEGACY_DEFAULT, screenW, screenH, null, density, 108f, 108f)
         assertEquals(screenH - (OverlayGeometry.NO_KEYBOARD_BASELINE_DP + 30f) * density, y, 0.01f)
         // A zero-height keyboard window is treated as absent too.
-        val (_, y2) = OverlayGeometry.anchorPoint(OverlayAnchor.DEFAULT, screenW, screenH, 0f, density, 108f, 108f)
+        val (_, y2) = OverlayGeometry.anchorPoint(OverlayAnchor.LEGACY_DEFAULT, screenW, screenH, 0f, density, 108f, 108f)
         assertEquals(y, y2, 0.01f)
     }
 
@@ -87,7 +87,7 @@ class OverlayGeometryTest {
 
     @Test
     fun `anchorFor is the inverse of anchorPoint`() {
-        val anchors = listOf(OverlayAnchor.DEFAULT, OverlayAnchor(0.12f, -22f), OverlayAnchor(0.87f, 140f), OverlayAnchor(0.5f, 0f))
+        val anchors = listOf(OverlayAnchor.LEGACY_DEFAULT, OverlayAnchor(0.12f, -22f), OverlayAnchor(0.87f, 140f), OverlayAnchor(0.5f, 0f))
         for (a in anchors) {
             val (x, y) = OverlayGeometry.anchorPoint(a, screenW, screenH, keyboardTop, density, 108f, 108f)
             val back = OverlayGeometry.anchorFor(x, y, screenW, screenH, keyboardTop, density)
@@ -213,7 +213,7 @@ class OverlayGeometryTest {
         val r = OverlayAnchor(0.123456f, -17.987f).rounded()
         assertEquals(0.1235f, r.xFraction, 0.000001f)
         assertEquals(-17.99f, r.offsetDp, 0.000001f)
-        assertEquals(OverlayAnchor.DEFAULT, OverlayAnchor.DEFAULT.rounded())
+        assertEquals(OverlayAnchor.LEGACY_DEFAULT, OverlayAnchor.LEGACY_DEFAULT.rounded())
     }
 
     @Test

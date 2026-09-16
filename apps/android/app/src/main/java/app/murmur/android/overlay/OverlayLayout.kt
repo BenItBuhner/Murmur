@@ -42,13 +42,16 @@ data class OverlayAnchor(val xFraction: Float, val offsetDp: Float) {
     }
 
     companion object {
-        /** Centred above the keyboard. */
+        /** The middle of the screen. */
         const val DEFAULT_X = 0.5f
 
-        /** A 36 dp button whose bottom edge floats 12 dp above the keyboard: centre = 12 + 36 / 2. */
-        const val DEFAULT_OFFSET_DP = 30f
+        /**
+         * Where builds before spots parked the button: a 36 dp button whose bottom edge floated
+         * 12 dp above the keyboard (centre = 12 + 36 / 2). Kept to recognise their stored position.
+         */
+        const val LEGACY_OFFSET_DP = 30f
 
-        val DEFAULT = OverlayAnchor(DEFAULT_X, DEFAULT_OFFSET_DP)
+        val LEGACY_DEFAULT = OverlayAnchor(DEFAULT_X, LEGACY_OFFSET_DP)
 
         private const val OVERLAP_X = 0.12f
         private const val OVERLAP_DP = 30f
@@ -90,7 +93,12 @@ data class OverlayLayout(
     /** The spot the button rests on (and the one selected while editing). */
     val active: OverlayAnchor get() = spots[activeIndex]
 
-    val isDefault: Boolean get() = this == DEFAULT
+    /**
+     * Still the spots builds before device-derived defaults started with, whichever of them the
+     * button rests on: the user never edited them, so a new default may take their place.
+     */
+    val isUntouchedLegacyDefault: Boolean
+        get() = spots == LEGACY_DEFAULT.spots && arrangement == LEGACY_DEFAULT.arrangement
 
     val canAdd: Boolean get() = spots.size < MAX_SPOTS
 
@@ -157,9 +165,30 @@ data class OverlayLayout(
     companion object {
         const val MAX_SPOTS = 4
 
-        /** Centred above the keyboard, plus a second spot at the right end of the same row. */
+        /**
+         * The preferred spots, as tuned by hand on a Galaxy S26 Ultra: the bottom-left corner of the
+         * screen (11 % of the width from the left; 323 dp down over the keyboard, which on that
+         * phone's keyboard is as low as the edge clamp lets the button go, so its capsule end runs
+         * concentric with the display's rounded corner) and the middle of the screen 25 dp above the
+         * keyboard. The button starts in the corner. This is the layout when nothing is known about
+         * the display; an install derives its own from the display's geometry ([OverlayDefaults]).
+         */
         val DEFAULT = OverlayLayout(
-            spots = listOf(OverlayAnchor.DEFAULT, OverlayAnchor(1f, OverlayAnchor.DEFAULT_OFFSET_DP)),
+            spots = listOf(
+                OverlayAnchor(0.11f, -323f),
+                OverlayAnchor(OverlayAnchor.DEFAULT_X, OverlayDefaults.ABOVE_KEYBOARD_DP)
+            ),
+            activeIndex = 0,
+            arrangement = OverlayArrangement.FREE
+        )
+
+        /**
+         * What every install started with before the defaults were derived from the device: centred
+         * above the keyboard, plus a second spot at the right end of the same row. Kept so a stored
+         * layout that never left it can be recognised (see [isUntouchedLegacyDefault]).
+         */
+        val LEGACY_DEFAULT = OverlayLayout(
+            spots = listOf(OverlayAnchor.LEGACY_DEFAULT, OverlayAnchor(1f, OverlayAnchor.LEGACY_OFFSET_DP)),
             activeIndex = 0,
             arrangement = OverlayArrangement.FREE
         )

@@ -26,7 +26,6 @@ import app.murmur.android.dictation.DictationState
 import app.murmur.android.dictation.TextSink
 import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayEditor
-import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.SettingsStore
@@ -226,7 +225,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             onOwnModelTap = { openApp(Route.MODEL); DictationController.dismiss() }
             onLayoutChanged = { layout -> settings.update { it.copy(overlayLayout = layout) } }
             onEditDone = { OverlayEditor.stop() }
-            onEditReset = { settings.update { it.copy(overlayLayout = OverlayLayout.DEFAULT) } }
+            onEditReset = { settings.update { it.copy(overlayLayout = settings.defaultOverlayLayout) } }
         }
         // Raw coordinates are display coordinates, which is the pill's own frame of reference, so
         // the relay does not depend on where the touch window happens to be at that instant.

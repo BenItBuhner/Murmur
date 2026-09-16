@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { describeLimit, type LimitNotice } from '@shared/limits'
 import type { OverlayState } from '@shared/types'
 import { cn } from '@renderer/lib/utils'
+import { pillElevation } from './elevation'
 
 const BAR_COUNT = 18
 const BAR_STEP_MS = 45
@@ -31,6 +32,8 @@ interface Props {
   onOwnProvider?: () => void
   /** The pointer entered or left the pill (main decides whether the window takes clicks). */
   onHover?: (over: boolean) => void
+  /** Off draws the pill flat, no drop shadow and no light catch (the "Button shadow" setting). */
+  shadow?: boolean
 }
 
 /** A refusal on a plan limit: the pill explains it instead of showing the bare error. */
@@ -110,7 +113,8 @@ export function Overlay({
   onDismiss,
   onUpgrade,
   onOwnProvider,
-  onHover
+  onHover,
+  shadow = true
 }: Props): React.JSX.Element {
   const key = contentKey(state)
   const idle = state.phase === 'idle'
@@ -211,11 +215,9 @@ export function Overlay({
           limitStop ? 'rounded-2xl' : 'rounded-full',
           // The pill floats over other windows: the overlay elevation, and a thin light catch on
           // its top edge rather than an outline, so it reads as a surface with a light on it.
-          idle
-            ? micError
-              ? 'bg-destructive/70 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
-              : 'bg-overlay/60 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
-            : 'shadow-[0_6px_24px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]',
+          // Both go when the button shadow is turned off (elevation.ts).
+          pillElevation(state, shadow),
+          idle && (micError ? 'bg-destructive/70' : 'bg-overlay/60'),
           !idle && 'bg-overlay/95',
           // A plan limit is not a fault: it keeps the pill's own colour and speaks calmly.
           phase === 'error' && !limitStop && 'bg-overlay-error/95',

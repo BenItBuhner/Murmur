@@ -26,6 +26,24 @@ describe('settings schema', () => {
     expect(s.general.accent).toBe('neutral')
     expect(s.general.accentColor).toBe('#ff5a36')
     expect(s.general.tintedSurfaces).toBe(false)
+    expect(s.general.buttonShadow).toBe(true)
+  })
+
+  it('keeps the button shadow on unless the user turns it off, with no migration in between', () => {
+    expect(parseSettings({ general: { buttonShadow: false } }).general.buttonShadow).toBe(false)
+    expect(parseSettings({ general: { buttonShadow: true } }).general.buttonShadow).toBe(true)
+    // A file from before the setting existed: the field is filled with its default, nothing else
+    // in the appearance section moves, and the file needs no migration for it.
+    const older = { version: SETTINGS_VERSION, general: { theme: 'dark', accent: 'teal' } }
+    expect(migrateSettings(older)).toBe(older)
+    const s = parseSettings(older)
+    expect(s.general.buttonShadow).toBe(true)
+    expect(s.general.theme).toBe('dark')
+    expect(s.general.accent).toBe('teal')
+    // A broken value drops the appearance section to its defaults, nothing else is lost.
+    const broken = parseSettings({ general: { buttonShadow: 'off' }, stats: { totalWords: 7 } })
+    expect(broken.general.buttonShadow).toBe(true)
+    expect(broken.stats.totalWords).toBe(7)
   })
 
   it('accepts every accent choice and repairs a broken custom colour', () => {

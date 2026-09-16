@@ -91,6 +91,11 @@ export const settingsSchema = z.object({
       accentColor: hexColorSchema.catch('#ff5a36').default('#ff5a36'),
       /** Material You style tonal surfaces: backgrounds and cards take a soft tint of the accent. */
       tintedSurfaces: z.boolean().default(false),
+      /**
+       * The dictation pill casts a drop shadow and catches the light along its top edge. Off, it
+       * is drawn flat: the same shape and colours, no shadow, no light catch. Device-local.
+       */
+      buttonShadow: z.boolean().default(true),
       sounds: z.boolean().default(true),
       soundVolume: z.number().min(0).max(1).default(0.35),
       overlayPosition: overlayPositionSchema.default('bottom-center'),

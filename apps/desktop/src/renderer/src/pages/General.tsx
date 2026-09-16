@@ -121,6 +121,15 @@ export function GeneralPage(): React.JSX.Element {
             onCheckedChange={(v) => void patch({ general: { showOverlayWhenIdle: v } })}
           />
         </SettingRow>
+        <SettingRow
+          title="Button shadow"
+          description="The pill floats with a soft shadow and a light catch on its top edge. Off, it sits flat."
+        >
+          <Switch
+            checked={g.buttonShadow}
+            onCheckedChange={(v) => void patch({ general: { buttonShadow: v } })}
+          />
+        </SettingRow>
         <SettingRow title="Sounds" description="Soft cues when recording starts, stops, or fails.">
           <div className="flex items-center gap-4">
             {g.sounds && (

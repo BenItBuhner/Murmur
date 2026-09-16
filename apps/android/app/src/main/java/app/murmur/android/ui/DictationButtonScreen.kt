@@ -51,6 +51,7 @@ import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.components.Segment
 import app.murmur.android.ui.components.Segmented
 import app.murmur.android.ui.components.Stage
+import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
 import kotlinx.coroutines.delay
 import kotlin.math.sin
@@ -89,6 +90,17 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
                 },
                 style = Murmur.type.bodySmall,
                 color = Murmur.colors.inkSoft
+            )
+        }
+
+        SectionGap()
+
+        Group("Look", rows = true) {
+            ToggleRow(
+                title = "Button shadow",
+                description = "The floating button casts a soft shadow and catches the light along its top edge. Off, it sits flat on the keyboard.",
+                checked = settings.buttonShadow,
+                onCheckedChange = { store.update { s -> s.copy(buttonShadow = it) } }
             )
         }
 

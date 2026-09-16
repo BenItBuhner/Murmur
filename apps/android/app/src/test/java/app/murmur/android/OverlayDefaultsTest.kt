@@ -173,6 +173,33 @@ class OverlayDefaultsTest {
     }
 
     @Test
+    fun `default spots read in plain words in the Spots list, moved ones by their numbers`() {
+        // Pinned (Galaxy S26 Ultra) and derived (Pixel 9) alike: the corner spot in words, the centred one by its numbers.
+        val pinned = OverlayDefaults.layoutFor(S26_ULTRA)
+        assertEquals("Bottom-left corner, over the keyboard", OverlayDefaults.describe(pinned.spots[0], pinned))
+        assertEquals("Centred, 25 dp above the keyboard", OverlayDefaults.describe(pinned.spots[1], pinned))
+        val derived = OverlayDefaults.layoutFor(PIXEL_9)
+        assertEquals("Bottom-left corner, over the keyboard", OverlayDefaults.describe(derived.spots[0], derived))
+        assertEquals("Centred, 25 dp above the keyboard", OverlayDefaults.describe(derived.spots[1], derived))
+        // The moment a spot is moved, a 1 dp nudge included, it reads by its numbers again.
+        val nudged = derived.moved(0, derived.spots[0].copy(offsetDp = derived.spots[0].offsetDp + 1f))
+        assertEquals("12% from the left, 887 dp down over the keyboard", OverlayDefaults.describe(nudged.spots[0], derived))
+        val dragged = pinned.moved(0, OverlayAnchor(0.9f, -20f))
+        assertEquals("10% from the right, 20 dp down over the keyboard", OverlayDefaults.describe(dragged.spots[0], pinned))
+        // Moving the other spot leaves the corner spot's words alone.
+        val otherMoved = pinned.moved(1, OverlayAnchor(0.5f, 40f))
+        assertEquals("Bottom-left corner, over the keyboard", OverlayDefaults.describe(otherMoved.spots[0], pinned))
+        assertEquals("Centred, 40 dp above the keyboard", OverlayDefaults.describe(otherMoved.spots[1], pinned))
+        // It is the spot that is untouched, not its slot: reordered, it keeps its words.
+        val reordered = OverlayLayout(listOf(pinned.spots[1], pinned.spots[0]))
+        assertEquals("Bottom-left corner, over the keyboard", OverlayDefaults.describe(reordered.spots[1], pinned))
+        // Another device's corner spot is not this device's default.
+        assertEquals("11% from the left, 323 dp down over the keyboard", OverlayDefaults.describe(pinned.spots[0], derived))
+        // Should the rule ever put the corner spot on the other side, the words follow.
+        assertEquals("Bottom-right corner, over the keyboard", OverlayDefaults.cornerLabel(OverlayAnchor(0.89f, -804f)))
+    }
+
+    @Test
     fun `a display that could not be measured gets the preferred spots`() {
         assertSame(OverlayLayout.DEFAULT, OverlayDefaults.derive(DisplayGeometry(0f, 0f, 0f, "")))
         assertSame(OverlayLayout.DEFAULT, OverlayDefaults.layoutFor(DisplayGeometry(0f, 800f, 30f, "unknown")))

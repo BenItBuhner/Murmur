@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.overlay.OverlayArrangement
+import app.murmur.android.overlay.OverlayDefaults
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
@@ -100,7 +101,7 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 layout.spots.forEachIndexed { i, spot ->
-                    SpotRow(index = i, spot = spot.describe(), active = i == layout.activeIndex)
+                    SpotRow(index = i, spot = OverlayDefaults.describe(spot, defaultLayout), active = i == layout.activeIndex)
                 }
             }
             Spacer(Modifier.height(12.dp))

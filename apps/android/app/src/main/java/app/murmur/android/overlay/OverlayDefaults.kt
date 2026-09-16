@@ -46,6 +46,25 @@ object OverlayDefaults {
     fun layoutFor(geometry: DisplayGeometry): OverlayLayout =
         pinnedFor(geometry.model) ?: derive(geometry)
 
+    /** The corner spot of a default layout: its first spot, whether pinned or derived. */
+    fun cornerSpotOf(default: OverlayLayout): OverlayAnchor = default.spots.first()
+
+    /**
+     * How a spot reads in the Spots list. A spot still where this device's default put its corner
+     * spot is described in plain words: its numbers are the corner's depth from the top of the
+     * display (or, pinned, the height of the keyboard it was tuned with) and mean nothing to a
+     * reader. Every other spot reads by its numbers as before, the centred default included
+     * ("Centred, 25 dp above the keyboard"), so the moment a spot is moved it says where it went.
+     */
+    fun describe(spot: OverlayAnchor, default: OverlayLayout): String =
+        if (spot == cornerSpotOf(default)) cornerLabel(spot) else spot.describe()
+
+    /** "Bottom-left corner, over the keyboard", or the right-hand corner should the rule ever put it there. */
+    fun cornerLabel(spot: OverlayAnchor): String {
+        val side = if (spot.xFraction <= OverlayAnchor.DEFAULT_X) "left" else "right"
+        return "Bottom-$side corner, over the keyboard"
+    }
+
     /** The hand-tuned spots for [model] (a `Build.MODEL`), or null when it is not a model that was tuned. */
     fun pinnedFor(model: String?): OverlayLayout? {
         val name = model?.trim()?.takeIf { it.isNotEmpty() } ?: return null

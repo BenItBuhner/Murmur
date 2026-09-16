@@ -38,9 +38,10 @@ import app.murmur.android.ui.theme.supportsDynamicColor
 import app.murmur.android.ui.theme.surface
 
 /**
- * The Appearance settings: light/dark/system, Material You wallpaper colours (Android 12+), and
- * the accent that seeds Murmur's own palette when wallpaper colours are off or unavailable. Drawn
- * with the same pieces as every other screen; the screen around them is the live preview.
+ * The Appearance settings: light/dark/system, Material You wallpaper colours (Android 12+), the
+ * accent that seeds Murmur's own palette when wallpaper colours are off or unavailable, and
+ * whether the dictation button casts a shadow. Drawn with the same pieces as every other screen;
+ * the screen around them is the live preview.
  */
 @Composable
 fun AppearanceSection(store: SettingsStore, settings: MurmurSettings) {
@@ -89,6 +90,17 @@ fun AppearanceSection(store: SettingsStore, settings: MurmurSettings) {
                 "backgrounds take a soft tint of it.",
             style = Murmur.type.bodySmall,
             color = c.inkSoft
+        )
+    }
+
+    SectionGap()
+
+    Group("Dictation button", rows = true) {
+        ToggleRow(
+            title = "Button shadow",
+            description = "The floating button casts a soft shadow and catches the light along its top edge. Off, it sits flat on the keyboard.",
+            checked = settings.buttonShadow,
+            onCheckedChange = { store.update { s -> s.copy(buttonShadow = it) } }
         )
     }
 }

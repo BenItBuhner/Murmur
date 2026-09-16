@@ -186,7 +186,7 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
     // wallpaper arrives as a configuration change.
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
-    val palette = remember(settings.themeMode, settings.dynamicColor, settings.accent, configuration) {
+    val palette = remember(settings.themeMode, settings.dynamicColor, settings.accent, settings.buttonShadow, configuration) {
         PillTheme.resolve(context, settings)
     }
 

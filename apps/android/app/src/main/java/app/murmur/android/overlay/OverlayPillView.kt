@@ -1164,8 +1164,8 @@ class OverlayPillView(context: Context) : View(context) {
             canvas,
             Box(hintLeft, hintTop, hintLeft + hintW, hintTop + hintH),
             hint,
-            ColorUtils.setAlphaComponent(palette.chip, 0xE6),
-            ColorUtils.setAlphaComponent(palette.onChip, 0xE6),
+            palette.chip,
+            palette.onChip,
             false
         )
     }

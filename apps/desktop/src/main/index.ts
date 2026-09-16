@@ -244,7 +244,8 @@ async function main(): Promise<void> {
     accent: s.general.accent,
     accentColor: s.general.accentColor,
     tintedSurfaces: s.general.tintedSurfaces,
-    systemAccent: systemAccent.get()
+    systemAccent: systemAccent.get(),
+    buttonShadow: s.general.buttonShadow
   })
   const pushTheme = (): void => {
     const msg = themeMessage(settings.get())

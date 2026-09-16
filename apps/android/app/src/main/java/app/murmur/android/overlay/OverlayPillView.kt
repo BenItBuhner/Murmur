@@ -654,7 +654,7 @@ class OverlayPillView(context: Context) : View(context) {
 
         val radius = lerp(radiusOf(fromLook, drawn.height), radiusOf(toLook, drawn.height), e)
         pillPaint.color = curBg
-        pillPaint.setShadowLayer(dp(if (dragging) 12f else 6f), 0f, dp(if (dragging) 5f else 2f), 0x59000000)
+        if (palette.elevated) pillPaint.setShadowLayer(dp(if (dragging) 12f else 6f), 0f, dp(if (dragging) 5f else 2f), 0x59000000)
         scratchRect.set(drawn.left, drawn.top, drawn.right, drawn.bottom)
         canvas.drawRoundRect(scratchRect, radius, radius, pillPaint)
         pillPaint.clearShadowLayer()
@@ -663,14 +663,17 @@ class OverlayPillView(context: Context) : View(context) {
         clipPath.addRoundRect(scratchRect, radius, radius, Path.Direction.CW)
 
         // A light catch along the top of the pill (as on the desktop pill): the one thin mark it
-        // keeps, so the button still reads as a surface on a keyboard of its own brightness.
-        strokePaint.color = ink(0x14)
-        strokePaint.strokeWidth = dp(1f)
-        scratchRect.inset(dp(0.5f), dp(0.5f))
-        canvas.save()
-        canvas.clipRect(drawn.left, drawn.top, drawn.right, drawn.top + drawn.height * 0.5f)
-        canvas.drawRoundRect(scratchRect, radius - dp(0.5f), radius - dp(0.5f), strokePaint)
-        canvas.restore()
+        // keeps, so the button still reads as a surface on a keyboard of its own brightness. It
+        // goes with the shadow: a flat pill (PillPalette.elevated off) has neither.
+        if (palette.elevated) {
+            strokePaint.color = ink(0x14)
+            strokePaint.strokeWidth = dp(1f)
+            scratchRect.inset(dp(0.5f), dp(0.5f))
+            canvas.save()
+            canvas.clipRect(drawn.left, drawn.top, drawn.right, drawn.top + drawn.height * 0.5f)
+            canvas.drawRoundRect(scratchRect, radius - dp(0.5f), radius - dp(0.5f), strokePaint)
+            canvas.restore()
+        }
 
         if (crossfade && outgoingAlpha > 0.01f) {
             drawLayer(canvas, drawn, fromLook, outgoingAlpha, lerp(1f, 0.9f, smoothstep(0f, 0.42f, t)), now, dt)
@@ -1114,7 +1117,7 @@ class OverlayPillView(context: Context) : View(context) {
         val cy = box.top + dp(3f)
         paint.color = if (active) palette.accent else palette.chip
         pillPaint.color = paint.color
-        pillPaint.setShadowLayer(dp(3f), 0f, dp(1f), 0x40000000)
+        if (palette.elevated) pillPaint.setShadowLayer(dp(3f), 0f, dp(1f), 0x40000000)
         canvas.drawCircle(cx, cy, r, pillPaint)
         pillPaint.clearShadowLayer()
         badgeTextPaint.color = if (active) palette.onAccent else palette.onChip
@@ -1180,9 +1183,9 @@ class OverlayPillView(context: Context) : View(context) {
         val top = max(statusBarInset(), dp(24f)) + dp(8f)
         panelBottom = top + pad * 2 + chipH * 3 + rowGap * 3 + captionH
 
-        // The panel is a floating card: the card radius, a shadow, no outline.
+        // The panel is a floating card: the card radius, a shadow (unless the pill is flat), no outline.
         pillPaint.color = palette.panel
-        pillPaint.setShadowLayer(dp(14f), 0f, dp(6f), 0x59000000)
+        if (palette.elevated) pillPaint.setShadowLayer(dp(14f), 0f, dp(6f), 0x59000000)
         scratchRect.set(left, top, right, panelBottom)
         canvas.drawRoundRect(scratchRect, dp(PANEL_RADIUS_DP), dp(PANEL_RADIUS_DP), pillPaint)
         pillPaint.clearShadowLayer()
@@ -1267,12 +1270,12 @@ class OverlayPillView(context: Context) : View(context) {
         return box.right
     }
 
-    /** A chip in the edit chrome: a raised pill, lifted by its shadow rather than outlined. */
+    /** A chip in the edit chrome: a raised pill, lifted by its shadow (never outlined); tonal alone when flat. */
     private fun drawChip(canvas: Canvas, box: Box, label: String, bg: Int, fg: Int, isPressed: Boolean) {
         val drawn = if (isPressed) Box.centered(box.centerX, box.centerY, box.width * 0.94f, box.height * 0.94f) else box
         val r = drawn.height / 2f
         pillPaint.color = bg
-        pillPaint.setShadowLayer(dp(4f), 0f, dp(1.5f), 0x40000000)
+        if (palette.elevated) pillPaint.setShadowLayer(dp(4f), 0f, dp(1.5f), 0x40000000)
         scratchRect.set(drawn.left, drawn.top, drawn.right, drawn.bottom)
         canvas.drawRoundRect(scratchRect, r, r, pillPaint)
         pillPaint.clearShadowLayer()

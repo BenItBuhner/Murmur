@@ -107,8 +107,9 @@ export interface AudioConfigureMessage {
 }
 
 /**
- * Everything a renderer needs to build the palette (see shared/theme.ts). Main resolves the
- * light/dark mode (it knows the OS setting) and the OS accent colour; the renderers do the maths.
+ * Everything a renderer needs to build the palette (see shared/theme.ts), and the one appearance
+ * choice the pill applies on its own. Main resolves the light/dark mode (it knows the OS setting)
+ * and the OS accent colour; the renderers do the maths.
  */
 export interface ThemeMessage {
   mode: 'light' | 'dark'
@@ -117,6 +118,8 @@ export interface ThemeMessage {
   tintedSurfaces: boolean
   /** `#rrggbb` accent published by the desktop environment, when there is one. */
   systemAccent: string | null
+  /** Whether the pill casts its shadow and wears its light catch (`general.buttonShadow`). */
+  buttonShadow: boolean
 }
 
 /** Colours the settings window resolved, for the native title bar and window background. */

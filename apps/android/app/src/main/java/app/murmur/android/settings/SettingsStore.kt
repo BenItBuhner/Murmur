@@ -166,6 +166,11 @@ data class MurmurSettings(
     val dynamicColor: Boolean = true,
     /** Seed for Murmur's own palette when wallpaper colours are off or unavailable. */
     val accent: AccentPreset = AccentPreset.CORAL,
+    /**
+     * The floating dictation button casts a drop shadow and catches the light along its top edge.
+     * Off, it and its edit panel are drawn flat: same shape and colours, no shadow, no light catch.
+     */
+    val buttonShadow: Boolean = true,
     /** Device-level first-run flow finished (permissions, provider). */
     val onboardingComplete: Boolean = false,
     /** `optional` account mode: the user chose to keep using Murmur without an account. */
@@ -338,6 +343,7 @@ class SettingsStore(context: Context) {
             themeMode = ThemeMode.from(prefs.getString("themeMode", d.themeMode.id)),
             dynamicColor = prefs.getBoolean("dynamicColor", d.dynamicColor),
             accent = AccentPreset.from(prefs.getString("accent", d.accent.id)),
+            buttonShadow = prefs.getBoolean("buttonShadow", d.buttonShadow),
             onboardingComplete = prefs.getBoolean("onboardingComplete", d.onboardingComplete),
             accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
             deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
@@ -386,6 +392,7 @@ class SettingsStore(context: Context) {
             .putString("themeMode", s.themeMode.id)
             .putBoolean("dynamicColor", s.dynamicColor)
             .putString("accent", s.accent.id)
+            .putBoolean("buttonShadow", s.buttonShadow)
             .putBoolean("onboardingComplete", s.onboardingComplete)
             .putBoolean("accountSkipped", s.accountSkipped)
             .putString("deviceId", s.deviceId)

@@ -14,6 +14,7 @@ function App(): React.JSX.Element {
   const [state, setState] = useState<OverlayState>({ phase: 'idle' })
   const [level, setLevel] = useState(0)
   const [micError, setMicError] = useState<string | undefined>()
+  const [shadow, setShadow] = useState(true)
 
   useEffect(() => {
     const capture = new MicCapture({
@@ -33,7 +34,8 @@ function App(): React.JSX.Element {
       bridge.onState((s) => setState(s)),
       bridge.onPlaySound((name) => playSound(name)),
       // The pill shares the settings window's palette; main sends the inputs, we do the maths.
-      bridge.onTheme((t) =>
+      // Whether it casts a shadow at all rides along with them.
+      bridge.onTheme((t) => {
         applyTheme(
           document.documentElement,
           buildTheme({
@@ -42,7 +44,8 @@ function App(): React.JSX.Element {
             tinted: t.tintedSurfaces
           })
         )
-      ),
+        setShadow(t.buttonShadow !== false)
+      }),
       bridge.onAudioConfigure((cfg) => {
         setSoundVolume(cfg.soundVolume)
         capture.configure(cfg).catch(() => undefined)
@@ -66,6 +69,7 @@ function App(): React.JSX.Element {
       onUpgrade={(url) => bridge.openUrl(url)}
       onOwnProvider={() => bridge.openModels()}
       onHover={(over) => bridge.hover(over)}
+      shadow={shadow}
     />
   )
 }

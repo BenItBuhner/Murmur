@@ -20,7 +20,8 @@ import app.murmur.android.ui.theme.withAlpha
  * palette as the app's screens, in the same brightness: light or dark (or whatever the system is
  * in), the wallpaper's colours on Android 12+ or the chosen accent preset. Over a light keyboard it
  * is a light control with dark ink; over a dark one, the reverse. Only the pulsing "recording" dot
- * (drawn by the view) stays red, because that is what it means.
+ * (drawn by the view) stays red, because that is what it means. Whether the pill is lifted off the
+ * keyboard at all ([elevated]) rides along with the colours, since the view takes them together.
  */
 data class PillPalette(
     /** Whether this is the dark variant: a dark body carrying light ink. */
@@ -46,7 +47,13 @@ data class PillPalette(
     val successBackground: Int,
     val errorBackground: Int,
     val successForeground: Int,
-    val errorForeground: Int
+    val errorForeground: Int,
+    /**
+     * The pill, its edit panel and their chips cast drop shadows, and the pill wears a light catch
+     * along its top; false (the "Button shadow" setting off) draws all of them flat: the same
+     * shapes and colours, nothing lifted.
+     */
+    val elevated: Boolean = true
 ) {
     companion object {
         /** The look before any settings are known: Murmur's coral, dark. */
@@ -68,7 +75,8 @@ object PillTheme {
     /**
      * The palette the appearance settings ask for: the Material scheme the app's screens are drawn
      * with (wallpaper colours when they are on and available, otherwise the scheme grown from the
-     * chosen preset), in the brightness the theme mode resolves to right now.
+     * chosen preset), in the brightness the theme mode resolves to right now, lifted off the
+     * keyboard unless the button shadow is turned off.
      */
     fun resolve(context: Context, settings: MurmurSettings): PillPalette {
         val dark = isDark(settings.themeMode, context.resources.configuration.uiMode)
@@ -77,7 +85,7 @@ object PillTheme {
         } else {
             schemeFromSeed(settings.accent.seed, dark)
         }
-        return fromScheme(scheme, dark)
+        return fromScheme(scheme, dark, elevated = settings.buttonShadow)
     }
 
     /**
@@ -86,7 +94,7 @@ object PillTheme {
      * panel are neighbouring containers. Status surfaces are fixed greens and reds in the mode's
      * brightness, nudged toward the accent's hue so they belong to the palette.
      */
-    fun fromScheme(scheme: SchemeArgb, dark: Boolean): PillPalette {
+    fun fromScheme(scheme: SchemeArgb, dark: Boolean, elevated: Boolean = true): PillPalette {
         val hue = Oklch.fromArgb(scheme.primary).h
         val body = if (dark) scheme.surfaceContainer else scheme.surfaceContainerLowest
         val panel = if (dark) scheme.surfaceContainerLow else scheme.surfaceContainerLowest
@@ -106,7 +114,8 @@ object PillTheme {
             successBackground = status(if (dark) 0.25 else 0.93, 0.05, 150.0, hue).withAlpha(BODY_ALPHA),
             errorBackground = status(if (dark) 0.26 else 0.93, 0.07, 25.0, hue).withAlpha(BODY_ALPHA),
             successForeground = if (dark) status(0.84, 0.12, 155.0, hue) else status(0.46, 0.12, 155.0, hue),
-            errorForeground = if (dark) status(0.78, 0.13, 30.0, hue) else status(0.48, 0.16, 30.0, hue)
+            errorForeground = if (dark) status(0.78, 0.13, 30.0, hue) else status(0.48, 0.16, 30.0, hue),
+            elevated = elevated
         )
     }
 

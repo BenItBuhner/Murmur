@@ -123,8 +123,8 @@ class ThemeTest {
         assertTrue(dark.isDark)
         assertFalse(light.isDark)
         // Translucent bodies: near-black at night, near-white by day, each with contrasting ink.
-        assertEquals(0xF2, dark.background ushr 24)
-        assertEquals(0xF2, light.background ushr 24)
+        assertEquals("an opaque body", 0xFF, dark.background ushr 24)
+        assertEquals("an opaque body", 0xFF, light.background ushr 24)
         assertTrue(Oklch.fromArgb(dark.background).l < 0.3)
         assertTrue(Oklch.fromArgb(light.background).l > 0.9)
         assertTrue(Oklch.fromArgb(dark.ink).l > 0.8)

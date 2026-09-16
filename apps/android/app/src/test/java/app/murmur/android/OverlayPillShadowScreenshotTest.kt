@@ -129,9 +129,10 @@ class OverlayPillShadowScreenshotTest {
     // ---- what the setting must and must not change --------------------------------------------
 
     /**
-     * The same state with the shadow on and off: identical outline and body colour; the flat one
-     * leaves the keyboard under and beside it untouched and has no light catch; the lifted one
-     * shades the keys below it and wears the catch. Returns the pair for the screenshots.
+     * The same state with the shadow on and off: identical outline, and a body that is exactly the
+     * palette's colour for the state, opaque, in both; the flat one leaves the keyboard under and
+     * beside it untouched and has no light catch; the lifted one shades the keys below it and wears
+     * the catch. Returns the pair for the screenshots.
      */
     private fun check(name: String, state: DictationState, heightDp: Float, dark: Boolean = false): Pair<Rendered, Rendered> {
         val lifted = render(state, palette(elevated = true, dark = dark))
@@ -155,9 +156,12 @@ class OverlayPillShadowScreenshotTest {
         val catchY = floor(pill.top + dp(0.5f)).toInt()
         val bodyY = floor(pill.top + dp(3f)).toInt()
         val body = flat.screen.getPixel(x, bodyY)
-        // The body is painted the same colour in both; being 95 % opaque it lets a whisper of its
-        // own shadow through when lifted (a unit or two per channel), and no more than that.
-        assertClose("$name: same body colour", body, lifted.screen.getPixel(x, bodyY), tolerance = 4)
+        // The body is the palette's colour for this state, to the bit, in both renders: the surface
+        // is fully opaque, so neither the keyboard nor the pill's own shadow shows through it.
+        val expectedBody = bodyColourOf(state, palette(elevated = false, dark = dark))
+        assertEquals("$name flat: the body is the pill colour ${hex(expectedBody)}", hex(expectedBody), hex(body))
+        assertEquals("$name lifted: the body is the pill colour ${hex(expectedBody)}", hex(expectedBody), hex(lifted.screen.getPixel(x, bodyY)))
+        assertEquals("$name: an opaque body", 0xFF, body ushr 24)
         assertEquals("$name flat: no light catch", body, flat.screen.getPixel(x, catchY))
         val catchDelta = lightness(lifted.screen.getPixel(x, catchY)) - lightness(body)
         assertTrue("$name lifted: a light catch on the top edge ($catchDelta)", abs(catchDelta) > 0.01)
@@ -242,6 +246,13 @@ class OverlayPillShadowScreenshotTest {
         val paddingY = (panelTop + dp(6f)).roundToInt()
         val underDone = (SCREEN_W - dp(12f) - dp(12f) - dp(20f)).roundToInt()
         assertEquals("flat: no chip shadow on the panel", flat.screen.getPixel(underDone, paddingY), flat.screen.getPixel(underDone, gapY))
+        // The panel and the chips on it are their palette colours to the bit, lifted or flat: opaque surfaces.
+        val flatPalette = palette(elevated = false)
+        assertEquals("flat: the panel is its colour", hex(flatPalette.panel), hex(flat.screen.getPixel(underDone, paddingY)))
+        assertEquals("lifted: the panel is its colour", hex(flatPalette.panel), hex(lifted.screen.getPixel(underDone, paddingY)))
+        val inDone = (panelTop + dp(12f) + dp(4f)).roundToInt()
+        assertEquals("flat: the Done chip is its colour", hex(flatPalette.accent), hex(flat.screen.getPixel(underDone, inDone)))
+        assertEquals("lifted: the Done chip is its colour", hex(flatPalette.accent), hex(lifted.screen.getPixel(underDone, inDone)))
         assertTrue(
             "lifted: the Done chip shades the panel under it",
             lightness(lifted.screen.getPixel(underDone, gapY)) < lightness(flat.screen.getPixel(underDone, gapY)) - 0.005
@@ -249,6 +260,19 @@ class OverlayPillShadowScreenshotTest {
 
         save(lifted, "android-edit-panel-shadow-on.png", crop = false)
         save(flat, "android-edit-panel-shadow-off.png", crop = false)
+    }
+
+    @Test
+    fun `every surface in the palette is opaque, lifted or flat, by day and by night`() {
+        for (dark in listOf(false, true)) for (elevated in listOf(true, false)) {
+            val p = palette(elevated, dark)
+            for ((name, colour) in listOf(
+                "background" to p.background, "panel" to p.panel, "chip" to p.chip, "accent" to p.accent,
+                "successBackground" to p.successBackground, "errorBackground" to p.errorBackground
+            )) {
+                assertEquals("$name (dark=$dark, elevated=$elevated) is opaque: ${hex(colour)}", 0xFF, colour ushr 24)
+            }
+        }
     }
 
     @Test
@@ -274,6 +298,13 @@ class OverlayPillShadowScreenshotTest {
 
     private fun lightness(argb: Int): Double = Oklch.fromArgb(argb).l
 
+    /** The surface the view paints the body with for [state]: success and error tints, otherwise the pill's own. */
+    private fun bodyColourOf(state: DictationState, palette: PillPalette): Int = when {
+        state is DictationState.Success -> palette.successBackground
+        state is DictationState.Error && state.limit == null -> palette.errorBackground
+        else -> palette.background
+    }
+
     /** Every pixel of [box] in [screen] is the backdrop's own: nothing was drawn or shaded there. */
     private fun assertUntouched(screen: Bitmap, box: Box, what: String) {
         val backdrop = backdrop()
@@ -296,15 +327,6 @@ class OverlayPillShadowScreenshotTest {
             if (s < p - 0.004) darker++
         }
         assertTrue("$what: only $darker of $total pixels are darker", darker > total * 0.8)
-    }
-
-    /** The two colours agree to within [tolerance] on every channel. */
-    private fun assertClose(what: String, expected: Int, actual: Int, tolerance: Int) {
-        for (shift in intArrayOf(24, 16, 8, 0)) {
-            val e = (expected ushr shift) and 0xFF
-            val a = (actual ushr shift) and 0xFF
-            assertTrue("$what: expected about ${hex(expected)}, was ${hex(actual)}", abs(e - a) <= tolerance)
-        }
     }
 
     private fun hex(argb: Int): String = "#%08X".format(argb)

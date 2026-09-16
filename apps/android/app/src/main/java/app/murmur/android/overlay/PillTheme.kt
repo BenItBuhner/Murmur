@@ -13,7 +13,6 @@ import app.murmur.android.ui.theme.harmonizeHue
 import app.murmur.android.ui.theme.schemeFromSeed
 import app.murmur.android.ui.theme.supportsDynamicColor
 import app.murmur.android.ui.theme.toSchemeArgb
-import app.murmur.android.ui.theme.withAlpha
 
 /**
  * Colours for the floating dictation button and its edit-mode chrome. The pill wears the same
@@ -30,7 +29,7 @@ data class PillPalette(
     val accent: Int,
     /** Icon and text on the [accent]. */
     val onAccent: Int,
-    /** Resting, listening and processing pill body (translucent). */
+    /** Resting, listening and processing pill body. Solid, like every surface here: nothing shows through. */
     val background: Int,
     /** Icons, waveform, text and hairlines on the body. */
     val ink: Int,
@@ -42,7 +41,7 @@ data class PillPalette(
     val chip: Int,
     /** Text and glyphs on a [chip]. */
     val onChip: Int,
-    /** The edit-mode toolbar surface (translucent). */
+    /** The edit-mode toolbar surface. */
     val panel: Int,
     val successBackground: Int,
     val errorBackground: Int,
@@ -62,9 +61,6 @@ data class PillPalette(
 }
 
 object PillTheme {
-    private const val BODY_ALPHA = 0xF2
-    private const val PANEL_ALPHA = 0xF5
-
     /** Whether the pill is dark under [mode], given the system's `Configuration.uiMode`. */
     fun isDark(mode: ThemeMode, uiMode: Int): Boolean = when (mode) {
         ThemeMode.LIGHT -> false
@@ -92,7 +88,8 @@ object PillTheme {
      * Material roles onto the pill: the body is a container surface (the lowest one by day, so it
      * reads as a key floating over the keyboard), ink is the on-surface pair, chips and the edit
      * panel are neighbouring containers. Status surfaces are fixed greens and reds in the mode's
-     * brightness, nudged toward the accent's hue so they belong to the palette.
+     * brightness, nudged toward the accent's hue so they belong to the palette. Every surface is
+     * fully opaque: the pill used to be 95 % and let a whisper of its own shadow through.
      */
     fun fromScheme(scheme: SchemeArgb, dark: Boolean, elevated: Boolean = true): PillPalette {
         val hue = Oklch.fromArgb(scheme.primary).h
@@ -102,17 +99,17 @@ object PillTheme {
             isDark = dark,
             accent = scheme.primary,
             onAccent = scheme.onPrimary,
-            background = body.withAlpha(BODY_ALPHA),
+            background = body,
             ink = scheme.onSurface,
             inkSoft = scheme.onSurfaceVariant,
             muted = scheme.outline,
             chip = scheme.surfaceContainerHighest,
             onChip = scheme.onSurface,
-            panel = panel.withAlpha(PANEL_ALPHA),
+            panel = panel,
             // Deep surfaces with pale icons at night (the desktop pill's values); pale surfaces
             // with deep icons by day.
-            successBackground = status(if (dark) 0.25 else 0.93, 0.05, 150.0, hue).withAlpha(BODY_ALPHA),
-            errorBackground = status(if (dark) 0.26 else 0.93, 0.07, 25.0, hue).withAlpha(BODY_ALPHA),
+            successBackground = status(if (dark) 0.25 else 0.93, 0.05, 150.0, hue),
+            errorBackground = status(if (dark) 0.26 else 0.93, 0.07, 25.0, hue),
             successForeground = if (dark) status(0.84, 0.12, 155.0, hue) else status(0.46, 0.12, 155.0, hue),
             errorForeground = if (dark) status(0.78, 0.13, 30.0, hue) else status(0.48, 0.16, 30.0, hue),
             elevated = elevated

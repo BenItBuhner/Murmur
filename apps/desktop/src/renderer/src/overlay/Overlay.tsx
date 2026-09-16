@@ -4,6 +4,7 @@ import { describeLimit, type LimitNotice } from '@shared/limits'
 import type { OverlayState } from '@shared/types'
 import { cn } from '@renderer/lib/utils'
 import { pillElevation } from './elevation'
+import { pillSurface } from './surface'
 
 const BAR_COUNT = 18
 const BAR_STEP_MS = 45
@@ -200,8 +201,6 @@ export function Overlay({
       : isSoftLimit(state)
         ? SOFT_HEIGHT
         : PILL_HEIGHT
-  const phase = state.phase
-
   return (
     <div className="flex h-full w-full items-end justify-center pb-3">
       <div
@@ -217,13 +216,8 @@ export function Overlay({
           // its top edge rather than an outline, so it reads as a surface with a light on it.
           // Both go when the button shadow is turned off (elevation.ts).
           pillElevation(state, shadow),
-          idle && (micError ? 'bg-destructive/70' : 'bg-overlay/60'),
-          !idle && 'bg-overlay/95',
-          // A plan limit is not a fault: it keeps the pill's own colour and speaks calmly.
-          phase === 'error' && !limitStop && 'bg-overlay-error/95',
-          phase === 'success' && 'bg-overlay-success/95',
-          phase === 'disabled' && 'bg-overlay-disabled/90 text-overlay-foreground/70',
-          state.mode === 'command' && listening && 'bg-overlay-command/95'
+          // A solid body in every state (surface.ts): nothing behind the pill shows through.
+          pillSurface(state, !!micError)
         )}
       >
         {stack.layers.map((layer) => (

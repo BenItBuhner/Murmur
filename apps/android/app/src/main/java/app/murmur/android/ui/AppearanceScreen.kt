@@ -3,11 +3,14 @@ package app.murmur.android.ui
 import androidx.compose.runtime.Composable
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.ui.components.Notice
 import app.murmur.android.ui.components.Screen
+import app.murmur.android.ui.components.SectionGap
 
 /**
  * Light/dark/system, wallpaper colours and the accent. The controls are the shared
- * [AppearanceSection]; the screen around them is the live preview.
+ * [AppearanceSection]; the screen around them is the live preview. The button's own look is set
+ * on the Dictation button screen, and a line at the end says so.
  */
 @Composable
 fun AppearanceScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
@@ -17,5 +20,7 @@ fun AppearanceScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav
         nav = nav
     ) {
         AppearanceSection(store, settings)
+        SectionGap()
+        Notice("Shape and shadow for the button itself are under Dictation button.")
     }
 }

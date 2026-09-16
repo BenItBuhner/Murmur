@@ -61,6 +61,13 @@ object OverlayGeometry {
     /** Distance kept between the pill and the screen edges. */
     const val EDGE_MARGIN_DP = 6f
 
+    /**
+     * The resting button in its wide shape (OverlayShape.PILL), as OverlayPillView draws it; the
+     * default spots are laid out around this outline. The circle is [RESTING_H_DP] square.
+     */
+    const val RESTING_W_DP = 64f
+    const val RESTING_H_DP = 36f
+
     /** Resting line for the vertical offset when no keyboard is on screen. */
     const val NO_KEYBOARD_BASELINE_DP = 96f
 

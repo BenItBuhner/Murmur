@@ -3,7 +3,9 @@ package app.murmur.android.settings
 import android.content.Context
 import android.content.SharedPreferences
 import app.murmur.android.BuildConfig
+import app.murmur.android.overlay.DeviceDisplay
 import app.murmur.android.overlay.OverlayAnchor
+import app.murmur.android.overlay.OverlayDefaults
 import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayLayoutCodec
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -153,7 +155,9 @@ data class MurmurSettings(
     val overlayShape: OverlayShape = OverlayShape.PILL,
     /**
      * The spots the floating button can be parked on (relative to the keyboard), which of them it
-     * rests on, and whether they are locked into one row or column.
+     * rests on, and whether they are locked into one row or column. The store starts an install on
+     * its device's own default ([SettingsStore.defaultOverlayLayout]); this is the layout when there
+     * is no store to ask.
      */
     val overlayLayout: OverlayLayout = OverlayLayout.DEFAULT,
     /** Light, dark or follow the system. */
@@ -198,6 +202,12 @@ enum class SettingsOrigin { LOCAL, CLOUD }
 class SettingsStore(context: Context) {
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences("murmur_settings", Context.MODE_PRIVATE)
+
+    /**
+     * The spots this device starts with and comes back to on Reset: hand-tuned for a model that
+     * was, otherwise laid out from the display's own geometry (see [OverlayDefaults]).
+     */
+    val defaultOverlayLayout: OverlayLayout = OverlayDefaults.layoutFor(DeviceDisplay.geometry(context))
 
     private val _flow = MutableStateFlow(read())
     val flow: StateFlow<MurmurSettings> = _flow
@@ -279,14 +289,21 @@ class SettingsStore(context: Context) {
         }
     }
 
+    /**
+     * The stored spots, or [default] (this device's own) when they were never edited. Every write
+     * persists the layout whether or not it was touched, so an install still on the spots older
+     * builds started with, whichever of them the button rests on, counts as untouched too.
+     */
     private fun readOverlayLayout(default: OverlayLayout): OverlayLayout {
-        OverlayLayoutCodec.decode(prefs.getString("overlayLayout", null))?.let { return it }
+        OverlayLayoutCodec.decode(prefs.getString("overlayLayout", null))?.let { stored ->
+            return if (stored.isUntouchedLegacyDefault) default else stored
+        }
         if (prefs.contains(LEGACY_ANCHOR_X) || prefs.contains(LEGACY_OFFSET_DP)) {
             val legacy = OverlayAnchor(
                 xFraction = prefs.getFloat(LEGACY_ANCHOR_X, OverlayAnchor.DEFAULT_X).coerceIn(0f, 1f),
-                offsetDp = prefs.getFloat(LEGACY_OFFSET_DP, OverlayAnchor.DEFAULT_OFFSET_DP)
+                offsetDp = prefs.getFloat(LEGACY_OFFSET_DP, OverlayAnchor.LEGACY_OFFSET_DP)
             )
-            return if (legacy == OverlayAnchor.DEFAULT) default else OverlayLayout.fromLegacy(legacy)
+            return if (legacy == OverlayAnchor.LEGACY_DEFAULT) default else OverlayLayout.fromLegacy(legacy)
         }
         return default
     }
@@ -317,7 +334,7 @@ class SettingsStore(context: Context) {
             dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
             useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio),
             overlayShape = OverlayShape.from(prefs.getString("overlayShape", d.overlayShape.id)),
-            overlayLayout = readOverlayLayout(d.overlayLayout),
+            overlayLayout = readOverlayLayout(defaultOverlayLayout),
             themeMode = ThemeMode.from(prefs.getString("themeMode", d.themeMode.id)),
             dynamicColor = prefs.getBoolean("dynamicColor", d.dynamicColor),
             accent = AccentPreset.from(prefs.getString("accent", d.accent.id)),

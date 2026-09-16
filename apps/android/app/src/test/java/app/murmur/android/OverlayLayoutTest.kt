@@ -18,13 +18,25 @@ class OverlayLayoutTest {
     private val toolbar = OverlayAnchor(0.9f, -20f)
 
     @Test
-    fun `the default layout is two spots on one row above the keyboard`() {
+    fun `the preferred layout is the bottom-left corner and the middle just above the keyboard`() {
         val d = OverlayLayout.DEFAULT
-        assertEquals(listOf(centre, right), d.spots)
+        assertEquals(listOf(OverlayAnchor(0.11f, -323f), OverlayAnchor(0.5f, 25f)), d.spots)
         assertEquals(0, d.activeIndex)
         assertEquals(OverlayArrangement.FREE, d.arrangement)
-        assertTrue(d.isDefault)
-        assertFalse(d.activated(1).isDefault)
+        assertFalse(d.isUntouchedLegacyDefault)
+    }
+
+    @Test
+    fun `the legacy default is recognised whichever of its spots the button rests on`() {
+        val legacy = OverlayLayout.LEGACY_DEFAULT
+        assertEquals(listOf(centre, right), legacy.spots)
+        assertTrue(legacy.isUntouchedLegacyDefault)
+        assertTrue(legacy.activated(1).isUntouchedLegacyDefault)
+        // Any edit (a moved spot, a lock, another spot) means the user chose these.
+        assertFalse(legacy.moved(1, OverlayAnchor(0.9f, 30f)).isUntouchedLegacyDefault)
+        assertFalse(legacy.arranged(OverlayArrangement.SAME_ROW).isUntouchedLegacyDefault)
+        assertFalse(legacy.added()!!.isUntouchedLegacyDefault)
+        assertFalse(legacy.removed(1)!!.isUntouchedLegacyDefault)
     }
 
     @Test
@@ -38,14 +50,14 @@ class OverlayLayoutTest {
 
     @Test
     fun `moving a free spot leaves the others alone`() {
-        val moved = OverlayLayout.DEFAULT.moved(1, OverlayAnchor(0.8f, -18f))
+        val moved = OverlayLayout(listOf(centre, right)).moved(1, OverlayAnchor(0.8f, -18f))
         assertEquals(centre, moved.spots[0])
         assertEquals(OverlayAnchor(0.8f, -18f), moved.spots[1])
     }
 
     @Test
     fun `moved spots are rounded so a drag does not persist float noise`() {
-        val moved = OverlayLayout.DEFAULT.moved(0, OverlayAnchor(0.123456f, -17.987f))
+        val moved = OverlayLayout(listOf(centre, right)).moved(0, OverlayAnchor(0.123456f, -17.987f))
         assertEquals(OverlayAnchor(0.1235f, -17.99f), moved.spots[0])
     }
 
@@ -91,8 +103,8 @@ class OverlayLayoutTest {
     fun `adding next to a centred spot goes to the edge instead of mirroring onto itself`() {
         val single = OverlayLayout(listOf(centre))
         assertEquals(right, single.added()!!.active)
-        // From the default layout (centre + right edge) the next free place is the left edge.
-        assertEquals(OverlayAnchor(0f, 30f), OverlayLayout.DEFAULT.added()!!.active)
+        // From the legacy default (centre + right edge) the next free place is the left edge.
+        assertEquals(OverlayAnchor(0f, 30f), OverlayLayout.LEGACY_DEFAULT.added()!!.active)
     }
 
     @Test

@@ -62,6 +62,7 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val layout = settings.overlayLayout
+    val defaultLayout = store.defaultOverlayLayout
 
     Screen(
         title = "Dictation button",
@@ -120,8 +121,8 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
                 }
                 SecondaryButton(
                     "Reset",
-                    enabled = !layout.isDefault,
-                    onClick = { store.update { it.copy(overlayLayout = OverlayLayout.DEFAULT) } }
+                    enabled = layout != defaultLayout,
+                    onClick = { store.update { it.copy(overlayLayout = defaultLayout) } }
                 )
             }
             editError?.let {

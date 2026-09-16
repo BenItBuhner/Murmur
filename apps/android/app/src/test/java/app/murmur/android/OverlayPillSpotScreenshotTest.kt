@@ -242,12 +242,12 @@ class OverlayPillSpotScreenshotTest {
         canvas.drawText("pill end, r = 18 dp, ${"%.1f".format(pill.left / DENSITY)} dp in, 6 dp up", pill.right + dp(10f), pill.centerY + dp(10f), text)
     }
 
-    /** The bottom-left 240 x 130 dp of the screen, three times larger. */
+    /** The bottom-left 320 x 130 dp of the screen, two and a half times larger. */
     private fun cornerCrop(screen: Bitmap): Bitmap {
-        val w = dp(240f).roundToInt()
+        val w = dp(320f).roundToInt()
         val h = dp(130f).roundToInt()
         val crop = Bitmap.createBitmap(screen, 0, SCREEN_H - h, w, h)
-        return Bitmap.createBitmap(crop, 0, 0, w, h, Matrix().apply { setScale(3f, 3f) }, true)
+        return Bitmap.createBitmap(crop, 0, 0, w, h, Matrix().apply { setScale(2.5f, 2.5f) }, true)
     }
 
     private fun save(bitmap: Bitmap, name: String) {

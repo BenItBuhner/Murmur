@@ -120,6 +120,11 @@ android {
         // output, which the JUnit report keeps (the console stays quiet).
         unitTests.all {
             it.systemProperty("robolectric.logging", "stdout")
+            // Robolectric screenshot tests (OverlayPillSpotScreenshotTest) drop their PNGs here.
+            it.systemProperty(
+                "murmur.screenshotDir",
+                layout.buildDirectory.dir("reports/pill-screenshots").get().asFile.absolutePath
+            )
             it.testLogging {
                 events("failed", "skipped")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

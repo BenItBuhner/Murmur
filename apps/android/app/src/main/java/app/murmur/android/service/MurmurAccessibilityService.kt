@@ -28,6 +28,7 @@ import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
+import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.Route
 import app.murmur.android.update.UpdateManager
@@ -302,28 +303,41 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      */
     override suspend fun insert(text: String, pressEnter: Boolean): String? =
         withContext(Dispatchers.Main.immediate) {
+            // The node may be null in a terminal: it takes IME input through a custom view but
+            // exposes no editable accessibility node. Keyboard support (when on and connected) is
+            // what reaches it, so the two are resolved together and handed to the strategy.
             val node = awaitEditableTarget()
-            if (node == null) {
-                Log.w(TAG, "no focused editable field; copied to clipboard")
-                copyToClipboard(text)
-                return@withContext COPIED_NO_FIELD
-            }
-            val target = NodeTarget(node)
-            when (val outcome = TextInserter.insert(target, text, pressEnter, ::copyToClipboard)) {
+            val (keyboard, keyboardStatus) = keyboardSupport(SettingsStore.get(this@MurmurAccessibilityService).get())
+            val target = node?.let { NodeTarget(it) }
+            when (val outcome = TextInserter.insert(target, text, pressEnter, ::copyToClipboard, keyboard, keyboardStatus)) {
                 is InsertOutcome.Inserted -> {
-                    Log.i(
-                        TAG,
-                        "inserted ${text.length} chars via ${outcome.method} into ${node.packageName}" +
-                            if (target.isWebContent) " (web content)" else ""
-                    )
+                    val where = when {
+                        node == null -> "keyboard support"
+                        target?.isWebContent == true -> "${node.packageName} (web content)"
+                        else -> node.packageName.toString()
+                    }
+                    Log.i(TAG, "inserted ${text.length} chars via ${outcome.method} into $where")
                     null
                 }
                 is InsertOutcome.Failed -> {
-                    Log.w(TAG, "insertion failed: ${outcome.message}")
+                    Log.w(TAG, "insertion failed [$keyboardStatus]: ${outcome.message}")
                     outcome.message
                 }
             }
         }
+
+    /**
+     * Whether the Android 13+ accessibility input-method connection can carry this dictation, and
+     * why not when it cannot. Off below API 33; otherwise resolved from the live IME connection (see
+     * [accessibilityKeyboard]). The "experimental keyboard support" setting gates its use, but the
+     * connection is still inspected when the setting is off so the notice can suggest turning it on.
+     */
+    private fun keyboardSupport(settings: MurmurSettings): Pair<KeyboardInput?, KeyboardStatus> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return null to if (settings.experimentalKeyboard) KeyboardStatus.UNSUPPORTED else KeyboardStatus.OFF
+        }
+        return accessibilityKeyboard(this, settings.experimentalKeyboard)
+    }
 
     private suspend fun awaitEditableTarget(): AccessibilityNodeInfo? =
         retryLookup(TARGET_LOOKUP_ATTEMPTS, TARGET_LOOKUP_RETRY_MS) { attempt ->

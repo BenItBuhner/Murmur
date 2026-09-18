@@ -106,7 +106,7 @@ class WebContentInsertionTest {
         val node = chromiumComposer()
         val clipboard = ArrayList<String>()
 
-        val outcome = TextInserter.insert(NodeTarget(node), "Hello world ", pressEnter = false) { clipboard.add(it) }
+        val outcome = TextInserter.insert(NodeTarget(node), "Hello world ", pressEnter = false, toClipboard = { clipboard.add(it) })
 
         assertEquals(InsertOutcome.Inserted("paste"), outcome)
         assertEquals(listOf("Hello world "), clipboard)
@@ -130,7 +130,7 @@ class WebContentInsertionTest {
             }
         }
 
-        TextInserter.insert(target, "Hello world ", pressEnter = false) { }
+        TextInserter.insert(target, "Hello world ", pressEnter = false, toClipboard = {})
 
         assertEquals(listOf(WEB_ACTIVATION_SETTLE_MS), pastedAt)
     }
@@ -139,7 +139,7 @@ class WebContentInsertionTest {
     fun `press enter on a page editor uses the IME action Chromium implements`() = runTest {
         val node = chromiumComposer()
 
-        TextInserter.insert(NodeTarget(node), "Hello world", pressEnter = true) { }
+        TextInserter.insert(NodeTarget(node), "Hello world", pressEnter = true, toClipboard = {})
 
         assertEquals(
             listOf(
@@ -156,7 +156,7 @@ class WebContentInsertionTest {
         val node = nativeField()
         val clipboard = ArrayList<String>()
 
-        val outcome = TextInserter.insert(NodeTarget(node), "world", pressEnter = false) { clipboard.add(it) }
+        val outcome = TextInserter.insert(NodeTarget(node), "world", pressEnter = false, toClipboard = { clipboard.add(it) })
 
         assertEquals(InsertOutcome.Inserted("set-text"), outcome)
         assertTrue(clipboard.isEmpty())
@@ -174,7 +174,7 @@ class WebContentInsertionTest {
         shadowOf(node).setRefreshReturnValue(false)
         val clipboard = ArrayList<String>()
 
-        val outcome = TextInserter.insert(NodeTarget(node), "Hello", pressEnter = false) { clipboard.add(it) }
+        val outcome = TextInserter.insert(NodeTarget(node), "Hello", pressEnter = false, toClipboard = { clipboard.add(it) })
 
         assertEquals(InsertOutcome.Failed("Copied — tap a text field and paste"), outcome)
         assertEquals(listOf("Hello"), clipboard)

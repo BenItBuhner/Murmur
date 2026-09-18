@@ -65,8 +65,59 @@ fun EditableTarget.canSetText(): Boolean =
 fun EditableTarget.canPaste(): Boolean =
     isEditable || supportsAction(AccessibilityNodeInfo.ACTION_PASTE)
 
+/**
+ * The Android 13+ accessibility-service input-method connection to whatever editor currently has
+ * IME focus (see [MurmurAccessibilityService.keyboardSupport]). Present only when "experimental
+ * keyboard support" is on, the platform is API 33+, and an editor is actually connected.
+ *
+ * This is the path that reaches editors which take input through `View.onCreateInputConnection`
+ * but expose no editable accessibility node — terminal emulators (Termius, Termux, ConnectBot),
+ * some game and canvas text boxes, a few custom rich editors. They never advertise
+ * `ACTION_SET_TEXT` or `ACTION_PASTE`, so the node strategy has nothing to act on, but the same
+ * `InputConnection` a soft keyboard talks to accepts committed text or key events.
+ */
+interface KeyboardInput {
+    /**
+     * The connected editor asked for raw key events rather than composed text: its
+     * `EditorInfo.inputType` is `TYPE_NULL`. Terminals do this, and they ignore `commitText`, so
+     * such editors are typed into with [sendTextAsKeyEvents] instead.
+     */
+    val prefersKeyEvents: Boolean
+
+    /** Commit [text] at the editor's cursor. False when there is no live connection to commit to. */
+    fun commitText(text: String): Boolean
+
+    /** Type [text] as individual key events, for editors that only read the key stream (TYPE_NULL). */
+    fun sendTextAsKeyEvents(text: String): Boolean
+
+    /** Send Enter (submit / newline) as a key-down/up pair. */
+    fun pressEnter(): Boolean
+}
+
+/** Why the keyboard-support path is or is not usable for this dictation; drives the failure notice. */
+enum class KeyboardStatus {
+    /** A live input connection exists and keyboard support is on: [KeyboardInput] is non-null. */
+    AVAILABLE,
+
+    /** Keyboard support is off in settings and no editor is currently connected through the IME. */
+    OFF,
+
+    /** Keyboard support is off, but an editor IS connected: turning it on would let text land here. */
+    OFF_BUT_EDITOR_PRESENT,
+
+    /**
+     * Keyboard support is on and the platform supports it, but no input connection came back — the
+     * usual cause is that the service's input-method flag has not taken effect since the last
+     * update and it needs turning off and on again.
+     */
+    NO_CONNECTION,
+
+    /** Keyboard support is on but this Android version is older than 13 (API 33), so it cannot work. */
+    UNSUPPORTED,
+}
+
 sealed class InsertOutcome {
-    /** The dictation is in the field; [method] is `set-text` or `paste`. */
+    /** The dictation is in the field; [method] is `set-text`, `paste`, `keyboard` or `keyboard-keys`. */
     data class Inserted(val method: String) : InsertOutcome()
 
     /** Nothing was written. The text is on the clipboard and [message] is what the pill shows. */
@@ -75,6 +126,21 @@ sealed class InsertOutcome {
 
 const val COPIED_NO_FIELD = "Copied — tap a text field and paste"
 const val COPIED_FIELD_BLOCKED = "Copied — this field blocks insertion, paste manually"
+
+/** A real text field that took neither SET_TEXT, a keyboard commit nor PASTE. */
+const val COPIED_EDITOR_REJECTED = "Copied — this editor rejected the text, paste manually"
+
+/** Keyboard support is on and connected, but the editor swallowed both committed text and keys. */
+const val COPIED_KEYBOARD_FAILED = "Copied — the keyboard could not type here, paste manually"
+
+/** An editor is focused (a terminal) but keyboard support is off: turning it on would type here. */
+const val COPIED_ENABLE_KEYBOARD = "Copied — turn on keyboard support to type into this app"
+
+/** Keyboard support is on but no input connection appeared: the service likely needs re-enabling. */
+const val COPIED_NO_CONNECTION = "Copied — turn Murmur's accessibility service off and on for keyboard support"
+
+/** Keyboard support is on but the OS is older than Android 13. */
+const val COPIED_KEYBOARD_UNSUPPORTED = "Copied — keyboard support needs Android 13 or newer"
 
 /**
  * Puts dictated text into a focused field using accessibility actions.
@@ -118,44 +184,143 @@ const val COPIED_FIELD_BLOCKED = "Copied — this field blocks insertion, paste 
  * to vanish right after it appeared.
  */
 object TextInserter {
+    /**
+     * Puts [text] into the focused editor, trying the strategies in the order that lands a real
+     * user edit in the widest range of fields:
+     *
+     *   1. the editable accessibility node (`ACTION_SET_TEXT`), for ordinary native fields;
+     *   2. the input-method connection ([keyboard]) whenever one exists, regardless of whether the
+     *      node is editable — this is what reaches terminals and other custom views that accept IME
+     *      input but expose no editable node;
+     *   3. `ACTION_PASTE`;
+     *   4. the clipboard, with a notice naming the step that failed.
+     *
+     * Web content and password fields keep their existing paste-first handling (see the class
+     * comment); the keyboard connection is a further fallback for them rather than a reordering.
+     *
+     * [target] is null when no editable node is focused at all — the normal case in a terminal.
+     * [keyboard] is null unless keyboard support is on and connected; [keyboardStatus] explains a
+     * null keyboard so the failure notice can be specific.
+     */
     suspend fun insert(
-        target: EditableTarget,
+        target: EditableTarget?,
         text: String,
         pressEnter: Boolean,
-        toClipboard: (String) -> Unit
+        toClipboard: (String) -> Unit,
+        keyboard: KeyboardInput? = null,
+        keyboardStatus: KeyboardStatus = KeyboardStatus.OFF,
     ): InsertOutcome {
         // A node that cannot be refreshed belongs to a field that is gone (or an app that stopped
         // answering); acting on the cached copy would only fail later with a misleading message.
-        if (!target.refresh() || !target.acceptsText()) {
-            toClipboard(text)
-            return InsertOutcome.Failed(COPIED_NO_FIELD)
+        val node = target?.takeIf { it.refresh() }
+        // A non-null connection is, by definition, available; keep the two consistent.
+        val status = if (keyboard != null) KeyboardStatus.AVAILABLE else keyboardStatus
+
+        // The clip lands on the clipboard once, whether a paste attempt put it there or the final
+        // fallback does: a paste that copies and then fails must not double the clip.
+        var copied = false
+        val copyOnce: (String) -> Unit = { s -> if (!copied) { copied = true; toClipboard(s) } }
+
+        val keyboardAttempt: suspend () -> String? = { keyboardInsert(keyboard, text) }
+        val method: String? = when {
+            // Terminal-style: an editor is focused but exposes no editable node. Only the IME
+            // connection can reach it.
+            node == null -> keyboardAttempt()
+
+            node.isPassword && node.acceptsText() -> firstMethod(
+                { if (paste(node, text, copyOnce)) "paste" else null },
+                keyboardAttempt,
+            )
+
+            // Web content: SET_TEXT corrupts rich editors, so paste (with the activation click)
+            // comes first, SET_TEXT is the engine-refuses-paste fallback, keyboard is the last try.
+            node.isWebContent && node.acceptsText() -> firstMethod(
+                { if (paste(node, text, copyOnce)) "paste" else null },
+                { if (node.canSetText() && setText(node, text)) "set-text".also { Log.i(TAG, "engine refused ACTION_PASTE; ACTION_SET_TEXT accepted") } else null },
+                keyboardAttempt,
+            )
+
+            // Ordinary native editable field: SET_TEXT, then the IME commit, then paste.
+            node.canSetText() -> firstMethod(
+                { if (setText(node, text)) "set-text" else null },
+                keyboardAttempt,
+                { if (node.canPaste() && paste(node, text, copyOnce)) "paste".also { Log.i(TAG, "field refused ACTION_SET_TEXT; pasted instead") } else null },
+            )
+
+            // A node that only advertises PASTE (not editable, no SET_TEXT): IME commit first per the
+            // general order, then paste.
+            node.acceptsText() -> firstMethod(
+                keyboardAttempt,
+                { if (paste(node, text, copyOnce)) "paste" else null },
+            )
+
+            // The node is focused but is not a text field (a button, say). The keyboard connection is
+            // the only thing that might still reach a real editor underneath it.
+            else -> keyboardAttempt()
         }
 
-        val method = when {
-            target.isPassword -> if (paste(target, text, toClipboard)) "paste" else null
-            target.isWebContent || !target.canSetText() -> when {
-                paste(target, text, toClipboard) -> "paste"
-                target.canSetText() && setText(target, text) -> {
-                    Log.i(TAG, "engine refused ACTION_PASTE; ACTION_SET_TEXT accepted")
-                    "set-text"
-                }
-                else -> null
-            }
-            else -> when {
-                setText(target, text) -> "set-text"
-                paste(target, text, toClipboard) -> {
-                    Log.i(TAG, "field refused ACTION_SET_TEXT; pasted instead")
-                    "paste"
-                }
-                else -> null
-            }
-        } ?: return InsertOutcome.Failed(COPIED_FIELD_BLOCKED)
-
-        if (pressEnter && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id, null)
+        if (method == null) {
+            copyOnce(text)
+            return InsertOutcome.Failed(failureMessage(node, status))
         }
+        pressEnterIfNeeded(pressEnter, method, node, keyboard)
         return InsertOutcome.Inserted(method)
     }
+
+    /** Runs [attempts] in order, returning the first non-null method name; null when all decline. */
+    private suspend fun firstMethod(vararg attempts: suspend () -> String?): String? {
+        for (attempt in attempts) attempt()?.let { return it }
+        return null
+    }
+
+    /**
+     * Type through the input-method connection. A TYPE_NULL editor (terminals) is sent key events,
+     * which it turns into terminal input; everything else is committed, with key events as a last
+     * resort for an editor that quietly ignores the commit.
+     */
+    private fun keyboardInsert(keyboard: KeyboardInput?, text: String): String? {
+        keyboard ?: return null
+        if (text.isEmpty()) return null
+        return if (keyboard.prefersKeyEvents) {
+            if (keyboard.sendTextAsKeyEvents(text)) "keyboard-keys" else null
+        } else {
+            when {
+                keyboard.commitText(text) -> "keyboard"
+                keyboard.sendTextAsKeyEvents(text) -> "keyboard-keys"
+                else -> null
+            }
+        }
+    }
+
+    /**
+     * Enter after the text. Through the keyboard connection when that is how the text went in (a
+     * terminal has no IME_ENTER node action); otherwise the node's IME_ENTER action, falling back to
+     * the keyboard connection when there is no node.
+     */
+    private fun pressEnterIfNeeded(pressEnter: Boolean, method: String, node: EditableTarget?, keyboard: KeyboardInput?) {
+        if (!pressEnter) return
+        val viaKeyboard = method == "keyboard" || method == "keyboard-keys"
+        when {
+            viaKeyboard && keyboard != null -> keyboard.pressEnter()
+            node != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+                node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id, null)
+            keyboard != null -> keyboard.pressEnter()
+        }
+    }
+
+    /** The notice for a dictation that could not be inserted, naming the step that failed. */
+    private fun failureMessage(node: EditableTarget?, status: KeyboardStatus): String =
+        if (node?.acceptsText() == true) {
+            // A real text field that refused every method it could.
+            if (status == KeyboardStatus.AVAILABLE) COPIED_EDITOR_REJECTED else COPIED_FIELD_BLOCKED
+        } else when (status) {
+            // No usable editable node (a terminal, a non-text view, or nothing focused).
+            KeyboardStatus.AVAILABLE -> COPIED_KEYBOARD_FAILED
+            KeyboardStatus.OFF_BUT_EDITOR_PRESENT -> COPIED_ENABLE_KEYBOARD
+            KeyboardStatus.NO_CONNECTION -> COPIED_NO_CONNECTION
+            KeyboardStatus.UNSUPPORTED -> COPIED_KEYBOARD_UNSUPPORTED
+            KeyboardStatus.OFF -> COPIED_NO_FIELD
+        }
 
     private fun setText(target: EditableTarget, text: String): Boolean {
         val existing = if (target.isShowingHintText) "" else target.text?.toString() ?: ""

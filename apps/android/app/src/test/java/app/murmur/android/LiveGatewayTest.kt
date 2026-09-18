@@ -102,7 +102,7 @@ class LiveGatewayTest {
         DictationController.sink = object : TextSink {
             override suspend fun insert(text: String, pressEnter: Boolean): String? =
                 withContext(Dispatchers.Main.immediate) {
-                    when (val outcome = TextInserter.insert(target, text, pressEnter) { }) {
+                    when (val outcome = TextInserter.insert(target, text, pressEnter, toClipboard = {})) {
                         is InsertOutcome.Inserted -> null
                         is InsertOutcome.Failed -> outcome.message
                     }

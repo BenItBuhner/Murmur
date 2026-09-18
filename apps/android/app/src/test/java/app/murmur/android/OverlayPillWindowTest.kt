@@ -35,10 +35,12 @@ private const val FRAME_MS = 8L
 private const val MORPH_MS = 340L
 
 /**
- * The windows the pill asks its host for. Moving a window and redrawing into it are not atomic on
- * Android, so the window the pill is drawn in must not move while the mic turns on and off: the
- * recording that motivated this showed the pill jumping 5 dp for a few frames at every idle
- * transition, once when the window grew for the morph and once when it was tightened afterwards.
+ * The windows the pill asks its host for. Android does not move a window and redraw its contents in
+ * the same frame, so a canvas that moves shows the pill jumping in from wherever the window used to
+ * be: 5 dp for a few frames at every idle transition in the first recording, and across the whole
+ * screen at the start and end of every drag in the second. The real host pins the canvas to the
+ * whole screen so it never moves; a host that instead sizes it to the pill must only ever grow it,
+ * never changing its top-left corner.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -148,5 +150,35 @@ class OverlayPillWindowTest {
         view.setEditing(false); settle()
         assertTrue(host.canvas.last().approximately(resting))
         assertTrue(resting.encloses(host.touch.last()))
+    }
+
+    @Test
+    fun `a canvas pinned to the screen is placed once and never moves`() {
+        val screen = Box(0f, 0f, SCREEN_W.toFloat(), SCREEN_H.toFloat())
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        host = RecordingHost()
+        view = OverlayPillView(activity).apply {
+            this.host = this@OverlayPillWindowTest.host
+            canvasPinnedToScreen = true
+        }
+        activity.setContentView(view, FrameLayout.LayoutParams(SCREEN_W, SCREEN_H))
+        ShadowLooper.idleMainLooper()
+        view.configure(OverlayShape.PILL, OverlayLayout.DEFAULT)
+        view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP)
+        view.render(DictationState.Idle)
+        frames(10)
+        assertEquals(listOf(screen), host.canvas)
+
+        view.render(DictationState.Listening(0, 0.2f)); listen(500)
+        view.render(DictationState.Success("Inserted")); settle()
+        view.render(DictationState.Idle); settle()
+        view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP - 120); settle()
+        view.setEditing(true); settle()
+        view.setEditing(false); settle()
+        assertEquals("the canvas is the screen, once and for all: ${host.canvas}", listOf(screen), host.canvas)
+        // The touch window still does its job: it hugs the button at rest.
+        val idleTouch = host.touch.last()
+        assertTrue(idleTouch.width < SCREEN_W / 3f && idleTouch.height < 200f)
+        assertTrue(screen.encloses(idleTouch))
     }
 }

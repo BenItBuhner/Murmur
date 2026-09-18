@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.5.2': [
+    "**Dictation lands in terminals on Android.** Terminal apps such as Termius, Termux and ConnectBot take text only through the keyboard and expose no editable field, so a dictation into them always ended in the failed-to-insert notice. On Android 13 and newer, Murmur can now type through the system's input-method path instead: turn on **Permissions → Experimental → Keyboard support** (off by default). After updating, switch Murmur's accessibility service off and on once so the new keyboard flag takes effect; the notice tells you if it is missing. Enter still runs the command.",
+    '**A failure notice that names the step.** When text does not land, the notice says which step failed (no field, the editor rejected the text, no keyboard connection, keyboard support off, or an Android older than 13) instead of the bare failure; Copy and Retry keep the recording as before.',
+    '**Button shadow has one home on Android.** The switch moved from Appearance to the Dictation button screen, in a Look group between Shape and Spots, where the button itself is set; the preview above it goes flat or lifts as you flip it. Appearance points there in one line. Desktop keeps the switch under General → Appearance next to the other pill rows.'
+  ],
   '0.5.1': [
     "**Default spots that fit the phone.** On Android the dictation button's two default spots are the ones tuned on a Galaxy S26 Ultra (spot 1 in the bottom-left corner, spot 2 centred 25 dp above the keyboard); an S26 Ultra gets those exact numbers and every other phone derives the same two spots from its own display geometry. Spots you edited stay as they are; Reset returns to the device's default.",
     '**Button shadow, a setting.** Settings → Appearance on Android and General → Appearance on desktop gain a Button shadow toggle (on by default). Off, the dictation pill is drawn flat in every state, and on Android the edit panel and its chips with it: same shape, colours and contents, nothing lifted.',

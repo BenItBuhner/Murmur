@@ -145,6 +145,15 @@ data class MurmurSettings(
      */
     val keepRecordings: Boolean = true,
     /**
+     * Experimental keyboard support: also type through the Android 13+ accessibility input-method
+     * connection, not only accessibility node actions. This is what lands text in apps that take
+     * IME input through a custom view but expose no editable accessibility node — terminal
+     * emulators above all. Device-local (screens and editors differ); never synced. Off by default;
+     * on Android 12 and older it has no effect. Adding it to an already-enabled service can need the
+     * service turned off and on once for the input-method flag to take hold.
+     */
+    val experimentalKeyboard: Boolean = false,
+    /**
      * Personal dictionary: STT prompt hint, LLM spelling list and enforced in the text. Synced with
      * the account when signed in (same shape as the desktop app and the backend).
      */
@@ -336,6 +345,7 @@ class SettingsStore(context: Context) {
             llmTimeoutMs = prefs.getInt("llmTimeoutMs", d.llmTimeoutMs),
             maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec),
             keepRecordings = prefs.getBoolean("keepRecordings", d.keepRecordings),
+            experimentalKeyboard = prefs.getBoolean("experimentalKeyboard", d.experimentalKeyboard),
             dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
             useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio),
             overlayShape = OverlayShape.from(prefs.getString("overlayShape", d.overlayShape.id)),
@@ -385,6 +395,7 @@ class SettingsStore(context: Context) {
             .putInt("llmTimeoutMs", s.llmTimeoutMs)
             .putInt("maxDurationSec", s.maxDurationSec)
             .putBoolean("keepRecordings", s.keepRecordings)
+            .putBoolean("experimentalKeyboard", s.experimentalKeyboard)
             .putString("dictionaryEntries", DictionaryCodec.encode(s.dictionaryEntries))
             .putBoolean("useFixtureAudio", s.useFixtureAudio)
             .putString("overlayShape", s.overlayShape.id)

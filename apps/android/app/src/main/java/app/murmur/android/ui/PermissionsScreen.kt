@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,12 +26,16 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.murmur.android.service.MurmurAccessibilityService
+import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Dot
+import app.murmur.android.ui.components.Group
 import app.murmur.android.ui.components.RowCardPadding
 import app.murmur.android.ui.components.Screen
+import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.components.SecondaryButton
+import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
 
 data class PermissionState(val microphone: Boolean, val overlay: Boolean, val accessibility: Boolean) {
@@ -59,12 +64,36 @@ private fun readPermissions(context: android.content.Context) = PermissionState(
 
 @Composable
 fun PermissionsScreen(nav: TopNav) {
+    val context = LocalContext.current
+    val store = remember(context) { SettingsStore.get(context) }
+    val settings by store.flow.collectAsState()
     Screen(
         title = "Permissions",
         description = "Three grants from the system: one to hear you, one to draw the button, one to type for you.",
         nav = nav
     ) {
         PermissionList()
+
+        // The accessibility node route cannot type into apps that take keyboard input through a
+        // custom view but expose no editable field — terminals above all. The Android 13+
+        // input-method connection can; it is opt-in because it is newer and app-specific.
+        if (Build.VERSION.SDK_INT >= 33) {
+            SectionGap()
+            Group(
+                "Experimental",
+                description = "For apps the accessibility service cannot type into directly.",
+                rows = true
+            ) {
+                ToggleRow(
+                    title = "Keyboard support",
+                    description = "Also type through Android's accessibility keyboard connection, so dictation lands in " +
+                        "terminals and other apps that show a keyboard but expose no text field to the service. If you just " +
+                        "updated Murmur, turn its accessibility service off and on once so this takes effect.",
+                    checked = settings.experimentalKeyboard,
+                    onCheckedChange = { on -> store.update { it.copy(experimentalKeyboard = on) } }
+                )
+            }
+        }
     }
 }
 

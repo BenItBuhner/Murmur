@@ -4,8 +4,13 @@
 next-env.d.ts
 *.tsbuildinfo
 
-# Vercel CLI link metadata
-.vercel
+# The Worker built by @opennextjs/cloudflare, and wrangler's local state (dev KV, Durable Objects).
+/.open-next/
+/.wrangler/
+
+# Local variables and secrets for `wrangler dev`; production values are Worker secrets.
+.dev.vars
+.dev.vars.*
 
 # Vitest
 /coverage

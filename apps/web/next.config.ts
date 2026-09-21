@@ -2,8 +2,9 @@ import type { NextConfig } from 'next'
 
 /**
  * The site is static-first: every page is prerendered and the two release endpoints revalidate on
- * a timer, so it runs the same on Vercel, on `next start` behind any reverse proxy, or in a
- * container. Nothing here depends on the host.
+ * a timer, so it runs the same on Cloudflare Workers (wrangler.jsonc and open-next.config.ts, the
+ * production host), on `next start` behind any reverse proxy, or in a container. Nothing here
+ * depends on the host.
  */
 const nextConfig: NextConfig = {
   reactStrictMode: true,

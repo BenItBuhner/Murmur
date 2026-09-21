@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:worker": "opennextjs-cloudflare build",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && wrangler deploy --config wrangler.jsonc && opennextjs-cloudflare populateCache remote",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
@@ -16,6 +19,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.2",
+    "@opennextjs/cloudflare": "^1.20.6",
     "convex": "1.45.0",
     "next": "16.3.4",
     "react": "19.2.8",
@@ -31,6 +35,7 @@
     "prettier": "^3.7.4",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "wrangler": "^4.135.0"
   }
 }

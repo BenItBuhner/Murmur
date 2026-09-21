@@ -421,5 +421,1493 @@
       "ok": false,
       "reason": "empty"
     }
-  ]
+  ],
+  "alreadyClean": [
+    {
+      "name": "numbers/million-thousand",
+      "transcript": "the budget is one million two hundred thousand dollars",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "numbers/hundreds-thousands-in-prose",
+      "transcript": "so we shipped three hundred and twenty units and the population is about three hundred and twenty thousand",
+      "context": {
+        "category": "document",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "tone"
+    },
+    {
+      "name": "numbers/twelve-hundred",
+      "transcript": "twelve hundred units by friday",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "numbers/digit-run-phone",
+      "transcript": "call me at five five five one two one two and ask for extension one two three",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "numbers/leading-zeros",
+      "transcript": "the code is zero zero zero seven",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "numbers/repeated-not-deduplicated",
+      "transcript": "the price was five thousand five thousand i said it twice",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "numbers/counting",
+      "transcript": "count with me one two three four five six seven eight nine ten",
+      "context": {
+        "category": "notes",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "numbers/version",
+      "transcript": "we are on version two point oh point one and node twenty two",
+      "context": {
+        "category": "code",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "destination"
+    },
+    {
+      "name": "numbers/time-money-percent",
+      "transcript": "i need eleven hundred dollars by five thirty pm and its about forty two percent of the total",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "numbers/year-and-date",
+      "transcript": "the meeting is on march third twenty twenty four at ten to eleven",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "numbers/grand",
+      "transcript": "so basically we need forty two percent more revenue about three hundred grand",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "cleanup/fillers-stutters-correction",
+      "transcript": "um so hey sarah, uh can you send the the report to john on tuesday, no, wednesday? and cc me on it thanks",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "app": "Slack",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "cleanup/hesitation-phrases",
+      "transcript": "I mean it was a hundred and fifty maybe a hundred and sixty people you know",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "cleanup/scratch-that",
+      "transcript": "send it tomorrow actually scratch that send it today",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "cleanup/spoken-quotes",
+      "transcript": "she told me quote hands off end quote and left",
+      "context": {
+        "category": "document",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "tone"
+    },
+    {
+      "name": "cleanup/new-line-and-press-enter",
+      "transcript": "thanks a lot new line see you tomorrow press enter",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "command"
+    },
+    {
+      "name": "structure/enumeration-to-list",
+      "transcript": "okay so three things for today first finish the deck second email the vendor about pricing and third book the flights for next week",
+      "context": {
+        "category": "notes",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "structure/numbered-by-speaker",
+      "transcript": "number one finish the deck number two email the vendor",
+      "context": {
+        "category": "notes",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "guard/question-stays-question",
+      "transcript": "what time is the meeting tomorrow and do i need to bring anything",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "guard/instruction-stays-written",
+      "transcript": "write a short summary of the meeting and send it to the whole team by five pm",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "guard/deliberate-repetition-and-swearing",
+      "transcript": "no no no that is not what I fucking said very very slowly",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "guard/negation-kept",
+      "transcript": "we should not ship on friday and I don't think we can make it anyway",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "destination/terminal",
+      "transcript": "git commit dash m fix the login bug",
+      "context": {
+        "category": "terminal",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "destination"
+    },
+    {
+      "name": "destination/code-identifiers",
+      "transcript": "add a function called parse user id that returns null when the input is empty",
+      "context": {
+        "category": "code",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "destination"
+    },
+    {
+      "name": "context/mid-sentence-continuation",
+      "transcript": "probably go with the second option since it is like forty two percent cheaper",
+      "context": {
+        "category": "document",
+        "tone": "professional",
+        "language": "auto",
+        "precedingText": "I think we should",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "preceding-text"
+    },
+    {
+      "name": "context/dictionary-correction",
+      "transcript": "we moved the whisper flow deck to convex and used cube control to deploy",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": [
+          {
+            "word": "Wispr Flow",
+            "aliases": [
+              "whisper flow"
+            ]
+          },
+          {
+            "word": "Convex",
+            "aliases": []
+          },
+          {
+            "word": "kubectl",
+            "aliases": [
+              "cube control"
+            ]
+          }
+        ]
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "context/keep-verbatim",
+      "transcript": "sign it with my sig and send it",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": [],
+        "keepVerbatim": [
+          "my sig"
+        ]
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "verbatim"
+    },
+    {
+      "name": "context/instructions-british",
+      "transcript": "we need to finalize the color of the organization logo",
+      "context": {
+        "category": "document",
+        "tone": "professional",
+        "language": "auto",
+        "instructions": "British spelling.",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "instructions"
+    },
+    {
+      "name": "language/pinned",
+      "transcript": "wir treffen uns morgen um zehn uhr dreißig im büro",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "de",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "language"
+    },
+    {
+      "name": "clean/quick-reply",
+      "transcript": "Sounds good, see you tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "app": "Slack",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/thanks-with-plan",
+      "transcript": "Thanks for the update, I'll take a look this afternoon.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/question-kept",
+      "transcript": "Can you send me the link to the doc?",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/three-words",
+      "transcript": "On my way.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/okay-reply",
+      "transcript": "Okay, sounds good.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/exclamation",
+      "transcript": "Looks great to me!",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/email-sentence",
+      "transcript": "Please review the attached document and let me know your thoughts.",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "app": "Outlook",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/twelve-words",
+      "transcript": "Please review the attached document and let me know your thoughts today.",
+      "context": {
+        "category": "document",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/lowercase-start-and-pronoun",
+      "transcript": "thanks for the update, i will look at it tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/dictionary-spelling",
+      "transcript": "We moved the deck to convex yesterday.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": [
+          {
+            "word": "Convex",
+            "aliases": []
+          }
+        ]
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/notes-neutral",
+      "transcript": "Follow up with Sarah about the vendor contract.",
+      "context": {
+        "category": "notes",
+        "tone": "neutral",
+        "app": "Obsidian",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/browser-field",
+      "transcript": "Just checking in on the proposal.",
+      "context": {
+        "category": "browser",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/after-full-stop",
+      "transcript": "Sounds good, see you tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "precedingText": "Thanks for the update.",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/pinned-english",
+      "transcript": "Let me know if you have any questions.",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "en",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "clean/verbatim-phrase-absent",
+      "transcript": "Sign it and send it back to me.",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": [],
+        "keepVerbatim": [
+          "my sig"
+        ]
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "nearly-clean/single-filler",
+      "transcript": "Sounds good, um, see you tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "filler"
+    },
+    {
+      "name": "nearly-clean/one-number",
+      "transcript": "I'm running about ten minutes late.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "number"
+    },
+    {
+      "name": "nearly-clean/one-command",
+      "transcript": "Thanks a lot, new line, see you tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "command"
+    },
+    {
+      "name": "nearly-clean/stutter",
+      "transcript": "The the report is ready.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "stutter"
+    },
+    {
+      "name": "nearly-clean/self-correction",
+      "transcript": "Send it Tuesday, no, Wednesday.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "correction"
+    },
+    {
+      "name": "nearly-clean/spoken-quote",
+      "transcript": "She said quote hands off end quote.",
+      "context": {
+        "category": "document",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "command"
+    },
+    {
+      "name": "nearly-clean/enumeration",
+      "transcript": "Firstly the deck, secondly the vendor.",
+      "context": {
+        "category": "notes",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "enumeration"
+    },
+    {
+      "name": "nearly-clean/unpunctuated",
+      "transcript": "sounds good see you tomorrow",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "nearly-clean/question-without-mark",
+      "transcript": "Can you send me the link to the doc.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "question"
+    },
+    {
+      "name": "nearly-clean/thirteen-words",
+      "transcript": "Please review the attached document and let me know your thoughts by tomorrow.",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "long"
+    },
+    {
+      "name": "nearly-clean/code-destination",
+      "transcript": "Sounds good, see you tomorrow.",
+      "context": {
+        "category": "code",
+        "tone": "neutral",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "destination"
+    },
+    {
+      "name": "nearly-clean/instructions",
+      "transcript": "We need to finalize the color.",
+      "context": {
+        "category": "document",
+        "tone": "professional",
+        "language": "auto",
+        "instructions": "British spelling.",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "instructions"
+    },
+    {
+      "name": "nearly-clean/forced-tone",
+      "transcript": "Sounds good, see you tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "tone"
+    },
+    {
+      "name": "nearly-clean/verbatim-phrase",
+      "transcript": "Sign it with my sig.",
+      "context": {
+        "category": "email",
+        "tone": "professional",
+        "language": "auto",
+        "dictionary": [],
+        "keepVerbatim": [
+          "my sig"
+        ]
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "verbatim"
+    },
+    {
+      "name": "nearly-clean/mid-sentence-continuation",
+      "transcript": "Probably go with the other option.",
+      "context": {
+        "category": "document",
+        "tone": "professional",
+        "language": "auto",
+        "precedingText": "I think we should",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "preceding-text"
+    },
+    {
+      "name": "nearly-clean/pinned-language",
+      "transcript": "Wir treffen uns morgen im Büro.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "de",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "language"
+    },
+    {
+      "name": "nearly-clean/foreign-under-auto",
+      "transcript": "Ich schicke dir das morgen.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "language": "auto",
+        "dictionary": []
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "foreign"
+    },
+    {
+      "name": "curly apostrophe",
+      "transcript": "Let’s ship it today.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "em dash",
+      "transcript": "Let's do it — tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "characters"
+    },
+    {
+      "name": "accented name",
+      "transcript": "Send it to Zoë.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "characters"
+    },
+    {
+      "name": "trailing off",
+      "transcript": "See you tomorrow...",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "pause like",
+      "transcript": "It was, like, really good.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "filler"
+    },
+    {
+      "name": "verb like",
+      "transcript": "I like the new design a lot.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "opener",
+      "transcript": "Okay so we ship tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "filler"
+    },
+    {
+      "name": "mid-sentence so",
+      "transcript": "It's late, so let's stop here.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "correction without second comma",
+      "transcript": "Send it Tuesday, no Wednesday.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "correction"
+    },
+    {
+      "name": "answer no",
+      "transcript": "No, that works for me.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "repeated run",
+      "transcript": "We need to, we need to ship it.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "stutter"
+    },
+    {
+      "name": "question then statement",
+      "transcript": "Is it done? Yes.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "later unmarked question",
+      "transcript": "Thanks. Can you resend it.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "question"
+    },
+    {
+      "name": "spoken period",
+      "transcript": "Send it today period.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "command"
+    },
+    {
+      "name": "press enter after a full stop",
+      "transcript": "See you tomorrow. Press enter.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "press enter without one",
+      "transcript": "See you tomorrow press enter",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "unpunctuated"
+    },
+    {
+      "name": "preceding new line",
+      "transcript": "Sounds good.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto",
+        "precedingText": "Hi Sarah,\n\n"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "preceding comma",
+      "transcript": "Sounds good.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto",
+        "precedingText": "Hi Sarah,"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "preceding-text"
+    },
+    {
+      "name": "regional english",
+      "transcript": "Sounds good.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "en-US"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "neutral notes",
+      "transcript": "Sounds good.",
+      "context": {
+        "category": "notes",
+        "tone": "neutral",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "raised cap",
+      "transcript": "Please review the attached document and let me know your thoughts by tomorrow.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": 20,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "cap of zero",
+      "transcript": "Sounds good.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": 0,
+      "clean": false,
+      "reason": "long"
+    }
+  ],
+  "cleanLexicon": {
+    "hesitationWords": [
+      "um",
+      "uh",
+      "uhm",
+      "umm",
+      "erm",
+      "er",
+      "ah",
+      "hmm",
+      "mm",
+      "mhm",
+      "hm",
+      "oh",
+      "basically",
+      "actually",
+      "literally",
+      "honestly",
+      "anyway",
+      "anyways",
+      "kinda",
+      "sorta"
+    ],
+    "hesitationPhrases": [
+      "you know",
+      "i mean",
+      "kind of",
+      "sort of"
+    ],
+    "commandWords": [
+      "quote",
+      "quotes",
+      "unquote",
+      "comma",
+      "period",
+      "colon",
+      "semicolon",
+      "hyphen",
+      "dash",
+      "ampersand",
+      "asterisk",
+      "underscore",
+      "slash",
+      "backslash",
+      "parenthesis",
+      "parentheses",
+      "bracket",
+      "brackets",
+      "ellipsis",
+      "newline",
+      "backspace",
+      "caps",
+      "capital",
+      "capitalize",
+      "uppercase",
+      "lowercase"
+    ],
+    "commandPhrases": [
+      "new line",
+      "new paragraph",
+      "line break",
+      "paragraph break",
+      "question mark",
+      "exclamation point",
+      "exclamation mark",
+      "full stop",
+      "open paren",
+      "close paren",
+      "all caps",
+      "scratch that",
+      "delete that",
+      "strike that",
+      "undo that",
+      "erase that",
+      "press enter",
+      "hit enter",
+      "select all",
+      "open quote",
+      "close quote",
+      "end quote"
+    ],
+    "correctionPhrases": [
+      "i meant",
+      "no wait",
+      "wait no",
+      "or rather",
+      "make that",
+      "never mind",
+      "nevermind",
+      "forget that",
+      "correction"
+    ],
+    "enumerationWords": [
+      "firstly",
+      "secondly",
+      "thirdly",
+      "lastly",
+      "bullet",
+      "bullets"
+    ],
+    "enumerationPhrases": [
+      "bullet point",
+      "bullet points",
+      "next item",
+      "next point"
+    ],
+    "foreignWords": [
+      "aber",
+      "auch",
+      "bist",
+      "bitte",
+      "danke",
+      "das",
+      "dass",
+      "der",
+      "dich",
+      "die",
+      "du",
+      "ein",
+      "eine",
+      "einem",
+      "einen",
+      "einer",
+      "es",
+      "euch",
+      "gibt",
+      "habe",
+      "haben",
+      "heute",
+      "hier",
+      "ich",
+      "ihm",
+      "ihn",
+      "ihr",
+      "im",
+      "ist",
+      "ja",
+      "jetzt",
+      "kann",
+      "mich",
+      "mir",
+      "morgen",
+      "muss",
+      "nein",
+      "nicht",
+      "noch",
+      "oder",
+      "schon",
+      "sehr",
+      "sie",
+      "sind",
+      "soll",
+      "und",
+      "uns",
+      "wenn",
+      "wie",
+      "wir",
+      "wird",
+      "wo",
+      "zu",
+      "alors",
+      "au",
+      "aussi",
+      "aux",
+      "avec",
+      "avez",
+      "avons",
+      "bonjour",
+      "ce",
+      "ces",
+      "cette",
+      "dans",
+      "de",
+      "demain",
+      "des",
+      "elle",
+      "elles",
+      "et",
+      "il",
+      "ils",
+      "je",
+      "la",
+      "le",
+      "les",
+      "mais",
+      "merci",
+      "moi",
+      "notre",
+      "nous",
+      "oui",
+      "pas",
+      "peut",
+      "peux",
+      "qui",
+      "que",
+      "sommes",
+      "sont",
+      "suis",
+      "sur",
+      "toi",
+      "tu",
+      "une",
+      "vais",
+      "votre",
+      "vous",
+      "del",
+      "el",
+      "ellas",
+      "ellos",
+      "eres",
+      "esta",
+      "este",
+      "esto",
+      "gracias",
+      "hola",
+      "hoy",
+      "las",
+      "lo",
+      "los",
+      "muy",
+      "nosotros",
+      "pero",
+      "por",
+      "porque",
+      "puede",
+      "puedes",
+      "puedo",
+      "quiero",
+      "quieres",
+      "se",
+      "si",
+      "somos",
+      "tengo",
+      "tiene",
+      "tienes",
+      "un",
+      "una",
+      "unas",
+      "unos",
+      "usted",
+      "ustedes",
+      "anche",
+      "che",
+      "ciao",
+      "cosa",
+      "degli",
+      "dei",
+      "della",
+      "delle",
+      "dello",
+      "di",
+      "domani",
+      "gli",
+      "grazie",
+      "lei",
+      "loro",
+      "lui",
+      "nel",
+      "nella",
+      "noi",
+      "oggi",
+      "posso",
+      "puoi",
+      "questa",
+      "questo",
+      "sei",
+      "siamo",
+      "sono",
+      "tutto",
+      "voi",
+      "vorrei",
+      "agora",
+      "aqui",
+      "bom",
+      "da",
+      "dos",
+      "ela",
+      "elas",
+      "ele",
+      "eles",
+      "essa",
+      "esse",
+      "hoje",
+      "isso",
+      "isto",
+      "mas",
+      "muito",
+      "nas",
+      "nos",
+      "obrigada",
+      "obrigado",
+      "quero",
+      "tem",
+      "tenho",
+      "tudo",
+      "uma",
+      "vamos",
+      "alle",
+      "deze",
+      "dit",
+      "een",
+      "en",
+      "geen",
+      "graag",
+      "heb",
+      "hebben",
+      "heeft",
+      "het",
+      "ik",
+      "jij",
+      "jullie",
+      "maar",
+      "mijn",
+      "naar",
+      "niet",
+      "nog",
+      "nu",
+      "ook",
+      "voor",
+      "wel",
+      "wij",
+      "wordt",
+      "ze",
+      "zij",
+      "zijn",
+      "zou",
+      "det",
+      "ett",
+      "ikke",
+      "inte",
+      "jag",
+      "jeg",
+      "och",
+      "og",
+      "som",
+      "czy",
+      "dla",
+      "jest",
+      "nie",
+      "tak",
+      "ama",
+      "bir",
+      "bu",
+      "evet",
+      "tamam",
+      "ve",
+      "yok",
+      "akan",
+      "bisa",
+      "dengan",
+      "ini",
+      "itu",
+      "kasih",
+      "saya",
+      "sudah",
+      "terima",
+      "tidak",
+      "untuk",
+      "yang",
+      "ako",
+      "ang",
+      "mga",
+      "salamat"
+    ]
+  }
 }

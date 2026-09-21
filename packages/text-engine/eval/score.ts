@@ -42,6 +42,12 @@ export interface Expectation {
   pressEnter?: boolean
   /** Only the number invariant is checked (the wording is free). */
   numbersOnly?: boolean
+  /**
+   * `true`: the engine must finish this dictation without the model (`skipped-clean`) and `good`
+   * is the exact rule-based text it inserts. `false` marks a near-miss that must reach the model;
+   * absent means the same as `false`.
+   */
+  skipModel?: boolean
 }
 
 export interface Fixture {

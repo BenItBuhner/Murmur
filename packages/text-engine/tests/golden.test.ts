@@ -1,17 +1,31 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import {
+  COMMAND_PHRASES,
+  COMMAND_WORDS,
+  CORRECTION_PHRASES,
+  ENUMERATION_PHRASES,
+  ENUMERATION_WORDS,
+  FOREIGN_WORDS,
+  HESITATION_PHRASES,
+  HESITATION_WORDS,
+  alreadyClean
+} from '../src/clean'
+import { prepareTranscript } from '../src/cleanup'
 import { digitSignature } from '../src/numbers'
 import { buildFormatMessages } from '../src/prompt'
 import type { FormatContext } from '../src/types'
 import { cleanModelOutput, verifyOutput } from '../src/verify'
+import { contextOf, loadFixtures } from '../eval/score'
 
 /**
  * The contract the Android port is pinned to. This file is the source of truth for the exact
- * messages the engine sends and the verdicts it reaches; the Kotlin test in
- * apps/android/app/src/test/.../GoldenEngineTest.kt reads the same JSON and asserts its port
- * produces byte-identical output. Regenerate with `npm run golden` after changing the prompt,
- * the verifier or the number reader, and review the diff.
+ * messages the engine sends, the verdicts it reaches and the "needs no model" decisions it makes;
+ * the Kotlin test in apps/android/app/src/test/.../GoldenEngineTest.kt reads the same JSON and
+ * asserts its port produces byte-identical output. Regenerate with `npm run golden` after
+ * changing the prompt, the verifier, the number reader or the clean-skip rules, and review the
+ * diff.
  */
 
 const GOLDEN = resolve(__dirname, '../golden/engine.golden.json')
@@ -120,6 +134,42 @@ const VERIFY_CASES: Array<[string, string, { language?: string; keepVerbatim?: s
   ['hello world', '']
 ]
 
+interface SkipCase {
+  name: string
+  transcript: string
+  context: FormatContext
+  maxWords?: number
+}
+
+const CHAT: FormatContext = { category: 'chat', tone: 'casual', dictionary: [], language: 'auto' }
+
+/** Every eval fixture, plus the edges the fixtures do not reach. */
+const SKIP_CASES: SkipCase[] = [
+  ...loadFixtures().map((f) => ({ name: f.id, transcript: f.transcript, context: contextOf(f) })),
+  { name: 'curly apostrophe', transcript: 'Let’s ship it today.', context: CHAT },
+  { name: 'em dash', transcript: "Let's do it — tomorrow.", context: CHAT },
+  { name: 'accented name', transcript: 'Send it to Zoë.', context: CHAT },
+  { name: 'trailing off', transcript: 'See you tomorrow...', context: CHAT },
+  { name: 'pause like', transcript: 'It was, like, really good.', context: CHAT },
+  { name: 'verb like', transcript: 'I like the new design a lot.', context: CHAT },
+  { name: 'opener', transcript: 'Okay so we ship tomorrow.', context: CHAT },
+  { name: 'mid-sentence so', transcript: "It's late, so let's stop here.", context: CHAT },
+  { name: 'correction without second comma', transcript: 'Send it Tuesday, no Wednesday.', context: CHAT },
+  { name: 'answer no', transcript: 'No, that works for me.', context: CHAT },
+  { name: 'repeated run', transcript: 'We need to, we need to ship it.', context: CHAT },
+  { name: 'question then statement', transcript: 'Is it done? Yes.', context: CHAT },
+  { name: 'later unmarked question', transcript: 'Thanks. Can you resend it.', context: CHAT },
+  { name: 'spoken period', transcript: 'Send it today period.', context: CHAT },
+  { name: 'press enter after a full stop', transcript: 'See you tomorrow. Press enter.', context: CHAT },
+  { name: 'press enter without one', transcript: 'See you tomorrow press enter', context: CHAT },
+  { name: 'preceding new line', transcript: 'Sounds good.', context: { ...CHAT, precedingText: 'Hi Sarah,\n\n' } },
+  { name: 'preceding comma', transcript: 'Sounds good.', context: { ...CHAT, precedingText: 'Hi Sarah,' } },
+  { name: 'regional english', transcript: 'Sounds good.', context: { ...CHAT, language: 'en-US' } },
+  { name: 'neutral notes', transcript: 'Sounds good.', context: { ...CHAT, category: 'notes', tone: 'neutral' } },
+  { name: 'raised cap', transcript: 'Please review the attached document and let me know your thoughts by tomorrow.', context: CHAT, maxWords: 20 },
+  { name: 'cap of zero', transcript: 'Sounds good.', context: CHAT, maxWords: 0 }
+]
+
 function build(): unknown {
   return {
     prompts: PROMPT_CASES.map((c) => ({
@@ -138,7 +188,28 @@ function build(): unknown {
     verify: VERIFY_CASES.map(([transcript, output, opts]) => {
       const v = verifyOutput(transcript, output, opts)
       return { transcript, output, options: opts ?? null, ok: v.ok, reason: v.reason ?? null }
-    })
+    }),
+    alreadyClean: SKIP_CASES.map((c) => {
+      const d = alreadyClean(prepareTranscript(c.transcript), c.context, { maxWords: c.maxWords })
+      return {
+        name: c.name,
+        transcript: c.transcript,
+        context: c.context,
+        maxWords: c.maxWords ?? null,
+        clean: d.clean,
+        reason: d.reason ?? null
+      }
+    }),
+    cleanLexicon: {
+      hesitationWords: HESITATION_WORDS,
+      hesitationPhrases: HESITATION_PHRASES,
+      commandWords: COMMAND_WORDS,
+      commandPhrases: COMMAND_PHRASES,
+      correctionPhrases: CORRECTION_PHRASES,
+      enumerationWords: ENUMERATION_WORDS,
+      enumerationPhrases: ENUMERATION_PHRASES,
+      foreignWords: FOREIGN_WORDS
+    }
   }
 }
 

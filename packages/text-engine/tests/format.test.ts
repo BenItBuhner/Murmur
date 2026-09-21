@@ -180,6 +180,59 @@ describe('formatTranscript', () => {
     expect(complete).not.toHaveBeenCalled()
   })
 
+  it('finishes an already clean short dictation with the rules and never calls the model', async () => {
+    const complete = vi.fn(async () => ({ text: 'nope' }))
+    const r = await formatTranscript(
+      {
+        transcript: 'Sounds good, i will send it to whisper flow tomorrow.',
+        mode: 'smart',
+        context: { ...ctx, dictionary: [{ word: 'Wispr Flow', aliases: ['whisper flow'] }] }
+      },
+      complete
+    )
+    expect(complete).not.toHaveBeenCalled()
+    expect(r.status).toEqual({ outcome: 'skipped-clean', detail: 'already clean', attempts: 0 })
+    expect(r.text).toBe('Sounds good, I will send it to Wispr Flow tomorrow.')
+    expect(r.stages).toEqual(['dictionary', 'capitalize'])
+    expect(r.llmMs).toBe(0)
+    expect(r.modelText).toBeUndefined()
+  })
+
+  it('keeps calling the model when the clean skip is turned off or the transcript is not clean', async () => {
+    const complete = answering('Sounds good, see you tomorrow.')
+    const off = await formatTranscript(
+      { transcript: 'Sounds good, see you tomorrow.', mode: 'smart', context: ctx, cleanMaxWords: 0 },
+      complete
+    )
+    expect(off.status.outcome).toBe('used')
+    const filler = await formatTranscript(
+      { transcript: 'Sounds good, um, see you tomorrow.', mode: 'smart', context: ctx },
+      complete
+    )
+    expect(filler.status.outcome).toBe('used')
+    expect(complete.calls).toHaveLength(2)
+  })
+
+  it('ranks the clean skip after mode, size and model availability', async () => {
+    const complete = vi.fn(async () => ({ text: 'nope' }))
+    const light = await formatTranscript(
+      { transcript: 'Sounds good, see you tomorrow.', mode: 'light', context: ctx },
+      complete
+    )
+    expect(light.status).toMatchObject({ outcome: 'skipped', detail: 'light mode' })
+    const none = await formatTranscript(
+      { transcript: 'Sounds good, see you tomorrow.', mode: 'smart', context: ctx },
+      null
+    )
+    expect(none.status).toMatchObject({ outcome: 'skipped', detail: 'no model configured' })
+    const tiny = await formatTranscript(
+      { transcript: 'Sounds good.', mode: 'smart', context: ctx },
+      complete
+    )
+    expect(tiny.status).toMatchObject({ outcome: 'skipped', detail: 'shorter than 3 words' })
+    expect(complete).not.toHaveBeenCalled()
+  })
+
   it('carries press enter through and keeps it out of the transcript', async () => {
     const complete = answering('See you tomorrow.')
     const r = await formatTranscript(

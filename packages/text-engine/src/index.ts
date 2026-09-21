@@ -89,4 +89,19 @@ export {
   type FinishOptions,
   type Finished
 } from './cleanup'
+export {
+  alreadyClean,
+  CLEAN_MAX_WORDS,
+  HESITATION_WORDS,
+  HESITATION_PHRASES,
+  COMMAND_WORDS,
+  COMMAND_PHRASES,
+  CORRECTION_PHRASES,
+  ENUMERATION_WORDS,
+  ENUMERATION_PHRASES,
+  FOREIGN_WORDS,
+  type CleanDecision,
+  type CleanOptions,
+  type NotCleanReason
+} from './clean'
 export { formatTranscript, type FormatInput } from './format'

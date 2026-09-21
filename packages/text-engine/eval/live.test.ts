@@ -62,9 +62,11 @@ describe.skipIf(!enabled)('eval corpus (live)', () => {
       )
       totalMs += result.llmMs
       const score = scoreText(f, result.text, result)
-      if (result.status.outcome !== 'used')
+      // A `skipModel` fixture never costs a round trip; every other one must be answered by the model.
+      const wanted = f.expect.skipModel ? 'skipped-clean' : 'used'
+      if (result.status.outcome !== wanted)
         score.checks.push({
-          name: 'model used',
+          name: wanted === 'used' ? 'model used' : 'model skipped',
           pass: false,
           detail: JSON.stringify(result.status)
         })

@@ -63,7 +63,16 @@ export interface FormatContext {
   keepVerbatim?: readonly string[]
 }
 
-export type FormatOutcome = 'used' | 'skipped' | 'rejected' | 'failed'
+/**
+ *   used           the model's answer passed the verifier and is the text
+ *   skipped        the model was not asked (mode, too short, no model configured)
+ *   skipped-clean  the model was not asked because the transcript needed nothing it could add
+ *                  (short, already punctuated, no filler, number, command or list cue); the
+ *                  rule-based cleanup is the text
+ *   rejected       every attempt failed the verifier; the rule-based cleanup is the text
+ *   failed         the request errored; the rule-based cleanup is the text
+ */
+export type FormatOutcome = 'used' | 'skipped' | 'skipped-clean' | 'rejected' | 'failed'
 
 export interface FormatStatus {
   outcome: FormatOutcome

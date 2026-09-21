@@ -71,6 +71,15 @@ function LlmBadge({
           rules
         </Badge>
       )
+    case 'skipped-clean':
+      return (
+        <Badge
+          variant="outline"
+          title="The transcript was short and already clean, so the model was not asked; the rule-based text was inserted"
+        >
+          {detailed ? 'already clean · model skipped' : 'clean'}
+        </Badge>
+      )
     default:
       return detailed ? <Badge variant="outline">model skipped: {llm.detail}</Badge> : null
   }

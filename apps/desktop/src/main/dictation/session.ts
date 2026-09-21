@@ -617,7 +617,7 @@ export class DictationController extends EventEmitter {
     else this.deps.history.add(entry)
     this.updateStats(entry)
     log.info(
-      `session ${job.id.slice(0, 8)} done: ${wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : ''}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
+      `session ${job.id.slice(0, 8)} done: ${wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : llmStatus?.outcome === 'skipped-clean' ? ' (clean, no model)' : ''}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
     )
     if (injectResult.ok) {
       this.deps.overlay.setState({

@@ -234,9 +234,17 @@ const CORRECTION = /,\s*no(?![a-z'’])|(?:^|[,.]\s*)wait(?![a-z'’])/
 const WORD = /[a-z]+(?:['’][a-z]+)?/g
 const SENTENCE_SPLIT = /(?<=[.!?])\s+/
 
-function hasPhrase(text: string, phrases: readonly string[]): boolean {
-  return phrases.some((p) => new RegExp(`(?<![a-z'’])${p.replace(/ /g, '\\s+')}(?![a-z'’])`).test(text))
-}
+/** One alternation for a phrase list, bounded so "i mean" does not match "semi meant". */
+const phraseRegex = (phrases: readonly string[]): RegExp =>
+  new RegExp(`(?<![a-z'’])(?:${phrases.map((p) => p.replace(/ /g, '\\s+')).join('|')})(?![a-z'’])`)
+const HESITATION_PHRASE_RE = phraseRegex(HESITATION_PHRASES)
+const COMMAND_PHRASE_RE = phraseRegex(COMMAND_PHRASES)
+const CORRECTION_PHRASE_RE = phraseRegex(CORRECTION_PHRASES)
+const ENUMERATION_PHRASE_RE = phraseRegex(ENUMERATION_PHRASES)
+const HESITATION_SET = new Set(HESITATION_WORDS)
+const COMMAND_SET = new Set(COMMAND_WORDS)
+const ENUMERATION_SET = new Set(ENUMERATION_WORDS)
+const FOREIGN_SET = new Set(FOREIGN_WORDS)
 
 /** A word, or a run of two or three words, said twice in a row: "the the", "I, I think", "we need to we need to". */
 function hasStutter(words: readonly string[]): boolean {
@@ -289,18 +297,18 @@ export function alreadyClean(
   if (!ALLOWED_CHARS.test(lower)) return no('characters')
 
   const words = lower.match(WORD) ?? []
-  const has = (list: readonly string[]): boolean => words.some((w) => list.includes(w))
-  if (has(HESITATION_WORDS) || hasPhrase(lower, HESITATION_PHRASES)) return no('filler')
+  const has = (set: ReadonlySet<string>): boolean => words.some((w) => set.has(w))
+  if (has(HESITATION_SET) || HESITATION_PHRASE_RE.test(lower)) return no('filler')
   if (OPENER.test(lower) || PAUSE_LIKE.test(lower)) return no('filler')
   if (hasStutter(words)) return no('stutter')
-  if (hasPhrase(lower, CORRECTION_PHRASES) || CORRECTION.test(lower)) return no('correction')
-  if (has(COMMAND_WORDS) || hasPhrase(lower, COMMAND_PHRASES)) return no('command')
-  if (has(ENUMERATION_WORDS) || hasPhrase(lower, ENUMERATION_PHRASES)) return no('enumeration')
+  if (CORRECTION_PHRASE_RE.test(lower) || CORRECTION.test(lower)) return no('correction')
+  if (has(COMMAND_SET) || COMMAND_PHRASE_RE.test(lower)) return no('command')
+  if (has(ENUMERATION_SET) || ENUMERATION_PHRASE_RE.test(lower)) return no('enumeration')
   if (/[0-9]/.test(lower) || words.some(isNumberWord)) return no('number')
   // A question the speech model ended with a period would come back with its "?".
   for (const sentence of text.split(SENTENCE_SPLIT)) {
     if (QUESTION_START.test(sentence) && !/\?$/.test(sentence)) return no('question')
   }
-  if (has(FOREIGN_WORDS)) return no('foreign')
+  if (has(FOREIGN_SET)) return no('foreign')
   return { clean: true }
 }

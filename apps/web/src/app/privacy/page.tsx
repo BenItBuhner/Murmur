@@ -202,7 +202,7 @@ const SECTIONS: LegalSection[] = [
                 'Transcription and formatting for accounts using Murmur’s models (see section 4).'
             },
             { term: 'Stripe', detail: 'Payments, invoices and the billing portal.' },
-            { term: 'Vercel', detail: 'Hosts this website.' },
+            { term: 'Cloudflare', detail: 'Hosts this website.' },
             { term: 'GitHub', detail: 'Hosts the source code, the releases and the downloads.' }
           ]}
         />

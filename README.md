@@ -114,7 +114,11 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   order**, whatever way it wrote them (“five thousand, five thousand” stays two numbers; a
   de-duplicated `5,000` is caught). A failed check gets one strict retry, then the rule-based
   cleanup of the transcript is inserted instead, and History says why. Numbers are never converted
-  by regex any more, so nothing is truncated or split by a rule the model then cannot fix.
+  by regex any more, so nothing is truncated or split by a rule the model then cannot fix. A
+  short dictation (up to 12 words) that the speech model already punctuated and that carries
+  nothing the model would change — no filler, stutter, spoken command, self-correction, number or
+  list cue, going to an ordinary destination under default style settings — never makes the round
+  trip at all: the rule-based cleanup is inserted and History marks it **clean**.
 - **Adaptive, not configurable.** Tone follows the app (casual in chat, professional in email and
   documents) unless you pick one; code editors keep identifiers exact with no prose punctuation;
   terminals get one line and no trailing period; text before the cursor is continued mid-sentence.
@@ -265,8 +269,8 @@ against an in-memory Convex via `convex-test`). Engine checks: the same three co
 `packages/text-engine`; `npm test` there includes the offline **eval corpus**
 (`eval/fixtures.json`: realistic dictations and the properties the inserted text must have) and
 the **golden contract** (`golden/engine.golden.json`) the Android port is pinned to — after changing
-the prompt, the verifier or the number reader, run `npm run golden`, review the diff, and port the
-change to `apps/android/.../text`. `MURMUR_LIVE=1 MURMUR_BASE_URL=… MURMUR_API_KEY=…
+the prompt, the verifier, the number reader or the clean-skip rules, run `npm run golden`, review
+the diff, and port the change to `apps/android/.../text`. `MURMUR_LIVE=1 MURMUR_BASE_URL=… MURMUR_API_KEY=…
 MURMUR_LLM_MODEL=… npm run test:live` runs the corpus against a real model and reports per fixture. The desktop app typechecks against the committed
 `packages/backend/convex/_generated`, so run `npx convex dev` (or `npx convex codegen`) after
 changing backend functions and commit the result. `MURMUR_LIVE=1 npm run test:live -- tests/live/cloud-sync.test.ts`

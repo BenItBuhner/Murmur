@@ -566,6 +566,43 @@ describe('POST /v1/format', () => {
     expect(status.usage.llmTokens).toBe(40)
   })
 
+  it('finishes a short, already clean transcript without the model and bills no tokens', async () => {
+    stubEnv(LLM_ENV)
+    const calls = stubFetch(() => chat('Sounds good, see you tomorrow.'))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    const res = await asAda.fetch(
+      '/v1/format',
+      body('sounds good, i will send it to sara tomorrow.', {
+        dictionary: [{ word: 'Sarah', aliases: ['sara'] }]
+      })
+    )
+    expect(res.status).toBe(200)
+    const out = await res.json()
+    expect(out.text).toBe('Sounds good, I will send it to Sarah tomorrow.')
+    expect(out.status).toEqual({ outcome: 'skipped-clean', detail: 'already clean', attempts: 0 })
+    expect(out.stages).toEqual(['dictionary', 'capitalize'])
+    expect(out.model).toBe('murmur-format')
+    expect(calls).toHaveLength(0)
+    // Nothing reached the provider, so nothing is recorded: no request, no tokens.
+    const status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmRequests).toBe(0)
+    expect(status.usage.llmTokens).toBe(0)
+
+    // The same words with one filler, one number or a code destination still reach the model.
+    for (const [transcript, context] of [
+      ['sounds good, um, i will send it to sara tomorrow.', {}],
+      ['sounds good, i will send it to sara at five.', {}],
+      ['sounds good, i will send it to sara tomorrow.', { category: 'code', tone: 'neutral' }]
+    ] as const) {
+      const before = calls.length
+      const dirty = await (await asAda.fetch('/v1/format', body(transcript, context))).json()
+      expect(dirty.status.attempts, transcript).toBeGreaterThanOrEqual(1)
+      expect(calls.length, transcript).toBeGreaterThan(before)
+    }
+  })
+
   it('retries once in strict mode when the verifier rejects, and falls back when it fails again', async () => {
     stubEnv(LLM_ENV)
     let n = 0

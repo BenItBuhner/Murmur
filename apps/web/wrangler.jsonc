@@ -1,0 +1,62 @@
+// The Cloudflare Worker that serves the site, built by @opennextjs/cloudflare (see
+// open-next.config.ts). Everything here fits the Workers Free plan, which permits commercial use.
+//
+// Deploys run from .github/workflows/deploy-web.yml with the CLOUDFLARE_API_TOKEN and
+// CLOUDFLARE_ACCOUNT_ID repository secrets; `npm run deploy` does the same from a machine that has
+// run `wrangler login`. Until a domain is attached the public address is the free
+// https://murmur-web.<account>.workers.dev URL.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "murmur-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": [
+    // Next's Node.js runtime needs the Node APIs; the adapter requires the flag.
+    "nodejs_compat",
+    // fetch() to the site's own hostname goes to the public internet instead of looping back into
+    // this Worker.
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  // The Free plan rejects a Worker over 3 MiB compressed; minifying the bundle takes a fair share off
+  // (ci.yml's web-check reports the size of every pull request).
+  "minify": true,
+  // _next/static and the public folder are served as static assets; public/_headers sets their cache
+  // and security headers because the Worker never runs in front of them.
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // The revalidation queue fetches pages from the Worker itself.
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "murmur-web"
+    }
+  ],
+  // Incremental cache: the prerendered pages, the release manifest and the GitHub fetch cache, so a
+  // ten-minute revalidation can write a fresh copy (see open-next.config.ts for why KV). The
+  // namespace carries no id on purpose: the first `wrangler deploy` provisions one named
+  // murmur-web-next-inc-cache-kv and every later deploy reuses the one bound to the Worker.
+  "kv_namespaces": [
+    {
+      "binding": "NEXT_INC_CACHE_KV"
+    }
+  ],
+  // The queue that deduplicates time-based revalidations; a SQLite-backed Durable Object, which the
+  // Free plan includes. The class is exported by the adapter's worker.js.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NEXT_CACHE_DO_QUEUE",
+        "class_name": "DOQueueHandler"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DOQueueHandler"]
+    }
+  ]
+}

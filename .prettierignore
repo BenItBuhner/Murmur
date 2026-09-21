@@ -1,5 +1,7 @@
 out
 dist
+.open-next
+.wrangler
 pnpm-lock.yaml
 LICENSE.md
 tsconfig.json

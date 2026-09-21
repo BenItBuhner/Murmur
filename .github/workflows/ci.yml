@@ -189,6 +189,8 @@ jobs:
     defaults:
       run:
         working-directory: apps/web
+    env:
+      WRANGLER_SEND_METRICS: 'false'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -203,9 +205,19 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-      # `next build` prerenders every page and the release endpoints against the live GitHub
-      # Releases API; a rate-limited API only degrades the output, it never fails the build. The
-      # workflow token lifts the anonymous limit shared by the runner's IP.
-      - run: npm run build
+      # OpenNext runs `next build`, which prerenders every page and the release endpoints against
+      # the live GitHub Releases API (a rate-limited API only degrades the output, it never fails the
+      # build; the workflow token lifts the anonymous limit shared by the runner's IP), then turns
+      # the output into the Cloudflare Worker that deploy-web.yml ships from main.
+      - run: npm run build:worker
         env:
           GITHUB_TOKEN: ${{ github.token }}
+      # Bundles the Worker exactly as a deploy would, without credentials. The Workers Free plan
+      # rejects a Worker over 3 MiB compressed, so the check fails here rather than on main.
+      - name: Bundle the Worker and check its compressed size
+        run: |
+          npx wrangler deploy --dry-run --config wrangler.jsonc | tee dry-run.log
+          kib=$(sed -nE 's/.*gzip: ([0-9]+)(\.[0-9]+)? KiB.*/\1/p' dry-run.log)
+          if [ -z "$kib" ]; then echo "::error::Could not read the compressed size from wrangler's output"; exit 1; fi
+          echo "Compressed size: $kib KiB (Workers Free plan limit: 3072 KiB)"
+          [ "$kib" -le 3072 ]

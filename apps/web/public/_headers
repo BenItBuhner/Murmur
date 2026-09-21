@@ -1,0 +1,11 @@
+# Headers for the files Cloudflare serves as static assets without running the Worker: the hashed
+# Next build files and this folder. The Worker adds the security headers from next.config.ts to
+# every page and endpoint it renders; this file gives the static files the same ones.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Next names these files by content hash, so they never change once published.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable

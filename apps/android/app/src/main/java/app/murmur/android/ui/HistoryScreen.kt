@@ -379,6 +379,7 @@ private fun HistoryRow(
                     when (entry.llm) {
                         LlmOutcome.USED -> Tag("smart")
                         LlmOutcome.REJECTED, LlmOutcome.FAILED -> Tag("rules")
+                        LlmOutcome.SKIPPED_CLEAN -> Tag("clean")
                         else -> Unit
                     }
                     if (entry.failed && entry.finalText.isNotEmpty()) Tag("not inserted", c.clay)
@@ -425,6 +426,7 @@ private fun HistoryRow(
                             LlmOutcome.REJECTED -> Tag("model rejected: ${entry.llmDetail ?: "guard"}", c.clay)
                             LlmOutcome.FAILED -> Tag("model failed", c.clay)
                             LlmOutcome.SKIPPED -> entry.llmDetail?.let { Tag("model skipped: $it") }
+                            LlmOutcome.SKIPPED_CLEAN -> Tag("already clean: model skipped")
                             null -> Unit
                         }
                     }

@@ -41,12 +41,14 @@ export interface StageTimings {
 
 /**
  * What happened in the smart-formatting stage, so the History view can explain the result.
- *   used      the model's answer passed the verifier and was inserted
- *   rejected  every attempt failed the verifier; the rule-based text was inserted
- *   failed    the request errored or timed out; the rule-based text was inserted
- *   skipped   the model was not asked (mode, too short, no model configured)
+ *   used           the model's answer passed the verifier and was inserted
+ *   rejected       every attempt failed the verifier; the rule-based text was inserted
+ *   failed         the request errored or timed out; the rule-based text was inserted
+ *   skipped        the model was not asked (mode, too short, no model configured)
+ *   skipped-clean  the model was not asked because the short transcript was already clean;
+ *                  the rule-based text was inserted
  */
-export type LlmOutcome = 'used' | 'rejected' | 'failed' | 'skipped'
+export type LlmOutcome = 'used' | 'rejected' | 'failed' | 'skipped' | 'skipped-clean'
 
 export interface LlmStatus {
   outcome: LlmOutcome

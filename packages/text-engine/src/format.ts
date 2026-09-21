@@ -1,3 +1,4 @@
+import { CLEAN_MAX_WORDS, alreadyClean } from './clean'
 import { basicCleanup, prepareTranscript } from './cleanup'
 import { buildFormatMessages, maxTokensFor } from './prompt'
 import { countWords, isMeaningful } from './text'
@@ -11,6 +12,11 @@ export interface FormatInput {
   context: FormatContext
   /** Fewer words than this and the model is not worth a round trip (default 3). */
   minWords?: number
+  /**
+   * Up to this many words, a transcript that is already clean (see `alreadyClean`) skips the
+   * model and takes the rule-based cleanup (default {@link CLEAN_MAX_WORDS}; 0 never skips).
+   */
+  cleanMaxWords?: number
   /** One more attempt in strict mode after a rejected answer (default true). */
   retry?: boolean
   /** Include the worked examples in the prompt (default true). */
@@ -66,6 +72,10 @@ export async function formatTranscript(
   const minWords = input.minWords ?? 3
   if (countWords(prepared.text) < minWords)
     return fallback('skipped', `shorter than ${minWords} words`)
+  // A short transcript the speech model already punctuated, with nothing in it the model would
+  // change, is finished by the rules alone: the same text, no round trip, no tokens.
+  if (alreadyClean(prepared, input.context, { maxWords: input.cleanMaxWords ?? CLEAN_MAX_WORDS }).clean)
+    return fallback('skipped-clean', 'already clean')
 
   const started = now()
   let attempts = 0

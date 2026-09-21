@@ -508,6 +508,15 @@ function outcomeBadge(status: LlmStatus): React.JSX.Element {
       return <Badge variant="destructive">model rejected: {status.detail}</Badge>
     case 'failed':
       return <Badge variant="destructive">model failed: {status.detail}</Badge>
+    case 'skipped-clean':
+      return (
+        <Badge
+          variant="outline"
+          title="Short and already clean: the rules finish it and no model call is made"
+        >
+          already clean · model skipped
+        </Badge>
+      )
     default:
       return <Badge variant="outline">model skipped: {status.detail}</Badge>
   }

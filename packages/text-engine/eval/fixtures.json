@@ -238,5 +238,265 @@
     "expect": { "contains": ["Büro"], "notMatches": "\\b(we|tomorrow|office)\\b" },
     "good": "Wir treffen uns morgen um 10:30 Uhr im Büro.",
     "bad": ["We meet tomorrow at 10:30 in the office."]
+  },
+  {
+    "id": "clean/quick-reply",
+    "transcript": "Sounds good, see you tomorrow.",
+    "context": { "category": "chat", "tone": "casual", "app": "Slack" },
+    "expect": { "skipModel": true, "contains": ["Sounds good"] },
+    "good": "Sounds good, see you tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "clean/thanks-with-plan",
+    "transcript": "Thanks for the update, I'll take a look this afternoon.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": true, "contains": ["I'll"] },
+    "good": "Thanks for the update, I'll take a look this afternoon.",
+    "bad": []
+  },
+  {
+    "id": "clean/question-kept",
+    "transcript": "Can you send me the link to the doc?",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": true, "contains": ["?"] },
+    "good": "Can you send me the link to the doc?",
+    "bad": []
+  },
+  {
+    "id": "clean/three-words",
+    "transcript": "On my way.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": true, "matches": "^On my way\\.$" },
+    "good": "On my way.",
+    "bad": []
+  },
+  {
+    "id": "clean/okay-reply",
+    "transcript": "Okay, sounds good.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": true, "contains": ["Okay"] },
+    "good": "Okay, sounds good.",
+    "bad": []
+  },
+  {
+    "id": "clean/exclamation",
+    "transcript": "Looks great to me!",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": true, "contains": ["!"] },
+    "good": "Looks great to me!",
+    "bad": []
+  },
+  {
+    "id": "clean/email-sentence",
+    "transcript": "Please review the attached document and let me know your thoughts.",
+    "context": { "category": "email", "tone": "professional", "app": "Outlook" },
+    "expect": { "skipModel": true, "matches": "^Please review" },
+    "good": "Please review the attached document and let me know your thoughts.",
+    "bad": []
+  },
+  {
+    "id": "clean/twelve-words",
+    "transcript": "Please review the attached document and let me know your thoughts today.",
+    "context": { "category": "document", "tone": "professional" },
+    "expect": { "skipModel": true, "contains": ["today."] },
+    "good": "Please review the attached document and let me know your thoughts today.",
+    "bad": []
+  },
+  {
+    "id": "clean/lowercase-start-and-pronoun",
+    "transcript": "thanks for the update, i will look at it tomorrow.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": true, "matches": "^Thanks", "contains": [", I will"] },
+    "good": "Thanks for the update, I will look at it tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "clean/dictionary-spelling",
+    "transcript": "We moved the deck to convex yesterday.",
+    "context": {
+      "category": "chat",
+      "tone": "casual",
+      "dictionary": [{ "word": "Convex", "aliases": [] }]
+    },
+    "expect": { "skipModel": true, "contains": ["Convex"], "notContains": ["convex"] },
+    "good": "We moved the deck to Convex yesterday.",
+    "bad": []
+  },
+  {
+    "id": "clean/notes-neutral",
+    "transcript": "Follow up with Sarah about the vendor contract.",
+    "context": { "category": "notes", "tone": "neutral", "app": "Obsidian" },
+    "expect": { "skipModel": true, "contains": ["Sarah"] },
+    "good": "Follow up with Sarah about the vendor contract.",
+    "bad": []
+  },
+  {
+    "id": "clean/browser-field",
+    "transcript": "Just checking in on the proposal.",
+    "context": { "category": "browser", "tone": "neutral" },
+    "expect": { "skipModel": true, "contains": ["proposal"] },
+    "good": "Just checking in on the proposal.",
+    "bad": []
+  },
+  {
+    "id": "clean/after-full-stop",
+    "transcript": "Sounds good, see you tomorrow.",
+    "context": { "category": "chat", "tone": "casual", "precedingText": "Thanks for the update." },
+    "expect": { "skipModel": true, "matches": "^Sounds good" },
+    "good": "Sounds good, see you tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "clean/pinned-english",
+    "transcript": "Let me know if you have any questions.",
+    "context": { "category": "email", "tone": "professional", "language": "en" },
+    "expect": { "skipModel": true, "contains": ["questions"] },
+    "good": "Let me know if you have any questions.",
+    "bad": []
+  },
+  {
+    "id": "clean/verbatim-phrase-absent",
+    "transcript": "Sign it and send it back to me.",
+    "context": { "category": "email", "tone": "professional", "keepVerbatim": ["my sig"] },
+    "expect": { "skipModel": true, "contains": ["Sign it"] },
+    "good": "Sign it and send it back to me.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/single-filler",
+    "transcript": "Sounds good, um, see you tomorrow.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "contains": ["tomorrow"], "notMatches": "\\bum\\b" },
+    "good": "Sounds good, see you tomorrow.",
+    "bad": ["Sounds good, um, see you tomorrow."]
+  },
+  {
+    "id": "nearly-clean/one-number",
+    "transcript": "I'm running about ten minutes late.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "contains": ["10"] },
+    "good": "I'm running about 10 minutes late.",
+    "bad": ["I'm running about 20 minutes late."]
+  },
+  {
+    "id": "nearly-clean/one-command",
+    "transcript": "Thanks a lot, new line, see you tomorrow.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "contains": ["\n"], "notContains": ["new line"] },
+    "good": "Thanks a lot.\nSee you tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/stutter",
+    "transcript": "The the report is ready.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "contains": ["report"], "notMatches": "[Tt]he the" },
+    "good": "The report is ready.",
+    "bad": ["The the report is ready."]
+  },
+  {
+    "id": "nearly-clean/self-correction",
+    "transcript": "Send it Tuesday, no, Wednesday.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "contains": ["Wednesday"], "notContains": ["Tuesday"] },
+    "good": "Send it Wednesday.",
+    "bad": ["Send it Tuesday."]
+  },
+  {
+    "id": "nearly-clean/spoken-quote",
+    "transcript": "She said quote hands off end quote.",
+    "context": { "category": "document", "tone": "professional" },
+    "expect": { "skipModel": false, "matches": "[\"“][Hh]ands off[.,]?[\"”]", "notContains": ["end quote"] },
+    "good": "She said \"Hands off\".",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/enumeration",
+    "transcript": "Firstly the deck, secondly the vendor.",
+    "context": { "category": "notes", "tone": "neutral" },
+    "expect": { "skipModel": false, "minLines": 2, "notContains": ["Firstly"] },
+    "good": "1. The deck\n2. The vendor",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/unpunctuated",
+    "transcript": "sounds good see you tomorrow",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "matches": "^Sounds good.*[.!]$" },
+    "good": "Sounds good, see you tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/question-without-mark",
+    "transcript": "Can you send me the link to the doc.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "contains": ["?"] },
+    "good": "Can you send me the link to the doc?",
+    "bad": ["Can you send me the link to the doc."]
+  },
+  {
+    "id": "nearly-clean/thirteen-words",
+    "transcript": "Please review the attached document and let me know your thoughts by tomorrow.",
+    "context": { "category": "email", "tone": "professional" },
+    "expect": { "skipModel": false, "matches": "^Please review" },
+    "good": "Please review the attached document and let me know your thoughts by tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/code-destination",
+    "transcript": "Sounds good, see you tomorrow.",
+    "context": { "category": "code", "tone": "neutral" },
+    "expect": { "skipModel": false, "contains": ["see you tomorrow"] },
+    "good": "Sounds good, see you tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/instructions",
+    "transcript": "We need to finalize the color.",
+    "context": { "category": "document", "tone": "professional", "instructions": "British spelling." },
+    "expect": { "skipModel": false, "contains": ["finalise", "colour"] },
+    "good": "We need to finalise the colour.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/forced-tone",
+    "transcript": "Sounds good, see you tomorrow.",
+    "context": { "category": "chat", "tone": "professional" },
+    "expect": { "skipModel": false, "contains": ["tomorrow"] },
+    "good": "Sounds good, see you tomorrow.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/verbatim-phrase",
+    "transcript": "Sign it with my sig.",
+    "context": { "category": "email", "tone": "professional", "keepVerbatim": ["my sig"] },
+    "expect": { "skipModel": false, "matches": "\\bmy sig\\b" },
+    "good": "Sign it with my sig.",
+    "bad": ["Sign it with my signature."]
+  },
+  {
+    "id": "nearly-clean/mid-sentence-continuation",
+    "transcript": "Probably go with the other option.",
+    "context": { "category": "document", "tone": "professional", "precedingText": "I think we should" },
+    "expect": { "skipModel": false, "matches": "^probably go" },
+    "good": "probably go with the other option.",
+    "bad": ["Probably go with the other option."]
+  },
+  {
+    "id": "nearly-clean/pinned-language",
+    "transcript": "Wir treffen uns morgen im Büro.",
+    "context": { "category": "chat", "tone": "casual", "language": "de" },
+    "expect": { "skipModel": false, "contains": ["Büro"] },
+    "good": "Wir treffen uns morgen im Büro.",
+    "bad": []
+  },
+  {
+    "id": "nearly-clean/foreign-under-auto",
+    "transcript": "Ich schicke dir das morgen.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "skipModel": false, "contains": ["morgen"] },
+    "good": "Ich schicke dir das morgen.",
+    "bad": []
   }
 ]

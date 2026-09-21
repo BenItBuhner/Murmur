@@ -36,13 +36,16 @@ data class StageTimings(
  *   REJECTED  the model's answer failed the guard rails; the rule-based text was inserted
  *   FAILED    the request errored or timed out; the rule-based text was inserted
  *   SKIPPED   the model was not asked (mode, too short, no model configured)
+ *   SKIPPED_CLEAN  the model was not asked because the short transcript was already clean; the
+ *                  rule-based text was inserted
  */
 @Serializable
 enum class LlmOutcome {
     @SerialName("used") USED,
     @SerialName("rejected") REJECTED,
     @SerialName("failed") FAILED,
-    @SerialName("skipped") SKIPPED
+    @SerialName("skipped") SKIPPED,
+    @SerialName("skipped-clean") SKIPPED_CLEAN
 }
 
 /** One dictation, kept on the phone. Mirrors the desktop `HistoryEntry` minus desktop-only fields. */

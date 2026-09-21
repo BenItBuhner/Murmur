@@ -155,6 +155,7 @@ private suspend fun runSampleTest(context: Context, s: MurmurSettings, router: I
             (formatted.status.retriedAfter?.let { " (after a strict retry: $it)" } ?: "") + ": ${formatted.text}"
         FormatOutcome.REJECTED -> "\nFormatter output rejected (${formatted.status.detail}); the rule-based text was kept."
         FormatOutcome.FAILED -> "\nFormatter failed (${formatted.status.detail}); the rule-based text was kept."
+        FormatOutcome.SKIPPED_CLEAN -> "\nAlready clean: the formatter was not asked, the rule-based text was kept."
         FormatOutcome.SKIPPED -> "\nFormatter skipped: ${formatted.status.detail}"
     }
     return out

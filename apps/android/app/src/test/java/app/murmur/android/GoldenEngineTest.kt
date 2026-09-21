@@ -2,11 +2,13 @@ package app.murmur.android
 
 import app.murmur.android.settings.Tone
 import app.murmur.android.text.AppCategory
+import app.murmur.android.text.Clean
 import app.murmur.android.text.DictionaryTerm
 import app.murmur.android.text.FormatContext
 import app.murmur.android.text.NumberSignature
 import app.murmur.android.text.Prompt
 import app.murmur.android.text.Verify
+import app.murmur.android.text.prepareTranscript
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -17,8 +19,9 @@ import java.io.File
 /**
  * Pins the Kotlin port of the text engine to the TypeScript original. The golden file is written
  * by `npm run golden` in packages/text-engine from the TypeScript code; this test asserts that the
- * Kotlin prompt builder, number reader, output cleaner and verifier produce byte-identical results
- * for the same inputs. When the engine changes, regenerate the golden file and port the change.
+ * Kotlin prompt builder, number reader, output cleaner, verifier and clean-skip decision produce
+ * byte-identical results for the same inputs. When the engine changes, regenerate the golden file
+ * and port the change.
  */
 class GoldenEngineTest {
     private val golden: JSONObject by lazy {
@@ -103,5 +106,35 @@ class GoldenEngineTest {
             assertEquals("${c.getString("transcript")} -> ${c.getString("output")}", c.getBoolean("ok"), v.ok)
             assertEquals("${c.getString("transcript")} -> ${c.getString("output")}", if (c.isNull("reason")) null else c.getString("reason"), v.reason)
         }
+    }
+
+    @Test
+    fun `clean-skip decisions agree`() {
+        val cases = golden.getJSONArray("alreadyClean")
+        // Every eval fixture plus the edge cases; at least ten of them must be clean.
+        assertTrue(cases.length() >= 60)
+        var clean = 0
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val maxWords = if (c.isNull("maxWords")) Clean.MAX_WORDS else c.getInt("maxWords")
+            val d = Clean.alreadyClean(prepareTranscript(c.getString("transcript")), contextOf(c.getJSONObject("context")), maxWords)
+            assertEquals("${c.getString("name")}: clean", c.getBoolean("clean"), d.clean)
+            assertEquals("${c.getString("name")}: reason", if (c.isNull("reason")) null else c.getString("reason"), d.reason)
+            if (d.clean) clean++
+        }
+        assertTrue(clean >= 10)
+    }
+
+    @Test
+    fun `clean-skip lexicon agrees`() {
+        val lexicon = golden.getJSONObject("cleanLexicon")
+        assertEquals(lexicon.getJSONArray("hesitationWords").strings(), Clean.HESITATION_WORDS)
+        assertEquals(lexicon.getJSONArray("hesitationPhrases").strings(), Clean.HESITATION_PHRASES)
+        assertEquals(lexicon.getJSONArray("commandWords").strings(), Clean.COMMAND_WORDS)
+        assertEquals(lexicon.getJSONArray("commandPhrases").strings(), Clean.COMMAND_PHRASES)
+        assertEquals(lexicon.getJSONArray("correctionPhrases").strings(), Clean.CORRECTION_PHRASES)
+        assertEquals(lexicon.getJSONArray("enumerationWords").strings(), Clean.ENUMERATION_WORDS)
+        assertEquals(lexicon.getJSONArray("enumerationPhrases").strings(), Clean.ENUMERATION_PHRASES)
+        assertEquals(lexicon.getJSONArray("foreignWords").strings(), Clean.FOREIGN_WORDS)
     }
 }

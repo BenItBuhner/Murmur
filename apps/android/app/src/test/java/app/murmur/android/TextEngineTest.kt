@@ -172,6 +172,40 @@ class TextEngineTest {
     }
 
     @Test
+    fun `engine finishes an already clean short dictation with the rules and never calls the model`() = runTest {
+        var called = false
+        val spy: suspend (List<ChatMessage>, Int) -> ModelAnswer = { _, _ -> called = true; ModelAnswer("nope") }
+        val dictionary = listOf(DictionaryEntry("d1", "Wispr Flow", listOf("whisper flow")))
+        val clean = Engine.formatTranscript(
+            input("Sounds good, i will send it to whisper flow tomorrow.").copy(
+                context = ctx.copy(dictionary = listOf(app.murmur.android.text.DictionaryTerm("Wispr Flow", listOf("whisper flow")))),
+                dictionary = dictionary
+            ),
+            spy
+        )
+        assertFalse(called)
+        assertEquals(FormatOutcome.SKIPPED_CLEAN, clean.status.outcome)
+        assertEquals("already clean", clean.status.detail)
+        assertEquals(0, clean.status.attempts)
+        assertEquals("Sounds good, I will send it to Wispr Flow tomorrow.", clean.text)
+        assertEquals(listOf("dictionary", "capitalize"), clean.stages)
+        assertEquals(0L, clean.llmMs)
+        assertNull(clean.modelText)
+
+        // One filler, or the skip turned off, and the model is asked as before.
+        val (complete, calls) = answering("Sounds good, see you tomorrow.")
+        val filler = Engine.formatTranscript(input("Sounds good, um, see you tomorrow."), complete)
+        assertEquals(FormatOutcome.USED, filler.status.outcome)
+        val off = Engine.formatTranscript(input("Sounds good, see you tomorrow.").copy(cleanMaxWords = 0), complete)
+        assertEquals(FormatOutcome.USED, off.status.outcome)
+        assertEquals(2, calls.size)
+
+        // A gateway answer carrying the new outcome reads back as such.
+        val json = JSONObject("""{"text":"On my way.","pressEnter":false,"status":{"outcome":"skipped-clean","detail":"already clean","attempts":0},"llmMs":0,"stages":["capitalize"],"model":"murmur-format"}""")
+        assertEquals(FormatOutcome.SKIPPED_CLEAN, FormatResult.fromJson(json).status.outcome)
+    }
+
+    @Test
     fun `gateway request and response round-trip through JSON`() {
         val body = input("hello").copy(
             context = ctx.copy(

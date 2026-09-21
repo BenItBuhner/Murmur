@@ -15,8 +15,16 @@ import org.json.JSONObject
  * the gateway (`POST /v1/format`) and [FormatResult.fromJson] reads its answer.
  */
 
+/**
+ *   USED           the model's answer passed the verifier and is the text
+ *   SKIPPED        the model was not asked (mode, too short, no model configured)
+ *   SKIPPED_CLEAN  the model was not asked because the short transcript was already clean; the
+ *                  rule-based cleanup is the text
+ *   REJECTED       every attempt failed the verifier; the rule-based cleanup is the text
+ *   FAILED         the request errored; the rule-based cleanup is the text
+ */
 enum class FormatOutcome(val id: String) {
-    USED("used"), SKIPPED("skipped"), REJECTED("rejected"), FAILED("failed");
+    USED("used"), SKIPPED("skipped"), SKIPPED_CLEAN("skipped-clean"), REJECTED("rejected"), FAILED("failed");
 
     companion object {
         fun from(id: String?): FormatOutcome = entries.firstOrNull { it.id == id } ?: FAILED
@@ -78,6 +86,8 @@ data class FormatInput(
     val context: FormatContext,
     val dictionary: List<DictionaryEntry>,
     val minWords: Int = 3,
+    /** Up to this many words an already clean transcript skips the model (see [Clean]); 0 never skips. */
+    val cleanMaxWords: Int = Clean.MAX_WORDS,
     val retry: Boolean = true
 ) {
     /** The body of a `POST /v1/format` request. */
@@ -112,6 +122,9 @@ object Engine {
         if (!isMeaningful(prepared.text)) return fallback(FormatOutcome.SKIPPED, "nothing to format")
         if (complete == null) return fallback(FormatOutcome.SKIPPED, "no model configured")
         if (countWords(prepared.text) < input.minWords) return fallback(FormatOutcome.SKIPPED, "shorter than ${input.minWords} words")
+        // A short transcript the speech model already punctuated, with nothing in it the model would
+        // change, is finished by the rules alone: the same text, no round trip, no tokens.
+        if (Clean.alreadyClean(prepared, input.context, input.cleanMaxWords).clean) return fallback(FormatOutcome.SKIPPED_CLEAN, "already clean")
 
         val started = System.currentTimeMillis()
         var attempts = 0

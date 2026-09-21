@@ -420,12 +420,14 @@ object DictationController {
                 FormatOutcome.REJECTED -> LlmOutcome.REJECTED
                 FormatOutcome.FAILED -> LlmOutcome.FAILED
                 FormatOutcome.SKIPPED -> LlmOutcome.SKIPPED
+                FormatOutcome.SKIPPED_CLEAN -> LlmOutcome.SKIPPED_CLEAN
             }
             llmDetail = formatted.status.detail ?: formatted.status.retriedAfter?.let { "used after a strict retry ($it)" }
             when (formatted.status.outcome) {
                 FormatOutcome.USED -> Log.i(TAG, "model formatting used (${formatted.status.attempts} attempt(s), ${llmMs}ms)")
                 FormatOutcome.REJECTED -> Log.w(TAG, "model output rejected (${formatted.status.detail}); using rule-based text")
                 FormatOutcome.FAILED -> Log.w(TAG, "model formatting failed, using rule-based text: ${formatted.status.detail}")
+                FormatOutcome.SKIPPED_CLEAN -> Log.i(TAG, "model skipped: transcript already clean, rule-based text used")
                 FormatOutcome.SKIPPED -> Unit
             }
         }

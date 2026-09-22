@@ -60,6 +60,7 @@ class KeyboardInsertionTest {
         val committed = ArrayList<String>()
         val keyed = ArrayList<String>()
         var enterPresses = 0
+        var deliveryChecks = 0
         override fun commitText(text: String): Boolean {
             committed.add(text)
             return commitResult
@@ -67,6 +68,10 @@ class KeyboardInsertionTest {
         override fun sendTextAsKeyEvents(text: String): Boolean {
             keyed.add(text)
             return keyResult
+        }
+        override suspend fun awaitDelivered(): Boolean {
+            deliveryChecks++
+            return true
         }
         override fun pressEnter(): Boolean {
             enterPresses++
@@ -139,6 +144,21 @@ class KeyboardInsertionTest {
 
         assertEquals("Enter is sent to the terminal", 1, keyboard.enterPresses)
         assertEquals(listOf("make"), keyboard.keyed)
+        assertEquals("the editor is asked to confirm the text before Enter", 1, keyboard.deliveryChecks)
+    }
+
+    @Test
+    fun `a dictation without press enter neither waits for the editor nor pauses`() = runTest {
+        val keyboard = FakeKeyboard(prefersKeyEvents = false)
+
+        TextInserter.insert(
+            target = null, text = "hello", pressEnter = false, toClipboard = ::toClipboard,
+            keyboard = keyboard, keyboardStatus = KeyboardStatus.AVAILABLE
+        )
+
+        assertEquals(0, keyboard.deliveryChecks)
+        assertEquals(0, keyboard.enterPresses)
+        assertEquals("no time passes: the Enter pause is only paid by dictations that press it", 0L, testScheduler.currentTime)
     }
 
     @Test
@@ -294,6 +314,7 @@ class KeyboardInsertionTest {
             override val prefersKeyEvents: Boolean = editorInfo.inputType == InputType.TYPE_NULL
             override fun commitText(text: String): Boolean = connection.commitText(text, 1)
             override fun sendTextAsKeyEvents(text: String): Boolean = false
+            override suspend fun awaitDelivered(): Boolean = connection.getSurroundingText(0, 0, 0) != null
             override fun pressEnter(): Boolean = false
         }
         val refusesSetText = object : EditTextTarget(field) {

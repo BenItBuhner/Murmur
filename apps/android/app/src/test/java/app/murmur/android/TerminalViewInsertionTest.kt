@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import app.murmur.android.service.ENTER_SEPARATION_MS
 import app.murmur.android.service.InsertOutcome
 import app.murmur.android.service.KeyboardInput
 import app.murmur.android.service.KeyboardStatus
@@ -41,11 +42,17 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class TerminalViewInsertionTest {
 
-    /** A custom view that takes key input like a terminal and keeps what it received. */
-    private class TerminalLikeView(context: Context) : View(context) {
+    /**
+     * A custom view that takes key input like a terminal and keeps what it received, each piece
+     * stamped with the time on [clock] at which it arrived — what a terminal would write down its
+     * connection at that instant.
+     */
+    private class TerminalLikeView(context: Context, private val clock: () -> Long = { 0L }) : View(context) {
         val buffer = StringBuilder()
         /** Text that arrived through `commitText` rather than as key presses, in order. */
         val committed = ArrayList<String>()
+        /** Everything the terminal took, with the clock reading when it did. */
+        val arrivals = ArrayList<Pair<Long, String>>()
         private val keys = DeviceKeyMap()
         init {
             isFocusable = true
@@ -59,7 +66,7 @@ class TerminalViewInsertionTest {
             return object : BaseInputConnection(this, false) {
                 override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
                     committed.add(text.toString())
-                    buffer.append(text)
+                    take(text.toString())
                     return true
                 }
                 override fun sendKeyEvent(event: KeyEvent): Boolean {
@@ -69,18 +76,22 @@ class TerminalViewInsertionTest {
             }
         }
 
+        private fun take(s: String) {
+            buffer.append(s)
+            arrivals.add(clock() to s)
+        }
+
         private fun onTerminalKey(event: KeyEvent) {
             if (event.action != KeyEvent.ACTION_DOWN) return
             if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
-                buffer.append('\n')
+                take("\n")
                 return
             }
             val leftAlt = event.metaState and KeyEvent.META_ALT_LEFT_ON != 0
             val meta = event.metaState and (KeyEvent.META_CTRL_MASK or KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON).inv()
             val ch = keys.charFor(event.keyCode, meta)
             if (ch == 0) return
-            if (leftAlt) buffer.append('\u001b')
-            buffer.appendCodePoint(ch)
+            take((if (leftAlt) "\u001b" else "") + String(Character.toChars(ch)))
         }
     }
 
@@ -95,6 +106,8 @@ class TerminalViewInsertionTest {
             typeAsKeys(text, DeviceKeyMap(), sendKey = { connection.sendKeyEvent(it) }, commit = { connection.commitText(it, 1) })
             return true
         }
+        // The same round trip the production connection makes; on a plain connection it is a call.
+        override suspend fun awaitDelivered(): Boolean = connection.getSurroundingText(0, 0, 0) != null
         override fun pressEnter(): Boolean {
             connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
             connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
@@ -102,9 +115,9 @@ class TerminalViewInsertionTest {
         }
     }
 
-    private fun terminal(): Pair<TerminalLikeView, ConnectionKeyboard> {
+    private fun terminal(clock: () -> Long = { 0L }): Pair<TerminalLikeView, ConnectionKeyboard> {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        val view = TerminalLikeView(activity)
+        val view = TerminalLikeView(activity, clock)
         activity.setContentView(view)
         assertTrue(view.requestFocus())
         val editorInfo = EditorInfo()
@@ -137,8 +150,8 @@ class TerminalViewInsertionTest {
     }
 
     @Test
-    fun `press enter runs the command in the terminal`() = runTest {
-        val (view, keyboard) = terminal()
+    fun `press enter runs the command in the terminal, as a later write of its own`() = runTest {
+        val (view, keyboard) = terminal(clock = { testScheduler.currentTime })
 
         TextInserter.insert(
             target = null, text = "make", pressEnter = true, toClipboard = {},
@@ -146,6 +159,25 @@ class TerminalViewInsertionTest {
         )
 
         assertEquals("make\n", view.buffer.toString())
+        // The command is typed in one instant; Enter reaches the terminal only after the pause, so
+        // an SSH client can never put the two into one write (Claude Code drops the text if it does).
+        val typedAt = view.arrivals.filter { it.second != "\n" }.map { it.first }.toSet()
+        val enterAt = view.arrivals.single { it.second == "\n" }.first
+        assertEquals(setOf(0L), typedAt)
+        assertEquals(ENTER_SEPARATION_MS, enterAt)
+    }
+
+    @Test
+    fun `without press enter the command lands at once and nothing waits`() = runTest {
+        val (view, keyboard) = terminal(clock = { testScheduler.currentTime })
+
+        TextInserter.insert(
+            target = null, text = "make", pressEnter = false, toClipboard = {},
+            keyboard = keyboard, keyboardStatus = KeyboardStatus.AVAILABLE
+        )
+
+        assertEquals("make", view.buffer.toString())
+        assertEquals(0L, testScheduler.currentTime)
     }
 
     @Test

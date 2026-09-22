@@ -1545,6 +1545,224 @@
       "reason": "long"
     }
   ],
+  "dictionary": [
+    {
+      "name": "exact alias",
+      "text": "ask bennet about it",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "ask Bennett about it"
+    },
+    {
+      "name": "possessive of an alias",
+      "text": "that is bennet's phone",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "that is Bennett's phone"
+    },
+    {
+      "name": "curly possessive of an alias",
+      "text": "that is bennet’s phone",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "that is Bennett’s phone"
+    },
+    {
+      "name": "capitalized possessive",
+      "text": "Bennet's phone rang",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "Bennett's phone rang"
+    },
+    {
+      "name": "possessive of a phrase alias",
+      "text": "whisper flow's new build",
+      "entries": [
+        {
+          "word": "Wispr Flow",
+          "aliases": [
+            "whisper flow"
+          ]
+        }
+      ],
+      "result": "Wispr Flow's new build"
+    },
+    {
+      "name": "curly possessive of a phrase alias",
+      "text": "whisper flow’s new build",
+      "entries": [
+        {
+          "word": "Wispr Flow",
+          "aliases": [
+            "whisper flow"
+          ]
+        }
+      ],
+      "result": "Wispr Flow’s new build"
+    },
+    {
+      "name": "plural possessive of a plural alias",
+      "text": "the bennets' house",
+      "entries": [
+        {
+          "word": "Bennetts",
+          "aliases": [
+            "bennets"
+          ]
+        }
+      ],
+      "result": "the Bennetts' house"
+    },
+    {
+      "name": "curly plural possessive of a plural alias",
+      "text": "the bennets’ house",
+      "entries": [
+        {
+          "word": "Bennetts",
+          "aliases": [
+            "bennets"
+          ]
+        }
+      ],
+      "result": "the Bennetts’ house"
+    },
+    {
+      "name": "plural possessive already canonical",
+      "text": "the Bennetts' house",
+      "entries": [
+        {
+          "word": "Bennetts",
+          "aliases": [
+            "bennets"
+          ]
+        }
+      ],
+      "result": "the Bennetts' house"
+    },
+    {
+      "name": "plural possessive of a singular alias",
+      "text": "the bennets' house",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "the bennets' house"
+    },
+    {
+      "name": "possessive already canonical",
+      "text": "Bennett's phone",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "Bennett's phone"
+    },
+    {
+      "name": "quoted entry keeps its closing quote",
+      "text": "call it 'Bennet' for now",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "call it 'Bennett' for now"
+    },
+    {
+      "name": "first half of a hyphenated name",
+      "text": "the bennet-smith account",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "the Bennett-smith account"
+    },
+    {
+      "name": "identifier is one word",
+      "text": "bennet_id = 3",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "bennet_id = 3"
+    },
+    {
+      "name": "contraction of an entry (the apostrophe ends the word)",
+      "text": "i don't know",
+      "entries": [
+        {
+          "word": "Don",
+          "aliases": []
+        }
+      ],
+      "result": "i Don't know"
+    },
+    {
+      "name": "straight and curly in one sentence",
+      "text": "bennet's and bennet’s",
+      "entries": [
+        {
+          "word": "Bennett",
+          "aliases": [
+            "bennet"
+          ],
+          "fuzzy": true
+        }
+      ],
+      "result": "Bennett's and Bennett’s"
+    }
+  ],
   "cleanLexicon": {
     "hesitationWords": [
       "um",

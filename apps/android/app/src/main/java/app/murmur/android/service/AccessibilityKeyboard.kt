@@ -9,6 +9,8 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import androidx.annotation.RequiresApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val TAG = "MurmurKeyboard"
 
@@ -76,6 +78,20 @@ private class AccessibilityInputMethodInput(
             },
         )
     }.isSuccess
+
+    /**
+     * Every call on the connection is posted to the editor's main thread in the order it was made,
+     * and `getSurroundingText` is the one that answers: its reply means the commits and key events
+     * before it have been handled (the platform gives the editor two seconds, then answers null).
+     * The wait is a blocking binder round trip, so it runs on the IO dispatcher rather than the
+     * service's main thread, which keeps drawing the pill meanwhile.
+     */
+    override suspend fun awaitDelivered(): Boolean = withContext(Dispatchers.IO) {
+        val started = SystemClock.uptimeMillis()
+        val answered = runCatching { connection.getSurroundingText(0, 0, 0) }.getOrNull() != null
+        Log.i(TAG, "editor ${if (answered) "confirmed the text" else "did not answer"} after ${SystemClock.uptimeMillis() - started}ms")
+        answered
+    }
 
     override fun pressEnter(): Boolean = runCatching {
         val now = SystemClock.uptimeMillis()

@@ -243,6 +243,11 @@ export function applyDictionary(text: string, entries: readonly DictionaryTerm[]
   out = applyPhrases(out, c)
   if (c.fuzzyTerms.length) {
     out = out.replace(/[\p{L}][\p{L}\p{N}'’-]{3,}/gu, (token) => {
+      // Punctuation the token ends with — a plural possessive's apostrophe ("the Bennetts' house"),
+      // a closing quote, a dash — is not part of the word. It takes part in the comparison (one
+      // more character of distance, which is what keeps "bennets'" away from a singular "Bennett")
+      // but never in the replacement: the word is corrected, the mark stays.
+      const tail = token.match(/['’-]+$/u)?.[0] ?? ''
       const lower = token.toLowerCase()
       if (c.allLower.has(lower) || c.canonical.has(lower)) return token
       const capitalized = isCapitalized(token)
@@ -261,7 +266,7 @@ export function applyDictionary(text: string, entries: readonly DictionaryTerm[]
           d = Math.min(d, key === t.key ? 0.5 : 1.5)
         if (d !== Infinity && (!best || d < best.d)) best = { canonical: t.canonical, d }
       }
-      return best ? best.canonical : token
+      return best ? best.canonical + tail : token
     })
   }
   return out

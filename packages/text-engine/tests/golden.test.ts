@@ -13,9 +13,10 @@ import {
   alreadyClean
 } from '../src/clean'
 import { prepareTranscript } from '../src/cleanup'
+import { applyDictionary } from '../src/dictionary'
 import { digitSignature } from '../src/numbers'
 import { buildFormatMessages } from '../src/prompt'
-import type { FormatContext } from '../src/types'
+import type { DictionaryTerm, FormatContext } from '../src/types'
 import { cleanModelOutput, verifyOutput } from '../src/verify'
 import { contextOf, loadFixtures } from '../eval/score'
 
@@ -170,6 +171,40 @@ const SKIP_CASES: SkipCase[] = [
   { name: 'cap of zero', transcript: 'Sounds good.', context: CHAT, maxWords: 0 }
 ]
 
+interface DictionaryCase {
+  name: string
+  text: string
+  entries: DictionaryTerm[]
+}
+
+const BENNETT: DictionaryTerm = { word: 'Bennett', aliases: ['bennet'], fuzzy: true }
+const BENNETTS: DictionaryTerm = { word: 'Bennetts', aliases: ['bennets'] }
+const WISPR: DictionaryTerm = { word: 'Wispr Flow', aliases: ['whisper flow'] }
+
+/**
+ * Where a term or alias ends: the boundary is letters, digits and underscore, so an apostrophe
+ * (either kind) or a hyphen closes the match and the entry is corrected inside its possessive,
+ * singular or plural; the punctuation after the word is kept whatever the word becomes.
+ */
+const DICTIONARY_CASES: DictionaryCase[] = [
+  { name: 'exact alias', text: 'ask bennet about it', entries: [BENNETT] },
+  { name: 'possessive of an alias', text: "that is bennet's phone", entries: [BENNETT] },
+  { name: 'curly possessive of an alias', text: 'that is bennet’s phone', entries: [BENNETT] },
+  { name: 'capitalized possessive', text: "Bennet's phone rang", entries: [BENNETT] },
+  { name: 'possessive of a phrase alias', text: "whisper flow's new build", entries: [WISPR] },
+  { name: 'curly possessive of a phrase alias', text: 'whisper flow’s new build', entries: [WISPR] },
+  { name: 'plural possessive of a plural alias', text: "the bennets' house", entries: [BENNETTS] },
+  { name: 'curly plural possessive of a plural alias', text: 'the bennets’ house', entries: [BENNETTS] },
+  { name: 'plural possessive already canonical', text: "the Bennetts' house", entries: [BENNETTS] },
+  { name: 'plural possessive of a singular alias', text: "the bennets' house", entries: [BENNETT] },
+  { name: 'possessive already canonical', text: "Bennett's phone", entries: [BENNETT] },
+  { name: 'quoted entry keeps its closing quote', text: "call it 'Bennet' for now", entries: [BENNETT] },
+  { name: 'first half of a hyphenated name', text: 'the bennet-smith account', entries: [BENNETT] },
+  { name: 'identifier is one word', text: 'bennet_id = 3', entries: [BENNETT] },
+  { name: 'contraction of an entry (the apostrophe ends the word)', text: "i don't know", entries: [{ word: 'Don', aliases: [] }] },
+  { name: 'straight and curly in one sentence', text: "bennet's and bennet’s", entries: [BENNETT] }
+]
+
 function build(): unknown {
   return {
     prompts: PROMPT_CASES.map((c) => ({
@@ -200,6 +235,12 @@ function build(): unknown {
         reason: d.reason ?? null
       }
     }),
+    dictionary: DICTIONARY_CASES.map((c) => ({
+      name: c.name,
+      text: c.text,
+      entries: c.entries,
+      result: applyDictionary(c.text, c.entries)
+    })),
     cleanLexicon: {
       hesitationWords: HESITATION_WORDS,
       hesitationPhrases: HESITATION_PHRASES,

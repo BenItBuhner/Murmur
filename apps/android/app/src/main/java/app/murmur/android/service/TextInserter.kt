@@ -31,6 +31,30 @@ private const val MAX_ANCESTOR_WALK = 64
 internal const val WEB_ACTIVATION_SETTLE_MS = 150L
 
 /**
+ * Pause between the dictation landing in the editor and the Enter that follows it when the speaker
+ * said "press enter" / "send it". The two must reach the program behind the editor as separate
+ * reads, so Enter is never sent in the same frame as the text.
+ *
+ * In an SSH client (Termius) the committed text goes down the connection wrapped in bracketed-paste
+ * markers and the Enter as a bare carriage return. Claude Code discards a paste block when other
+ * bytes follow its end marker in the same stdin chunk (anthropics/claude-code#91205): the whole
+ * dictation vanishes and only the Enter arrives. Terminal programs without bracketed paste tell a
+ * paste from typing by timing, and an Enter inside that window is taken as a newline of the paste
+ * rather than a submit: Gemini CLI within 30 ms of the last character, Codex CLI within 120 ms of a
+ * burst of them (which is what the key-event path into Termux or ConnectBot looks like).
+ *
+ * Sent back to back, the two events leave the phone microseconds apart and land in one read. The
+ * gap also has to survive the way to the server: a mobile uplink hands out transmission slots tens
+ * of milliseconds apart and sends everything queued in between as one burst, a client that leaves
+ * Nagle on holds a small write behind unacknowledged data for a round trip plus the server's
+ * delayed ACK (40 ms at least on Linux), and the receiving side merges segments that arrive
+ * together. 250 ms clears the widest timing window (Codex's 120 ms) twice over and the Nagle case
+ * on a mobile round trip, and is invisible next to the seconds a dictation already takes. Only a
+ * dictation that presses Enter pays it; the text itself is never held back.
+ */
+internal const val ENTER_SEPARATION_MS = 250L
+
+/**
  * The slice of [AccessibilityNodeInfo] the insertion strategy needs. Kept behind an interface so
  * the exact action sequence the service sends can be exercised against a real `EditText` in unit
  * tests: `View.performAccessibilityAction` takes the same action ids and argument bundles.
@@ -92,6 +116,14 @@ interface KeyboardInput {
      * plain key produces are committed in place (see [typeAsKeys]).
      */
     fun sendTextAsKeyEvents(text: String): Boolean
+
+    /**
+     * Suspend until the editor has handled everything sent through this connection so far, where
+     * the connection can tell. The connection's calls reach the editor in order and only a request
+     * that answers proves the earlier ones were processed, so this is a round trip into the editor's
+     * app; it must never block the calling thread. False when the editor did not answer in time.
+     */
+    suspend fun awaitDelivered(): Boolean
 
     /** Send Enter (submit / newline) as a key-down/up pair. */
     fun pressEnter(): Boolean
@@ -203,7 +235,9 @@ object TextInserter {
      *
      * [target] is null when no editable node is focused at all — the normal case in a terminal.
      * [keyboard] is null unless keyboard support is on and connected; [keyboardStatus] explains a
-     * null keyboard so the failure notice can be specific.
+     * null keyboard so the failure notice can be specific. With [pressEnter], Enter follows the text
+     * as an event of its own, [enterDelayMs] after the editor took the text (see
+     * [ENTER_SEPARATION_MS]).
      */
     suspend fun insert(
         target: EditableTarget?,
@@ -212,6 +246,7 @@ object TextInserter {
         toClipboard: (String) -> Unit,
         keyboard: KeyboardInput? = null,
         keyboardStatus: KeyboardStatus = KeyboardStatus.OFF,
+        enterDelayMs: Long = ENTER_SEPARATION_MS,
     ): InsertOutcome {
         // A node that cannot be refreshed belongs to a field that is gone (or an app that stopped
         // answering); acting on the cached copy would only fail later with a misleading message.
@@ -266,7 +301,7 @@ object TextInserter {
             copyOnce(text)
             return InsertOutcome.Failed(failureMessage(node, status))
         }
-        pressEnterIfNeeded(pressEnter, method, node, keyboard)
+        if (pressEnter) pressEnterAfter(method, node, keyboard, enterDelayMs)
         return InsertOutcome.Inserted(method)
     }
 
@@ -296,13 +331,24 @@ object TextInserter {
     }
 
     /**
-     * Enter after the text. Through the keyboard connection when that is how the text went in (a
-     * terminal has no IME_ENTER node action); otherwise the node's IME_ENTER action, falling back to
-     * the keyboard connection when there is no node.
+     * Enter after the text, as a separate, later event (see [ENTER_SEPARATION_MS]): first the editor
+     * is given the chance to confirm it has the text, then [delayMs] pass, then Enter goes out.
+     *
+     * A node action (`ACTION_SET_TEXT`, `ACTION_PASTE`) is a call into the app that only returns
+     * once the field has acted on it, so the text is confirmed by the time the method reports
+     * success. The keyboard connection is one-way, so it is asked ([KeyboardInput.awaitDelivered]);
+     * an editor that does not answer in time still gets its Enter after the pause.
+     *
+     * Enter goes through the keyboard connection when that is how the text went in (a terminal has
+     * no IME_ENTER node action); otherwise the node's IME_ENTER action, falling back to the keyboard
+     * connection when there is no node.
      */
-    private fun pressEnterIfNeeded(pressEnter: Boolean, method: String, node: EditableTarget?, keyboard: KeyboardInput?) {
-        if (!pressEnter) return
+    private suspend fun pressEnterAfter(method: String, node: EditableTarget?, keyboard: KeyboardInput?, delayMs: Long) {
         val viaKeyboard = method == "keyboard" || method == "keyboard-keys"
+        if (viaKeyboard && keyboard != null && !keyboard.awaitDelivered()) {
+            Log.w(TAG, "editor did not confirm the text; pressing Enter after the pause anyway")
+        }
+        delay(delayMs)
         when {
             viaKeyboard && keyboard != null -> keyboard.pressEnter()
             node != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->

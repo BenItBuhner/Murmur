@@ -603,6 +603,30 @@ describe('POST /v1/format', () => {
     }
   })
 
+  it('returns apostrophes, typographic quotes and accents exactly as the engine wrote them', async () => {
+    stubEnv(LLM_ENV)
+    const answer = 'What are you referring to? I don’t recall — I have the worst memory in the world… “Café”.'
+    const calls = stubFetch(() => chat(answer))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+
+    const clean = "I don't recall, it's fine, we'll see, Bennett's phone."
+    const skipped = await (await asAda.fetch('/v1/format', body(clean))).json()
+    expect(skipped.status.outcome).toBe('skipped-clean')
+    expect(skipped.text).toBe(clean)
+    expect(calls).toHaveLength(0)
+
+    const used = await (
+      await asAda.fetch(
+        '/v1/format',
+        body("what are you referring to i don't recall i have the worst memory in the world cafe")
+      )
+    ).json()
+    expect(used.status.outcome).toBe('used')
+    expect(used.text).toBe(answer)
+    expect(used.modelText).toBe(answer)
+  })
+
   it('retries once in strict mode when the verifier rejects, and falls back when it fails again', async () => {
     stubEnv(LLM_ENV)
     let n = 0

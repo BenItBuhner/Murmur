@@ -244,3 +244,71 @@ describe('formatTranscript', () => {
     expect(r.stages).toEqual(['press-enter', 'llm'])
   })
 })
+
+describe('apostrophes, quotes and non-ASCII punctuation', () => {
+  const ASCII = "I don't recall, it's fine, we'll see, Bennett's phone."
+  const CURLY = 'I don’t recall, it’s fine, we’ll see, Bennett’s phone.'
+  const MARKS = 'She said “it’s ‘fine’” — sure… café, naïve, “don’t”.'
+  const dictionary = [
+    { word: 'Bennett', aliases: ['bennet'], fuzzy: true },
+    { word: 'T3 Chat', aliases: [] }
+  ]
+  const withDictionary: FormatContext = { ...ctx, dictionary }
+
+  it('keeps every character through prepare, the rule-based cleanup and finishing', () => {
+    for (const text of [ASCII, CURLY, MARKS]) {
+      const prepared = prepareTranscript(text)
+      expect(prepared.text).toBe(text)
+      expect(basicCleanup(prepared.text, { dictionary }).text).toBe(text)
+      expect(finish(text, { category: 'chat', dictionary, trailingSpace: true }).text).toBe(
+        `${text} `
+      )
+      expect(finish(text, { category: 'terminal', dictionary, trailingSpace: false }).text).toBe(
+        text.replace(/\.$/, '')
+      )
+    }
+  })
+
+  it('keeps contractions inside spoken quotes and next to fillers', () => {
+    expect(
+      basicCleanup("um he said quote I don't know end quote and uh it's fine", { dictionary })
+        .text
+    ).toBe('He said "I don\'t know" and it\'s fine')
+    expect(basicCleanup('um I can’t go uh it’s late', { dictionary }).text).toBe('I can’t go it’s late')
+  })
+
+  it('keeps contractions when the clean skip finishes the transcript without a model', async () => {
+    for (const text of [ASCII, CURLY]) {
+      const complete = answering('unused')
+      const r = await formatTranscript({ transcript: text, mode: 'smart', context: withDictionary }, complete)
+      expect(r.status.outcome).toBe('skipped-clean')
+      expect(complete.calls).toHaveLength(0)
+      expect(r.text).toBe(text)
+    }
+  })
+
+  it('keeps a model answer that writes typographic apostrophes and quotes', async () => {
+    const transcript = "what are you referring to i don't recall i have the worst memory in the world"
+    const answer = 'What are you referring to? I don’t recall — I have the worst memory in the world…'
+    const r = await formatTranscript(
+      { transcript, mode: 'smart', context: withDictionary },
+      answering(answer)
+    )
+    expect(r.status.outcome).toBe('used')
+    expect(r.text).toBe(answer)
+    expect(finish(r.text, { category: 'chat', dictionary, trailingSpace: true }).text).toBe(`${answer} `)
+  })
+
+  it('keeps contractions in the fallback when the model fails or is off', async () => {
+    const transcript = "i don't recall, it's fine, we'll see, bennet said so"
+    const failed = await formatTranscript(
+      { transcript, mode: 'smart', context: withDictionary },
+      async () => {
+        throw new Error('down')
+      }
+    )
+    expect(failed.text).toBe("I don't recall, it's fine, we'll see, Bennett said so")
+    const off = await formatTranscript({ transcript, mode: 'off', context: withDictionary }, null)
+    expect(off.text).toBe(transcript)
+  })
+})

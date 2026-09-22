@@ -238,4 +238,56 @@ class TextEngineTest {
         assertEquals(412L, result.llmMs)
         assertEquals(listOf("llm-strict"), result.stages)
     }
+
+    @Test
+    fun `apostrophes, quotes and non-ASCII punctuation survive every stage`() = runTest {
+        val ascii = "I don't recall, it's fine, we'll see, Bennett's phone."
+        val curly = "I don’t recall, it’s fine, we’ll see, Bennett’s phone."
+        val marks = "She said “it’s ‘fine’” — sure… café, naïve, “don’t”."
+        val dictionary = listOf(
+            DictionaryEntry("d1", "Bennett", listOf("bennet"), fuzzy = true),
+            DictionaryEntry("d2", "T3 Chat")
+        )
+        val terms = dictionary.map { app.murmur.android.text.DictionaryTerm(it.word, it.aliases, it.fuzzy) }
+        val withDictionary = ctx.copy(dictionary = terms)
+
+        for (text in listOf(ascii, curly, marks)) {
+            val prepared = prepareTranscript(text)
+            assertEquals(text, prepared.text)
+            assertEquals(text, basicCleanup(prepared.text, dictionary).text)
+            assertEquals("$text ", finish(text, AppCategory.CHAT, dictionary, trailingSpace = true).text)
+            assertEquals(text.removeSuffix("."), finish(text, AppCategory.TERMINAL, dictionary, trailingSpace = false).text)
+        }
+        assertEquals(
+            "He said \"I don't know\" and it's fine",
+            basicCleanup("um he said quote I don't know end quote and uh it's fine", dictionary).text
+        )
+        assertEquals("I can’t go it’s late", basicCleanup("um I can’t go uh it’s late", dictionary).text)
+
+        // The clean skip finishes both spellings with the rules alone.
+        for (text in listOf(ascii, curly)) {
+            val (complete, calls) = answering("unused")
+            val r = Engine.formatTranscript(FormatInput(text, FormattingMode.SMART, withDictionary, dictionary), complete)
+            assertEquals(FormatOutcome.SKIPPED_CLEAN, r.status.outcome)
+            assertTrue(calls.isEmpty())
+            assertEquals(text, r.text)
+        }
+
+        // A model answer written with typographic marks is used as is.
+        val answer = "What are you referring to? I don’t recall — I have the worst memory in the world…"
+        val (complete, _) = answering(answer)
+        val used = Engine.formatTranscript(
+            FormatInput("what are you referring to i don't recall i have the worst memory in the world", FormattingMode.SMART, withDictionary, dictionary),
+            complete
+        )
+        assertEquals(FormatOutcome.USED, used.status.outcome)
+        assertEquals(answer, used.text)
+        assertEquals("$answer ", finish(used.text, AppCategory.UNKNOWN, dictionary, trailingSpace = true).text)
+
+        // And the fallback when the model is down.
+        val failed = Engine.formatTranscript(
+            FormatInput("i don't recall, it's fine, we'll see, bennet said so", FormattingMode.SMART, withDictionary, dictionary)
+        ) { _, _ -> throw IllegalStateException("down") }
+        assertEquals("I don't recall, it's fine, we'll see, Bennett said so", failed.text)
+    }
 }

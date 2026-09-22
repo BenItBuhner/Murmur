@@ -34,6 +34,16 @@ private val NON_LETTER = Regex("[^a-z]")
 private val MARKS = Regex("\\p{M}+")
 
 /**
+ * The engine's word boundary (text.ts `WB_START` / `WB_END`): letters, digits and the underscore
+ * continue a word, everything else ends it. An apostrophe or a hyphen therefore closes the match,
+ * so a term or alias is corrected inside its possessive ("bennet's" → "Bennett's", with either
+ * apostrophe) and as the first half of a hyphenated name, while an identifier ("bennet_id") is one
+ * word and is left alone.
+ */
+private const val WB_START = "(?<![\\p{L}\\p{N}_])"
+private const val WB_END = "(?![\\p{L}\\p{N}_])"
+
+/**
  * A rough sound key for a Latin-script word, in the spirit of Metaphone: what it sounds like
  * rather than how it is spelt, so "whisper" and "Wispr", "Bennet" and "Bennett", "Konvex" and
  * "Convex" collide. Vowels after the first are dropped, doubled letters collapsed, common
@@ -99,7 +109,7 @@ private fun compile(entries: List<DictionaryEntry>): Compiled {
         val alternation = canonical.keys
             .sortedByDescending { it.length }
             .joinToString("|") { key -> key.split(' ').joinToString("\\s+") { escapeRegex(it) } }
-        Regex("(?<![\\p{L}\\p{N}])(?:$alternation)(?![\\p{L}\\p{N}'’-])", RegexOption.IGNORE_CASE)
+        Regex("$WB_START(?:$alternation)$WB_END", RegexOption.IGNORE_CASE)
     }
     phrases.sortWith(compareByDescending<PhraseTerm> { it.words.size }.thenByDescending { it.key.length })
     return Compiled(exact, canonical, fuzzyTerms, phrases, allLower)
@@ -116,6 +126,9 @@ private fun soundsLike(key: String, vowel: String, termKey: String, termVowel: S
 private class Token(val text: String, val start: Int, val end: Int)
 
 private val TOKEN_RE = Regex("[\\p{L}\\p{N}][\\p{L}\\p{N}'’-]*")
+
+/** The apostrophes and hyphens a fuzzy-pass token ends with; punctuation, not part of the word. */
+private val TOKEN_TAIL = Regex("['’-]+$")
 
 /**
  * Multi-word terms: "Wispr Flow" comes back from the recognizer as "whisper flow", "Whisper Flo"
@@ -190,6 +203,10 @@ fun applyDictionary(text: String, entries: List<DictionaryEntry>): String {
     if (c.fuzzyTerms.isNotEmpty()) {
         val token = Regex("[\\p{L}][\\p{L}\\p{N}'’-]{3,}")
         out = token.replace(out) { m ->
+            // Punctuation the token ends with (a plural possessive's apostrophe, a closing quote, a
+            // dash) is not part of the word: it counts in the comparison, as in the original, but
+            // the replacement keeps it.
+            val tail = TOKEN_TAIL.find(m.value)?.value ?: ""
             val lower = m.value.lowercase()
             if (c.allLower.contains(lower) || c.canonical.containsKey(lower)) return@replace m.value
             val capitalized = m.value.first().isUpperCase()
@@ -209,7 +226,7 @@ fun applyDictionary(text: String, entries: List<DictionaryEntry>): String {
                 }
                 if (d != Double.POSITIVE_INFINITY && (best == null || d < best.second)) best = t.canonical to d
             }
-            best?.first ?: m.value
+            best?.let { it.first + tail } ?: m.value
         }
     }
     return out

@@ -48,6 +48,27 @@ class DictionaryTest {
     }
 
     @Test
+    fun `corrects an entry inside its possessive, with either apostrophe`() {
+        val bennett = DictionaryEntry("3", "Bennett", listOf("bennet"), fuzzy = true)
+        assertEquals("that is Bennett's phone", applyDictionary("that is bennet's phone", listOf(bennett)))
+        assertEquals("that is Bennett’s phone", applyDictionary("that is bennet’s phone", listOf(bennett)))
+        assertEquals("Bennett's phone rang", applyDictionary("Bennet's phone rang", listOf(bennett)))
+        assertEquals("Wispr Flow's new build", applyDictionary("whisper flow's new build", listOf(wispr)))
+        // A plural possessive keeps its apostrophe, whether the word was corrected or already right.
+        val bennetts = DictionaryEntry("4", "Bennetts", listOf("bennets"))
+        assertEquals("the Bennetts' house", applyDictionary("the bennets' house", listOf(bennetts)))
+        assertEquals("the Bennetts’ house", applyDictionary("the bennets’ house", listOf(bennetts)))
+        assertEquals("the Bennetts' house", applyDictionary("the Bennetts' house", listOf(bennetts)))
+        // A singular alias does not reach into a plural possessive.
+        assertEquals("the bennets' house", applyDictionary("the bennets' house", listOf(bennett)))
+        // Punctuation after the word is never swallowed by a correction.
+        assertEquals("call it 'Bennett' for now", applyDictionary("call it 'Bennet' for now", listOf(bennett)))
+        assertEquals("the Bennett-smith account", applyDictionary("the bennet-smith account", listOf(bennett)))
+        // Underscore continues a word: an identifier is left alone.
+        assertEquals("bennet_id = 3", applyDictionary("bennet_id = 3", listOf(bennett)))
+    }
+
+    @Test
     fun `matches multi-word terms by sound however the recognizer split or spelt them`() {
         val exactOnly = DictionaryEntry("1", "Wispr Flow", emptyList(), fuzzy = false)
         assertEquals("I use Wispr Flow every day", applyDictionary("I use Wisper Flo every day", listOf(exactOnly)))

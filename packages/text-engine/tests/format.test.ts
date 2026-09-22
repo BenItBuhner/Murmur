@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { basicCleanup, finish, prepareTranscript } from '../src/cleanup'
+import { applyDictionary } from '../src/dictionary'
 import { formatTranscript } from '../src/format'
 import type { ChatMessage, Complete, FormatContext } from '../src/types'
 
@@ -267,6 +268,18 @@ describe('apostrophes, quotes and non-ASCII punctuation', () => {
         text.replace(/\.$/, '')
       )
     }
+  })
+
+  it('corrects an entry inside its possessive and keeps the punctuation after the word', () => {
+    expect(applyDictionary("that is bennet's phone", dictionary)).toBe("that is Bennett's phone")
+    expect(applyDictionary('that is bennet’s phone', dictionary)).toBe('that is Bennett’s phone')
+    expect(finish("bennet's phone", { category: 'chat', dictionary, trailingSpace: false }).text).toBe(
+      "Bennett's phone"
+    )
+    const bennetts = [{ word: 'Bennetts', aliases: ['bennets'] }]
+    expect(applyDictionary("the bennets' house", bennetts)).toBe("the Bennetts' house")
+    expect(applyDictionary('the Bennetts’ house', bennetts)).toBe('the Bennetts’ house')
+    expect(applyDictionary("call it 'Bennet' for now", dictionary)).toBe("call it 'Bennett' for now")
   })
 
   it('keeps contractions inside spoken quotes and next to fillers', () => {

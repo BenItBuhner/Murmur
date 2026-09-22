@@ -1,5 +1,6 @@
 package app.murmur.android
 
+import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.Tone
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.Clean
@@ -8,6 +9,7 @@ import app.murmur.android.text.FormatContext
 import app.murmur.android.text.NumberSignature
 import app.murmur.android.text.Prompt
 import app.murmur.android.text.Verify
+import app.murmur.android.text.applyDictionary
 import app.murmur.android.text.prepareTranscript
 import org.json.JSONArray
 import org.json.JSONObject
@@ -19,9 +21,9 @@ import java.io.File
 /**
  * Pins the Kotlin port of the text engine to the TypeScript original. The golden file is written
  * by `npm run golden` in packages/text-engine from the TypeScript code; this test asserts that the
- * Kotlin prompt builder, number reader, output cleaner, verifier and clean-skip decision produce
- * byte-identical results for the same inputs. When the engine changes, regenerate the golden file
- * and port the change.
+ * Kotlin prompt builder, number reader, output cleaner, verifier, clean-skip decision and
+ * dictionary stage produce byte-identical results for the same inputs. When the engine changes,
+ * regenerate the golden file and port the change.
  */
 class GoldenEngineTest {
     private val golden: JSONObject by lazy {
@@ -123,6 +125,23 @@ class GoldenEngineTest {
             if (d.clean) clean++
         }
         assertTrue(clean >= 10)
+    }
+
+    @Test
+    fun `dictionary corrections agree`() {
+        val cases = golden.getJSONArray("dictionary")
+        // The possessive, hyphen, quote and identifier boundary cases; at least one of each apostrophe.
+        assertTrue(cases.length() >= 12)
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val entries = c.getJSONArray("entries").let { arr ->
+                (0 until arr.length()).map { k ->
+                    val e = arr.getJSONObject(k)
+                    DictionaryEntry("g$k", e.getString("word"), e.optJSONArray("aliases")?.strings() ?: emptyList(), e.optBoolean("fuzzy", false))
+                }
+            }
+            assertEquals(c.getString("name"), c.getString("result"), applyDictionary(c.getString("text"), entries))
+        }
     }
 
     @Test

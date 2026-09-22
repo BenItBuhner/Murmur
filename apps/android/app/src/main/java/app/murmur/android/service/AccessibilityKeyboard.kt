@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
-import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import androidx.annotation.RequiresApi
@@ -57,8 +56,8 @@ private class AccessibilityInputMethodInput(
 ) : KeyboardInput {
 
     /**
-     * TYPE_NULL editors (terminals) want the key stream, not composed text, and ignore commits. The
-     * whole `inputType` is zero for TYPE_NULL, so compare the value directly.
+     * TYPE_NULL editors (terminals) want the key stream, not composed text. The whole `inputType` is
+     * zero for TYPE_NULL, so compare the value directly.
      */
     override val prefersKeyEvents: Boolean =
         editorInfo != null && editorInfo.inputType == InputType.TYPE_NULL
@@ -66,17 +65,17 @@ private class AccessibilityInputMethodInput(
     override fun commitText(text: String): Boolean =
         runCatching { connection.commitText(text, 1, null) }.isSuccess
 
-    override fun sendTextAsKeyEvents(text: String): Boolean {
-        val events = runCatching {
-            KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray())
-        }.getOrNull()
-        if (events != null && events.isNotEmpty()) {
-            return runCatching { events.forEach { connection.sendKeyEvent(it) } }.isSuccess
-        }
-        // Characters the virtual keyboard cannot map (rare in a command line): commit them instead.
-        Log.i(TAG, "no key events for the text; committing it through the input connection")
-        return runCatching { connection.commitText(text, 1, null) }.isSuccess
-    }
+    override fun sendTextAsKeyEvents(text: String): Boolean = runCatching {
+        typeAsKeys(
+            text,
+            VirtualKeyMap(),
+            sendKey = { connection.sendKeyEvent(it) },
+            commit = {
+                Log.i(TAG, "no plain key for ${it.length} char(s); committing them through the input connection")
+                connection.commitText(it, 1, null)
+            },
+        )
+    }.isSuccess
 
     override fun pressEnter(): Boolean = runCatching {
         val now = SystemClock.uptimeMillis()

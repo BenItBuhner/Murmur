@@ -5,7 +5,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.text.InputType
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import app.murmur.android.service.COPIED_EDITOR_REJECTED
 import app.murmur.android.service.COPIED_ENABLE_KEYBOARD
@@ -267,5 +269,61 @@ class KeyboardInsertionTest {
 
         assertEquals(InsertOutcome.Failed(COPIED_EDITOR_REJECTED), outcome)
         assertEquals(listOf("Hello"), clipboard)
+    }
+
+    // ---- every apostrophe, quote and accent reaches a normal field intact ------------------
+
+    private val punctuated = "I don't recall, it’s ‘fine’ — “really”… \"ok\", café, cafe\u0301, garçon, Straße \uD83D\uDE80 "
+
+    @Test
+    fun `apostrophes, quotes and accents survive set-text`() = runTest {
+        val outcome = TextInserter.insert(
+            target = EditTextTarget(field), text = punctuated, pressEnter = false, toClipboard = ::toClipboard,
+            keyboard = FakeKeyboard(), keyboardStatus = KeyboardStatus.AVAILABLE
+        )
+
+        assertEquals(InsertOutcome.Inserted("set-text"), outcome)
+        assertEquals(punctuated, field.text.toString())
+    }
+
+    @Test
+    fun `apostrophes, quotes and accents survive a keyboard commit into a normal field`() = runTest {
+        val editorInfo = EditorInfo()
+        val connection = field.onCreateInputConnection(editorInfo)!!
+        val fieldKeyboard = object : KeyboardInput {
+            override val prefersKeyEvents: Boolean = editorInfo.inputType == InputType.TYPE_NULL
+            override fun commitText(text: String): Boolean = connection.commitText(text, 1)
+            override fun sendTextAsKeyEvents(text: String): Boolean = false
+            override fun pressEnter(): Boolean = false
+        }
+        val refusesSetText = object : EditTextTarget(field) {
+            override fun performAction(action: Int, arguments: Bundle?): Boolean =
+                action != AccessibilityNodeInfo.ACTION_SET_TEXT && super.performAction(action, arguments)
+        }
+
+        val outcome = TextInserter.insert(
+            target = refusesSetText, text = punctuated, pressEnter = false, toClipboard = ::toClipboard,
+            keyboard = fieldKeyboard, keyboardStatus = KeyboardStatus.AVAILABLE
+        )
+
+        assertEquals(InsertOutcome.Inserted("keyboard"), outcome)
+        assertEquals(punctuated, field.text.toString())
+    }
+
+    @Test
+    fun `apostrophes, quotes and accents survive paste`() = runTest {
+        val refusesSetText = object : EditTextTarget(field) {
+            override fun performAction(action: Int, arguments: Bundle?): Boolean =
+                action != AccessibilityNodeInfo.ACTION_SET_TEXT && super.performAction(action, arguments)
+        }
+
+        val outcome = TextInserter.insert(
+            target = refusesSetText, text = punctuated, pressEnter = false, toClipboard = ::toClipboard,
+            keyboard = null, keyboardStatus = KeyboardStatus.OFF
+        )
+
+        assertEquals(InsertOutcome.Inserted("paste"), outcome)
+        assertEquals(listOf(punctuated), clipboard)
+        assertEquals(punctuated, field.text.toString())
     }
 }

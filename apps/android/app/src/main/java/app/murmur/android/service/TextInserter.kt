@@ -79,15 +79,18 @@ fun EditableTarget.canPaste(): Boolean =
 interface KeyboardInput {
     /**
      * The connected editor asked for raw key events rather than composed text: its
-     * `EditorInfo.inputType` is `TYPE_NULL`. Terminals do this, and they ignore `commitText`, so
-     * such editors are typed into with [sendTextAsKeyEvents] instead.
+     * `EditorInfo.inputType` is `TYPE_NULL`. Terminals do this, so such editors are typed into with
+     * [sendTextAsKeyEvents] instead.
      */
     val prefersKeyEvents: Boolean
 
     /** Commit [text] at the editor's cursor. False when there is no live connection to commit to. */
     fun commitText(text: String): Boolean
 
-    /** Type [text] as individual key events, for editors that only read the key stream (TYPE_NULL). */
+    /**
+     * Type [text] as key presses, for editors that read the key stream (TYPE_NULL); characters no
+     * plain key produces are committed in place (see [typeAsKeys]).
+     */
     fun sendTextAsKeyEvents(text: String): Boolean
 
     /** Send Enter (submit / newline) as a key-down/up pair. */

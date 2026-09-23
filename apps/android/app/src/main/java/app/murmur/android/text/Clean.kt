@@ -94,6 +94,8 @@ object Clean {
     // `\z` is the true end of input: Java's `$` would also match before a final line break.
 
     private val ALLOWED_CHARS = Regex("^[a-z0-9 .,!?'’-]*\\z")
+    /** A word ending in a bare apostrophe that is not a plural possessive: a cut contraction. */
+    private val CUT_WORD = Regex("[a-z](?<!s)['’](?![a-z0-9])")
     private val TERMINAL = Regex("(?<!\\.)[.!?]\\z")
     private val PRECEDING_BOUNDARY = Regex("(?:[.!?…][\"'”’)\\]]*[ \\t]*|\\n[ \\t]*)\\z")
     private val OPENER = Regex("^(?:so|well|alright|(?:okay|ok|yeah|yes|right|and|but|now|then)\\s*,?\\s*so)(?![a-z'’])")
@@ -159,6 +161,7 @@ object Clean {
         if (countWords(text) > maxWords) return no("long")
         if (!TERMINAL.containsMatchIn(text)) return no("unpunctuated")
         if (!ALLOWED_CHARS.containsMatchIn(lower)) return no("characters")
+        if (CUT_WORD.containsMatchIn(lower)) return no("truncated")
 
         val words = WORD.findAll(lower).map { it.value }.toList()
         fun has(set: Set<String>) = words.any { it in set }

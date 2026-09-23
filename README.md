@@ -4,7 +4,7 @@ Hold a key (or tap a pill), speak, and clean text lands wherever your cursor is.
 Wispr Flow–style voice dictation tool. It turns raw speech into polished, punctuated, formatted
 text that types itself into any application. Against a Murmur instance the speech and formatting
 models come with your account; on its own, or whenever you prefer, it uses a model you bring —
-OpenAI Whisper, Groq, Deepgram, ElevenLabs, or a local whisper server.
+OpenAI, Groq, Deepgram, ElevenLabs, or a local whisper server.
 
 This is a monorepo:
 

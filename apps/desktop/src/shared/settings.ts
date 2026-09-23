@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { replacementModel } from './models'
 import { ACCENT_PRESET_IDS } from './theme'
 
-export const SETTINGS_VERSION = 4
+export const SETTINGS_VERSION = 5
 
 /**
  * Where a model runs: the Murmur instance's managed models (cloud builds only) or a provider the
@@ -254,9 +254,11 @@ export type SettingsInput = z.input<typeof settingsSchema>
  * model freedom, ...) that the engine no longer has. They are dropped by the schema; the model
  * instructions move from `formatting.llm.instructions` to `formatting.instructions`.
  *
- * v3 files may still name a model its provider has since retired (shared/models.ts). The model is
- * swapped for the provider's recommended replacement once; a v4 file is the user's own choice and
- * is left alone even if it names a retired id.
+ * v3 files may still name a Groq or OpenAI model retired in 2026, v4 files one of the OpenAI
+ * transcription models that shut down on 2027-02-26 (shared/models.ts). The whole table runs on
+ * any file below the current version, so the model is swapped for the provider's recommended
+ * replacement once per bump; a file at the current version is the user's own choice and is left
+ * alone even if it names a retired id.
  */
 export function migrateSettings(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw
@@ -286,7 +288,7 @@ export function migrateSettings(raw: unknown): unknown {
     const { instructions, ...rest } = llm
     input = { ...input, formatting: { ...formatting, instructions, llm: rest } }
   }
-  if (version < 4) input = replaceRetiredModels(input)
+  if (version < SETTINGS_VERSION) input = replaceRetiredModels(input)
   return input === raw ? raw : { ...input, version: SETTINGS_VERSION }
 }
 

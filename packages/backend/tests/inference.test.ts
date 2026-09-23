@@ -263,6 +263,25 @@ describe('managed inference gateway', () => {
     expect((form.get('file') as File).size).toBe(wav.length)
   })
 
+  it('sends a gpt-transcribe upstream the language as the list field it takes', async () => {
+    const calls = stubFetch(() => jsonResponse({ text: 'hallo', languages: [{ code: 'de' }] }))
+    stubEnv({ ...STT_ENV, MURMUR_INFERENCE_STT_MODEL: 'gpt-transcribe' })
+    const t = setup()
+    const res = await t
+      .withIdentity(ada)
+      .fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { language: 'de', prompt: 'Murmur.' }))
+    expect(res.status).toBe(200)
+    // The apps keep sending `language`; OpenAI's guide says gpt-transcribe takes `languages` in
+    // its place and must not get both.
+    const form = calls[0].init.body as FormData
+    expect(form.get('model')).toBe('gpt-transcribe')
+    expect(form.getAll('languages[]')).toEqual(['de'])
+    expect(form.get('language')).toBeNull()
+    expect(form.get('prompt')).toBe('Murmur.')
+    // The response is passed through as the provider sent it, detected languages included.
+    expect(await res.json()).toEqual({ text: 'hallo', languages: [{ code: 'de' }] })
+  })
+
   it('names the available model when the client asks for another one', async () => {
     const calls = stubFetch(() => jsonResponse({}))
     const t = setup()

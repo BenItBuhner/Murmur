@@ -1,3 +1,4 @@
+import { sttLanguageField } from '@shared/languages'
 import {
   SttError,
   combineSignals,
@@ -15,9 +16,19 @@ import {
 interface VerboseJson {
   text?: string
   language?: string
+  /** What gpt-transcribe detected, most likely first; empty when it could not tell. */
+  languages?: Array<{ code?: string }>
   duration?: number
   segments?: Array<{ start?: number; end?: number; no_speech_prob?: number; avg_logprob?: number }>
   words?: Array<{ word?: string; start?: number; end?: number }>
+}
+
+/** The language a response reports: whisper's `language`, or the first of gpt-transcribe's list. */
+export function languageFromResponse(json: VerboseJson | undefined): string | undefined {
+  if (!json) return undefined
+  if (typeof json.language === 'string' && json.language) return json.language
+  const code = json.languages?.[0]?.code
+  return typeof code === 'string' && code ? code : undefined
 }
 
 /** Servers that rejected verbose_json once are remembered so we do not pay a failed round-trip again. */
@@ -69,7 +80,8 @@ export class OpenAiCompatibleStt implements SttProvider {
         form.append('timestamp_granularities[]', 'word')
         form.append('timestamp_granularities[]', 'segment')
       }
-      if (cfg.language && cfg.language !== 'auto') form.append('language', cfg.language)
+      if (cfg.language && cfg.language !== 'auto')
+        form.append(sttLanguageField(cfg.model), cfg.language)
       if (input.prompt) form.append('prompt', input.prompt)
       const headers: Record<string, string> = {}
       if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`
@@ -116,7 +128,7 @@ export class OpenAiCompatibleStt implements SttProvider {
         : undefined
       return {
         text: text.trim(),
-        language: json?.language,
+        language: languageFromResponse(json),
         durationSec: json?.duration,
         noSpeechProb: noSpeech,
         latencyMs: Math.round(performance.now() - started),

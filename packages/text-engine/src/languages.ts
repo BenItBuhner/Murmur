@@ -1,9 +1,9 @@
 /**
  * Dictation languages. ISO-639-1 codes, which every supported speech provider accepts
- * (OpenAI-compatible `language`, Deepgram `language`, ElevenLabs `language_code`), paired with the
- * English name the formatting model is told about. The Android app carries the same table in
- * app/murmur/android/settings/Languages.kt; keep the two identical so both apps offer the same
- * choices and build the same prompt.
+ * (OpenAI-compatible `language` or `languages[]`, Deepgram `language`, ElevenLabs `language_code`),
+ * paired with the English name the formatting model is told about. The Android app carries the
+ * same table in app/murmur/android/settings/Languages.kt; keep the two identical so both apps offer
+ * the same choices and build the same prompt.
  */
 
 export const AUTO_LANGUAGE = 'auto'
@@ -81,4 +81,16 @@ export function languageName(code: string | undefined | null): string | undefine
 export function languageLabel(code: string | undefined | null): string {
   if (!code || code.trim().toLowerCase() === AUTO_LANGUAGE) return 'Auto-detect'
   return languageName(code) ?? code
+}
+
+/**
+ * The multipart field that carries the dictation language to `/v1/audio/transcriptions` for
+ * `model`. OpenAI's `gpt-transcribe` family takes `languages[]`, a list of the languages the audio
+ * may be in, in place of the singular `language` every other OpenAI-compatible server (and
+ * OpenAI's older transcription models) accepts, and must not be sent both. Decided on the model id
+ * rather than the host so the same request works through a proxy in front of OpenAI. The Android
+ * client carries the same rule in app/murmur/android/stt/SttClient.kt.
+ */
+export function sttLanguageField(model: string): 'language' | 'languages[]' {
+  return /^gpt-transcribe(-|$)/i.test(model.trim()) ? 'languages[]' : 'language'
 }

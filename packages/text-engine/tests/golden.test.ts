@@ -15,6 +15,7 @@ import {
 import { prepareTranscript } from '../src/cleanup'
 import { applyDictionary } from '../src/dictionary'
 import { digitSignature } from '../src/numbers'
+import { repairContractions } from '../src/text'
 import { buildFormatMessages } from '../src/prompt'
 import type { DictionaryTerm, FormatContext } from '../src/types'
 import { cleanModelOutput, verifyOutput } from '../src/verify'
@@ -25,8 +26,8 @@ import { contextOf, loadFixtures } from '../eval/score'
  * messages the engine sends, the verdicts it reaches and the "needs no model" decisions it makes;
  * the Kotlin test in apps/android/app/src/test/.../GoldenEngineTest.kt reads the same JSON and
  * asserts its port produces byte-identical output. Regenerate with `npm run golden` after
- * changing the prompt, the verifier, the number reader or the clean-skip rules, and review the
- * diff.
+ * changing the prompt, the verifier, the number reader, the contraction repair or the clean-skip
+ * rules, and review the diff.
  */
 
 const GOLDEN = resolve(__dirname, '../golden/engine.golden.json')
@@ -148,6 +149,10 @@ const CHAT: FormatContext = { category: 'chat', tone: 'casual', dictionary: [], 
 const SKIP_CASES: SkipCase[] = [
   ...loadFixtures().map((f) => ({ name: f.id, transcript: f.transcript, context: contextOf(f) })),
   { name: 'curly apostrophe', transcript: 'Let’s ship it today.', context: CHAT },
+  { name: 'cut negative contraction', transcript: "I don' think so.", context: CHAT },
+  { name: 'cut curly negative contraction', transcript: 'They didn’ call back.', context: CHAT },
+  { name: 'other bare apostrophe', transcript: "It' fine, we' see.", context: CHAT },
+  { name: 'plural possessive', transcript: "The dogs' bowls are empty.", context: CHAT },
   { name: 'em dash', transcript: "Let's do it — tomorrow.", context: CHAT },
   { name: 'accented name', transcript: 'Send it to Zoë.', context: CHAT },
   { name: 'trailing off', transcript: 'See you tomorrow...', context: CHAT },
@@ -205,8 +210,19 @@ const DICTIONARY_CASES: DictionaryCase[] = [
   { name: 'straight and curly in one sentence', text: "bennet's and bennet’s", entries: [BENNETT] }
 ]
 
+/** Negative contractions a speech model cut ("don' think"), and the words that must stay as they are. */
+const CONTRACTION_CASES: string[] = [
+  "I don' think so. It's not what we need.",
+  'we couldn’t find it and they didn’ call back.',
+  "It doesn' matter, it hasn' shipped, you shouldn' care, ain' it?",
+  "DON' DO IT, Don' do it, I can'",
+  "I don't know, it’s fine, we won't",
+  "call it 'won' for now, the dogs' bowls, rock 'n' roll, nothin' doin'"
+]
+
 function build(): unknown {
   return {
+    contractions: CONTRACTION_CASES.map((text) => ({ text, repaired: repairContractions(text) })),
     prompts: PROMPT_CASES.map((c) => ({
       name: c.name,
       transcript: c.transcript,

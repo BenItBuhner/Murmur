@@ -1,4 +1,30 @@
 {
+  "contractions": [
+    {
+      "text": "I don' think so. It's not what we need.",
+      "repaired": "I don't think so. It's not what we need."
+    },
+    {
+      "text": "we couldn’t find it and they didn’ call back.",
+      "repaired": "we couldn’t find it and they didn’t call back."
+    },
+    {
+      "text": "It doesn' matter, it hasn' shipped, you shouldn' care, ain' it?",
+      "repaired": "It doesn't matter, it hasn't shipped, you shouldn't care, ain't it?"
+    },
+    {
+      "text": "DON' DO IT, Don' do it, I can'",
+      "repaired": "DON'T DO IT, Don't do it, I can't"
+    },
+    {
+      "text": "I don't know, it’s fine, we won't",
+      "repaired": "I don't know, it’s fine, we won't"
+    },
+    {
+      "text": "call it 'won' for now, the dogs' bowls, rock 'n' roll, nothin' doin'",
+      "repaired": "call it 'won' for now, the dogs' bowls, rock 'n' roll, nothin' doin'"
+    }
+  ],
   "prompts": [
     {
       "name": "minimal chat",
@@ -1259,6 +1285,58 @@
     {
       "name": "curly apostrophe",
       "transcript": "Let’s ship it today.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "cut negative contraction",
+      "transcript": "I don' think so.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "cut curly negative contraction",
+      "transcript": "They didn’ call back.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": true,
+      "reason": null
+    },
+    {
+      "name": "other bare apostrophe",
+      "transcript": "It' fine, we' see.",
+      "context": {
+        "category": "chat",
+        "tone": "casual",
+        "dictionary": [],
+        "language": "auto"
+      },
+      "maxWords": null,
+      "clean": false,
+      "reason": "truncated"
+    },
+    {
+      "name": "plural possessive",
+      "transcript": "The dogs' bowls are empty.",
       "context": {
         "category": "chat",
         "tone": "casual",

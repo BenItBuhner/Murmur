@@ -50,6 +50,40 @@ export const RETIRED_MODELS: readonly RetiredModel[] = [
     model: 'gpt-4.1-nano-2025-04-14',
     replacement: 'gpt-5.6-luna',
     retiredOn: '2026-10-23'
+  },
+  // Transcription models, announced 2026-08-26. OpenAI names gpt-live-transcribe or gpt-transcribe
+  // as the replacement; the former is the Realtime-session model, the latter the one for
+  // /v1/audio/transcriptions, which is what both apps send recordings to.
+  {
+    host: OPENAI_HOST,
+    model: 'whisper-1',
+    replacement: 'gpt-transcribe',
+    retiredOn: '2027-02-26'
+  },
+  {
+    host: OPENAI_HOST,
+    model: 'gpt-4o-transcribe',
+    replacement: 'gpt-transcribe',
+    retiredOn: '2027-02-26'
+  },
+  {
+    host: OPENAI_HOST,
+    model: 'gpt-4o-mini-transcribe',
+    replacement: 'gpt-transcribe',
+    retiredOn: '2027-02-26'
+  },
+  {
+    host: OPENAI_HOST,
+    model: 'gpt-4o-transcribe-diarize',
+    replacement: 'gpt-transcribe',
+    retiredOn: '2027-02-26'
+  },
+  // The dated snapshot has its own notice (2026-07-20) and its own replacement, the later snapshot.
+  {
+    host: OPENAI_HOST,
+    model: 'gpt-4o-mini-transcribe-2025-03-20',
+    replacement: 'gpt-4o-mini-transcribe-2025-12-15',
+    retiredOn: '2027-01-20'
   }
 ]
 

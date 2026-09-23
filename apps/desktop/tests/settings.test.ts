@@ -147,7 +147,7 @@ describe('settings schema', () => {
 
     it('leave files that already know about sources, and unset providers, alone', () => {
       const explicit = {
-        stt: { source: 'murmur', baseUrl: 'https://api.openai.com/v1', model: 'whisper-1' }
+        stt: { source: 'murmur', baseUrl: 'https://api.openai.com/v1', model: 'gpt-transcribe' }
       }
       expect(migrateSettings(explicit)).toBe(explicit)
       expect(parseSettings(explicit).stt.source).toBe('murmur')
@@ -202,7 +202,7 @@ describe('settings schema', () => {
     })
   })
 
-  describe('retired models (v4)', () => {
+  describe('retired models (v4: Groq, gpt-4.1-nano)', () => {
     const groq = 'https://api.groq.com/openai/v1'
 
     it('moves Groq speech and formatting models onto the recommended replacements', () => {
@@ -268,9 +268,9 @@ describe('settings schema', () => {
       expect(stale.formatting.llm.model).toBe('openai/gpt-oss-20b')
     })
 
-    it('runs once: a v4 file naming a retired id is the user’s own choice', () => {
+    it('runs once: a file at the current version naming a retired id is the user’s own choice', () => {
       const chosen = {
-        version: 4,
+        version: SETTINGS_VERSION,
         stt: { source: 'custom', baseUrl: groq, model: 'whisper-large-v3-turbo' },
         formatting: { llm: { source: 'custom', sameAsStt: true, model: 'llama-3.1-8b-instant' } }
       }
@@ -289,6 +289,93 @@ describe('settings schema', () => {
         stt: { source: 'custom', baseUrl: groq, model: 'whisper-large-v3-turbo' }
       }
       expect(migrateSettings(current)).toBe(current)
+    })
+  })
+
+  describe('retiring OpenAI transcription models (v5)', () => {
+    const openai = 'https://api.openai.com/v1'
+
+    it('moves a v4 install off the models OpenAI shuts down on 2027-02-26', () => {
+      const v4 = {
+        version: 4,
+        stt: {
+          source: 'custom',
+          presetId: 'openai',
+          baseUrl: openai,
+          model: 'gpt-4o-mini-transcribe',
+          fallbackModel: 'whisper-1'
+        },
+        formatting: { llm: { source: 'custom', sameAsStt: true, model: 'gpt-4o-mini' } }
+      }
+      expect((migrateSettings(v4) as { version: number }).version).toBe(SETTINGS_VERSION)
+      const s = parseSettings(v4)
+      expect(s.version).toBe(SETTINGS_VERSION)
+      expect(s.stt.model).toBe('gpt-transcribe')
+      expect(s.stt.fallbackModel).toBe('gpt-transcribe')
+      expect(s.stt.presetId).toBe('openai')
+      // The formatting model is not retiring; the rest of the file is untouched.
+      expect(s.formatting.llm.model).toBe('gpt-4o-mini')
+      // Every model in OpenAI's notice has the same replacement, the diarization model included.
+      for (const model of ['whisper-1', 'gpt-4o-transcribe', 'gpt-4o-transcribe-diarize']) {
+        expect(parseSettings({ version: 4, stt: { baseUrl: openai, model } }).stt.model).toBe(
+          'gpt-transcribe'
+        )
+      }
+      // The dated snapshot follows its own notice (2027-01-20) onto the later snapshot.
+      expect(
+        parseSettings({
+          version: 4,
+          stt: { baseUrl: openai, model: 'gpt-4o-mini-transcribe-2025-03-20' }
+        }).stt.model
+      ).toBe('gpt-4o-mini-transcribe-2025-12-15')
+    })
+
+    it('leaves the same ids alone on every other host', () => {
+      // whisper-1 is the id local servers and proxies answer to; only OpenAI is retiring it.
+      for (const baseUrl of [
+        'http://127.0.0.1:8080/v1',
+        'http://127.0.0.1:1234/v1',
+        'https://litellm.example.com/v1',
+        'https://api.groq.com/openai/v1'
+      ]) {
+        const file = {
+          version: 4,
+          stt: {
+            source: 'custom',
+            baseUrl,
+            model: 'whisper-1',
+            fallbackModel: 'gpt-4o-mini-transcribe'
+          }
+        }
+        expect(migrateSettings(file)).toBe(file)
+        const s = parseSettings(file)
+        expect(s.stt.model).toBe('whisper-1')
+        expect(s.stt.fallbackModel).toBe('gpt-4o-mini-transcribe')
+      }
+      // No server configured: there is nothing to judge the id against.
+      const unset = { version: 4, stt: { baseUrl: '', model: 'whisper-1' } }
+      expect(migrateSettings(unset)).toBe(unset)
+      expect(parseSettings(unset).stt.model).toBe('whisper-1')
+    })
+
+    it('runs once, and catches up a file that missed the earlier migration too', () => {
+      // A file already at v5 naming a retiring id is the user's own choice.
+      const chosen = {
+        version: SETTINGS_VERSION,
+        stt: { source: 'custom', baseUrl: openai, model: 'gpt-4o-mini-transcribe' }
+      }
+      expect(migrateSettings(chosen)).toBe(chosen)
+      expect(parseSettings(chosen).stt.model).toBe('gpt-4o-mini-transcribe')
+      // A v3 file gets the 2026 retirements and this one in the same pass.
+      const v3 = {
+        version: 3,
+        stt: { source: 'custom', baseUrl: openai, model: 'whisper-1' },
+        formatting: { llm: { source: 'custom', sameAsStt: true, model: 'gpt-4.1-nano' } }
+      }
+      const s = parseSettings(v3)
+      expect(s.version).toBe(SETTINGS_VERSION)
+      expect(s.stt.model).toBe('gpt-transcribe')
+      expect(s.formatting.llm.model).toBe('gpt-5.6-luna')
     })
   })
 })

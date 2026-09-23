@@ -11,11 +11,14 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 private const val GROQ = "https://api.groq.com/openai/v1"
+private const val OPENAI = "https://api.openai.com/v1"
 private const val PREFS = "murmur_settings"
+/** The current generation of the retired-model migration (SettingsStore.MODEL_MIGRATION). */
+private const val GENERATION = 2
 
 /**
  * An install that still names a model its provider retired is moved onto the replacement when the
- * store opens, exactly once: after that whatever it names is the user's own choice.
+ * store opens, exactly once per generation: after that whatever it names is the user's own choice.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -55,7 +58,47 @@ class SettingsMigrationTest {
         // Persisted, and the run is recorded.
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         assertEquals("openai/gpt-oss-20b", prefs.getString("llmModel", null))
-        assertEquals(1, prefs.getInt("modelMigration", 0))
+        assertEquals(GENERATION, prefs.getInt("modelMigration", 0))
+    }
+
+    @Test
+    fun `a store from the first generation is moved off the OpenAI transcription models`() {
+        // Stamped by a build that knew only the 2026 retirements; whisper-1 and the gpt-4o
+        // transcription models shut down on 2027-02-26.
+        seed(
+            "sttSource" to "custom",
+            "sttBaseUrl" to OPENAI,
+            "sttModel" to "gpt-4o-mini-transcribe",
+            "sttFallbackModel" to "whisper-1",
+            "llmSameAsStt" to true,
+            "llmModel" to "gpt-4o-mini",
+            "modelMigration" to 1
+        )
+        val s = SettingsStore(context).get()
+        assertEquals("gpt-transcribe", s.sttModel)
+        assertEquals("gpt-transcribe", s.sttFallbackModel)
+        assertEquals("gpt-4o-mini", s.llmModel)
+        assertEquals(OPENAI, s.sttBaseUrl)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        assertEquals("gpt-transcribe", prefs.getString("sttModel", null))
+        assertEquals(GENERATION, prefs.getInt("modelMigration", 0))
+    }
+
+    @Test
+    fun `the same ids on another host are left alone`() {
+        // whisper-1 is what local servers and proxies answer to; only OpenAI is retiring it.
+        seed(
+            "sttSource" to "custom",
+            "sttBaseUrl" to "http://127.0.0.1:8080/v1",
+            "sttModel" to "whisper-1",
+            "sttFallbackModel" to "gpt-4o-mini-transcribe",
+            "modelMigration" to 1
+        )
+        val s = SettingsStore(context).get()
+        assertEquals("whisper-1", s.sttModel)
+        assertEquals("gpt-4o-mini-transcribe", s.sttFallbackModel)
+        // The run still counts: it is the table that had nothing to say here.
+        assertEquals(GENERATION, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("modelMigration", 0))
     }
 
     @Test
@@ -66,15 +109,24 @@ class SettingsMigrationTest {
             "sttModel" to "whisper-large-v3-turbo",
             "llmSameAsStt" to true,
             "llmModel" to "llama-3.1-8b-instant",
-            "modelMigration" to 1
+            "modelMigration" to GENERATION
         )
         assertEquals("llama-3.1-8b-instant", SettingsStore(context).get().llmModel)
+        // The same for a retiring speech model on OpenAI's own host.
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        seed(
+            "sttSource" to "custom",
+            "sttBaseUrl" to OPENAI,
+            "sttModel" to "gpt-4o-mini-transcribe",
+            "modelMigration" to GENERATION
+        )
+        assertEquals("gpt-4o-mini-transcribe", SettingsStore(context).get().sttModel)
     }
 
     @Test
     fun `a fresh install has nothing to move and is simply stamped`() {
         val s = SettingsStore(context).get()
         assertEquals("", s.llmModel)
-        assertEquals(1, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("modelMigration", 0))
+        assertEquals(GENERATION, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("modelMigration", 0))
     }
 }

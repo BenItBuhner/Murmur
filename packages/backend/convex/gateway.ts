@@ -1,6 +1,7 @@
 import { internal } from './_generated/api'
 import { httpAction, type ActionCtx } from './_generated/server'
 import { formatTranscript } from '../../text-engine/src/format'
+import { sttLanguageField } from '../../text-engine/src/languages'
 import type { ChatMessage, ChatOptions, ChatResult } from '../../text-engine/src/types'
 import {
   MAX_COMPLETION_TOKENS,
@@ -103,10 +104,14 @@ export const transcriptions = httpAction(async (ctx, request) => {
     new Blob([file.data as BlobPart], { type: file.type || 'audio/wav' }),
     file.filename || 'audio.wav'
   )
-  form.append('model', upstreamModelFor(upstream, gate.plan))
+  const upstreamModel = upstreamModelFor(upstream, gate.plan)
+  form.append('model', upstreamModel)
   for (const [key, values] of Object.entries(fields)) {
     if (!STT_PASSTHROUGH_FIELDS.has(key)) continue
-    for (const value of values) form.append(key, value)
+    // Clients speak to the Murmur alias and send the singular `language`; an OpenAI gpt-transcribe
+    // upstream takes `languages[]` instead.
+    const upstreamKey = key === 'language' ? sttLanguageField(upstreamModel) : key
+    for (const value of values) form.append(upstreamKey, value)
   }
   const headers: Record<string, string> = {}
   if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`

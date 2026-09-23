@@ -33,8 +33,10 @@ export const STT_PRESETS: SttPreset[] = [
     name: 'OpenAI',
     kind: 'openai-compatible',
     baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o-mini-transcribe',
-    models: ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'],
+    // whisper-1, gpt-4o-transcribe and gpt-4o-mini-transcribe shut down on 2027-02-26;
+    // gpt-transcribe is the file-transcription model OpenAI recommends instead (shared/models.ts).
+    defaultModel: 'gpt-transcribe',
+    models: ['gpt-transcribe'],
     requiresKey: true,
     supportsDiscovery: true,
     docsUrl: 'https://platform.openai.com/docs/guides/speech-to-text'

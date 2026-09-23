@@ -71,6 +71,7 @@ export {
   LANGUAGE_OPTIONS,
   languageName,
   languageLabel,
+  sttLanguageField,
   type Language
 } from './languages'
 export {

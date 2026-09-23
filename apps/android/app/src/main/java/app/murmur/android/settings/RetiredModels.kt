@@ -34,7 +34,16 @@ object RetiredModels {
         RetiredModel(GROQ_HOST, "distil-whisper-large-v3-en", "whisper-large-v3-turbo", "2025-08-23"),
         // https://developers.openai.com/api/docs/deprecations
         RetiredModel(OPENAI_HOST, "gpt-4.1-nano", "gpt-5.6-luna", "2026-10-23"),
-        RetiredModel(OPENAI_HOST, "gpt-4.1-nano-2025-04-14", "gpt-5.6-luna", "2026-10-23")
+        RetiredModel(OPENAI_HOST, "gpt-4.1-nano-2025-04-14", "gpt-5.6-luna", "2026-10-23"),
+        // Transcription models, announced 2026-08-26. OpenAI names gpt-live-transcribe or
+        // gpt-transcribe as the replacement; the former is the Realtime-session model, the latter
+        // the one for /v1/audio/transcriptions, which is what both apps send recordings to.
+        RetiredModel(OPENAI_HOST, "whisper-1", "gpt-transcribe", "2027-02-26"),
+        RetiredModel(OPENAI_HOST, "gpt-4o-transcribe", "gpt-transcribe", "2027-02-26"),
+        RetiredModel(OPENAI_HOST, "gpt-4o-mini-transcribe", "gpt-transcribe", "2027-02-26"),
+        RetiredModel(OPENAI_HOST, "gpt-4o-transcribe-diarize", "gpt-transcribe", "2027-02-26"),
+        // The dated snapshot has its own notice (2026-07-20) and its own replacement, the later snapshot.
+        RetiredModel(OPENAI_HOST, "gpt-4o-mini-transcribe-2025-03-20", "gpt-4o-mini-transcribe-2025-12-15", "2027-01-20")
     )
 
     /** Host of an API base URL, lower-cased; empty when the URL does not parse. */

@@ -288,7 +288,8 @@ class SettingsStore(context: Context) {
         val stale = LEGACY_CLEANUP_KEYS.filter { prefs.contains(it) }
         if (stale.isNotEmpty()) prefs.edit().apply { for (k in stale) remove(k) }.apply()
         // Models the hosted providers retired (RetiredModels) are swapped for the recommended
-        // replacement once; from then on whatever the store names is the user's own choice.
+        // replacement once per generation; a store stamped with the current one names the user's
+        // own choice, whatever it is.
         if (prefs.getInt(MODEL_MIGRATION_KEY, 0) < MODEL_MIGRATION) {
             update(SettingsOrigin.LOCAL) { RetiredModels.migrate(it) }
             prefs.edit().putInt(MODEL_MIGRATION_KEY, MODEL_MIGRATION).apply()
@@ -424,8 +425,13 @@ class SettingsStore(context: Context) {
     companion object {
         private const val LEGACY_ANCHOR_X = "overlayAnchorX"
         private const val LEGACY_OFFSET_DP = "overlayOffsetDp"
-        /** Bump when RetiredModels gains entries that existing installs should be moved off. */
-        private const val MODEL_MIGRATION = 1
+        /**
+         * Bump when RetiredModels gains entries that existing installs should be moved off. The
+         * whole table runs again on a store below this generation (same as the desktop settings
+         * version). 1: Groq's 2026-08-16 retirements and gpt-4.1-nano; 2: the OpenAI transcription
+         * models that shut down on 2027-02-26.
+         */
+        private const val MODEL_MIGRATION = 2
         private const val MODEL_MIGRATION_KEY = "modelMigration"
         private val LEGACY_CLEANUP_KEYS = listOf(
             "removeFillers", "hesitations", "hesitationPhrases", "collapseRepeats", "repetitionScope",

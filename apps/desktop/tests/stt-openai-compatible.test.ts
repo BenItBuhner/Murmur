@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { OpenAiCompatibleStt, spansFromVerbose } from '@core/stt/openai-compatible'
+import {
+  OpenAiCompatibleStt,
+  languageFromResponse,
+  spansFromVerbose
+} from '@core/stt/openai-compatible'
 import type { SttConfig } from '@core/stt/types'
 
 const cfg = (baseUrl: string): SttConfig => ({
@@ -111,6 +115,48 @@ describe('OpenAiCompatibleStt', () => {
     await expect(
       new OpenAiCompatibleStt().transcribe({ wav }, cfg('http://d.test/v1'))
     ).rejects.toMatchObject({ kind: 'model', status: 400 })
+  })
+
+  it('sends gpt-transcribe the languages list and every other model the language field', async () => {
+    const seen = serve([
+      { status: 200, body: { text: 'hallo welt', languages: [{ code: 'de' }] } },
+      { status: 200, body: { text: 'hallo welt', language: 'german' } },
+      { status: 200, body: { text: 'hello', languages: [] } }
+    ])
+    const stt = new OpenAiCompatibleStt()
+    const german = { ...cfg('http://e.test/v1'), language: 'de' }
+    // OpenAI's guide: for gpt-transcribe, `languages` replaces `language`; never send both.
+    const out = await stt.transcribe({ wav }, { ...german, model: 'gpt-transcribe' })
+    expect(seen[0].fields['languages[]']).toEqual(['de'])
+    expect(seen[0].fields.language).toBeUndefined()
+    // The detected language comes back as a list; the first entry is the answer.
+    expect(out.language).toBe('de')
+    // Whisper-style models, on OpenAI or anywhere else, keep the singular field.
+    const whisper = await stt.transcribe({ wav }, { ...german, model: 'whisper-large-v3-turbo' })
+    expect(seen[1].fields.language).toEqual(['de'])
+    expect(seen[1].fields['languages[]']).toBeUndefined()
+    expect(whisper.language).toBe('german')
+    // Auto-detect sends neither, and an empty detection list reports no language.
+    const auto = await stt.transcribe(
+      { wav },
+      { ...cfg('http://e.test/v1'), model: 'gpt-transcribe' }
+    )
+    expect(seen[2].fields.language).toBeUndefined()
+    expect(seen[2].fields['languages[]']).toBeUndefined()
+    expect(auto.language).toBeUndefined()
+  })
+
+  it('reads the language from whisper’s field first, then gpt-transcribe’s list', () => {
+    expect(languageFromResponse(undefined)).toBeUndefined()
+    expect(languageFromResponse({ text: 'x' })).toBeUndefined()
+    expect(languageFromResponse({ text: 'x', languages: [] })).toBeUndefined()
+    expect(languageFromResponse({ text: 'x', languages: [{ code: 'fr' }, { code: 'en' }] })).toBe(
+      'fr'
+    )
+    expect(
+      languageFromResponse({ text: 'x', language: 'french', languages: [{ code: 'en' }] })
+    ).toBe('french')
+    expect(languageFromResponse({ text: 'x', language: '', languages: [{}] })).toBeUndefined()
   })
 
   it('reads spans from words, then segments, and ignores malformed entries', () => {

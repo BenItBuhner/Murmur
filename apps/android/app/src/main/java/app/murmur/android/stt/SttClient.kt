@@ -122,6 +122,26 @@ fun toSttException(err: Throwable, fallback: String = "Transcription failed"): S
     else -> SttException(err.message ?: fallback, SttErrorKind.UNKNOWN)
 }
 
+/**
+ * The multipart field that carries the dictation language to `/v1/audio/transcriptions` for
+ * [model]. OpenAI's `gpt-transcribe` family takes `languages[]`, a list of the languages the audio
+ * may be in, in place of the singular `language` every other OpenAI-compatible server (and OpenAI's
+ * older transcription models) accepts, and must not be sent both. Port of `sttLanguageField` in
+ * packages/text-engine/src/languages.ts.
+ */
+fun sttLanguageField(model: String): String =
+    if (Regex("^gpt-transcribe(-|$)", RegexOption.IGNORE_CASE).containsMatchIn(model.trim())) "languages[]" else "language"
+
+/**
+ * The language a transcription response reports: whisper's `language`, or the first entry of
+ * gpt-transcribe's detected `languages` list. Null when neither says.
+ */
+fun languageFromResponse(json: JSONObject): String? {
+    json.optString("language").takeIf { it.isNotEmpty() }?.let { return it }
+    val code = json.optJSONArray("languages")?.optJSONObject(0)?.optString("code") ?: return null
+    return code.takeIf { it.isNotEmpty() }
+}
+
 /** Rank model ids so speech models float to the top of pickers. */
 fun rankSpeechModels(ids: List<String>): List<String> {
     fun score(id: String): Int {
@@ -246,7 +266,7 @@ object SttClient {
                 form.addFormDataPart("timestamp_granularities[]", "word")
                 form.addFormDataPart("timestamp_granularities[]", "segment")
             }
-            if (cfg.language.isNotEmpty() && cfg.language != "auto") form.addFormDataPart("language", cfg.language)
+            if (cfg.language.isNotEmpty() && cfg.language != "auto") form.addFormDataPart(sttLanguageField(cfg.model), cfg.language)
             if (!prompt.isNullOrEmpty()) form.addFormDataPart("prompt", prompt)
             val req = Request.Builder().url(url).post(form.build()).apply {
                 if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}")
@@ -289,7 +309,7 @@ object SttClient {
             if (contentType.contains("json")) {
                 val json = JSONObject(bodyText)
                 text = json.optString("text", "")
-                language = json.optString("language").takeIf { it.isNotEmpty() }
+                language = languageFromResponse(json)
                 duration = if (json.has("duration")) json.optDouble("duration") else null
                 val segments = json.optJSONArray("segments")
                 if (segments != null && segments.length() > 0) {

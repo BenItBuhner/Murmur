@@ -72,7 +72,7 @@ android {
         // building repository so forks update from their own releases.
         buildConfigField(
             "String", "UPDATE_REPO",
-            "\"${envOrProp("MURMUR_UPDATE_REPO").ifBlank { "BenItBuhner/voxflow" }}\""
+            "\"${envOrProp("MURMUR_UPDATE_REPO").ifBlank { "BenItBuhner/Murmur" }}\""
         )
     }
 

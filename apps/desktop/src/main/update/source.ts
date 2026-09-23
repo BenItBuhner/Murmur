@@ -9,7 +9,7 @@ export interface UpdateSource {
 }
 
 /** Last resort when neither the build nor package.json names a repository. */
-export const DEFAULT_REPO = 'BenItBuhner/voxflow'
+export const DEFAULT_REPO = 'BenItBuhner/Murmur'
 export const GITHUB_API = 'https://api.github.com'
 export const GITHUB_ORIGIN = 'https://github.com'
 

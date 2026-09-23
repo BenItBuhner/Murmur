@@ -7,7 +7,7 @@ param(
     [switch]$Android,
     [switch]$PrintUrl,
     [string]$InstallDir = $env:MURMUR_INSTALL_DIR,
-    [string]$Repo = $(if ($env:MURMUR_REPO) { $env:MURMUR_REPO } else { 'BenItBuhner/voxflow' })
+    [string]$Repo = $(if ($env:MURMUR_REPO) { $env:MURMUR_REPO } else { 'BenItBuhner/Murmur' })
 )
 
 Set-StrictMode -Version Latest

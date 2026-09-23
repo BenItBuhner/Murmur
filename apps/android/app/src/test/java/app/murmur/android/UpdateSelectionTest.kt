@@ -15,11 +15,11 @@ class UpdateSelectionTest {
     private fun release(tag: String, prerelease: Boolean = tag.contains('-'), draft: Boolean = false, assets: List<GithubAssetDto> = emptyList()) =
         GithubReleaseDto(
             tag_name = tag, name = "Murmur $tag", draft = draft, prerelease = prerelease,
-            published_at = "2026-09-01T10:00:00Z", html_url = "https://github.com/BenItBuhner/voxflow/releases/tag/$tag",
+            published_at = "2026-09-01T10:00:00Z", html_url = "https://github.com/BenItBuhner/Murmur/releases/tag/$tag",
             body = "notes", assets = assets
         )
 
-    private fun asset(name: String, base: String = "https://github.com/BenItBuhner/voxflow/releases/download/v0.2.0") =
+    private fun asset(name: String, base: String = "https://github.com/BenItBuhner/Murmur/releases/download/v0.2.0") =
         GithubAssetDto(name, 1234, "$base/$name")
 
     @Test
@@ -78,11 +78,11 @@ class UpdateSelectionTest {
     fun `parses the GitHub feed and finds the APK plus its checksum`() {
         val body = """
             [{"tag_name":"v0.2.0","name":"Murmur v0.2.0","draft":false,"prerelease":false,
-              "published_at":"2026-09-01T10:00:00Z","html_url":"https://github.com/BenItBuhner/voxflow/releases/tag/v0.2.0",
+              "published_at":"2026-09-01T10:00:00Z","html_url":"https://github.com/BenItBuhner/Murmur/releases/tag/v0.2.0",
               "body":"notes","zipball_url":"ignored","author":{"login":"x"},
               "assets":[
-                {"name":"Murmur-0.2.0-android.apk","size":42,"browser_download_url":"https://github.com/BenItBuhner/voxflow/releases/download/v0.2.0/Murmur-0.2.0-android.apk","content_type":"application/vnd.android.package-archive"},
-                {"name":"SHA256SUMS.txt","size":1,"browser_download_url":"https://github.com/BenItBuhner/voxflow/releases/download/v0.2.0/SHA256SUMS.txt"}
+                {"name":"Murmur-0.2.0-android.apk","size":42,"browser_download_url":"https://github.com/BenItBuhner/Murmur/releases/download/v0.2.0/Murmur-0.2.0-android.apk","content_type":"application/vnd.android.package-archive"},
+                {"name":"SHA256SUMS.txt","size":1,"browser_download_url":"https://github.com/BenItBuhner/Murmur/releases/download/v0.2.0/SHA256SUMS.txt"}
               ]}]
         """.trimIndent()
         val releases = UpdateSelection.parseReleases(body)
@@ -106,7 +106,7 @@ class UpdateSelectionTest {
     @Test
     fun `only trusts assets from the release origin`() {
         val gh = "https://github.com"
-        assertTrue(UpdateSelection.isTrustedAssetUrl("https://github.com/BenItBuhner/voxflow/releases/download/v0.2.0/x.apk", gh))
+        assertTrue(UpdateSelection.isTrustedAssetUrl("https://github.com/BenItBuhner/Murmur/releases/download/v0.2.0/x.apk", gh))
         assertFalse(UpdateSelection.isTrustedAssetUrl("https://evil.example/x.apk", gh))
         assertFalse(UpdateSelection.isTrustedAssetUrl("http://github.com/x.apk", gh))
         assertTrue(UpdateSelection.isTrustedAssetUrl("http://127.0.0.1:8080/x.apk", "http://127.0.0.1:8080"))

@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.5.4': [
+    '**Contractions arrive whole.** A speech model asked for a timestamped transcript can drop the t of a negative contraction in front of a consonant ("I don\' recall", "didn\' call", "doesn\' matter"), and short clean dictations went into the field exactly like that. Murmur now restores the missing letter first, in every app and with formatting on, light or off; the apostrophe keeps its shape, and quoted words and dropped-g dialect ("nothin\'") are left alone.',
+    "**OpenAI speech preset moves to `gpt-transcribe`.** OpenAI removes `whisper-1`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` and `gpt-4o-transcribe-diarize` from its API on 26 February 2027; the preset now offers `gpt-transcribe`, and an install that still names one of those models on OpenAI's own host is moved to it once, on both apps. The same model ids on Groq, a proxy or a local server are untouched.",
+    "**One-line installers name the repository.** `install.sh` and `install.ps1` download from the repository's current name, `BenItBuhner/Murmur`, instead of relying on GitHub redirecting the old one."
+  ],
   '0.5.3': [
     '**Enter arrives on its own.** Saying "press enter" or "send it" at the end of a dictation now sends Enter as a separate keystroke a moment after the text, on every insertion path. Before, both landed in the same instant, and programs over SSH read them as one paste: Claude Code dropped the whole dictation and kept only the Enter, Gemini CLI and Codex CLI took the Enter for a newline inside the paste. Now the text lands, then the command runs.',
     '**Terminals keep every character.** When Murmur types into a terminal key by key (Termux, ConnectBot and other apps that take raw keystrokes), a curly quote, a dash, an ellipsis or an accented letter used to change how the whole dictation was sent, and some letters went out as Alt chords the terminal read as Escape sequences. Each character now goes in as a plain key when a plain key types it and is committed as text otherwise, so contractions, quotes, dashes and accents arrive as spoken.',

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SttError, type TranscribeOutput } from '@core/stt'
 import { defaultSettings, type Settings } from '@shared/settings'
@@ -26,12 +26,13 @@ const provider = vi.hoisted(() => ({
   requests: 0,
   /** What the next transcription requests do: fail like a slow server, or answer. */
   outcome: 'timeout' as 'timeout' | 'ok',
+  text: 'um so hello from murmur this is a test',
   transcribe: async (): Promise<TranscribeOutput> => {
     provider.requests++
     if (provider.outcome === 'timeout')
       throw new SttError('The request timed out after 45000 ms', 'timeout')
     return {
-      text: 'um so hello from murmur this is a test',
+      text: provider.text,
       language: 'en',
       durationSec: 1.5,
       latencyMs: 12
@@ -144,6 +145,7 @@ describe('DictationController retry', () => {
     inject.calls.length = 0
     provider.requests = 0
     provider.outcome = 'timeout'
+    provider.text = 'um so hello from murmur this is a test'
     controller = new DictationController({
       settings: new FakeSettings() as never,
       history,
@@ -263,4 +265,37 @@ describe('DictationController retry', () => {
     expect(history.get(id)!.recording).toBeUndefined()
     expect(recordings.info().count).toBe(0)
   })
+
+  it.each(['off', 'light'] as const)(
+    'types a contraction the speech model cut whole with formatting %s',
+    async (mode) => {
+      // A real speech model's verbose_json for "I don't think so. It's not what we need."
+      const captured = JSON.parse(
+        readFileSync(
+          resolve(__dirname, '../../../packages/text-engine/tests/fixtures/live/transcribe-1.verbose.dont-think-so.json'),
+          'utf8'
+        )
+      ) as { text: string }
+      expect(captured.text).toBe("I don' think so. It's not what we need.")
+      const settings = new FakeSettings()
+      settings.value.formatting.mode = mode
+      controller = new DictationController({
+        settings: settings as never,
+        history,
+        recorder: new FakeRecorder() as never,
+        recordings,
+        hook: hook as never,
+        inference: inference as never,
+        overlay: { setState: (s) => states.push(s), playSound: () => undefined },
+        getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
+      })
+      provider.outcome = 'ok'
+      provider.text = captured.text
+      controller.handle({ type: 'start', mode: 'hold' })
+      controller.handle({ type: 'stop' })
+      await settle()
+      expect(inject.calls).toEqual([{ text: "I don't think so. It's not what we need. ", method: 'auto' }])
+      expect(history.list().entries[0].rawText).toBe(captured.text)
+    }
+  )
 })

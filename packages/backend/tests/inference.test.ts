@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, internal } from '../convex/_generated/api'
 import {
@@ -644,6 +646,36 @@ describe('POST /v1/format', () => {
     expect(used.status.outcome).toBe('used')
     expect(used.text).toBe(answer)
     expect(used.modelText).toBe(answer)
+  })
+
+  it('restores the "t" a speech model cut from a contraction, on captured bytes', async () => {
+    // A real speech model's verbose_json and formatting model's completion (text-engine live fixtures).
+    const live = (name: string): Record<string, unknown> =>
+      JSON.parse(readFileSync(resolve(__dirname, '../../text-engine/tests/fixtures/live', name), 'utf8'))
+    stubEnv(LLM_ENV)
+    const completion = live('complete.what-are-you-referring-to.json')
+    const calls = stubFetch(() => jsonResponse(completion))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+
+    const short = live('transcribe-1.verbose.dont-think-so.json').text as string
+    expect(short).toBe("I don' think so. It's not what we need.")
+    for (const [transcript, want] of [
+      [short, "I don't think so. It's not what we need."],
+      [short.replace(/'/g, '’'), 'I don’t think so. It’s not what we need.']
+    ]) {
+      const skipped = await (await asAda.fetch('/v1/format', body(transcript))).json()
+      expect(skipped.status.outcome).toBe('skipped-clean')
+      expect(skipped.text).toBe(want)
+    }
+    expect(calls).toHaveLength(0)
+
+    const long = live('transcribe-1.verbose.what-are-you-referring-to.json').text as string
+    const used = await (await asAda.fetch('/v1/format', body(long))).json()
+    expect(used.status.outcome).toBe('used')
+    expect(used.text).toBe("What are you referring to? I don't recall. I have the worst memory in the world.")
+    const sent = JSON.parse(calls[0].init.body as string).messages.at(-1).content as string
+    expect(sent).toContain("Transcript:\nWhat are you referring to? I don't recall.")
   })
 
   it('retries once in strict mode when the verifier rejects, and falls back when it fails again', async () => {

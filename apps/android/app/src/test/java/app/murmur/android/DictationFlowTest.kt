@@ -60,6 +60,9 @@ class DictationFlowTest {
     /** How many transcription requests the "server" still refuses on the free plan's weekly words. */
     @Volatile private var refusals = 0
 
+    /** A captured transcription response to answer with instead of the sample transcript. */
+    @Volatile private var sttBody: String? = null
+
     @Before
     fun startMockStt() {
         server.dispatcher = object : Dispatcher() {
@@ -78,9 +81,12 @@ class DictationFlowTest {
                            "resetsAt":${System.currentTimeMillis() + 172_800_000L},"upgradeUrl":"https://murmur.app/account?upgrade=yearly"}}"""
                     )
                 }
+                // The captured clip is shorter than the sample audio: the rest of it, which transcript
+                // recovery asks for, holds no more speech.
+                val body = sttBody?.let { if (requests.size == 1) it else """{"text":""}""" }
                 return MockResponse()
                     .setHeader("Content-Type", "application/json")
-                    .setBody("""{"text":"$TRANSCRIPT","language":"en","segments":[{"no_speech_prob":0.01}]}""")
+                    .setBody(body ?: """{"text":"$TRANSCRIPT","language":"en","segments":[{"no_speech_prob":0.01}]}""")
             }
         }
         server.start()
@@ -93,7 +99,7 @@ class DictationFlowTest {
     }
 
     /** A focused field in a real activity, with the controller's sink pointed at it. */
-    private fun setUpField(): Pair<Activity, EditText> {
+    private fun setUpField(mode: FormattingMode = FormattingMode.LIGHT): Pair<Activity, EditText> {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val field = EditText(activity).apply { hint = "Dictate into me…" }
         activity.setContentView(field)
@@ -105,7 +111,7 @@ class DictationFlowTest {
                 sttApiKey = "test-key",
                 sttModel = "mock-whisper",
                 sttFallbackModel = "",
-                formattingMode = FormattingMode.LIGHT,
+                formattingMode = mode,
                 useFixtureAudio = true,
                 onboardingComplete = true
             )
@@ -237,6 +243,36 @@ class DictationFlowTest {
         assertFalse(done.injected)
         val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         assertEquals(lightText(), clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+    }
+
+    /**
+     * The speech model's captured `verbose_json` for "I don't think so. It's not what we need.",
+     * with the "t" it dropped ([LiveFixtures]), parsed by the real client and inserted into the field.
+     */
+    private fun dictateCutContraction(mode: FormattingMode): String {
+        sttBody = LiveFixtures.raw("transcribe-1.verbose.dont-think-so.json")
+        val (activity, field) = setUpField(mode)
+        DictationController.start(activity)
+        DictationController.stopAndInsert(activity)
+        assertEquals(DictationState.Success("Inserted"), awaitOutcome(timeoutMs = 30_000))
+        val entry = HistoryStore.get(activity).entries.value.first()
+        assertEquals("History keeps what the speech model returned", "I don' think so. It's not what we need.", entry.rawText)
+        return field.text.toString()
+    }
+
+    @Test
+    fun `a contraction the speech model cut lands whole with formatting off`() {
+        assertEquals("I don't think so. It's not what we need. ", dictateCutContraction(FormattingMode.OFF))
+    }
+
+    @Test
+    fun `a contraction the speech model cut lands whole in light mode`() {
+        assertEquals("I don't think so. It's not what we need. ", dictateCutContraction(FormattingMode.LIGHT))
+    }
+
+    @Test
+    fun `a contraction the speech model cut lands whole in smart mode without a model`() {
+        assertEquals("I don't think so. It's not what we need. ", dictateCutContraction(FormattingMode.SMART))
     }
 
     /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */

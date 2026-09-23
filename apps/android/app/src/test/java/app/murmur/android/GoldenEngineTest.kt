@@ -11,6 +11,7 @@ import app.murmur.android.text.Prompt
 import app.murmur.android.text.Verify
 import app.murmur.android.text.applyDictionary
 import app.murmur.android.text.prepareTranscript
+import app.murmur.android.text.repairContractions
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -107,6 +108,16 @@ class GoldenEngineTest {
             )
             assertEquals("${c.getString("transcript")} -> ${c.getString("output")}", c.getBoolean("ok"), v.ok)
             assertEquals("${c.getString("transcript")} -> ${c.getString("output")}", if (c.isNull("reason")) null else c.getString("reason"), v.reason)
+        }
+    }
+
+    @Test
+    fun `contraction repairs agree`() {
+        val cases = golden.getJSONArray("contractions")
+        assertTrue(cases.length() >= 5)
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            assertEquals(c.getString("text"), c.getString("repaired"), repairContractions(c.getString("text")))
         }
     }
 

@@ -11,6 +11,8 @@
 export * from './types'
 export {
   countWords,
+  repairContractions,
+  NEGATIVE_CONTRACTION_STEMS,
   capitalizeFirst,
   isQuestion,
   normalizeWhitespace,

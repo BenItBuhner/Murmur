@@ -43,6 +43,7 @@ export type NotCleanReason =
   | 'long'
   | 'unpunctuated'
   | 'characters'
+  | 'truncated'
   | 'filler'
   | 'stutter'
   | 'correction'
@@ -221,6 +222,11 @@ export const FOREIGN_WORDS: readonly string[] = [
 
 /** Only what a punctuated English sentence is made of. Digits pass here and fail the number rule. */
 const ALLOWED_CHARS = /^[a-z0-9 .,!?'’-]*$/
+/**
+ * A word ending in a bare apostrophe that is not a plural possessive ("dogs'"): a contraction the
+ * speech model cut and `repairContractions` could not restore, which only the model can finish.
+ */
+const CUT_WORD = /[a-z](?<!s)['’](?![a-z0-9])/
 /** One terminal mark at the very end; "..." is trailing off, not punctuation. */
 const TERMINAL = /(?<!\.)[.!?]$/
 /** The cursor sits at a sentence or paragraph start: the dictation is a fresh sentence. */
@@ -295,6 +301,7 @@ export function alreadyClean(
   if (countWords(text) > (opts.maxWords ?? CLEAN_MAX_WORDS)) return no('long')
   if (!TERMINAL.test(text)) return no('unpunctuated')
   if (!ALLOWED_CHARS.test(lower)) return no('characters')
+  if (CUT_WORD.test(lower)) return no('truncated')
 
   const words = lower.match(WORD) ?? []
   const has = (set: ReadonlySet<string>): boolean => words.some((w) => set.has(w))

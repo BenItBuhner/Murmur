@@ -123,6 +123,14 @@ describe('alreadyClean', () => {
     expect(reason('Todo: fix the build.')).toBe('characters')
   })
 
+  it('finishes a cut negative contraction itself and sends any other bare apostrophe to the model', () => {
+    expect(decide("I don' think so.")).toEqual({ clean: true })
+    expect(decide('They didn’ call back.')).toEqual({ clean: true })
+    expect(reason("It' fine, we' see.")).toBe('truncated')
+    expect(reason('That’ right.')).toBe('truncated')
+    expect(decide("The dogs' bowls are empty.")).toEqual({ clean: true })
+  })
+
   it('sends every filler, hesitation, opener and pause "like" to the model', () => {
     expect(reason('Thanks, um, I will look at it tomorrow.')).toBe('filler')
     expect(reason('I mean, it looks fine.')).toBe('filler')

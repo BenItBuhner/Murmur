@@ -19,6 +19,13 @@ import app.murmur.android.service.InsertOutcome
 import app.murmur.android.service.KeyboardInput
 import app.murmur.android.service.KeyboardStatus
 import app.murmur.android.service.TextInserter
+import app.murmur.android.settings.FormattingMode
+import app.murmur.android.settings.Tone
+import app.murmur.android.text.AppCategory
+import app.murmur.android.text.Engine
+import app.murmur.android.text.FormatContext
+import app.murmur.android.text.FormatInput
+import app.murmur.android.text.finish
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -346,5 +353,41 @@ class KeyboardInsertionTest {
         assertEquals(InsertOutcome.Inserted("paste"), outcome)
         assertEquals(listOf(punctuated), clipboard)
         assertEquals(punctuated, field.text.toString())
+    }
+
+    @Test
+    fun `a transcript the speech model cut reaches the field whole by set-text, keyboard commit and paste`() = runTest {
+        val context = FormatContext(AppCategory.UNKNOWN, Tone.NEUTRAL, language = "auto")
+        val cases = listOf(
+            LiveFixtures.transcript("transcribe-1.verbose.didnt-call-back.json"),
+            LiveFixtures.transcript("transcribe-1.verbose.didnt-call-back.json").replace('\'', '’')
+        )
+        for (raw in cases) {
+            val formatted = Engine.formatTranscript(FormatInput(raw, FormattingMode.SMART, context, emptyList()), null)
+            val text = finish(formatted.text, AppCategory.UNKNOWN, emptyList(), trailingSpace = true).text
+            assertTrue(text, text.contains("didn't call") || text.contains("didn’t call"))
+
+            val connection = field.onCreateInputConnection(EditorInfo())!!
+            val commitOnly = object : KeyboardInput {
+                override val prefersKeyEvents: Boolean = false
+                override fun commitText(text: String): Boolean = connection.commitText(text, 1)
+                override fun sendTextAsKeyEvents(text: String): Boolean = false
+                override suspend fun awaitDelivered(): Boolean = true
+                override fun pressEnter(): Boolean = false
+            }
+            val refusesSetText = object : EditTextTarget(field) {
+                override fun performAction(action: Int, arguments: Bundle?): Boolean =
+                    action != AccessibilityNodeInfo.ACTION_SET_TEXT && super.performAction(action, arguments)
+            }
+            for ((method, insert) in listOf(
+                "set-text" to suspend { TextInserter.insert(EditTextTarget(field), text, false, ::toClipboard) },
+                "keyboard" to suspend { TextInserter.insert(refusesSetText, text, false, ::toClipboard, commitOnly, KeyboardStatus.AVAILABLE) },
+                "paste" to suspend { TextInserter.insert(refusesSetText, text, false, ::toClipboard) },
+            )) {
+                field.setText("")
+                assertEquals(InsertOutcome.Inserted(method), insert())
+                assertEquals(method, text, field.text.toString())
+            }
+        }
     }
 }

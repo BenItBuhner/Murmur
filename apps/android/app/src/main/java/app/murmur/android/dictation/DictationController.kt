@@ -42,6 +42,7 @@ import app.murmur.android.text.buildSttPrompt
 import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
+import app.murmur.android.text.repairContractions
 import app.murmur.android.text.resolveStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -374,7 +375,7 @@ object DictationController {
         // The text goes in, but the formatting model was paused or refused on a plan limit.
         var softLimit: LimitNotice? = null
         if (style.mode == FormattingMode.OFF) {
-            final = raw + if (style.trailingSpace) " " else ""
+            final = repairContractions(raw) + if (style.trailingSpace) " " else ""
             llmDetail = "formatting off"
         } else {
             val input = FormatInput(

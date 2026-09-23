@@ -13,7 +13,8 @@ import {
   capitalizeSentences,
   fixPunctuationSpacing,
   isMeaningful,
-  normalizeWhitespace
+  normalizeWhitespace,
+  repairContractions
 } from './text'
 import type { AppCategory, DictionaryTerm } from './types'
 
@@ -39,15 +40,16 @@ export interface PreparedTranscript {
 export function prepareTranscript(raw: string): PreparedTranscript {
   const stages: string[] = []
   let text = normalizeWhitespace(raw)
-  const enter = extractPressEnter(text)
-  if (enter.pressEnter) {
-    stages.push('press-enter')
-    text = enter.text
-  }
   const step = (name: string, fn: (s: string) => string): void => {
     const next = fn(text)
     if (next !== text) stages.push(name)
     text = next
+  }
+  step('contractions', repairContractions)
+  const enter = extractPressEnter(text)
+  if (enter.pressEnter) {
+    stages.push('press-enter')
+    text = enter.text
   }
   step('line-commands', applyLineCommands)
   step('literal-punctuation', applyLiteralPunctuation)

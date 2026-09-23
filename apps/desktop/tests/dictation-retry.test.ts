@@ -272,7 +272,10 @@ describe('DictationController retry', () => {
       // A real speech model's verbose_json for "I don't think so. It's not what we need."
       const captured = JSON.parse(
         readFileSync(
-          resolve(__dirname, '../../../packages/text-engine/tests/fixtures/live/transcribe-1.verbose.dont-think-so.json'),
+          resolve(
+            __dirname,
+            '../../../packages/text-engine/tests/fixtures/live/transcribe-1.verbose.dont-think-so.json'
+          ),
           'utf8'
         )
       ) as { text: string }
@@ -294,7 +297,9 @@ describe('DictationController retry', () => {
       controller.handle({ type: 'start', mode: 'hold' })
       controller.handle({ type: 'stop' })
       await settle()
-      expect(inject.calls).toEqual([{ text: "I don't think so. It's not what we need. ", method: 'auto' }])
+      expect(inject.calls).toEqual([
+        { text: "I don't think so. It's not what we need. ", method: 'auto' }
+      ])
       expect(history.list().entries[0].rawText).toBe(captured.text)
     }
   )

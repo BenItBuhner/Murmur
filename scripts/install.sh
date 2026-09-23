@@ -3,7 +3,7 @@
 # Safe to pipe: curl -fsSL https://github.com/<repo>/releases/latest/download/install.sh | bash
 set -euo pipefail
 
-REPO="${MURMUR_REPO:-BenItBuhner/voxflow}"
+REPO="${MURMUR_REPO:-BenItBuhner/Murmur}"
 BASE="${MURMUR_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/latest/download}"
 WANT_DEB=0
 WANT_ANDROID=0

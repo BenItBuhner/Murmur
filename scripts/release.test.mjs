@@ -21,7 +21,7 @@ import {
 
 const ROOT = join(import.meta.dirname, '..')
 const SCRIPT = join(import.meta.dirname, 'release.mjs')
-const REPO = 'BenItBuhner/voxflow'
+const REPO = 'BenItBuhner/Murmur'
 
 function run(args, opts = {}) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {

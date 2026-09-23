@@ -27,7 +27,7 @@ function release(tag: string, extra: Partial<GithubRelease> = {}): GithubRelease
     draft: false,
     prerelease: tag.includes('-'),
     published_at: '2026-09-01T10:00:00Z',
-    html_url: `https://github.com/BenItBuhner/voxflow/releases/tag/${tag}`,
+    html_url: `https://github.com/BenItBuhner/Murmur/releases/tag/${tag}`,
     body: 'notes',
     assets: [],
     ...extra
@@ -214,7 +214,7 @@ describe('checksums and trust', () => {
   it('only trusts assets from the release origin (https, or loopback for tests)', () => {
     expect(
       isTrustedAssetUrl(
-        'https://github.com/BenItBuhner/voxflow/releases/download/v0.2.0/x.exe',
+        'https://github.com/BenItBuhner/Murmur/releases/download/v0.2.0/x.exe',
         'https://github.com'
       )
     ).toBe(true)
@@ -292,7 +292,7 @@ describe('detectInstallKind', () => {
 
 describe('resolveUpdateSource', () => {
   it('reads the repository from the build, the package, or the override', () => {
-    expect(repoFromUrl('https://github.com/BenItBuhner/voxflow.git')).toBe('BenItBuhner/voxflow')
+    expect(repoFromUrl('https://github.com/BenItBuhner/Murmur.git')).toBe('BenItBuhner/Murmur')
     expect(repoFromUrl('git@github.com:Owner/Repo')).toBe('Owner/Repo')
     expect(repoFromUrl('https://gitlab.com/a/b')).toBeNull()
 
@@ -313,7 +313,7 @@ describe('resolveUpdateSource', () => {
     ).toBe('Env/repo')
 
     const bad = resolveUpdateSource({ MURMUR_UPDATE_REPO: 'nope' }, {})
-    expect(bad.source.repo).toBe('BenItBuhner/voxflow')
+    expect(bad.source.repo).toBe('BenItBuhner/Murmur')
     expect(bad.warnings[0]).toMatch(/invalid update repository/)
   })
 

@@ -47,6 +47,7 @@ object ShortcutRecorder {
         _session.value = null
     }
 
+    @androidx.annotation.VisibleForTesting
     internal fun publish(snapshot: ShortcutCapture) {
         val current = _session.value ?: counter
         _capture.value = CaptureEvent(current, snapshot)

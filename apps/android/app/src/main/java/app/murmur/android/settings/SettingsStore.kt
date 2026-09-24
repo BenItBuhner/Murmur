@@ -247,7 +247,12 @@ data class MurmurSettings(
     /** Version the user dismissed; withheld until a newer one appears. */
     val updateSkippedVersion: String = "",
     /** Totals of everything dictated on this phone (see [DictationStats]); never synced as such. */
-    val stats: DictationStats = DictationStats.EMPTY
+    val stats: DictationStats = DictationStats.EMPTY,
+    /**
+     * Hardware-keyboard shortcuts and the desktop-style overlay (see [KeyboardSettings]). One
+     * section, stored as one value, so it evolves without touching the rest of the store.
+     */
+    val keyboard: KeyboardSettings = KeyboardSettings.DEFAULT
 ) {
     val dictionaryTerms: List<String>
         get() = dictionaryEntries.map { it.word.trim() }.filter { it.isNotEmpty() }
@@ -444,7 +449,8 @@ class SettingsStore(context: Context) {
                 totalSpeechMs = prefs.getLong("statsTotalSpeechMs", 0L),
                 streakDays = prefs.getInt("statsStreakDays", 0),
                 lastSessionDay = prefs.getString("statsLastSessionDay", "") ?: ""
-            )
+            ),
+            keyboard = KeyboardSettingsCodec.decode(prefs.getString("keyboard", null))
         )
     }
 
@@ -499,6 +505,7 @@ class SettingsStore(context: Context) {
             .putLong("statsTotalSpeechMs", s.stats.totalSpeechMs)
             .putInt("statsStreakDays", s.stats.streakDays)
             .putString("statsLastSessionDay", s.stats.lastSessionDay)
+            .putString("keyboard", KeyboardSettingsCodec.encode(s.keyboard))
             .apply()
     }
 

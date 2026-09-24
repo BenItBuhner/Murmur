@@ -50,6 +50,10 @@ class HotkeyEngine(config: HotkeyEngineConfig) {
     private var lastTapAt: Long? = null
     private var chords: Map<ChordId, List<Int>> = emptyMap()
 
+    /** The chord (canonical codes) the most recent [keyDown] completed; empty when it completed none. */
+    var lastMatchedChord: List<Int> = emptyList()
+        private set
+
     init {
         applyConfig(config)
     }
@@ -89,6 +93,7 @@ class HotkeyEngine(config: HotkeyEngineConfig) {
 
     fun keyDown(rawCode: Int, now: Long): List<HotkeyAction> {
         val code = Keys.canonicalKey(rawCode, config.sideSensitive)
+        lastMatchedChord = emptyList()
         if (!down.add(code)) return emptyList() // key repeat
 
         if (code == Key.ESCAPE) {
@@ -103,6 +108,7 @@ class HotkeyEngine(config: HotkeyEngineConfig) {
         if (activated.isEmpty()) return emptyList()
         // Prefer the most specific (longest) chord when several complete at once.
         val chord = activated.first()
+        lastMatchedChord = chords[chord] ?: emptyList()
 
         val current = session
         if (current != null) {

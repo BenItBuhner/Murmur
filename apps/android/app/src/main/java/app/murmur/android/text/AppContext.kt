@@ -103,6 +103,9 @@ fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
     )
 }
 
+/** Code and terminals: identifiers and syntax must survive an edit (desktop: `isTechnical`). */
+fun isTechnical(category: AppCategory): Boolean = category == AppCategory.CODE || category == AppCategory.TERMINAL
+
 /** Same wording as the TypeScript engine's `categoryHint`; part of the golden prompt contract. */
 fun categoryHint(category: AppCategory): String = when (category) {
     AppCategory.CHAT -> "a chat message"

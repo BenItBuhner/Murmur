@@ -174,7 +174,45 @@ object Prompt {
         val words = countWords(transcript)
         return minOf(4096, maxOf(768, Math.ceil(words * 3.2).toInt() + 512))
     }
+
+    /**
+     * Command mode: the user selected text and spoke an instruction; apply it in place. Port of the
+     * TypeScript `buildCommandMessages`, pinned to it by GoldenEngineTest.
+     */
+    fun buildCommandMessages(input: CommandPromptInput): List<ChatMessage> {
+        val spoken = Languages.name(input.language)
+        val dictionary = dictionaryLine(input.dictionary)
+        val system = listOfNotNull(
+            "You are an in-place text editor driven by voice. The user highlighted some text and spoke an instruction. Apply the instruction to the text and return only the edited text.",
+            if (spoken != null) {
+                "- The user speaks $spoken, so the instruction is in $spoken. Keep the text in its original language unless the instruction asks to translate."
+            } else {
+                "- Keep the original language unless asked to translate."
+            },
+            "- Preserve formatting (line breaks, lists, markdown) unless the instruction changes it.",
+            "- Never add commentary, notes, quotes or code fences around the result. Never explain what you changed.",
+            "- If the instruction cannot be applied, return the text unchanged.",
+            dictionary.takeIf { it.isNotEmpty() }?.let { "- $it" },
+            "- The text lives in ${categoryHint(input.category)}${if (isTechnical(input.category)) "; keep identifiers and syntax intact" else ""}."
+        ).joinToString("\n")
+        return listOf(
+            ChatMessage("system", system),
+            ChatMessage("user", "Instruction: ${input.instruction.trim()}\n\nText:\n${input.selection}")
+        )
+    }
+
+    /** Upper bound for an edit of [selection]: room for the whole text again, plus a margin (desktop: session.ts). */
+    fun commandMaxTokens(selection: String): Int = minOf(4096, maxOf(1024, countWords(selection) * 4 + 512))
 }
+
+/** What the command prompt needs: the selected text, the spoken instruction and the destination (desktop: CommandPromptInput). */
+data class CommandPromptInput(
+    val selection: String,
+    val instruction: String,
+    val category: AppCategory,
+    val dictionary: List<DictionaryTerm> = emptyList(),
+    val language: String? = null
+)
 
 /** Style hint that goes to the speech model on its own; nothing in it can be mistaken for speech. */
 const val STT_BASE_PROMPT = "Dictation with punctuation."

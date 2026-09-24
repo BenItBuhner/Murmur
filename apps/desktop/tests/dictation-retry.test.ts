@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SttError, type TranscribeOutput } from '@core/stt'
-import type { FormattingMode } from '@engine'
+import { formatTranscript, type Complete, type FormatInput, type FormattingMode } from '@engine'
 import { defaultSettings, type Settings } from '@shared/settings'
 import type { HistoryEntry, OverlayState } from '@shared/types'
 
@@ -281,7 +281,7 @@ describe('DictationController retry', () => {
       )
     ) as { text: string }
 
-    async function dictate(mode: FormattingMode): Promise<HistoryEntry> {
+    async function dictate(mode: FormattingMode, deps: object = inference): Promise<HistoryEntry> {
       expect(captured.text).toBe("I don' think so. It's not what we need.")
       const settings = new FakeSettings()
       settings.value.formatting.mode = mode
@@ -291,7 +291,7 @@ describe('DictationController retry', () => {
         recorder: new FakeRecorder() as never,
         recordings,
         hook: hook as never,
-        inference: inference as never,
+        inference: deps as never,
         overlay: { setState: (s) => states.push(s), playSound: () => undefined },
         getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
       })
@@ -316,5 +316,29 @@ describe('DictationController retry', () => {
         expect(entry.llmUsed).toBe(false)
       }
     )
+
+    it('is shown to the formatting model exactly as the speech model wrote it in the default mode', async () => {
+      expect(defaultSettings().formatting.mode).toBe('smart')
+      const shown: string[] = []
+      const complete: Complete = async (messages) => {
+        const prompt = messages.at(-1)!.content
+        shown.push(prompt.slice(prompt.lastIndexOf('Transcript:\n') + 'Transcript:\n'.length))
+        return { text: "I don't think so. It's not what we need.", finishReason: 'stop' }
+      }
+      const withModel = {
+        ...inference,
+        formatter: async () => ({
+          source: 'custom' as const,
+          format: (input: FormatInput) => formatTranscript(input, complete)
+        })
+      }
+      const entry = await dictate('smart', withModel)
+      expect(shown).toEqual([captured.text])
+      expect(inject.calls).toEqual([
+        { text: "I don't think so. It's not what we need. ", method: 'auto' }
+      ])
+      expect(entry.llm).toMatchObject({ outcome: 'used', attempts: 1 })
+      expect(entry.stages).toEqual(['llm'])
+    })
   })
 })

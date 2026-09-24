@@ -23,6 +23,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -64,11 +65,21 @@ class DictationFlowTest {
     /** A captured transcription response to answer with instead of the sample transcript. */
     @Volatile private var sttBody: String? = null
 
+    /** A captured chat completion the "server" answers `/v1/chat/completions` with, and what it was asked. */
+    @Volatile private var llmBody: String? = null
+    private val prompts = CopyOnWriteArrayList<String>()
+
     @Before
     fun startMockStt() {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 requests.add("${request.method} ${request.path} (${request.bodySize} bytes)")
+                val completion = llmBody
+                if (request.path == "/v1/chat/completions" && completion != null) {
+                    val messages = JSONObject(request.body.readUtf8()).getJSONArray("messages")
+                    prompts.add(messages.getJSONObject(messages.length() - 1).getString("content"))
+                    return MockResponse().setHeader("Content-Type", "application/json").setBody(completion)
+                }
                 if (request.path != "/v1/audio/transcriptions") return MockResponse().setResponseCode(404)
                 if (failures > 0) {
                     failures--
@@ -99,8 +110,11 @@ class DictationFlowTest {
         DictationController.sink = null
     }
 
-    /** A focused field in a real activity, with the controller's sink pointed at it, and no formatting model. */
-    private fun setUpField(mode: FormattingMode = FormattingMode.LIGHT): Pair<Activity, EditText> {
+    /**
+     * A focused field in a real activity, with the controller's sink pointed at it. The formatting
+     * model, when one is named, is the same "server" as the speech model (the default connection).
+     */
+    private fun setUpField(mode: FormattingMode = FormattingMode.LIGHT, llmModel: String = ""): Pair<Activity, EditText> {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val field = EditText(activity).apply { hint = "Dictate into me…" }
         activity.setContentView(field)
@@ -114,7 +128,7 @@ class DictationFlowTest {
                 sttFallbackModel = "",
                 formattingMode = mode,
                 llmSameAsStt = true,
-                llmModel = "",
+                llmModel = llmModel,
                 useFixtureAudio = true,
                 onboardingComplete = true
             )
@@ -251,11 +265,12 @@ class DictationFlowTest {
     /**
      * The speech model's captured `verbose_json` ([LiveFixtures]) with the "t" it dropped from a
      * negative contraction, parsed by the real client and inserted into the field. Murmur never
-     * patches a model's text with rules of its own: what the speech model wrote is what goes in.
+     * patches a model's text with rules of its own: what the speech model wrote is what goes in, or
+     * what the formatting model is shown.
      */
-    private fun dictateCaptured(fixture: String, mode: FormattingMode): Pair<String, HistoryEntry> {
+    private fun dictateCaptured(fixture: String, mode: FormattingMode, llmModel: String = ""): Pair<String, HistoryEntry> {
         sttBody = LiveFixtures.raw(fixture)
-        val (activity, field) = setUpField(mode)
+        val (activity, field) = setUpField(mode, llmModel)
         DictationController.start(activity)
         DictationController.stopAndInsert(activity)
         assertEquals(DictationState.Success("Inserted"), awaitOutcome(timeoutMs = 30_000))
@@ -284,6 +299,20 @@ class DictationFlowTest {
         assertEquals("I don' think so. It's not what we need. ", text)
         assertFalse(entry.llmUsed)
         assertTrue("no chat completion was requested: $requests", requests.none { "/v1/chat/completions" in it })
+    }
+
+    @Test
+    fun `a word the speech model cut at an apostrophe is shown to the formatting model as it came in smart mode`() {
+        // The formatting model's captured answer to this very transcript ([LiveFixtures]).
+        llmBody = LiveFixtures.raw("complete.what-are-you-referring-to.json")
+        val (text, entry) = dictateCaptured("transcribe-1.verbose.what-are-you-referring-to.json", FormattingMode.SMART, llmModel = "mock-llm")
+        assertEquals("What are you referring to? I don't recall. I have the worst memory in the world. ", text)
+        assertTrue(entry.llmUsed)
+        assertEquals(1, prompts.size)
+        assertTrue(
+            prompts[0],
+            prompts[0].endsWith("Transcript:\nWhat are you referring to? I don' recall. I have the worst memory in the world.")
+        )
     }
 
     /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */

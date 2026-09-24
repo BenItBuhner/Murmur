@@ -52,7 +52,10 @@ data class PillPalette(
      * along its top; false (the "Button shadow" setting off) draws all of them flat: the same
      * shapes and colours, nothing lifted.
      */
-    val elevated: Boolean = true
+    val elevated: Boolean = true,
+    /** Command mode (an instruction for the selected text): the desktop pill's violet body and ink. */
+    val commandBackground: Int = background,
+    val commandForeground: Int = ink
 ) {
     companion object {
         /** The look before any settings are known: Murmur's coral, dark. */
@@ -112,7 +115,10 @@ object PillTheme {
             errorBackground = status(if (dark) 0.26 else 0.93, 0.07, 25.0, hue),
             successForeground = if (dark) status(0.84, 0.12, 155.0, hue) else status(0.46, 0.12, 155.0, hue),
             errorForeground = if (dark) status(0.78, 0.13, 30.0, hue) else status(0.48, 0.16, 30.0, hue),
-            elevated = elevated
+            elevated = elevated,
+            // The desktop's --overlay-command / --overlay-command-foreground, in the mode's brightness.
+            commandBackground = status(if (dark) 0.24 else 0.93, 0.06, 290.0, hue),
+            commandForeground = if (dark) status(0.72, 0.16, 293.0, hue) else status(0.42, 0.16, 293.0, hue)
         )
     }
 

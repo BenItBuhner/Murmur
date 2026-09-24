@@ -1,5 +1,6 @@
 package app.murmur.android.text
 
+import app.murmur.android.settings.AppRule
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.Tone
@@ -37,13 +38,27 @@ private val PACKAGE_PATTERNS: List<Pair<AppCategory, Regex>> = listOf(
     )
 )
 
-data class AppContext(val packageName: String, val category: AppCategory)
+/**
+ * The app that owns the focused field. [label] is its launcher name when the system will tell us
+ * ("Slack" for `com.Slack`); per-app rules match on either, the way the desktop's match on the
+ * process name or the window title.
+ */
+data class AppContext(val packageName: String, val category: AppCategory, val label: String? = null)
 
-fun classifyPackage(packageName: String): AppContext {
+fun classifyPackage(packageName: String, label: String? = null): AppContext {
     for ((category, re) in PACKAGE_PATTERNS) {
-        if (re.containsMatchIn(packageName)) return AppContext(packageName, category)
+        if (re.containsMatchIn(packageName)) return AppContext(packageName, category, label)
     }
-    return AppContext(packageName, AppCategory.UNKNOWN)
+    return AppContext(packageName, AppCategory.UNKNOWN, label)
+}
+
+/** The first rule whose match is contained in the package name or the label (desktop: `findRule`). */
+fun findRule(rules: List<AppRule>, ctx: AppContext): AppRule? {
+    val hay = "${ctx.packageName} ${ctx.label ?: ""}".lowercase()
+    return rules.firstOrNull { r ->
+        val m = r.match.trim().lowercase()
+        m.isNotEmpty() && hay.contains(m)
+    }
 }
 
 fun autoTone(category: AppCategory): Tone = when (category) {
@@ -60,15 +75,33 @@ data class FormatStyle(
     val tone: Tone,
     val mode: FormattingMode,
     val instructions: String,
-    val trailingSpace: Boolean
+    val trailingSpace: Boolean,
+    /** The per-app rule that applied, if any. */
+    val rule: AppRule? = null
 )
 
-fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle = FormatStyle(
-    tone = resolveTone(s.tone, ctx),
-    mode = s.formattingMode,
-    instructions = s.llmInstructions.trim(),
-    trailingSpace = s.trailingSpace
-)
+/**
+ * Precedence, as on the desktop: the matching per-app rule, then the global settings, then the
+ * destination's defaults. A rule's instructions are appended to the global ones.
+ */
+fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
+    val rule = findRule(s.appRules, ctx)
+    val tone = when {
+        rule != null && rule.tone != Tone.AUTO -> rule.tone
+        s.tone != Tone.AUTO -> s.tone
+        else -> autoTone(ctx.category)
+    }
+    val instructions = listOf(s.llmInstructions.trim(), rule?.instructions?.trim() ?: "")
+        .filter { it.isNotEmpty() }
+        .joinToString("\n\n")
+    return FormatStyle(
+        tone = tone,
+        mode = rule?.formatting ?: s.formattingMode,
+        instructions = instructions,
+        trailingSpace = rule?.trailingSpace ?: s.trailingSpace,
+        rule = rule
+    )
+}
 
 /** Same wording as the TypeScript engine's `categoryHint`; part of the golden prompt contract. */
 fun categoryHint(category: AppCategory): String = when (category) {

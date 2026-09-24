@@ -4,9 +4,11 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import app.murmur.android.BuildConfig
+import app.murmur.android.settings.AppRule
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.Snippet
 import app.murmur.android.settings.SettingsOrigin
 import app.murmur.android.settings.SettingsStore
 import com.clerk.api.Clerk
@@ -87,6 +89,8 @@ class CloudSync private constructor(
     /** The instance rejected the `day` argument: an older backend, asked the old way from then on. */
     @Volatile private var statusWithoutDay = false
     private var serverDictionary: List<DictionaryEntryDto>? = null
+    private var serverSnippets: List<SnippetDto>? = null
+    private var serverAppRules: List<AppRuleDto>? = null
     private var serverPreferences: PreferencesDto? = null
     private var serverStats: StatsDto? = null
     private var preferencesLoaded = false
@@ -167,12 +171,16 @@ class CloudSync private constructor(
         devices = emptyList()
         inference = null
         serverDictionary = null
+        serverSnippets = null
+        serverAppRules = null
         serverPreferences = null
         serverStats = null
         preferencesLoaded = false
         error = null
         outbox.clear()
-        settings.update(SettingsOrigin.CLOUD) { it.copy(dictionaryEntries = emptyList(), lastSignedInUserId = "") }
+        settings.update(SettingsOrigin.CLOUD) {
+            it.copy(dictionaryEntries = emptyList(), snippets = emptyList(), appRules = emptyList(), lastSignedInUserId = "")
+        }
         mirrorPrefs = StylePreferences.of(settings.get())
         scope.launch { client?.logout(app) }
         publish()
@@ -206,8 +214,10 @@ class CloudSync private constructor(
         val s = settings.get()
         if (s.importedForUserId == userId) return
         val entries = s.dictionaryEntries.filter { it.word.isNotBlank() }
-        Log.i(TAG, "merging ${entries.size} local words into the account")
-        for (chunk in entries.chunked(500)) {
+        val snippets = s.snippets.filter { it.trigger.isNotBlank() && it.content.isNotBlank() }
+        val rules = s.appRules.filter { it.match.isNotBlank() }
+        Log.i(TAG, "merging local data into the account: ${entries.size} words, ${snippets.size} snippets, ${rules.size} rules")
+        for (chunk in entries.chunked(IMPORT_CHUNK)) {
             convex.mutation("dictionary:importMany", mapOf(
                 "entries" to chunk.map { e ->
                     buildMap<String, Any?> {
@@ -218,6 +228,12 @@ class CloudSync private constructor(
                     }
                 }
             ))
+        }
+        for (chunk in snippets.chunked(IMPORT_CHUNK)) {
+            convex.mutation("snippets:importMany", mapOf("snippets" to chunk.map { snippetArgs(it) }))
+        }
+        for (chunk in rules.chunked(IMPORT_CHUNK)) {
+            convex.mutation("appRules:importMany", mapOf("rules" to chunk.map { appRuleArgs(it) }))
         }
         if (s.onboardingComplete) {
             convex.mutation("users:completeOnboarding", mapOf("version" to ONBOARDING_VERSION))
@@ -246,6 +262,28 @@ class CloudSync private constructor(
                     if (gen != generation) return@collect
                     result.onSuccess { list ->
                         serverDictionary = list
+                        outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
+                        applyDerived()
+                    }.onFailure { error = it.message }
+                    publish()
+                }
+            }
+            launch {
+                convex.subscribe<List<SnippetDto>>("snippets:list").collect { result ->
+                    if (gen != generation) return@collect
+                    result.onSuccess { list ->
+                        serverSnippets = list
+                        outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
+                        applyDerived()
+                    }.onFailure { error = it.message }
+                    publish()
+                }
+            }
+            launch {
+                convex.subscribe<List<AppRuleDto>>("appRules:list").collect { result ->
+                    if (gen != generation) return@collect
+                    result.onSuccess { list ->
+                        serverAppRules = list
                         outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
                         applyDerived()
                     }.onFailure { error = it.message }
@@ -332,13 +370,16 @@ class CloudSync private constructor(
 
     private fun applyDerived() {
         val s = settings.get()
-        val derived = SyncReducers.deriveDictionary(serverDictionary, s.dictionaryEntries, outbox.ops)
+        val ops = outbox.ops
+        val derived = SyncReducers.deriveDictionary(serverDictionary, s.dictionaryEntries, ops)
+        val snippets = SyncReducers.deriveCollection(SyncReducers.snippetsSpec, serverSnippets, s.snippets, ops)
+        val rules = SyncReducers.deriveCollection(SyncReducers.appRulesSpec, serverAppRules, s.appRules, ops)
         val remote = serverPreferences
-        val pendingPrefs = outbox.ops.filterIsInstance<SyncOp.PreferencesUpdate>().lastOrNull()?.prefs
+        val pendingPrefs = ops.filterIsInstance<SyncOp.PreferencesUpdate>().lastOrNull()?.prefs
         applying = true
         try {
             settings.update(SettingsOrigin.CLOUD) { current ->
-                var next = current.copy(dictionaryEntries = derived)
+                var next = current.copy(dictionaryEntries = derived, snippets = snippets, appRules = rules)
                 if (preferencesLoaded && remote != null) next = applyRemotePreferences(next, remote)
                 if (pendingPrefs != null) next = applyRemotePreferences(next, pendingPrefs.toDto())
                 next
@@ -381,6 +422,41 @@ class CloudSync private constructor(
             touched = true
             outbox.update { ops ->
                 SyncReducers.queueRemove(ops, e.id, SyncReducers.remoteIdFor(e.id, serverIds, ops), newOpId())
+            }
+        }
+        val snippetIds = serverSnippets?.map { it.id }?.toSet() ?: emptySet()
+        val snips = SyncReducers.diffCollection(previous.snippets, next.snippets, { it.id }, SyncReducers::sameSnippet)
+        for (x in snips.added + snips.changed) {
+            touched = true
+            outbox.update { ops ->
+                SyncReducers.queueUpsert(
+                    ops,
+                    SyncOp.SnippetUpsert(newOpId(), x.id, SyncReducers.remoteIdFor(x.id, snippetIds, ops), snippet = x)
+                )
+            }
+        }
+        for (x in snips.removed) {
+            touched = true
+            outbox.update { ops ->
+                SyncReducers.queueRemove(ops, SyncReducers.snippetsSpec, x.id, SyncReducers.remoteIdFor(x.id, snippetIds, ops), newOpId())
+            }
+        }
+        val ruleIds = serverAppRules?.map { it.id }?.toSet() ?: emptySet()
+        val rules = SyncReducers.diffCollection(previous.appRules, next.appRules, { it.id }, SyncReducers::sameAppRule)
+        for (r in rules.added + rules.changed) {
+            if (r.match.isBlank()) continue // the Style screen adds an empty rule first, then fills it in
+            touched = true
+            outbox.update { ops ->
+                SyncReducers.queueUpsert(
+                    ops,
+                    SyncOp.AppRuleUpsert(newOpId(), r.id, SyncReducers.remoteIdFor(r.id, ruleIds, ops), rule = r)
+                )
+            }
+        }
+        for (r in rules.removed) {
+            touched = true
+            outbox.update { ops ->
+                SyncReducers.queueRemove(ops, SyncReducers.appRulesSpec, r.id, SyncReducers.remoteIdFor(r.id, ruleIds, ops), newOpId())
             }
         }
         val prefs = StylePreferences.of(next)
@@ -441,7 +517,7 @@ class CloudSync private constructor(
         val gen = generation
         try {
             while (gen == generation && authenticated) {
-                val op = outbox.ops.firstOrNull { !(it is SyncOp.DictionaryUpsert && it.acked) } ?: break
+                val op = outbox.ops.firstOrNull { !it.isAcked } ?: break
                 try {
                     send(convex, op)
                     if (gen != generation) break
@@ -485,6 +561,26 @@ class CloudSync private constructor(
             }
             is SyncOp.DictionaryRemove ->
                 convex.mutation<Boolean>("dictionary:remove", mapOf("id" to op.remoteId))
+            is SyncOp.SnippetUpsert -> {
+                val id = convex.mutation<String>("snippets:upsert", buildMap {
+                    if (op.remoteId != null) put("id", op.remoteId)
+                    putAll(snippetArgs(op.snippet))
+                })
+                outbox.update { SyncReducers.ack(it, op.id, id) }
+                return
+            }
+            is SyncOp.SnippetRemove ->
+                convex.mutation<Boolean>("snippets:remove", mapOf("id" to op.remoteId))
+            is SyncOp.AppRuleUpsert -> {
+                val id = convex.mutation<String>("appRules:upsert", buildMap {
+                    if (op.remoteId != null) put("id", op.remoteId)
+                    putAll(appRuleArgs(op.rule))
+                })
+                outbox.update { SyncReducers.ack(it, op.id, id) }
+                return
+            }
+            is SyncOp.AppRuleRemove ->
+                convex.mutation<Boolean>("appRules:remove", mapOf("id" to op.remoteId))
             is SyncOp.PreferencesUpdate ->
                 convex.mutation<PreferencesDto>("preferences:update", op.prefs.patchArgs(null))
             is SyncOp.StatsRecord ->
@@ -528,6 +624,26 @@ class CloudSync private constructor(
 
     companion object {
         @Volatile private var instance: CloudSync? = null
+
+        /** Records per import call; the backend takes at most `LIMITS.batch` (500). */
+        private const val IMPORT_CHUNK = 500
+
+        /** `snippets:upsert` / `snippets:importMany` arguments for one snippet; optionals only when set. */
+        fun snippetArgs(s: Snippet): Map<String, Any?> = buildMap {
+            put("trigger", s.trigger)
+            put("content", s.content)
+            if (s.createdAt > 0) put("createdAt", s.createdAt.toDouble())
+        }
+
+        /** `appRules:upsert` / `appRules:importMany` arguments for one rule; `v.optional` fields are omitted, never null. */
+        fun appRuleArgs(r: AppRule): Map<String, Any?> = buildMap {
+            put("match", r.match)
+            put("tone", r.tone.id)
+            r.formatting?.let { put("formatting", it.id) }
+            r.trailingSpace?.let { put("trailingSpace", it) }
+            r.instructions?.takeIf { it.isNotBlank() }?.let { put("instructions", it) }
+            if (r.createdAt > 0) put("createdAt", r.createdAt.toDouble())
+        }
 
         fun init(context: Context, config: CloudConfig, settings: SettingsStore): CloudSync =
             instance ?: synchronized(this) {

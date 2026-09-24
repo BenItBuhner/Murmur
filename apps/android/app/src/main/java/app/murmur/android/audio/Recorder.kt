@@ -26,11 +26,13 @@ class Recorder {
     val isRecording: Boolean get() = running
 
     /**
+     * @param maxDurationSec stop on its own after this long, or null to run until [stop] (the
+     *   default: `limitDuration` is off unless the user turns it on, as on the desktop).
      * @throws IllegalStateException when the microphone cannot be opened or started (in use by a
      *   call or another app, or the audio server refused the stream).
      */
     @SuppressLint("MissingPermission")
-    fun start(maxDurationSec: Int, onAutoStop: () -> Unit) {
+    fun start(maxDurationSec: Int?, onAutoStop: () -> Unit) {
         if (running) return
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
@@ -60,7 +62,7 @@ class Recorder {
         synchronized(chunks) { chunks.clear() }
         record = rec
         running = true
-        val maxSamples = maxDurationSec.toLong() * SAMPLE_RATE
+        val maxSamples = maxDurationSec?.let { it.toLong() * SAMPLE_RATE }
         thread = Thread {
             val buf = ShortArray(SAMPLE_RATE / 20) // 50 ms
             var total = 0L
@@ -73,7 +75,7 @@ class Recorder {
                 synchronized(chunks) { chunks.add(copy) }
                 total += n
                 level = perceptualLevel(copy)
-                if (total >= maxSamples) {
+                if (maxSamples != null && total >= maxSamples) {
                     autoStop = true
                     break
                 }

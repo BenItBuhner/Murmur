@@ -25,9 +25,13 @@ object ShortcutRecorder {
 
     private var counter = 0
 
+    /** Test seam: whether the service that sees the keys is there. Tests stand in for it and publish captures themselves. */
+    @androidx.annotation.VisibleForTesting
+    internal var serviceRunning: () -> Boolean = { MurmurAccessibilityService.isRunning }
+
     /** @return the capture session, or null when the accessibility service (which sees the keys) is not running. */
     fun start(): Int? {
-        if (!MurmurAccessibilityService.isRunning) return null
+        if (!serviceRunning()) return null
         val next = ++counter
         _capture.value = null
         _session.value = next

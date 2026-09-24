@@ -16,29 +16,6 @@ private val WORD_RE = Regex("[\\p{L}\\p{N}]+(?:['’][\\p{L}]+)?")
 
 fun countWords(text: String): Int = WORD_RE.findAll(text.trim()).count()
 
-/** Negative contractions without their "t". None of them otherwise ends a word in an apostrophe. */
-val NEGATIVE_CONTRACTION_STEMS = listOf(
-    "ain", "aren", "can", "couldn", "daren", "didn", "doesn", "don", "hadn", "hasn", "haven",
-    "isn", "mightn", "mustn", "needn", "oughtn", "shan", "shouldn", "wasn", "weren", "won", "wouldn"
-)
-
-private val CUT_NEGATION = Regex(
-    "(?<![\\p{L}\\p{N}'’‘])(${NEGATIVE_CONTRACTION_STEMS.joinToString("|")})(['’])(?![\\p{L}\\p{N}])",
-    RegexOption.IGNORE_CASE
-)
-
-/**
- * Restore a negative contraction whose "t" the speech model dropped (desktop: `repairContractions`):
- * "I don' think so" becomes "I don't think so", with the apostrophe it wrote. Whisper-style models
- * cut "n't" this way in front of a consonant in their timestamped transcripts (`verbose_json`,
- * which [app.murmur.android.stt.SttClient] asks for to get word timings); the plain transcript of
- * the same audio keeps it. A word the speaker quoted ('won') opens with a quote and is left alone.
- */
-fun repairContractions(text: String): String = CUT_NEGATION.replace(text) { m ->
-    val stem = m.groupValues[1]
-    stem + m.groupValues[2] + if (stem == stem.uppercase()) "T" else "t"
-}
-
 fun capitalizeFirst(s: String): String {
     val idx = s.indexOfFirst { it.isLetter() }
     if (idx < 0) return s
@@ -346,16 +323,15 @@ data class PreparedTranscript(val text: String, val pressEnter: Boolean, val sta
 fun prepareTranscript(raw: String): PreparedTranscript {
     val stages = ArrayList<String>()
     var text = normalizeWhitespace(raw)
-    fun step(name: String, fn: (String) -> String) {
-        val next = fn(text)
-        if (next != text) stages.add(name)
-        text = next
-    }
-    step("contractions", ::repairContractions)
     val enter = extractPressEnter(text)
     if (enter.pressEnter) {
         stages.add("press-enter")
         text = enter.text
+    }
+    fun step(name: String, fn: (String) -> String) {
+        val next = fn(text)
+        if (next != text) stages.add(name)
+        text = next
     }
     step("line-commands", ::applyLineCommands)
     step("literal-punctuation", ::applyLiteralPunctuation)

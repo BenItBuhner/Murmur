@@ -224,7 +224,8 @@ export const FOREIGN_WORDS: readonly string[] = [
 const ALLOWED_CHARS = /^[a-z0-9 .,!?'’-]*$/
 /**
  * A word ending in a bare apostrophe that is not a plural possessive ("dogs'"): a contraction the
- * speech model cut and `repairContractions` could not restore, which only the model can finish.
+ * speech model cut ("don' think"). The rules never rewrite the model's words, so only the
+ * formatting model can finish it.
  */
 const CUT_WORD = /[a-z](?<!s)['’](?![a-z0-9])/
 /** One terminal mark at the very end; "..." is trailing off, not punctuation. */

@@ -19,7 +19,6 @@ import {
   countWords,
   finish,
   formatTranscript,
-  repairContractions,
   resolveStyle,
   type AppContext,
   type FormatContext,
@@ -522,7 +521,7 @@ export class DictationController extends EventEmitter {
         return failure(raw, resolved, err)
       }
     } else if (style.mode === 'off') {
-      finalText = repairContractions(raw) + (style.trailingSpace ? ' ' : '')
+      finalText = raw + (style.trailingSpace ? ' ' : '')
     } else {
       t = performance.now()
       const input: FormatInput = {

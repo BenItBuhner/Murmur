@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { basicCleanup, finish, prepareTranscript } from '../src/cleanup'
 import { applyDictionary } from '../src/dictionary'
 import { formatTranscript } from '../src/format'
-import { NEGATIVE_CONTRACTION_STEMS, repairContractions } from '../src/text'
 import type { ChatMessage, Complete, FormatContext } from '../src/types'
 
 const ctx: FormatContext = {
@@ -33,32 +32,10 @@ describe('prepareTranscript', () => {
   it('turns spoken punctuation into marks', () => {
     expect(prepareTranscript('are you coming question mark').text).toBe('are you coming?')
   })
-  it('restores the "t" a speech model cut from a negative contraction, before anything else', () => {
+  it("leaves the speech model's words alone, a cut contraction included", () => {
     const p = prepareTranscript("I don' think so. They didn’ call. It hasn' shipped press enter")
-    expect(p.text).toBe('I don\'t think so. They didn’t call. It hasn\'t shipped')
-    expect(p.stages).toEqual(['contractions', 'press-enter'])
-  })
-})
-
-describe('repairContractions', () => {
-  it('restores every negative contraction, keeping the apostrophe and the case', () => {
-    for (const stem of NEGATIVE_CONTRACTION_STEMS) {
-      expect(repairContractions(`we ${stem}' go`)).toBe(`we ${stem}'t go`)
-      expect(repairContractions(`we ${stem}’.`)).toBe(`we ${stem}’t.`)
-    }
-    expect(repairContractions("Don' do it, DON' DO IT, can'")).toBe("Don't do it, DON'T DO IT, can't")
-  })
-  it('leaves whole contractions, possessives, quoted words and dropped g alone', () => {
-    for (const text of [
-      "I don't know, it's fine, we won't",
-      'I don’t know',
-      "the dogs' bowls and James' car",
-      "call it 'won' for now",
-      'call it ‘won’ for now',
-      "rock 'n' roll, nothin' doin'",
-      'Donnie’s dog'
-    ])
-      expect(repairContractions(text)).toBe(text)
+    expect(p.text).toBe("I don' think so. They didn’ call. It hasn' shipped")
+    expect(p.stages).toEqual(['press-enter'])
   })
 })
 

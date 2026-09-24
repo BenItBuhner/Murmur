@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SttError, type TranscribeOutput } from '@core/stt'
+import { formatTranscript, type Complete, type FormatInput, type FormattingMode } from '@engine'
 import { defaultSettings, type Settings } from '@shared/settings'
-import type { OverlayState } from '@shared/types'
+import type { HistoryEntry, OverlayState } from '@shared/types'
 
 // The session talks to the desktop through the injector (Electron's clipboard and native key
 // synthesis) and the speech provider (HTTP). Both are replaced; everything else is the real code.
@@ -266,19 +267,21 @@ describe('DictationController retry', () => {
     expect(recordings.info().count).toBe(0)
   })
 
-  it.each(['off', 'light'] as const)(
-    'types a contraction the speech model cut whole with formatting %s',
-    async (mode) => {
-      // A real speech model's verbose_json for "I don't think so. It's not what we need."
-      const captured = JSON.parse(
-        readFileSync(
-          resolve(
-            __dirname,
-            '../../../packages/text-engine/tests/fixtures/live/transcribe-1.verbose.dont-think-so.json'
-          ),
-          'utf8'
-        )
-      ) as { text: string }
+  describe('a transcript the speech model cut at an apostrophe', () => {
+    // A real speech model's verbose_json for "I don't think so. It's not what we need.", with the
+    // "t" it dropped (text-engine live fixtures). Murmur never patches a model's text with rules of
+    // its own: the transcript goes in as it came, or goes to the formatting model as it came.
+    const captured = JSON.parse(
+      readFileSync(
+        resolve(
+          __dirname,
+          '../../../packages/text-engine/tests/fixtures/live/transcribe-1.verbose.dont-think-so.json'
+        ),
+        'utf8'
+      )
+    ) as { text: string }
+
+    async function dictate(mode: FormattingMode, deps: object = inference): Promise<HistoryEntry> {
       expect(captured.text).toBe("I don' think so. It's not what we need.")
       const settings = new FakeSettings()
       settings.value.formatting.mode = mode
@@ -288,7 +291,7 @@ describe('DictationController retry', () => {
         recorder: new FakeRecorder() as never,
         recordings,
         hook: hook as never,
-        inference: inference as never,
+        inference: deps as never,
         overlay: { setState: (s) => states.push(s), playSound: () => undefined },
         getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
       })
@@ -297,10 +300,45 @@ describe('DictationController retry', () => {
       controller.handle({ type: 'start', mode: 'hold' })
       controller.handle({ type: 'stop' })
       await settle()
+      const entry = history.list().entries[0]
+      expect(entry.rawText).toBe(captured.text)
+      return entry
+    }
+
+    it.each(['off', 'light'] as const)(
+      'is typed exactly as the speech model wrote it with formatting %s',
+      async (mode) => {
+        const entry = await dictate(mode)
+        expect(inject.calls).toEqual([
+          { text: "I don' think so. It's not what we need. ", method: 'auto' }
+        ])
+        expect(entry.finalText).toBe("I don' think so. It's not what we need.")
+        expect(entry.llmUsed).toBe(false)
+      }
+    )
+
+    it('is shown to the formatting model exactly as the speech model wrote it in the default mode', async () => {
+      expect(defaultSettings().formatting.mode).toBe('smart')
+      const shown: string[] = []
+      const complete: Complete = async (messages) => {
+        const prompt = messages.at(-1)!.content
+        shown.push(prompt.slice(prompt.lastIndexOf('Transcript:\n') + 'Transcript:\n'.length))
+        return { text: "I don't think so. It's not what we need.", finishReason: 'stop' }
+      }
+      const withModel = {
+        ...inference,
+        formatter: async () => ({
+          source: 'custom' as const,
+          format: (input: FormatInput) => formatTranscript(input, complete)
+        })
+      }
+      const entry = await dictate('smart', withModel)
+      expect(shown).toEqual([captured.text])
       expect(inject.calls).toEqual([
         { text: "I don't think so. It's not what we need. ", method: 'auto' }
       ])
-      expect(history.list().entries[0].rawText).toBe(captured.text)
-    }
-  )
+      expect(entry.llm).toMatchObject({ outcome: 'used', attempts: 1 })
+      expect(entry.stages).toEqual(['llm'])
+    })
+  })
 })

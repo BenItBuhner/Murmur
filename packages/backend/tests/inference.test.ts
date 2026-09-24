@@ -648,34 +648,55 @@ describe('POST /v1/format', () => {
     expect(used.modelText).toBe(answer)
   })
 
-  it('restores the "t" a speech model cut from a contraction, on captured bytes', async () => {
+  it('sends a transcript the speech model cut at an apostrophe to the model, as it came, on captured bytes', async () => {
     // A real speech model's verbose_json and formatting model's completion (text-engine live fixtures).
+    // The speech model dropped the "t" of "don't"; the gateway never patches a model's text itself,
+    // so the cut word is what keeps the transcript from the clean skip and sends it to the model.
     const live = (name: string): Record<string, unknown> =>
       JSON.parse(readFileSync(resolve(__dirname, '../../text-engine/tests/fixtures/live', name), 'utf8'))
+    const shownTo = (call: { init: RequestInit }): string => {
+      const prompt = JSON.parse(call.init.body as string).messages.at(-1).content as string
+      return prompt.slice(prompt.lastIndexOf('Transcript:\n') + 'Transcript:\n'.length)
+    }
     stubEnv(LLM_ENV)
+    const short = live('transcribe-1.verbose.dont-think-so.json').text as string
+    expect(short).toBe("I don' think so. It's not what we need.")
+    // What a formatting model that read the whole sentence answers; the long clip has its real answer.
+    const answers: Record<string, string> = {
+      [short]: "I don't think so. It's not what we need.",
+      [short.replace(/'/g, '’')]: 'I don’t think so. It’s not what we need.'
+    }
     const completion = live('complete.what-are-you-referring-to.json')
-    const calls = stubFetch(() => jsonResponse(completion))
+    const calls = stubFetch((_url, init) => {
+      const shown = shownTo({ init })
+      return shown in answers ? chat(answers[shown]) : jsonResponse(completion)
+    })
     const t = setup()
     const asAda = t.withIdentity(ada)
 
-    const short = live('transcribe-1.verbose.dont-think-so.json').text as string
-    expect(short).toBe("I don' think so. It's not what we need.")
-    for (const [transcript, want] of [
-      [short, "I don't think so. It's not what we need."],
-      [short.replace(/'/g, '’'), 'I don’t think so. It’s not what we need.']
-    ]) {
-      const skipped = await (await asAda.fetch('/v1/format', body(transcript))).json()
-      expect(skipped.status.outcome).toBe('skipped-clean')
-      expect(skipped.text).toBe(want)
+    for (const [transcript, want] of Object.entries(answers)) {
+      const before = calls.length
+      const used = await (await asAda.fetch('/v1/format', body(transcript))).json()
+      expect(calls).toHaveLength(before + 1)
+      expect(shownTo(calls[before])).toBe(transcript)
+      expect(used.status).toMatchObject({ outcome: 'used', attempts: 1 })
+      expect(used.text).toBe(want)
+      expect(used.stages).toEqual(['llm'])
     }
-    expect(calls).toHaveLength(0)
 
     const long = live('transcribe-1.verbose.what-are-you-referring-to.json').text as string
     const used = await (await asAda.fetch('/v1/format', body(long))).json()
-    expect(used.status.outcome).toBe('used')
+    expect(calls).toHaveLength(3)
+    expect(shownTo(calls[2])).toBe("What are you referring to? I don' recall. I have the worst memory in the world.")
+    expect(used.status).toMatchObject({ outcome: 'used', attempts: 1 })
     expect(used.text).toBe("What are you referring to? I don't recall. I have the worst memory in the world.")
-    const sent = JSON.parse(calls[0].init.body as string).messages.at(-1).content as string
-    expect(sent).toContain("Transcript:\nWhat are you referring to? I don't recall.")
+
+    // The same short sentence with its "t", as the plain json of the same audio returns it, is clean.
+    const whole = live('transcribe-1.json.dont-think-so.json').text as string
+    const skipped = await (await asAda.fetch('/v1/format', body(whole))).json()
+    expect(skipped.status.outcome).toBe('skipped-clean')
+    expect(skipped.text).toBe(whole)
+    expect(calls).toHaveLength(3)
   })
 
   it('retries once in strict mode when the verifier rejects, and falls back when it fails again', async () => {

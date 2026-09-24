@@ -94,7 +94,11 @@ object Clean {
     // `\z` is the true end of input: Java's `$` would also match before a final line break.
 
     private val ALLOWED_CHARS = Regex("^[a-z0-9 .,!?'’-]*\\z")
-    /** A word ending in a bare apostrophe that is not a plural possessive: a cut contraction. */
+    /**
+     * A word ending in a bare apostrophe that is not a plural possessive ("dogs'"): a contraction
+     * the speech model cut ("don' think"). The rules never rewrite the model's words, so only the
+     * formatting model can finish it.
+     */
     private val CUT_WORD = Regex("[a-z](?<!s)['’](?![a-z0-9])")
     private val TERMINAL = Regex("(?<!\\.)[.!?]\\z")
     private val PRECEDING_BOUNDARY = Regex("(?:[.!?…][\"'”’)\\]]*[ \\t]*|\\n[ \\t]*)\\z")

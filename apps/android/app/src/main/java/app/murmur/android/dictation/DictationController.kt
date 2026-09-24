@@ -18,6 +18,7 @@ import app.murmur.android.history.StageTimings
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
 import app.murmur.android.inference.LimitNotice
+import app.murmur.android.keyboard.HotkeyAction
 import app.murmur.android.service.RecordingService
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.FormattingMode
@@ -30,6 +31,7 @@ import app.murmur.android.stt.adaptiveThreshold
 import app.murmur.android.stt.lastVoicedSec
 import app.murmur.android.stt.transcribeComplete
 import app.murmur.android.text.AppContext
+import app.murmur.android.text.CommandPromptInput
 import app.murmur.android.text.DictionaryTerm
 import app.murmur.android.text.Engine
 import app.murmur.android.text.FormatContext
@@ -37,7 +39,9 @@ import app.murmur.android.text.FormatInput
 import app.murmur.android.text.FormatOutcome
 import app.murmur.android.text.FormatResult
 import app.murmur.android.text.FormatStatus
+import app.murmur.android.text.Prompt
 import app.murmur.android.text.STT_BASE_PROMPT
+import app.murmur.android.text.Verify
 import app.murmur.android.text.buildSttPrompt
 import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
@@ -47,6 +51,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,14 +63,29 @@ private const val TAG = "MurmurDictation"
 
 /** How long an error that can be retried stays on the pill, waiting for the user. */
 private const val RETRY_HOLD_MS = 15_000L
+
+/** Command mode began with nothing selected; the same words as the desktop pill. */
+const val NO_SELECTION = "Select some text first, then hold the command key"
+const val NO_COMMAND_MODEL = "Command mode needs a formatting model (Style settings)"
 /** A limit refusal is read, not glanced at; a text inserted unformatted deserves a beat more too. */
 private const val LIMIT_HOLD_MS = 20_000L
 private const val SOFT_LIMIT_HOLD_MS = 5_000L
 
 sealed class DictationState {
     data object Idle : DictationState()
-    data class Listening(val elapsedSec: Int, val level: Float) : DictationState()
-    data class Processing(val label: String) : DictationState()
+
+    /**
+     * [mode] and [locked] are what the desktop pill shows: a hands-free badge on a locked session,
+     * the command tint while an instruction is being spoken. A session from the button is hands-free.
+     */
+    data class Listening(
+        val elapsedSec: Int,
+        val level: Float,
+        val mode: DictationMode = DictationMode.HANDS_FREE,
+        val locked: Boolean = mode == DictationMode.HANDS_FREE
+    ) : DictationState()
+
+    data class Processing(val label: String, val mode: DictationMode = DictationMode.HANDS_FREE) : DictationState()
 
     /**
      * [limit]: the text went in with rule-based cleanup only because the Murmur instance paused or
@@ -97,8 +117,14 @@ private class Run(
      * Insert the text into the focused field. A retry started from the History screen only copies
      * it: the focused field, if any, is Murmur's own search box.
      */
-    val insert: Boolean = true
+    val insert: Boolean = true,
+    val mode: DictationMode = DictationMode.HANDS_FREE,
+    /** Command mode: the text that was selected when the session began, which the edit replaces. */
+    val selection: Selection? = null
 )
+
+/** The selected text in the focused field and where it sits, as the accessibility node reports it. */
+data class Selection(val text: String, val start: Int, val end: Int)
 
 /** Where the final text should go. */
 interface TextSink {
@@ -113,6 +139,15 @@ interface TextSink {
      * continues it naturally (mid-sentence means no capital, an ongoing list keeps its markers).
      */
     suspend fun precedingText(): String? = null
+
+    /** The selected text in the focused field, for command mode; null when there is none. */
+    suspend fun readSelection(): Selection? = null
+
+    /**
+     * Put [text] in place of [selection] (command mode). The default writes it where the cursor is.
+     * @return null on success, or a user-facing error message.
+     */
+    suspend fun replaceSelection(selection: Selection, text: String): String? = insert(text, pressEnter = false)
 }
 
 /**
@@ -139,16 +174,40 @@ object DictationController {
     @Volatile private var stoppedAt = 0L
     /** Id of the dictation in flight: the history entry and the account's idempotent stats record. */
     @Volatile private var sessionId = ""
+    /** How the session in flight was started, and whether it runs until stopped. */
+    @Volatile private var mode = DictationMode.HANDS_FREE
+    @Volatile private var locked = true
+    /** Command mode: the selection read when the session began; null until it has been, or when there was none. */
+    @Volatile private var selectionJob: kotlinx.coroutines.Deferred<Selection?>? = null
 
     val isListening: Boolean get() = _state.value is DictationState.Listening
     val isBusy: Boolean get() = _state.value is DictationState.Processing
 
+    /** The floating button and the idle bar: toggles a hands-free session. */
     fun toggle(context: Context) {
         when {
             isListening -> stopAndInsert(context)
             isBusy -> Unit
             else -> start(context)
         }
+    }
+
+    /** A hardware shortcut fired (see [app.murmur.android.keyboard.HotkeyEngine]). */
+    fun handle(context: Context, action: HotkeyAction) {
+        when (action) {
+            is HotkeyAction.Start -> start(context, action.mode)
+            HotkeyAction.Lock -> lock()
+            HotkeyAction.Stop -> stopAndInsert(context)
+            HotkeyAction.Cancel -> cancel(context)
+        }
+    }
+
+    /** A tap of the held shortcut, or the hands-free shortcut on top of it: keep recording until stopped. */
+    fun lock() {
+        if (!isListening) return
+        locked = true
+        if (mode == DictationMode.HOLD) mode = DictationMode.HANDS_FREE
+        (_state.value as? DictationState.Listening)?.let { _state.value = it.copy(mode = mode, locked = true) }
     }
 
     /**
@@ -158,43 +217,72 @@ object DictationController {
      */
     private fun fixtureMode(settings: MurmurSettings): Boolean = settings.useFixtureAudio && BuildConfig.DEBUG
 
-    fun start(context: Context) {
+    /**
+     * Begin listening. [mode] HOLD records until the key is released (a tap locks it), HANDS_FREE
+     * until stopped, COMMAND takes an instruction for the selected text: the selection is read as
+     * the session begins (there is no waiting for a key release here, so nothing is lost by reading
+     * it first), and a session with nothing selected ends at once with a notice.
+     */
+    fun start(context: Context, mode: DictationMode = DictationMode.HANDS_FREE) {
         if (isListening || isBusy) return
         resetJob?.cancel()
         val appContext = context.applicationContext
         val settings = SettingsStore.get(appContext).get()
         startedAt = System.currentTimeMillis()
         sessionId = UUID.randomUUID().toString()
+        this.mode = mode
+        locked = mode == DictationMode.HANDS_FREE
+        selectionJob = null
+
+        if (mode == DictationMode.COMMAND) {
+            val currentSink = sink
+            if (currentSink == null) {
+                showTransient(DictationState.Error("Accessibility service not running"))
+                return
+            }
+            selectionJob = scope.async { runCatching { currentSink.readSelection() }.getOrNull() }
+        }
 
         if (fixtureMode(settings)) {
             // Debug aid for emulators without a microphone: "listen" briefly, then dictate
             // the bundled fixture clip through the real provider pipeline.
-            _state.value = DictationState.Listening(0, 0.4f)
+            _state.value = DictationState.Listening(0, 0.4f, mode, locked)
             listeningJob = scope.launch {
                 while (isActive) {
                     val elapsed = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
-                    _state.value = DictationState.Listening(elapsed, 0.3f + (Math.random() * 0.4f).toFloat())
+                    _state.value = DictationState.Listening(elapsed, 0.3f + (Math.random() * 0.4f).toFloat(), this@DictationController.mode, locked)
                     delay(100)
                 }
             }
-            return
+        } else {
+            try {
+                RecordingService.start(appContext)
+                recorder.start(settings.sessionDurationLimitSec) { stopAndInsert(appContext) }
+            } catch (e: Exception) {
+                Log.e(TAG, "recorder start failed", e)
+                RecordingService.stop(appContext)
+                showTransient(DictationState.Error(friendlyError(e)))
+                return
+            }
+            _state.value = DictationState.Listening(0, 0f, mode, locked)
+            listeningJob = scope.launch {
+                while (isActive) {
+                    val elapsed = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
+                    _state.value = DictationState.Listening(elapsed, recorder.level, this@DictationController.mode, locked)
+                    delay(80)
+                }
+            }
         }
 
-        try {
-            RecordingService.start(appContext)
-            recorder.start(settings.sessionDurationLimitSec) { stopAndInsert(appContext) }
-        } catch (e: Exception) {
-            Log.e(TAG, "recorder start failed", e)
-            RecordingService.stop(appContext)
-            showTransient(DictationState.Error(friendlyError(e)))
-            return
-        }
-        _state.value = DictationState.Listening(0, 0f)
-        listeningJob = scope.launch {
-            while (isActive) {
-                val elapsed = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
-                _state.value = DictationState.Listening(elapsed, recorder.level)
-                delay(80)
+        val selection = selectionJob
+        if (mode == DictationMode.COMMAND && selection != null) {
+            // Nothing selected: say so now rather than after the user has spoken the instruction.
+            val id = sessionId
+            scope.launch {
+                if (selection.await() == null && isListening && sessionId == id) {
+                    cancel(appContext)
+                    showTransient(DictationState.Error(NO_SELECTION))
+                }
             }
         }
     }
@@ -215,7 +303,9 @@ object DictationController {
         listeningJob = null
         stoppedAt = System.currentTimeMillis()
         val settings = SettingsStore.get(appContext).get()
-        _state.value = DictationState.Processing("Transcribing…")
+        val mode = this.mode
+        val selectionJob = this.selectionJob
+        _state.value = DictationState.Processing("Transcribing…", mode)
 
         scope.launch {
             val id = sessionId
@@ -238,14 +328,20 @@ object DictationController {
                 }
                 // Store the audio before anything can go wrong with it: a failed request is retried
                 // from this file, and a kept recording is what History plays back.
-                val started = Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = storeRecording(appContext, id, pcm))
+                val started = Run(
+                    id,
+                    recordMs = (stoppedAt - startedAt).coerceAtLeast(0),
+                    recording = storeRecording(appContext, id, pcm),
+                    mode = mode,
+                    selection = selectionJob?.await()
+                )
                 run = started
                 process(started, pcm, settings, appContext, InferenceRouter.get(appContext))
             } catch (e: Exception) {
                 Log.e(TAG, "dictation failed", e)
                 RecordingService.stop(appContext)
                 val message = friendlyError(e)
-                val failed = run ?: Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = null)
+                val failed = run ?: Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = null, mode = mode)
                 recordFailure(appContext, settings, failed, raw = "", error = message)
                 showError(message, failed, planLimitOf(e))
             } finally {
@@ -267,6 +363,7 @@ object DictationController {
         val appContext = context.applicationContext
         val entry = HistoryStore.get(appContext).get(id) ?: return "This dictation is no longer in History"
         if (entry.finalText.isNotEmpty()) return "This dictation already has its text"
+        if (entry.mode == DictationMode.COMMAND) return "A command needs its selection: select the text and say it again"
         val recording = entry.recording?.takeIf { RecordingStore.get(appContext).has(it) }
             ?: return "The recording of this dictation was not kept"
         val decoded = RecordingStore.get(appContext).read(recording) ?: return "The recording could not be read"
@@ -282,7 +379,8 @@ object DictationController {
             recording = recording,
             previous = entry,
             attempts = entry.attempts + 1,
-            insert = insert
+            insert = insert,
+            mode = entry.mode
         )
         Log.i(TAG, "retry #${run.attempts} of ${id.take(8)}${if (insert) "" else " (copy only)"}")
         scope.launch {
@@ -377,7 +475,45 @@ object DictationController {
         var llmMs = 0L
         // The text goes in, but the formatting model was paused or refused on a plan limit.
         var softLimit: LimitNotice? = null
-        if (style.mode == FormattingMode.OFF) {
+        if (run.mode == DictationMode.COMMAND) {
+            // The transcript is an instruction for the selected text (desktop: session.ts command
+            // mode): the model applies it and the answer replaces the selection, nothing else runs.
+            val selection = run.selection
+            if (selection == null || selection.text.isBlank()) {
+                recordFailure(context, s, run, raw, NO_SELECTION, StageTimings(recordMs = recordMs, sttMs = sttMs), resolved.provider, resolved.cfg.model)
+                showError(NO_SELECTION, run)
+                return
+            }
+            _state.value = DictationState.Processing("Editing…", run.mode)
+            val cfg = router.llm().cfg
+            if (cfg.baseUrl.isEmpty() || cfg.model.isEmpty()) {
+                recordFailure(context, s, run, raw, NO_COMMAND_MODEL, StageTimings(recordMs = recordMs, sttMs = sttMs), resolved.provider, resolved.cfg.model)
+                showError(NO_COMMAND_MODEL, run)
+                return
+            }
+            val messages = Prompt.buildCommandMessages(
+                CommandPromptInput(
+                    selection = selection.text,
+                    instruction = raw,
+                    category = app.category,
+                    dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) },
+                    language = s.language
+                )
+            )
+            val answer = router.complete(cfg, messages, maxTokens = Prompt.commandMaxTokens(selection.text))
+            llmMs = System.currentTimeMillis() - formatStarted
+            val edited = Verify.cleanModelOutput(answer.text, selection.text)
+            if (edited.isEmpty()) {
+                val timings = StageTimings(recordMs = recordMs, sttMs = sttMs, llmMs = llmMs)
+                recordFailure(context, s, run, raw, "The model returned nothing", timings, resolved.provider, resolved.cfg.model)
+                showError("The model returned nothing", run)
+                return
+            }
+            final = edited
+            stages = listOf("command")
+            llm = LlmOutcome.USED
+            llmDetail = null
+        } else if (style.mode == FormattingMode.OFF) {
             final = raw + if (style.trailingSpace) " " else ""
             llmDetail = "formatting off"
         } else {
@@ -453,9 +589,15 @@ object DictationController {
             showError("Accessibility service not running", run)
             return
         }
-        _state.value = DictationState.Processing(if (run.insert) "Inserting…" else "Copying…")
+        _state.value = DictationState.Processing(if (run.insert) "Inserting…" else "Copying…", run.mode)
         val injectStarted = System.currentTimeMillis()
-        val error = if (run.insert && currentSink != null) currentSink.insert(final, pressEnter) else copyToClipboard(context, final)
+        val selection = run.selection
+        val error = when {
+            run.insert && currentSink != null && run.mode == DictationMode.COMMAND && selection != null ->
+                currentSink.replaceSelection(selection, final)
+            run.insert && currentSink != null -> currentSink.insert(final, pressEnter)
+            else -> copyToClipboard(context, final)
+        }
         val wordCount = countWords(final)
         val now = System.currentTimeMillis()
         // The audio stays with a successful dictation only if the user wants recordings kept.
@@ -463,6 +605,7 @@ object DictationController {
         val entry = HistoryEntry(
             id = run.id,
             createdAt = run.previous?.createdAt ?: now,
+            mode = run.mode,
             rawText = raw,
             finalText = if (error == null) final.trimEnd() else "",
             wordCount = if (error == null) wordCount else 0,
@@ -485,7 +628,7 @@ object DictationController {
         if (error == null) {
             Log.i(TAG, "${if (run.insert) "inserted" else "copied"} $wordCount words in ${entry.timings.totalMs}ms${if (run.attempts > 1) " (attempt ${run.attempts})" else ""}")
             showTransient(
-                DictationState.Success(if (run.insert) "Inserted" else "Copied", softLimit),
+                DictationState.Success(if (!run.insert) "Copied" else if (run.mode == DictationMode.COMMAND) "Edited" else "Inserted", softLimit),
                 if (softLimit != null) SOFT_LIMIT_HOLD_MS else 1500
             )
             SettingsStore.get(context).update { current ->
@@ -527,6 +670,7 @@ object DictationController {
         val entry = HistoryEntry(
             id = run.id.ifEmpty { UUID.randomUUID().toString() },
             createdAt = previous?.createdAt ?: now,
+            mode = run.mode,
             rawText = raw.ifEmpty { previous?.rawText ?: "" },
             finalText = "",
             wordCount = 0,

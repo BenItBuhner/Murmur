@@ -73,8 +73,7 @@ fun UnitNumberControl(
             .alpha(if (enabled) 1f else 0.45f)
             .background(c.paperRaised, shape)
             .border(1.5.dp, ring, shape)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .semantics { contentDescription = label },
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         BasicTextField(
@@ -84,7 +83,7 @@ fun UnitNumberControl(
                 text = digits
                 digits.toIntOrNull()?.takeIf { it in range }?.let { if (it != value) onChange(it) }
             },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).semantics { contentDescription = label },
             enabled = enabled,
             textStyle = Murmur.type.title.copy(color = c.ink, textAlign = TextAlign.End),
             cursorBrush = SolidColor(c.ink),

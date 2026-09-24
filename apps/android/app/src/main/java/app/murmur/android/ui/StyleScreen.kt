@@ -15,6 +15,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.murmur.android.inference.Inference
@@ -312,14 +313,14 @@ private fun RuleEditor(rule: AppRule, onChange: (AppRule) -> Unit, onRemove: () 
     Overline("Tone")
     Spacer(Modifier.height(8.dp))
     val tones = listOf(DEFAULT_CHOICE) + Tone.entries.filter { it != Tone.AUTO }.map { it.displayName }
-    ChipRow(tones, if (rule.tone == Tone.AUTO) DEFAULT_CHOICE else rule.tone.displayName) { label ->
+    ChipRow(tones, if (rule.tone == Tone.AUTO) DEFAULT_CHOICE else rule.tone.displayName, Modifier.testTag("rule-tone")) { label ->
         onChange(rule.copy(tone = Tone.entries.firstOrNull { it.displayName == label } ?: Tone.AUTO))
     }
     Spacer(Modifier.height(14.dp))
     Overline("Mode")
     Spacer(Modifier.height(8.dp))
     val modes = listOf(DEFAULT_CHOICE) + FormattingMode.entries.map { it.displayName }
-    ChipRow(modes, rule.formatting?.displayName ?: DEFAULT_CHOICE) { label ->
+    ChipRow(modes, rule.formatting?.displayName ?: DEFAULT_CHOICE, Modifier.testTag("rule-mode")) { label ->
         onChange(rule.copy(formatting = FormattingMode.entries.firstOrNull { it.displayName == label }))
     }
     Spacer(Modifier.height(14.dp))
@@ -330,7 +331,7 @@ private fun RuleEditor(rule: AppRule, onChange: (AppRule) -> Unit, onRemove: () 
         true -> "On"
         else -> "Off"
     }
-    ChipRow(listOf(DEFAULT_CHOICE, "On", "Off"), trailing) { label ->
+    ChipRow(listOf(DEFAULT_CHOICE, "On", "Off"), trailing, Modifier.testTag("rule-trailing")) { label ->
         onChange(rule.copy(trailingSpace = when (label) { "On" -> true; "Off" -> false; else -> null }))
     }
     Spacer(Modifier.height(16.dp))

@@ -10,8 +10,14 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.filterToOne
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onChildren
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -101,6 +107,13 @@ class ParitySettingsScreensTest {
         compose.waitForIdle()
     }
 
+    /** The editable field showing [placeholder] (the placeholder text itself is a separate node). */
+    private fun field(placeholder: String) = compose.onNode(hasSetTextAction() and hasText(placeholder))
+
+    /** A chip by label inside one of the rule editor's tagged rows. */
+    private fun ruleChip(row: String, label: String) =
+        compose.onNodeWithTag(row).onChildren().filterToOne(hasText(label))
+
     @Test
     fun `Speech model has Recognition with the dictionary bias and the transcription timeout`() {
         store.update { it.copy(sttBaseUrl = "https://api.groq.com/openai/v1", sttModel = "whisper-large-v3-turbo") }
@@ -158,9 +171,10 @@ class ParitySettingsScreensTest {
         compose.onNodeWithText("PER-APP RULES").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Add rule").performScrollTo().performClick()
         assertEquals(1, store.get().appRules.size)
-        compose.onNodeWithText("whatsapp, gmail, termux…").performScrollTo().performTextInput("whatsapp")
-        compose.onNodeWithText("Professional").performScrollTo().performClick()
-        compose.onNodeWithText("Off").performScrollTo().performClick()
+        field("whatsapp, gmail, termux…").performScrollTo().performTextInput("whatsapp")
+        ruleChip("rule-tone", "Professional").performScrollTo().performClick()
+        ruleChip("rule-mode", "Off").performScrollTo().performClick()
+        ruleChip("rule-trailing", "Default").assertIsSelected()
         val rule = store.get().appRules.single()
         assertEquals("whatsapp", rule.match)
         assertEquals(Tone.PROFESSIONAL, rule.tone)
@@ -196,8 +210,8 @@ class ParitySettingsScreensTest {
     fun `Dictionary carries the snippets, with the desktop's duplicate rule`() {
         show { DictionaryScreen(store, synced = false, TopNav.Back {}) }
         compose.onNodeWithText("SNIPPETS").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("my email").performScrollTo().performTextInput("my email")
-        compose.onNodeWithText("ben@example.com").performScrollTo().performTextInput("ben@example.com")
+        field("my email").performScrollTo().performTextInput("my email")
+        field("ben@example.com").performScrollTo().performTextInput("ben@example.com")
         compose.onNodeWithText("Add snippet").performScrollTo().performClick()
         val snippet = store.get().snippets.single()
         assertEquals("my email", snippet.trigger)
@@ -205,8 +219,8 @@ class ParitySettingsScreensTest {
         compose.onNodeWithText("“my email”").performScrollTo().assertIsDisplayed()
 
         // The same trigger again, in any case, is refused.
-        compose.onNodeWithText("my email").performScrollTo().performTextInput("My Email")
-        compose.onNodeWithText("ben@example.com").performScrollTo().performTextInput("other")
+        field("my email").performScrollTo().performTextInput("My Email")
+        field("ben@example.com").performScrollTo().performTextInput("other")
         compose.onNodeWithText("Add snippet").performScrollTo().performClick()
         assertEquals(1, store.get().snippets.size)
         compose.onNodeWithText("“My Email” is already a snippet trigger").performScrollTo().assertIsDisplayed()

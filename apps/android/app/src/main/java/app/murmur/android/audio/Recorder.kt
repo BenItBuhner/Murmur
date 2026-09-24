@@ -25,6 +25,10 @@ class Recorder {
 
     val isRecording: Boolean get() = running
 
+    /** How many samples are buffered so far; for tests that watch a capture run. */
+    @androidx.annotation.VisibleForTesting
+    fun peekSampleCount(): Long = synchronized(chunks) { chunks.sumOf { it.size.toLong() } }
+
     /**
      * @param maxDurationSec stop on its own after this long, or null to run until [stop] (the
      *   default: `limitDuration` is off unless the user turns it on, as on the desktop).

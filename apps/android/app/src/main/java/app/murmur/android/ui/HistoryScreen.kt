@@ -51,15 +51,18 @@ import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.RecordingsInfo
+import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.EmphasizedAccelerate
 import app.murmur.android.ui.components.EmphasizedDecelerate
 import app.murmur.android.ui.components.Card
+import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.LatencyBar
 import app.murmur.android.ui.components.LazyScreen
 import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.RowCardPadding
+import app.murmur.android.ui.components.SecondsControl
 import app.murmur.android.ui.components.Tag
 import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.components.ToggleRow
@@ -201,6 +204,10 @@ fun HistoryScreen(store: HistoryStore, settings: SettingsStore, recordings: Reco
             RecordingsRow(
                 keep = prefs.keepRecordings,
                 onKeepChange = { keep -> settings.update { it.copy(keepRecordings = keep) } },
+                limitDuration = prefs.limitDuration,
+                onLimitDurationChange = { on -> settings.update { it.copy(limitDuration = on) } },
+                maxDurationSec = prefs.maxDurationSec,
+                onMaxDurationChange = { sec -> settings.update { it.copy(maxDurationSec = sec) } },
                 info = recordingsInfo,
                 confirming = confirmClearRecordings,
                 onConfirmChange = { confirmClearRecordings = it },
@@ -232,6 +239,7 @@ fun HistoryScreen(store: HistoryStore, settings: SettingsStore, recordings: Reco
                     expanded = open == entry.id,
                     playing = playing == entry.id,
                     retrying = retrying == entry.id,
+                    showLatency = prefs.showLatencyInHistory,
                     retryNote = retryNote?.takeIf { it.first == entry.id }?.second,
                     onToggle = { open = if (open == entry.id) null else entry.id },
                     onCopy = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Murmur", entry.finalText))) } },
@@ -263,6 +271,10 @@ fun HistoryScreen(store: HistoryStore, settings: SettingsStore, recordings: Reco
 private fun RecordingsRow(
     keep: Boolean,
     onKeepChange: (Boolean) -> Unit,
+    limitDuration: Boolean,
+    onLimitDurationChange: (Boolean) -> Unit,
+    maxDurationSec: Int,
+    onMaxDurationChange: (Int) -> Unit,
     info: RecordingsInfo,
     confirming: Boolean,
     onConfirmChange: (Boolean) -> Unit,
@@ -270,6 +282,26 @@ private fun RecordingsRow(
 ) {
     val c = Murmur.colors
     Card(padding = RowCardPadding) {
+        // The session length limit, with the desktop's default (off) and bounds (5–1800 s).
+        ToggleRow(
+            title = "Limit session length",
+            description = "Off by default. Turn this on only if you want a dictation to stop on its own.",
+            checked = limitDuration,
+            onCheckedChange = onLimitDurationChange
+        )
+        ControlRow(
+            "Maximum length",
+            description = if (limitDuration) "Dictations stop automatically after this."
+            else "Unused until you enable the limit above. Dictations run until you stop them."
+        ) {
+            SecondsControl(
+                value = maxDurationSec,
+                range = SettingsRanges.MAX_DURATION_SEC,
+                onChange = onMaxDurationChange,
+                label = "Maximum dictation length in seconds",
+                enabled = limitDuration
+            )
+        }
         ToggleRow(
             title = "Keep recordings",
             description = "Store the audio of every dictation with its entry, to play it back or send it again. Off, only failed dictations keep their audio until they succeed. Recordings never leave this phone.",
@@ -334,6 +366,8 @@ private fun HistoryRow(
     expanded: Boolean,
     playing: Boolean,
     retrying: Boolean,
+    /** Per-stage timing bars and the total (the "Show latency in history" setting). */
+    showLatency: Boolean,
     /** Why the last retry from here did not work out, shown under the entry. */
     retryNote: String?,
     onToggle: () -> Unit,
@@ -375,7 +409,7 @@ private fun HistoryRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(entryMeta(entry), style = Murmur.type.labelSmall, color = c.inkSoft, modifier = Modifier.padding(vertical = 2.dp))
+                    Text(entryMeta(entry, latency = showLatency), style = Murmur.type.labelSmall, color = c.inkSoft, modifier = Modifier.padding(vertical = 2.dp))
                     when (entry.llm) {
                         LlmOutcome.USED -> Tag("smart")
                         LlmOutcome.REJECTED, LlmOutcome.FAILED -> Tag("rules")
@@ -412,7 +446,7 @@ private fun HistoryRow(
                     Well { Text(entry.rawText, style = Murmur.type.bodySmall, color = c.inkSoft) }
                     Spacer(Modifier.height(18.dp))
                 }
-                if (!entry.failed && entry.timings.totalMs > 0) {
+                if (showLatency && !entry.failed && entry.timings.totalMs > 0) {
                     LatencyBar(entry.timings)
                     Spacer(Modifier.height(18.dp))
                 }

@@ -120,7 +120,7 @@ fun AttentionCard(title: String, description: String, onClick: () -> Unit, modif
 
 /** One recent dictation: the text, then when, where and how long. A row of a [ListCard]. */
 @Composable
-fun RecentRow(entry: HistoryEntry, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+fun RecentRow(entry: HistoryEntry, modifier: Modifier = Modifier, showLatency: Boolean = true, onClick: (() -> Unit)? = null) {
     val c = Murmur.colors
     ListRow(modifier, onClick = onClick) {
         Column(Modifier.weight(1f)) {
@@ -130,18 +130,18 @@ fun RecentRow(entry: HistoryEntry, modifier: Modifier = Modifier, onClick: (() -
                 Text(entry.finalText, style = Murmur.type.body, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(5.dp))
-            Text(entryMeta(entry), style = Murmur.type.labelSmall, color = c.inkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(entryMeta(entry, latency = showLatency), style = Murmur.type.labelSmall, color = c.inkSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
-/** "5 min ago · Messages · 24 words · 1,240 ms" */
-fun entryMeta(entry: HistoryEntry, now: Long = System.currentTimeMillis()): String {
+/** "5 min ago · Messages · 24 words · 1,240 ms"; the total is left out when latency is hidden. */
+fun entryMeta(entry: HistoryEntry, now: Long = System.currentTimeMillis(), latency: Boolean = true): String {
     val parts = ArrayList<String>(4)
     parts += formatRelative(entry.createdAt, now)
     entry.appName?.takeIf { it.isNotBlank() }?.let { parts += it }
     if (!entry.failed) parts += pluralize(entry.wordCount, "word")
-    if (!entry.failed && entry.timings.totalMs > 0) parts += "${formatCount(entry.timings.totalMs.toInt())} ms"
+    if (latency && !entry.failed && entry.timings.totalMs > 0) parts += "${formatCount(entry.timings.totalMs.toInt())} ms"
     return parts.joinToString(" · ")
 }
 

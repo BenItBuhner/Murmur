@@ -20,8 +20,10 @@ import androidx.compose.ui.unit.dp
 import app.murmur.android.inference.Inference
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
+import app.murmur.android.settings.SttPresets
 import app.murmur.android.stt.SttClient
 import app.murmur.android.ui.components.Chip
 import app.murmur.android.ui.components.ChipRow
@@ -30,9 +32,12 @@ import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.Group
 import app.murmur.android.ui.components.Notice
 import app.murmur.android.ui.components.NoticeTone
+import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
+import app.murmur.android.ui.components.SecondsControl
 import app.murmur.android.ui.components.SectionGap
+import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
 import kotlinx.coroutines.launch
 
@@ -72,6 +77,34 @@ fun SpeechModelForm(store: SettingsStore, settings: MurmurSettings, showAdvanced
         SectionGap()
     }
     if (inference.routing.murmurStt) MurmurSpeechSummary(inference) else OwnProviderForm(store, settings, showAdvanced)
+    if (showAdvanced) {
+        SectionGap()
+        RecognitionGroup(store, settings)
+    }
+}
+
+/**
+ * What applies whichever model transcribes (desktop: Models → Recognition). The language has its
+ * own screen; the dictionary bias and the timeout live here, with the desktop's defaults and bounds.
+ */
+@Composable
+fun RecognitionGroup(store: SettingsStore, settings: MurmurSettings) {
+    Group("Recognition", rows = true) {
+        ToggleRow(
+            title = "Bias with dictionary",
+            description = "Sends your dictionary and snippet triggers as a prompt so rare words are spelled right the first time.",
+            checked = settings.useDictionaryPrompt,
+            onCheckedChange = { on -> store.update { s -> s.copy(useDictionaryPrompt = on) } }
+        )
+        ControlRow("Timeout", description = "Give up on a transcription after this long.") {
+            SecondsControl(
+                value = settings.sttTimeoutMs / 1000,
+                range = SettingsRanges.STT_TIMEOUT_MS.first / 1000..SettingsRanges.STT_TIMEOUT_MS.last / 1000,
+                onChange = { seconds -> store.update { s -> s.copy(sttTimeoutMs = seconds * 1000) } },
+                label = "Transcription timeout in seconds"
+            )
+        }
+    }
 }
 
 /** Murmur models vs. the user's own provider. Only rendered in builds that talk to an instance. */
@@ -136,20 +169,26 @@ private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, show
     var discovering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val kind = settings.sttKind
+    val preset = SttPresets.find(settings.sttPresetId)
 
+    // The same presets as the desktop's Models page: one fills the server, the kind and the
+    // recommended model; Custom leaves the server to be typed and keeps the kind chips below.
     Group("Provider") {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (k in SttKind.entries) {
-                Chip(k.displayName, selected = kind == k, onClick = {
+            for (p in SttPresets.ALL) {
+                Chip(p.name, selected = preset.id == p.id, onClick = {
                     models = emptyList()
                     error = null
-                    store.update { s -> s.copy(sttKind = k) }
+                    store.update { s ->
+                        if (p.id == SttPresets.CUSTOM) s.copy(sttPresetId = p.id)
+                        else s.copy(sttPresetId = p.id, sttKind = p.kind, sttBaseUrl = p.baseUrl, sttModel = p.defaultModel)
+                    }
                 })
             }
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            when (kind) {
+            preset.note ?: when (kind) {
                 SttKind.OPENAI_COMPATIBLE -> "OpenAI, Groq, or any server with a /v1/audio/transcriptions endpoint, including a local whisper server."
                 SttKind.DEEPGRAM -> "Deepgram's Nova models. Only the API key is required."
                 SttKind.ELEVENLABS -> "ElevenLabs Scribe. Only the API key is required."
@@ -157,6 +196,20 @@ private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, show
             style = Murmur.type.bodySmall,
             color = Murmur.colors.inkSoft
         )
+        if (preset.id == SttPresets.CUSTOM) {
+            Spacer(Modifier.height(14.dp))
+            Overline("Speaks")
+            Spacer(Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (k in SttKind.entries) {
+                    Chip(k.displayName, selected = kind == k, onClick = {
+                        models = emptyList()
+                        error = null
+                        store.update { s -> s.copy(sttKind = k) }
+                    })
+                }
+            }
+        }
     }
 
     SectionGap()
@@ -164,7 +217,10 @@ private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, show
     Group("Connection") {
         Field(
             value = settings.sttBaseUrl,
-            onValueChange = { store.update { s -> s.copy(sttBaseUrl = it) } },
+            // A server typed by hand is no longer the preset's; the chips follow.
+            onValueChange = { url ->
+                store.update { s -> s.copy(sttBaseUrl = url, sttPresetId = if (url.trim() == preset.baseUrl) s.sttPresetId else SttPresets.CUSTOM) }
+            },
             label = if (kind == SttKind.OPENAI_COMPATIBLE) "Server" else "Server (optional)",
             placeholder = when (kind) {
                 SttKind.OPENAI_COMPATIBLE -> "https://api.groq.com/openai/v1"
@@ -193,6 +249,10 @@ private fun OwnProviderForm(store: SettingsStore, settings: MurmurSettings, show
                 SttKind.ELEVENLABS -> "scribe_v1"
             }
         )
+        if (models.isEmpty() && preset.id != SttPresets.CUSTOM && preset.models.size > 1) {
+            Spacer(Modifier.height(12.dp))
+            ChipRow(preset.models, settings.sttModel) { store.update { s -> s.copy(sttModel = it) } }
+        }
         Spacer(Modifier.height(14.dp))
         Row {
             SecondaryButton(

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Loader2, Play, Plus, Sparkles, Trash2, WandSparkles } from 'lucide-react'
 import type { AppRule, FormattingMode, Tone } from '@shared/settings'
-import { LLM_INSTRUCTIONS_MAX } from '@shared/settings'
+import { LLM_INSTRUCTIONS_MAX, SETTINGS_RANGES, clampToRange } from '@shared/settings'
 import { MURMUR_LLM_MODEL } from '@shared/inference'
 import type { LlmStatus, PreviewResult, ProviderTestResult } from '@shared/types'
 import { LLM_PRESETS } from '@core/stt/presets'
@@ -312,13 +312,20 @@ export function StylePage(): React.JSX.Element {
           <div className="flex items-center gap-2">
             <Input
               type="number"
-              min={1}
-              max={60}
+              min={SETTINGS_RANGES.llmTimeoutMs.min / 1000}
+              max={SETTINGS_RANGES.llmTimeoutMs.max / 1000}
               className="w-20 text-right"
               value={Math.round(f.llm.timeoutMs / 1000)}
               onChange={(e) =>
                 void patch({
-                  formatting: { llm: { timeoutMs: Math.max(1000, Number(e.target.value) * 1000) } }
+                  formatting: {
+                    llm: {
+                      timeoutMs: clampToRange(
+                        Number(e.target.value) * 1000,
+                        SETTINGS_RANGES.llmTimeoutMs
+                      )
+                    }
+                  }
                 })
               }
             />

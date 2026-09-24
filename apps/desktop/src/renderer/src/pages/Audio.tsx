@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { RecordingsInfo } from '@shared/ipc'
+import { SETTINGS_RANGES, clampToRange } from '@shared/settings'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
 import { Slider } from '@renderer/components/ui/slider'
@@ -193,13 +194,20 @@ export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Eleme
           <div className="flex items-center gap-2">
             <Input
               type="number"
-              min={5}
-              max={1800}
+              min={SETTINGS_RANGES.maxDurationSec.min}
+              max={SETTINGS_RANGES.maxDurationSec.max}
               className="w-20 text-right"
               value={a.maxDurationSec}
               disabled={!a.limitDuration}
               onChange={(e) =>
-                void patch({ audio: { maxDurationSec: Math.max(5, Number(e.target.value)) } })
+                void patch({
+                  audio: {
+                    maxDurationSec: clampToRange(
+                      Number(e.target.value),
+                      SETTINGS_RANGES.maxDurationSec
+                    )
+                  }
+                })
               }
             />
             <span className="text-sm text-muted-foreground">s</span>

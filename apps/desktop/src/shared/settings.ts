@@ -21,6 +21,30 @@ export type Tone = z.infer<typeof toneSchema>
 
 export const LLM_INSTRUCTIONS_MAX = 2000
 
+/** Inclusive bounds of a numeric setting, shared by the schema and the input that edits it. */
+export interface SettingRange {
+  min: number
+  max: number
+}
+
+/**
+ * Bounds the Android app mirrors (`SettingsRanges` in its settings store); an input clamps into
+ * them before writing, since a value outside the schema would drop its whole section to defaults.
+ */
+export const SETTINGS_RANGES = {
+  /** `stt.timeoutMs`: give up on a transcription after this long. */
+  sttTimeoutMs: { min: 2000, max: 120000 },
+  /** `formatting.llm.timeoutMs`: a formatting model slower than this loses to the Light result. */
+  llmTimeoutMs: { min: 1000, max: 60000 },
+  /** `audio.maxDurationSec`: how long a session may run when the limit is on. */
+  maxDurationSec: { min: 5, max: 1800 }
+} as const satisfies Record<string, SettingRange>
+
+export function clampToRange(value: number, range: SettingRange): number {
+  if (!Number.isFinite(value)) return range.min
+  return Math.min(range.max, Math.max(range.min, Math.round(value)))
+}
+
 export const injectionMethodSchema = z.enum(['auto', 'paste', 'type', 'clipboard'])
 export type InjectionMethod = z.infer<typeof injectionMethodSchema>
 
@@ -130,7 +154,12 @@ export const settingsSchema = z.object({
        */
       limitDuration: z.boolean().default(false),
       /** Used only when `limitDuration` is on. */
-      maxDurationSec: z.number().int().min(5).max(1800).default(300),
+      maxDurationSec: z
+        .number()
+        .int()
+        .min(SETTINGS_RANGES.maxDurationSec.min)
+        .max(SETTINGS_RANGES.maxDurationSec.max)
+        .default(300),
       noiseSuppression: z.boolean().default(true),
       autoGainControl: z.boolean().default(true),
       /**
@@ -156,7 +185,12 @@ export const settingsSchema = z.object({
       fallbackModel: z.string().default(''),
       language: z.string().default('auto'),
       useDictionaryPrompt: z.boolean().default(true),
-      timeoutMs: z.number().int().min(2000).max(120000).default(45000)
+      timeoutMs: z
+        .number()
+        .int()
+        .min(SETTINGS_RANGES.sttTimeoutMs.min)
+        .max(SETTINGS_RANGES.sttTimeoutMs.max)
+        .default(45000)
     })
     .prefault({}),
   /**
@@ -182,7 +216,12 @@ export const settingsSchema = z.object({
           baseUrl: z.string().default(''),
           apiKeyEnc: z.string().default(''),
           model: z.string().default(''),
-          timeoutMs: z.number().int().min(1000).max(60000).default(8000)
+          timeoutMs: z
+            .number()
+            .int()
+            .min(SETTINGS_RANGES.llmTimeoutMs.min)
+            .max(SETTINGS_RANGES.llmTimeoutMs.max)
+            .default(8000)
         })
         .prefault({})
     })

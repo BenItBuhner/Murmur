@@ -229,13 +229,13 @@ fun HomeScreen(
                         EmptyRecent(onTry = { onOpen(Route.TRY_IT) })
                     } else {
                         ListCard {
-                            for (entry in recent) RecentRow(entry, onClick = { onOpen(Route.HISTORY) })
+                            for (entry in recent) RecentRow(entry, showLatency = settings.showLatencyInHistory, onClick = { onOpen(Route.HISTORY) })
                         }
                     }
                 }
             }
 
-            Appear(last != null) {
+            Appear(last != null && settings.showLatencyInHistory) {
                 Column {
                     Spacer(Modifier.height(36.dp))
                     Overline("Last dictation, where the time went")

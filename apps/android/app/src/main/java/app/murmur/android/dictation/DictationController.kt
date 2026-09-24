@@ -182,7 +182,7 @@ object DictationController {
 
         try {
             RecordingService.start(appContext)
-            recorder.start(settings.maxDurationSec) { stopAndInsert(appContext) }
+            recorder.start(settings.sessionDurationLimitSec) { stopAndInsert(appContext) }
         } catch (e: Exception) {
             Log.e(TAG, "recorder start failed", e)
             RecordingService.stop(appContext)
@@ -328,7 +328,9 @@ object DictationController {
         // whether the clip goes to the instance's model or the user's own provider.
         val sttStarted = System.currentTimeMillis()
         val resolved = router.stt()
-        val prompt = buildSttPrompt(s.dictionaryTerms)
+        // The dictionary and the snippet triggers prime the speech model, unless the user turned
+        // the bias off (then no prompt goes at all, as on the desktop).
+        val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
         val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
         val complete = transcribeComplete(
             pcm = pcm,
@@ -338,7 +340,7 @@ object DictationController {
             prompt = prompt,
             // Resumed tails keep the style hint but never the vocabulary: a prompt that ends with a
             // term the speaker says next is exactly what makes Whisper stop early.
-            tailPrompt = STT_BASE_PROMPT,
+            tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
             log = { Log.w(TAG, it) }
         ) { wav, p -> router.transcribe(resolved, wav, p) }
         val stt = complete.output
@@ -362,8 +364,10 @@ object DictationController {
         // 2. Text. The engine gets the raw transcript plus everything it should know about the
         // destination; against a Murmur instance it runs on the gateway, otherwise here.
         val focusedPackage = sink?.focusedPackage() ?: ""
-        val app: AppContext = classifyPackage(focusedPackage)
+        val focusedLabel = appLabel(context, focusedPackage)
+        val app: AppContext = classifyPackage(focusedPackage, focusedLabel)
         val style = resolveStyle(s, app)
+        style.rule?.let { Log.i(TAG, "per-app rule \"${it.match}\" applies to $focusedPackage") }
         val formatStarted = System.currentTimeMillis()
         var final: String
         var pressEnter = false
@@ -388,7 +392,9 @@ object DictationController {
                     // A copy-only retry has no target field; what is focused is Murmur's own screen.
                     precedingText = if (run.insert && style.mode == FormattingMode.SMART) runCatching { sink?.precedingText() }.getOrNull() else null,
                     instructions = style.instructions.takeIf { it.isNotEmpty() },
-                    dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) }
+                    dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) },
+                    // Snippet triggers are expanded after the model; it must leave them alone.
+                    keepVerbatim = s.snippetTriggers
                 ),
                 dictionary = s.dictionaryEntries
             )
@@ -410,7 +416,7 @@ object DictationController {
                         .copy(status = FormatStatus(FormatOutcome.FAILED, friendlyError(e), 0))
                 }
             }
-            val finished = finish(formatted.text, app.category, s.dictionaryEntries, style.trailingSpace)
+            val finished = finish(formatted.text, app.category, s.dictionaryEntries, style.trailingSpace, snippets = s.snippets)
             final = finished.text
             pressEnter = formatted.pressEnter
             stages = formatted.stages + finished.stages
@@ -461,7 +467,7 @@ object DictationController {
             finalText = if (error == null) final.trimEnd() else "",
             wordCount = if (error == null) wordCount else 0,
             speechMs = recordMs,
-            appName = if (run.insert) appLabel(context, focusedPackage) else run.previous?.appName,
+            appName = if (run.insert) focusedLabel else run.previous?.appName,
             provider = resolved.provider,
             model = resolved.cfg.model,
             injected = error == null && run.insert,

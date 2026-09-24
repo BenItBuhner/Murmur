@@ -128,5 +128,48 @@ class SettingsMigrationTest {
         val s = SettingsStore(context).get()
         assertEquals("", s.llmModel)
         assertEquals(GENERATION, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("modelMigration", 0))
+        assertEquals(PARITY_GENERATION, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("parityMigration", 0))
+        assertEquals("the desktop's formatting timeout", 8_000, s.llmTimeoutMs)
+    }
+
+    // ---- parity migration: the formatting timeout -----------------------------------------------
+
+    @Test
+    fun `an install still on the old 15 s formatting timeout moves to the shared 8 s default once`() {
+        // Every earlier build wrote its 15 s default and offered no screen to change it.
+        seed("llmTimeoutMs" to 15_000, "sttTimeoutMs" to 45_000, "sttBaseUrl" to GROQ)
+        val s = SettingsStore(context).get()
+        assertEquals(8_000, s.llmTimeoutMs)
+        assertEquals("untouched", 45_000, s.sttTimeoutMs)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        assertEquals(8_000, prefs.getInt("llmTimeoutMs", 0))
+        assertEquals(PARITY_GENERATION, prefs.getInt("parityMigration", 0))
+    }
+
+    @Test
+    fun `runs once - 15 s chosen on the Style screen after the migration stays`() {
+        seed("llmTimeoutMs" to 15_000, "parityMigration" to PARITY_GENERATION)
+        assertEquals(15_000, SettingsStore(context).get().llmTimeoutMs)
+    }
+
+    @Test
+    fun `a formatting timeout that is not the old default is the user's and is left alone`() {
+        seed("llmTimeoutMs" to 12_000)
+        val s = SettingsStore(context).get()
+        assertEquals(12_000, s.llmTimeoutMs)
+        assertEquals(PARITY_GENERATION, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("parityMigration", 0))
+    }
+
+    @Test
+    fun `an install that never wrote a session limit runs unlimited, keeping its old maximum for when it opts in`() {
+        // Earlier builds stopped every session at maxDurationSec; the limit is now a choice, off by default.
+        seed("maxDurationSec" to 300)
+        val s = SettingsStore(context).get()
+        assertEquals(false, s.limitDuration)
+        assertEquals(300, s.maxDurationSec)
+        assertEquals(null, s.sessionDurationLimitSec)
     }
 }
+
+/** The current generation of the parity migration (SettingsStore.PARITY_MIGRATION). */
+private const val PARITY_GENERATION = 1

@@ -174,7 +174,8 @@ class InferenceTest {
         assertEquals("https://api.groq.com/openai/v1", stt.cfg.baseUrl)
         assertEquals("sk-own", stt.cfg.apiKey)
         val llm = h.router.llm()
-        assertEquals(LlmConfig("https://api.groq.com/openai/v1", "sk-own", "openai/gpt-oss-20b", 15_000), llm.cfg)
+        // The formatting timeout is the shared default (8 s, as on the desktop) and applies to the user's own model.
+        assertEquals(LlmConfig("https://api.groq.com/openai/v1", "sk-own", "openai/gpt-oss-20b", 8_000), llm.cfg)
         val blankLocal = Harness(local, blank(), tokens = listOf("nope"))
         assertEquals(InferenceSource.CUSTOM, blankLocal.router.stt().source)
         assertEquals(InferenceSource.CUSTOM, blankLocal.router.llm().source)
@@ -197,7 +198,8 @@ class InferenceTest {
         assertEquals("de", stt.cfg.language)
         assertEquals(30_000, stt.cfg.timeoutMs)
         val llm = h.router.llm()
-        assertEquals(LlmConfig(gateway, "jwt-1", Inference.LLM_MODEL, 15_000), llm.cfg)
+        // The same formatting timeout applies to the gateway's model.
+        assertEquals(LlmConfig(gateway, "jwt-1", Inference.LLM_MODEL, 8_000), llm.cfg)
         assertEquals(listOf(false, false), h.requests)
         assertTrue(h.router.isMurmur("$gateway/"))
         assertFalse(h.router.isMurmur("https://api.groq.com/openai/v1"))

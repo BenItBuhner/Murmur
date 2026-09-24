@@ -2,10 +2,12 @@ package app.murmur.android.cloud
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.murmur.android.settings.AppRule
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.Snippet
 import app.murmur.android.settings.Tone
 import java.util.UUID
 import kotlinx.serialization.SerialName
@@ -25,6 +27,35 @@ data class DictionaryEntryDto(
     val word: String,
     val aliases: List<String> = emptyList(),
     val fuzzy: Boolean = false,
+    val createdAt: Double = 0.0,
+    val updatedAt: Double = 0.0
+)
+
+@Serializable
+data class SnippetDto(
+    val id: String,
+    val trigger: String,
+    val content: String,
+    val createdAt: Double = 0.0,
+    val updatedAt: Double = 0.0
+)
+
+/**
+ * A per-app rule as the server holds it. The rule-based cleanup knobs older clients wrote
+ * (`lists`, `numbers`, `freedom`) may still be on a record; they are read so decoding never
+ * fails and never written back.
+ */
+@Serializable
+data class AppRuleDto(
+    val id: String,
+    val match: String,
+    val tone: String = "auto",
+    val formatting: String? = null,
+    val trailingSpace: Boolean? = null,
+    val instructions: String? = null,
+    val lists: String? = null,
+    val numbers: String? = null,
+    val freedom: String? = null,
     val createdAt: Double = 0.0,
     val updatedAt: Double = 0.0
 )
@@ -254,19 +285,72 @@ fun applyRemotePreferences(s: MurmurSettings, remote: PreferencesDto): MurmurSet
 sealed class SyncOp {
     abstract val id: String
 
+    /**
+     * An upsert of one item of a synced collection (dictionary, snippets, app rules). [localId] is
+     * the item's id on this device; [remoteId] the server's once known; [acked] once the server
+     * confirmed it and until its own snapshot echoes the record.
+     */
+    sealed interface Upsert {
+        val localId: String
+        val remoteId: String?
+        val acked: Boolean
+
+        /** The same op, confirmed under the server's id. */
+        fun acked(remoteId: String): SyncOp
+    }
+
+    /** A removal of one server record of a synced collection. */
+    sealed interface Remove {
+        val remoteId: String
+    }
+
     @Serializable
     @SerialName("dictionary.upsert")
     data class DictionaryUpsert(
         override val id: String,
-        val localId: String,
-        val remoteId: String? = null,
-        val acked: Boolean = false,
+        override val localId: String,
+        override val remoteId: String? = null,
+        override val acked: Boolean = false,
         val entry: DictionaryEntry
-    ) : SyncOp()
+    ) : SyncOp(), Upsert {
+        override fun acked(remoteId: String): SyncOp = copy(remoteId = remoteId, acked = true)
+    }
 
     @Serializable
     @SerialName("dictionary.remove")
-    data class DictionaryRemove(override val id: String, val remoteId: String) : SyncOp()
+    data class DictionaryRemove(override val id: String, override val remoteId: String) : SyncOp(), Remove
+
+    @Serializable
+    @SerialName("snippets.upsert")
+    data class SnippetUpsert(
+        override val id: String,
+        override val localId: String,
+        override val remoteId: String? = null,
+        override val acked: Boolean = false,
+        val snippet: Snippet
+    ) : SyncOp(), Upsert {
+        override fun acked(remoteId: String): SyncOp = copy(remoteId = remoteId, acked = true)
+    }
+
+    @Serializable
+    @SerialName("snippets.remove")
+    data class SnippetRemove(override val id: String, override val remoteId: String) : SyncOp(), Remove
+
+    @Serializable
+    @SerialName("appRules.upsert")
+    data class AppRuleUpsert(
+        override val id: String,
+        override val localId: String,
+        override val remoteId: String? = null,
+        override val acked: Boolean = false,
+        val rule: AppRule
+    ) : SyncOp(), Upsert {
+        override fun acked(remoteId: String): SyncOp = copy(remoteId = remoteId, acked = true)
+    }
+
+    @Serializable
+    @SerialName("appRules.remove")
+    data class AppRuleRemove(override val id: String, override val remoteId: String) : SyncOp(), Remove
 
     @Serializable
     @SerialName("preferences.update")
@@ -289,6 +373,9 @@ sealed class SyncOp {
 
 fun newOpId(): String = UUID.randomUUID().toString()
 
+/** An upsert the server has confirmed; it waits only for the snapshot to echo it and is never sent again. */
+val SyncOp.isAcked: Boolean get() = this is SyncOp.Upsert && acked
+
 /** Durable queue in SharedPreferences, bound to one account. */
 class Outbox(context: Context) {
     private val prefs: SharedPreferences =
@@ -301,7 +388,7 @@ class Outbox(context: Context) {
 
     val userId: String get() = prefs.getString("userId", "") ?: ""
 
-    val pending: Int get() = ops.count { !(it is SyncOp.DictionaryUpsert && it.acked) }
+    val pending: Int get() = ops.count { !it.isAcked }
 
     fun bind(userId: String) {
         if (this.userId != userId) {
@@ -333,6 +420,26 @@ class Outbox(context: Context) {
 
 // ---- reducers (pure; see SyncReducersTest) ----------------------------------------------------
 
+/**
+ * How one synced collection maps onto the outbox and the wire (desktop: `CollectionSpec`). The
+ * three collections share every rule below; a spec only says which ops are theirs and how an
+ * item is built from a server record or from a pending upsert.
+ */
+class CollectionSpec<Local : Any, Remote : Any>(
+    /** This collection's upsert op, or null for any other op. */
+    val upsertOf: (SyncOp) -> SyncOp.Upsert?,
+    /** This collection's remove op, or null for any other op. */
+    val removeOf: (SyncOp) -> SyncOp.Remove?,
+    val fromRemote: (Remote) -> Local,
+    /** The item a pending upsert carries, under the id it should show as. */
+    val fromOp: (SyncOp.Upsert, String) -> Local,
+    val localId: (Local) -> String,
+    val remoteId: (Remote) -> String,
+    /** Newest first by this, or null to keep the server's order with local additions at the end. */
+    val createdAt: ((Local) -> Long)?,
+    val makeRemove: (opId: String, remoteId: String) -> SyncOp
+)
+
 object SyncReducers {
     fun fromRemote(dto: DictionaryEntryDto) = DictionaryEntry(
         id = dto.id,
@@ -342,63 +449,136 @@ object SyncReducers {
         createdAt = dto.createdAt.toLong()
     )
 
-    /** Server snapshot + pending ops -> the list the app shows. Local is kept until the first snapshot. */
-    fun deriveDictionary(
-        server: List<DictionaryEntryDto>?,
-        local: List<DictionaryEntry>,
+    fun fromRemote(dto: SnippetDto) = Snippet(
+        id = dto.id,
+        trigger = dto.trigger,
+        content = dto.content,
+        createdAt = dto.createdAt.toLong()
+    )
+
+    fun fromRemote(dto: AppRuleDto) = AppRule(
+        id = dto.id,
+        match = dto.match,
+        tone = Tone.from(dto.tone),
+        formatting = dto.formatting?.let { FormattingMode.from(it) },
+        trailingSpace = dto.trailingSpace,
+        instructions = dto.instructions,
+        createdAt = dto.createdAt.toLong()
+    )
+
+    val dictionarySpec = CollectionSpec<DictionaryEntry, DictionaryEntryDto>(
+        upsertOf = { it as? SyncOp.DictionaryUpsert },
+        removeOf = { it as? SyncOp.DictionaryRemove },
+        fromRemote = ::fromRemote,
+        fromOp = { op, id -> (op as SyncOp.DictionaryUpsert).entry.copy(id = id) },
+        localId = { it.id },
+        remoteId = { it.id },
+        createdAt = { it.createdAt },
+        makeRemove = { opId, remoteId -> SyncOp.DictionaryRemove(opId, remoteId) }
+    )
+
+    val snippetsSpec = CollectionSpec<Snippet, SnippetDto>(
+        upsertOf = { it as? SyncOp.SnippetUpsert },
+        removeOf = { it as? SyncOp.SnippetRemove },
+        fromRemote = ::fromRemote,
+        fromOp = { op, id -> (op as SyncOp.SnippetUpsert).snippet.copy(id = id) },
+        localId = { it.id },
+        remoteId = { it.id },
+        createdAt = { it.createdAt },
+        makeRemove = { opId, remoteId -> SyncOp.SnippetRemove(opId, remoteId) }
+    )
+
+    /** App rules keep the user's ordering (oldest first), matching the Style screen. */
+    val appRulesSpec = CollectionSpec<AppRule, AppRuleDto>(
+        upsertOf = { it as? SyncOp.AppRuleUpsert },
+        removeOf = { it as? SyncOp.AppRuleRemove },
+        fromRemote = ::fromRemote,
+        fromOp = { op, id -> (op as SyncOp.AppRuleUpsert).rule.copy(id = id) },
+        localId = { it.id },
+        remoteId = { it.id },
+        createdAt = null,
+        makeRemove = { opId, remoteId -> SyncOp.AppRuleRemove(opId, remoteId) }
+    )
+
+    /**
+     * Server snapshot + pending ops -> the list the app shows. Local is kept until the first
+     * snapshot arrives, so dictation keeps working offline.
+     */
+    fun <Local : Any, Remote : Any> deriveCollection(
+        spec: CollectionSpec<Local, Remote>,
+        server: List<Remote>?,
+        local: List<Local>,
         ops: List<SyncOp>
-    ): List<DictionaryEntry> {
+    ): List<Local> {
         if (server == null) return local
-        val byId = LinkedHashMap<String, DictionaryEntry>()
-        for (dto in server) byId[dto.id] = fromRemote(dto)
-        val serverIds = server.map { it.id }.toSet()
+        val byId = LinkedHashMap<String, Local>()
+        for (dto in server) byId[spec.remoteId(dto)] = spec.fromRemote(dto)
+        val serverIds = server.map(spec.remoteId).toSet()
         for (op in ops) {
-            when (op) {
-                is SyncOp.DictionaryUpsert -> {
-                    if (op.acked && op.remoteId != null && serverIds.contains(op.remoteId)) continue
-                    val id = op.remoteId ?: op.localId
-                    if (op.remoteId != null && op.remoteId != op.localId) byId.remove(op.localId)
-                    byId[id] = op.entry.copy(id = id)
-                }
-                is SyncOp.DictionaryRemove -> byId.remove(op.remoteId)
-                else -> Unit
+            spec.upsertOf(op)?.let { up ->
+                if (up.acked && up.remoteId != null && serverIds.contains(up.remoteId)) return@let
+                val id = up.remoteId ?: up.localId
+                if (up.remoteId != null && up.remoteId != up.localId) byId.remove(up.localId)
+                // Re-putting keeps the record's place in the server's order (the desktop keeps the first occurrence too).
+                byId[id] = spec.fromOp(up, id)
             }
+            spec.removeOf(op)?.let { byId.remove(it.remoteId) }
         }
-        return byId.values.sortedByDescending { it.createdAt }
+        val createdAt = spec.createdAt ?: return byId.values.toList()
+        return byId.values.sortedByDescending(createdAt)
     }
 
-    data class Diff(val added: List<DictionaryEntry>, val changed: List<DictionaryEntry>, val removed: List<DictionaryEntry>)
+    fun deriveDictionary(server: List<DictionaryEntryDto>?, local: List<DictionaryEntry>, ops: List<SyncOp>): List<DictionaryEntry> =
+        deriveCollection(dictionarySpec, server, local, ops)
 
-    fun diffDictionary(previous: List<DictionaryEntry>, next: List<DictionaryEntry>): Diff {
-        val prevById = previous.associateBy { it.id }
-        val nextIds = next.map { it.id }.toSet()
-        val added = ArrayList<DictionaryEntry>()
-        val changed = ArrayList<DictionaryEntry>()
+    data class Diff<T>(val added: List<T>, val changed: List<T>, val removed: List<T>)
+
+    fun <T : Any> diffCollection(previous: List<T>, next: List<T>, id: (T) -> String, same: (T, T) -> Boolean): Diff<T> {
+        val prevById = previous.associateBy(id)
+        val nextIds = next.map(id).toSet()
+        val added = ArrayList<T>()
+        val changed = ArrayList<T>()
         for (e in next) {
-            val before = prevById[e.id]
+            val before = prevById[id(e)]
             if (before == null) added.add(e)
-            else if (before.word != e.word || before.fuzzy != e.fuzzy || before.aliases != e.aliases) changed.add(e)
+            else if (!same(before, e)) changed.add(e)
         }
-        return Diff(added, changed, previous.filter { it.id !in nextIds })
+        return Diff(added, changed, previous.filter { id(it) !in nextIds })
     }
+
+    fun sameDictionaryEntry(a: DictionaryEntry, b: DictionaryEntry): Boolean =
+        a.word == b.word && a.fuzzy == b.fuzzy && a.aliases == b.aliases
+
+    fun sameSnippet(a: Snippet, b: Snippet): Boolean = a.trigger == b.trigger && a.content == b.content
+
+    fun sameAppRule(a: AppRule, b: AppRule): Boolean =
+        a.match == b.match && a.tone == b.tone && a.formatting == b.formatting &&
+            a.trailingSpace == b.trailingSpace && a.instructions == b.instructions
+
+    fun diffDictionary(previous: List<DictionaryEntry>, next: List<DictionaryEntry>): Diff<DictionaryEntry> =
+        diffCollection(previous, next, { it.id }, ::sameDictionaryEntry)
 
     /** Replace an unsent upsert for the same item; keep acknowledged ones. */
-    fun queueUpsert(ops: List<SyncOp>, op: SyncOp.DictionaryUpsert): List<SyncOp> =
-        ops.filterNot { it is SyncOp.DictionaryUpsert && it.localId == op.localId && !it.acked } + op
+    fun <U> queueUpsert(ops: List<SyncOp>, op: U): List<SyncOp> where U : SyncOp, U : SyncOp.Upsert =
+        ops.filterNot { it is SyncOp.Upsert && it.localId == op.localId && !it.acked } + op
 
     /** Drop a never-sent creation outright; otherwise delete the server record. */
-    fun queueRemove(ops: List<SyncOp>, localId: String, remoteId: String?, opId: String): List<SyncOp> {
-        val pending = ops.filterIsInstance<SyncOp.DictionaryUpsert>().firstOrNull { it.localId == localId }
+    fun queueRemove(ops: List<SyncOp>, spec: CollectionSpec<*, *>, localId: String, remoteId: String?, opId: String): List<SyncOp> {
+        val pending = ops.mapNotNull(spec.upsertOf).firstOrNull { it.localId == localId }
         val target = remoteId ?: pending?.remoteId
-        val kept = ops.filterNot { it is SyncOp.DictionaryUpsert && it.localId == localId }
-        return if (target == null) kept else kept + SyncOp.DictionaryRemove(opId, target)
+        val kept = ops.filterNot { spec.upsertOf(it)?.localId == localId }
+        return if (target == null) kept else kept + spec.makeRemove(opId, target)
     }
 
-    fun ack(ops: List<SyncOp>, opId: String, remoteId: String): List<SyncOp> =
-        ops.map { if (it is SyncOp.DictionaryUpsert && it.id == opId) it.copy(remoteId = remoteId, acked = true) else it }
+    fun queueRemove(ops: List<SyncOp>, localId: String, remoteId: String?, opId: String): List<SyncOp> =
+        queueRemove(ops, dictionarySpec, localId, remoteId, opId)
 
+    fun ack(ops: List<SyncOp>, opId: String, remoteId: String): List<SyncOp> =
+        ops.map { if (it is SyncOp.Upsert && it.id == opId) it.acked(remoteId) else it }
+
+    /** Server ids are unique across tables, so any confirmed upsert the snapshot now echoes is done. */
     fun pruneAcked(ops: List<SyncOp>, serverIds: Set<String>): List<SyncOp> =
-        ops.filterNot { it is SyncOp.DictionaryUpsert && it.acked && it.remoteId != null && serverIds.contains(it.remoteId) }
+        ops.filterNot { it is SyncOp.Upsert && it.acked && it.remoteId != null && serverIds.contains(it.remoteId) }
 
     /** Coalesce style changes into one pending update carrying the latest full preferences. */
     fun queuePreferences(ops: List<SyncOp>, prefs: StylePreferences, opId: String): List<SyncOp> =
@@ -406,7 +586,7 @@ object SyncReducers {
 
     fun remoteIdFor(localId: String, serverIds: Set<String>, ops: List<SyncOp>): String? {
         if (serverIds.contains(localId)) return localId
-        return ops.filterIsInstance<SyncOp.DictionaryUpsert>().firstOrNull { it.localId == localId }?.remoteId
+        return ops.filterIsInstance<SyncOp.Upsert>().firstOrNull { it.localId == localId }?.remoteId
     }
 
     /**

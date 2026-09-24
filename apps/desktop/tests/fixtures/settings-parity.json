@@ -1,0 +1,122 @@
+{
+  "$comment": "The settings both apps must agree on: names, defaults and bounds of everything a person can set on either, and the speech provider presets. apps/desktop/tests/settings-parity.test.ts pins the desktop schema to this file and apps/android/.../SettingsParityTest.kt pins the Android store to it, so a change to one app without the other fails a test.",
+  "defaults": {
+    "sttTimeoutMs": 45000,
+    "llmTimeoutMs": 8000,
+    "limitDuration": false,
+    "maxDurationSec": 300,
+    "keepRecordings": true,
+    "useDictionaryPrompt": true,
+    "showLatencyInHistory": true,
+    "buttonShadow": true,
+    "formattingMode": "smart",
+    "tone": "auto",
+    "trailingSpace": true,
+    "instructions": "",
+    "language": "auto",
+    "sttKind": "openai-compatible",
+    "sttPresetId": "custom",
+    "llmSameAsStt": true,
+    "updateAutoCheck": true,
+    "updateAutoInstall": true,
+    "updateIncludePrereleases": false
+  },
+  "ranges": {
+    "sttTimeoutMs": { "min": 2000, "max": 120000 },
+    "llmTimeoutMs": { "min": 1000, "max": 60000 },
+    "maxDurationSec": { "min": 5, "max": 1800 },
+    "instructionsLength": { "min": 0, "max": 2000 }
+  },
+  "sttPresets": [
+    {
+      "id": "custom",
+      "kind": "openai-compatible",
+      "baseUrl": "",
+      "defaultModel": "whisper-1",
+      "models": ["whisper-1"],
+      "requiresKey": false,
+      "local": false
+    },
+    {
+      "id": "openai",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.openai.com/v1",
+      "defaultModel": "gpt-transcribe",
+      "models": ["gpt-transcribe"],
+      "requiresKey": true,
+      "local": false
+    },
+    {
+      "id": "groq",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "defaultModel": "whisper-large-v3-turbo",
+      "models": ["whisper-large-v3-turbo", "whisper-large-v3"],
+      "requiresKey": true,
+      "local": false
+    },
+    {
+      "id": "mistral",
+      "kind": "openai-compatible",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "defaultModel": "voxtral-mini-latest",
+      "models": ["voxtral-mini-latest", "voxtral-small-latest"],
+      "requiresKey": true,
+      "local": false
+    },
+    {
+      "id": "deepgram",
+      "kind": "deepgram",
+      "baseUrl": "https://api.deepgram.com/v1",
+      "defaultModel": "nova-3",
+      "models": ["nova-3", "nova-2", "nova-3-medical"],
+      "requiresKey": true,
+      "local": false
+    },
+    {
+      "id": "elevenlabs",
+      "kind": "elevenlabs",
+      "baseUrl": "https://api.elevenlabs.io/v1",
+      "defaultModel": "scribe_v1",
+      "models": ["scribe_v1", "scribe_v1_experimental"],
+      "requiresKey": true,
+      "local": false
+    },
+    {
+      "id": "whisper-cpp",
+      "kind": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "defaultModel": "whisper-1",
+      "models": ["whisper-1"],
+      "requiresKey": false,
+      "local": true
+    },
+    {
+      "id": "speaches",
+      "kind": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "defaultModel": "Systran/faster-whisper-large-v3",
+      "models": [
+        "Systran/faster-whisper-large-v3",
+        "Systran/faster-distil-whisper-large-v3",
+        "Systran/faster-whisper-small"
+      ],
+      "requiresKey": false,
+      "local": true
+    },
+    {
+      "id": "lm-studio",
+      "kind": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:1234/v1",
+      "defaultModel": "whisper-1",
+      "models": ["whisper-1"],
+      "requiresKey": false,
+      "local": true
+    }
+  ],
+  "snippetPlaceholders": ["date", "time", "day", "datetime", "clipboard"],
+  "appRule": {
+    "tones": ["auto", "casual", "neutral", "professional"],
+    "modes": ["off", "light", "smart"]
+  }
+}

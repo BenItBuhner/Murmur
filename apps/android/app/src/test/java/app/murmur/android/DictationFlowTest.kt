@@ -13,8 +13,11 @@ import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.service.InsertOutcome
 import app.murmur.android.service.TextInserter
+import app.murmur.android.settings.AppRuleCodec
+import app.murmur.android.settings.DictionaryCodec
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.settings.SnippetCodec
 import app.murmur.android.text.basicCleanup
 import app.murmur.android.text.prepareTranscript
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +72,9 @@ class DictationFlowTest {
     @Volatile private var llmBody: String? = null
     private val prompts = CopyOnWriteArrayList<String>()
 
+    /** The `prompt` field of every transcription request, or null when none was sent. */
+    private val sttPrompts = CopyOnWriteArrayList<String?>()
+
     @Before
     fun startMockStt() {
         server.dispatcher = object : Dispatcher() {
@@ -81,6 +87,10 @@ class DictationFlowTest {
                     return MockResponse().setHeader("Content-Type", "application/json").setBody(completion)
                 }
                 if (request.path != "/v1/audio/transcriptions") return MockResponse().setResponseCode(404)
+                sttPrompts.add(
+                    Regex("name=\"prompt\"\\r\\n(?:[^\\r\\n]+\\r\\n)*\\r\\n([^\\r\\n]*)\\r\\n")
+                        .find(request.body.readUtf8())?.groupValues?.get(1)
+                )
                 if (failures > 0) {
                     failures--
                     return MockResponse().setResponseCode(500).setBody("""{"error":{"message":"upstream exploded"}}""")
@@ -130,7 +140,12 @@ class DictationFlowTest {
                 llmSameAsStt = true,
                 llmModel = llmModel,
                 useFixtureAudio = true,
-                onboardingComplete = true
+                onboardingComplete = true,
+                // The store is a process-wide singleton: what one test taught it must not reach the next.
+                useDictionaryPrompt = true,
+                dictionaryEntries = emptyList(),
+                snippets = emptyList(),
+                appRules = emptyList()
             )
         }
 
@@ -313,6 +328,66 @@ class DictationFlowTest {
             prompts[0],
             prompts[0].endsWith("Transcript:\nWhat are you referring to? I don' recall. I have the worst memory in the world.")
         )
+    }
+
+    // ---- the settings the phone gained for parity with the desktop --------------------------------
+
+    private fun dictate(activity: Activity): DictationState {
+        DictationController.start(activity)
+        DictationController.stopAndInsert(activity)
+        return awaitOutcome(timeoutMs = 30_000)
+    }
+
+    @Test
+    fun `the speech model is primed with the dictionary and the snippet triggers unless the bias is off`() {
+        val (activity, _) = setUpField()
+        val store = SettingsStore.get(activity)
+        store.update {
+            it.copy(
+                dictionaryEntries = listOf(DictionaryCodec.newEntry("Wispr Flow")),
+                snippets = listOf(SnippetCodec.newSnippet("my sig", "Best,\nBen"))
+            )
+        }
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertEquals("Vocabulary: Wispr Flow, my sig. Dictation with punctuation.", sttPrompts[0])
+
+        // Bias off: no prompt at all goes to the speech model, as on the desktop.
+        store.update { it.copy(useDictionaryPrompt = false) }
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertEquals(2, sttPrompts.size)
+        assertNull(sttPrompts[1])
+    }
+
+    @Test
+    fun `a snippet trigger in the dictation expands once the text is finished`() {
+        val (activity, field) = setUpField()
+        SettingsStore.get(activity).update {
+            it.copy(snippets = listOf(SnippetCodec.newSnippet("this is a test", "sent from my phone")))
+        }
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertEquals("So hello from murmur sent from my phone ", field.text.toString())
+        val entry = HistoryStore.get(activity).entries.value.first()
+        assertTrue(entry.stages.toString(), "snippets" in entry.stages)
+        assertEquals("History keeps what the speech model returned", TRANSCRIPT, entry.rawText)
+    }
+
+    @Test
+    fun `a per-app rule for the focused app overrides the style`() {
+        val (activity, field) = setUpField(FormattingMode.LIGHT)
+        // The sink reports Murmur's own package; a rule on "murmur" turns formatting off there.
+        SettingsStore.get(activity).update {
+            it.copy(appRules = listOf(AppRuleCodec.newRule("murmur").copy(formatting = FormattingMode.OFF, trailingSpace = false)))
+        }
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertEquals("exactly what the speech model heard, no trailing space", TRANSCRIPT, field.text.toString())
+
+        // A rule for another app leaves this one on the global Light setting.
+        SettingsStore.get(activity).update {
+            it.copy(appRules = listOf(AppRuleCodec.newRule("whatsapp").copy(formatting = FormattingMode.OFF)))
+        }
+        field.setText("")
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertEquals(lightText(), field.text.toString())
     }
 
     /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */

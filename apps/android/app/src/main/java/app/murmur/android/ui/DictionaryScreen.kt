@@ -13,14 +13,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.murmur.android.settings.DictionaryCodec
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.settings.Snippet
+import app.murmur.android.settings.SnippetCodec
 import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.ListCard
 import app.murmur.android.ui.components.ListRow
+import app.murmur.android.ui.components.Notice
+import app.murmur.android.ui.components.NoticeTone
 import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.PrimaryButton
 import app.murmur.android.ui.components.Screen
@@ -33,13 +38,115 @@ fun DictionaryScreen(store: SettingsStore, synced: Boolean, nav: TopNav) {
     Screen(
         title = "Dictionary",
         description = if (synced) {
-            "Names and terms spelled your way, on every device you sign in on."
+            "Names and terms spelled your way, and snippets that expand from a short cue, on every device you sign in on."
         } else {
-            "Names and terms the transcriber should get right, spelled the way you write them."
+            "Names and terms the transcriber should get right, spelled the way you write them, and snippets that expand from a short cue."
         },
         nav = nav
     ) {
         DictionaryEditor(store)
+        SectionGap()
+        SectionGap()
+        SnippetsEditor(store)
+    }
+}
+
+/**
+ * Voice snippets (the desktop's Snippets page): say a short cue and Murmur inserts the full
+ * text. Same fields, placeholders and duplicate rule as the desktop; synced with the account.
+ */
+@Composable
+fun SnippetsEditor(store: SettingsStore) {
+    val settings by store.flow.collectAsState()
+    var trigger by remember { mutableStateOf("") }
+    var content by remember { mutableStateOf("") }
+    var duplicate by remember { mutableStateOf<String?>(null) }
+
+    fun add() {
+        val t = trigger.trim()
+        if (t.isEmpty() || content.isBlank()) return
+        if (store.get().snippets.any { it.trigger.equals(t, ignoreCase = true) }) {
+            duplicate = "“$t” is already a snippet trigger"
+            return
+        }
+        val snippet = SnippetCodec.newSnippet(t, content)
+        store.update { s -> s.copy(snippets = listOf(snippet) + s.snippets) }
+        trigger = ""
+        content = ""
+        duplicate = null
+    }
+
+    Overline("Snippets")
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "Say a short cue and Murmur pastes the full text. Great for links, intros, addresses and replies you type all the time.",
+        style = Murmur.type.bodySmall,
+        color = Murmur.colors.inkSoft
+    )
+    Spacer(Modifier.height(12.dp))
+    Card {
+        Field(
+            value = trigger,
+            onValueChange = { trigger = it; duplicate = null },
+            label = "Trigger phrase",
+            placeholder = "my email",
+            helper = "Say it on its own or as “insert my email”."
+        )
+        Spacer(Modifier.height(18.dp))
+        Field(
+            value = content,
+            onValueChange = { content = it },
+            label = "Text to insert",
+            placeholder = "ben@example.com",
+            helper = "Placeholders {date} {time} {day} {datetime} are filled in when inserted.",
+            singleLine = false,
+            minLines = 3
+        )
+        duplicate?.let {
+            Spacer(Modifier.height(14.dp))
+            Notice(it, NoticeTone.ERROR)
+        }
+        Spacer(Modifier.height(20.dp))
+        PrimaryButton(
+            "Add snippet",
+            onClick = ::add,
+            enabled = trigger.isNotBlank() && content.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    SectionGap()
+
+    val snippets = settings.snippets
+    Overline(if (snippets.isEmpty()) "Your snippets" else pluralize(snippets.size, "snippet"))
+    Spacer(Modifier.height(10.dp))
+    if (snippets.isEmpty()) {
+        Text(
+            "No snippets yet. Create one like “my email” → your address, then say “insert my email” mid-sentence.",
+            style = Murmur.type.bodySmall,
+            color = Murmur.colors.inkMuted
+        )
+    } else {
+        ListCard {
+            for (snippet in snippets) {
+                SnippetRow(snippet) {
+                    store.update { s -> s.copy(snippets = s.snippets.filter { it.id != snippet.id }) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SnippetRow(snippet: Snippet, onRemove: () -> Unit) {
+    ListRow {
+        Column(Modifier.weight(1f)) {
+            Text("“${snippet.trigger}”", style = Murmur.type.headline, color = Murmur.colors.ink)
+            Spacer(Modifier.height(3.dp))
+            Text(snippet.content, style = Murmur.type.bodySmall, color = Murmur.colors.inkSoft, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(12.dp))
+        TextLink("Remove", onClick = onRemove)
     }
 }
 

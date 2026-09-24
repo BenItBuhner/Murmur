@@ -1,6 +1,7 @@
 package app.murmur.android.text
 
 import app.murmur.android.settings.DictionaryEntry
+import app.murmur.android.settings.Snippet
 
 /**
  * Kotlin port of the text engine's deterministic stages
@@ -358,10 +359,25 @@ fun basicCleanup(prepared: String, dictionary: List<DictionaryEntry>): Cleaned {
     return Cleaned(normalizeWhitespace(text), stages)
 }
 
-data class Finished(val text: String, val empty: Boolean, val stages: List<String>)
+data class Finished(
+    val text: String,
+    val empty: Boolean,
+    val stages: List<String>,
+    val snippetsExpanded: List<String> = emptyList()
+)
 
-/** After the model (or the fallback): the parts that must be exact. */
-fun finish(text: String, category: AppCategory, dictionary: List<DictionaryEntry>, trailingSpace: Boolean): Finished {
+/**
+ * After the model (or the fallback): the parts that must be exact. Snippets expand last, after
+ * the destination finishing, because their content may depend on the device (local time).
+ */
+fun finish(
+    text: String,
+    category: AppCategory,
+    dictionary: List<DictionaryEntry>,
+    trailingSpace: Boolean,
+    snippets: List<Snippet> = emptyList(),
+    snippetContext: SnippetContext = SnippetContext()
+): Finished {
     val stages = ArrayList<String>()
     var out = normalizeWhitespace(text)
     val dict = applyDictionary(out, dictionary)
@@ -372,8 +388,10 @@ fun finish(text: String, category: AppCategory, dictionary: List<DictionaryEntry
         if (one != out) stages.add("terminal")
         out = one
     }
-    out = normalizeWhitespace(out)
+    val expanded = expandSnippets(out, snippets, snippetContext)
+    if (expanded.expanded.isNotEmpty()) stages.add("snippets")
+    out = normalizeWhitespace(expanded.text)
     val empty = !isMeaningful(out)
     if (!empty) out = applyTrailing(out, trailingSpace && !out.endsWith("\n"))
-    return Finished(if (empty) "" else out, empty, stages)
+    return Finished(if (empty) "" else out, empty, stages, expanded.expanded)
 }

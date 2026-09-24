@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Check, Cloud, ExternalLink, KeyRound, Loader2, Play } from 'lucide-react'
 import type { ProviderTestResult } from '@shared/types'
 import type { InferenceSource } from '@shared/inference'
+import { SETTINGS_RANGES, clampToRange } from '@shared/settings'
 import { STT_PRESETS, findPreset } from '@core/stt/presets'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -92,12 +93,19 @@ export function ProvidersPage({
           <div className="flex items-center gap-2">
             <Input
               type="number"
-              min={2}
-              max={120}
+              min={SETTINGS_RANGES.sttTimeoutMs.min / 1000}
+              max={SETTINGS_RANGES.sttTimeoutMs.max / 1000}
               className="w-20 text-right"
               value={Math.round(stt.timeoutMs / 1000)}
               onChange={(e) =>
-                void patch({ stt: { timeoutMs: Math.max(2000, Number(e.target.value) * 1000) } })
+                void patch({
+                  stt: {
+                    timeoutMs: clampToRange(
+                      Number(e.target.value) * 1000,
+                      SETTINGS_RANGES.sttTimeoutMs
+                    )
+                  }
+                })
               }
             />
             <span className="text-sm text-muted-foreground">s</span>

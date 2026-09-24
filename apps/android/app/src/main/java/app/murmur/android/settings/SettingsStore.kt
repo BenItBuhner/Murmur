@@ -10,6 +10,8 @@ import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayLayoutCodec
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 enum class SttKind(val id: String) {
     OPENAI_COMPATIBLE("openai-compatible"),
@@ -35,25 +37,41 @@ enum class InferenceSource(val id: String) {
     }
 }
 
+/** Serialized by id ("off", "light", "smart") so a stored or synced rule reads like the desktop's. */
+@Serializable
 enum class FormattingMode(val id: String) {
-    OFF("off"),
-    LIGHT("light"),
-    SMART("smart");
+    @SerialName("off") OFF("off"),
+    @SerialName("light") LIGHT("light"),
+    @SerialName("smart") SMART("smart");
 
     companion object {
         fun from(id: String?): FormattingMode = entries.firstOrNull { it.id == id } ?: SMART
     }
 }
 
+@Serializable
 enum class Tone(val id: String) {
-    AUTO("auto"),
-    CASUAL("casual"),
-    NEUTRAL("neutral"),
-    PROFESSIONAL("professional");
+    @SerialName("auto") AUTO("auto"),
+    @SerialName("casual") CASUAL("casual"),
+    @SerialName("neutral") NEUTRAL("neutral"),
+    @SerialName("professional") PROFESSIONAL("professional");
 
     companion object {
         fun from(id: String?): Tone = entries.firstOrNull { it.id == id } ?: AUTO
     }
+}
+
+/**
+ * Bounds shared with the desktop schema (apps/desktop/src/shared/settings.ts); a value outside
+ * them is clamped when the store reads it and when a screen writes it.
+ */
+object SettingsRanges {
+    /** `stt.timeoutMs`: give up on a transcription after this long. */
+    val STT_TIMEOUT_MS: IntRange = 2_000..120_000
+    /** `formatting.llm.timeoutMs`: a formatting model slower than this loses to the Light result. */
+    val LLM_TIMEOUT_MS: IntRange = 1_000..60_000
+    /** `audio.maxDurationSec`: how long a session may run when the limit is on. */
+    val MAX_DURATION_SEC: IntRange = 5..1800
 }
 
 /** Resting shape of the floating dictation button. */
@@ -118,7 +136,15 @@ data class MurmurSettings(
     val sttApiKey: String = BuildConfig.DEFAULT_API_KEY,
     val sttModel: String = BuildConfig.DEFAULT_STT_MODEL,
     val sttFallbackModel: String = "",
+    /** The preset the connection was filled from (desktop: `stt.presetId`); `custom` for a hand-typed server. */
+    val sttPresetId: String = SttPresets.CUSTOM,
     val language: String = "auto",
+    /**
+     * Send the dictionary and the snippet triggers to the speech model as its prompt so rare
+     * words are spelled right the first time (desktop: `stt.useDictionaryPrompt`). Device-local.
+     */
+    val useDictionaryPrompt: Boolean = true,
+    /** Give up on a transcription after this long; [SettingsRanges.STT_TIMEOUT_MS], same default as the desktop. */
     val sttTimeoutMs: Int = 45_000,
     /**
      * How speech becomes text. The engine (packages/text-engine, ported in app.murmur.android.text)
@@ -135,9 +161,18 @@ data class MurmurSettings(
     val llmBaseUrl: String = "",
     val llmApiKey: String = "",
     val llmModel: String = BuildConfig.DEFAULT_LLM_MODEL,
-    // More generous than desktop (8 s): mobile networks and reasoning models need headroom,
-    // and the rule-based cleanup still covers any timeout.
-    val llmTimeoutMs: Int = 15_000,
+    /**
+     * A formatting model slower than this loses to the Light result; [SettingsRanges.LLM_TIMEOUT_MS],
+     * same default as the desktop. Builds before the parity pass defaulted to 15 s here with no
+     * way to change it; [SettingsStore.migrate] moves those installs to the shared default once.
+     */
+    val llmTimeoutMs: Int = 8_000,
+    /**
+     * Sessions run until the user stops them unless this is on (desktop: `audio.limitDuration`).
+     * Off by default so a leftover 300 s cap never cuts someone off mid-thought. Device-local.
+     */
+    val limitDuration: Boolean = false,
+    /** Used only when [limitDuration] is on; [SettingsRanges.MAX_DURATION_SEC]. */
     val maxDurationSec: Int = 300,
     /**
      * Store the audio of every dictation next to its History entry (play it back, send it again).
@@ -158,6 +193,16 @@ data class MurmurSettings(
      * the account when signed in (same shape as the desktop app and the backend).
      */
     val dictionaryEntries: List<DictionaryEntry> = emptyList(),
+    /**
+     * Voice snippets: a spoken trigger expands to stored text after the model, which is told to
+     * leave the trigger alone. Synced with the account (same shape as the desktop and the backend).
+     */
+    val snippets: List<Snippet> = emptyList(),
+    /**
+     * Per-app style overrides, matched on the focused app's package name or label; the first
+     * matching rule wins. Synced with the account (same shape as the desktop and the backend).
+     */
+    val appRules: List<AppRule> = emptyList(),
     /** Debug aid: dictate the bundled fixture clip instead of the microphone. */
     val useFixtureAudio: Boolean = false,
     /** Resting shape of the floating dictation button. */
@@ -180,6 +225,8 @@ data class MurmurSettings(
      * Off, it and its edit panel are drawn flat: same shape and colours, no shadow, no light catch.
      */
     val buttonShadow: Boolean = true,
+    /** Per-stage timing bars on Home and in History (desktop: `general.showLatencyInHistory`). Device-local. */
+    val showLatencyInHistory: Boolean = true,
     /** Device-level first-run flow finished (permissions, provider). */
     val onboardingComplete: Boolean = false,
     /** `optional` account mode: the user chose to keep using Murmur without an account. */
@@ -204,6 +251,17 @@ data class MurmurSettings(
 ) {
     val dictionaryTerms: List<String>
         get() = dictionaryEntries.map { it.word.trim() }.filter { it.isNotEmpty() }
+
+    /** Snippet triggers the speech model is primed with and the formatting model must keep verbatim. */
+    val snippetTriggers: List<String>
+        get() = snippets.map { it.trigger.trim() }.filter { it.isNotEmpty() }
+
+    /**
+     * Seconds until a listening session is force-stopped, or null when the user left the cap off
+     * (desktop: `sessionDurationLimitMs`).
+     */
+    val sessionDurationLimitSec: Int?
+        get() = if (limitDuration) maxDurationSec else null
 
     fun llmConnection(): Triple<String, String, String> =
         if (llmSameAsStt) Triple(sttBaseUrl, sttApiKey, llmModel)
@@ -294,6 +352,16 @@ class SettingsStore(context: Context) {
             update(SettingsOrigin.LOCAL) { RetiredModels.migrate(it) }
             prefs.edit().putInt(MODEL_MIGRATION_KEY, MODEL_MIGRATION).apply()
         }
+        // Settings brought into line with the desktop app, once per generation. 1: the formatting
+        // timeout defaulted to 15 s here against the desktop's 8 s, and nothing on the phone could
+        // change it, so an install still on that value never chose it and takes the shared default.
+        // From then on the value is the user's own (the Style screen lets them set it).
+        if (prefs.getInt(PARITY_MIGRATION_KEY, 0) < PARITY_MIGRATION) {
+            if (prefs.contains("llmTimeoutMs") && prefs.getInt("llmTimeoutMs", 0) == LEGACY_LLM_TIMEOUT_MS) {
+                update(SettingsOrigin.LOCAL) { it.copy(llmTimeoutMs = MurmurSettings().llmTimeoutMs) }
+            }
+            prefs.edit().putInt(PARITY_MIGRATION_KEY, PARITY_MIGRATION).apply()
+        }
         if (_flow.value.deviceId.isEmpty()) {
             update(SettingsOrigin.CLOUD) { it.copy(deviceId = java.util.UUID.randomUUID().toString()) }
         }
@@ -333,8 +401,10 @@ class SettingsStore(context: Context) {
             sttApiKey = prefs.getString("sttApiKey", d.sttApiKey) ?: d.sttApiKey,
             sttModel = prefs.getString("sttModel", d.sttModel) ?: d.sttModel,
             sttFallbackModel = prefs.getString("sttFallbackModel", d.sttFallbackModel) ?: "",
+            sttPresetId = SttPresets.find(prefs.getString("sttPresetId", d.sttPresetId)).id,
             language = prefs.getString("language", d.language) ?: "auto",
-            sttTimeoutMs = prefs.getInt("sttTimeoutMs", d.sttTimeoutMs),
+            useDictionaryPrompt = prefs.getBoolean("useDictionaryPrompt", d.useDictionaryPrompt),
+            sttTimeoutMs = prefs.getInt("sttTimeoutMs", d.sttTimeoutMs).coerceIn(SettingsRanges.STT_TIMEOUT_MS),
             formattingMode = FormattingMode.from(prefs.getString("formattingMode", d.formattingMode.id)),
             tone = Tone.from(prefs.getString("tone", d.tone.id)),
             trailingSpace = prefs.getBoolean("trailingSpace", d.trailingSpace),
@@ -343,11 +413,14 @@ class SettingsStore(context: Context) {
             llmBaseUrl = prefs.getString("llmBaseUrl", d.llmBaseUrl) ?: "",
             llmApiKey = prefs.getString("llmApiKey", d.llmApiKey) ?: "",
             llmModel = prefs.getString("llmModel", d.llmModel) ?: d.llmModel,
-            llmTimeoutMs = prefs.getInt("llmTimeoutMs", d.llmTimeoutMs),
-            maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec),
+            llmTimeoutMs = prefs.getInt("llmTimeoutMs", d.llmTimeoutMs).coerceIn(SettingsRanges.LLM_TIMEOUT_MS),
+            limitDuration = prefs.getBoolean("limitDuration", d.limitDuration),
+            maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec).coerceIn(SettingsRanges.MAX_DURATION_SEC),
             keepRecordings = prefs.getBoolean("keepRecordings", d.keepRecordings),
             experimentalKeyboard = prefs.getBoolean("experimentalKeyboard", d.experimentalKeyboard),
             dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
+            snippets = SnippetCodec.decode(prefs.getString("snippets", null)),
+            appRules = AppRuleCodec.decode(prefs.getString("appRules", null)),
             useFixtureAudio = prefs.getBoolean("useFixtureAudio", d.useFixtureAudio),
             overlayShape = OverlayShape.from(prefs.getString("overlayShape", d.overlayShape.id)),
             overlayLayout = readOverlayLayout(defaultOverlayLayout),
@@ -355,6 +428,7 @@ class SettingsStore(context: Context) {
             dynamicColor = prefs.getBoolean("dynamicColor", d.dynamicColor),
             accent = AccentPreset.from(prefs.getString("accent", d.accent.id)),
             buttonShadow = prefs.getBoolean("buttonShadow", d.buttonShadow),
+            showLatencyInHistory = prefs.getBoolean("showLatencyInHistory", d.showLatencyInHistory),
             onboardingComplete = prefs.getBoolean("onboardingComplete", d.onboardingComplete),
             accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
             deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
@@ -383,8 +457,10 @@ class SettingsStore(context: Context) {
             .putString("sttApiKey", s.sttApiKey)
             .putString("sttModel", s.sttModel)
             .putString("sttFallbackModel", s.sttFallbackModel)
+            .putString("sttPresetId", s.sttPresetId)
             .putString("language", s.language)
-            .putInt("sttTimeoutMs", s.sttTimeoutMs)
+            .putBoolean("useDictionaryPrompt", s.useDictionaryPrompt)
+            .putInt("sttTimeoutMs", s.sttTimeoutMs.coerceIn(SettingsRanges.STT_TIMEOUT_MS))
             .putString("formattingMode", s.formattingMode.id)
             .putString("tone", s.tone.id)
             .putBoolean("trailingSpace", s.trailingSpace)
@@ -393,11 +469,14 @@ class SettingsStore(context: Context) {
             .putString("llmBaseUrl", s.llmBaseUrl)
             .putString("llmApiKey", s.llmApiKey)
             .putString("llmModel", s.llmModel)
-            .putInt("llmTimeoutMs", s.llmTimeoutMs)
-            .putInt("maxDurationSec", s.maxDurationSec)
+            .putInt("llmTimeoutMs", s.llmTimeoutMs.coerceIn(SettingsRanges.LLM_TIMEOUT_MS))
+            .putBoolean("limitDuration", s.limitDuration)
+            .putInt("maxDurationSec", s.maxDurationSec.coerceIn(SettingsRanges.MAX_DURATION_SEC))
             .putBoolean("keepRecordings", s.keepRecordings)
             .putBoolean("experimentalKeyboard", s.experimentalKeyboard)
             .putString("dictionaryEntries", DictionaryCodec.encode(s.dictionaryEntries))
+            .putString("snippets", SnippetCodec.encode(s.snippets))
+            .putString("appRules", AppRuleCodec.encode(s.appRules))
             .putBoolean("useFixtureAudio", s.useFixtureAudio)
             .putString("overlayShape", s.overlayShape.id)
             .putString("overlayLayout", OverlayLayoutCodec.encode(s.overlayLayout))
@@ -405,6 +484,7 @@ class SettingsStore(context: Context) {
             .putBoolean("dynamicColor", s.dynamicColor)
             .putString("accent", s.accent.id)
             .putBoolean("buttonShadow", s.buttonShadow)
+            .putBoolean("showLatencyInHistory", s.showLatencyInHistory)
             .putBoolean("onboardingComplete", s.onboardingComplete)
             .putBoolean("accountSkipped", s.accountSkipped)
             .putString("deviceId", s.deviceId)
@@ -433,6 +513,11 @@ class SettingsStore(context: Context) {
          */
         private const val MODEL_MIGRATION = 2
         private const val MODEL_MIGRATION_KEY = "modelMigration"
+        /** Bump when a default is brought into line with the desktop and existing installs should follow. */
+        private const val PARITY_MIGRATION = 1
+        private const val PARITY_MIGRATION_KEY = "parityMigration"
+        /** What `llmTimeoutMs` defaulted to before generation 1, with no screen to change it. */
+        private const val LEGACY_LLM_TIMEOUT_MS = 15_000
         private val LEGACY_CLEANUP_KEYS = listOf(
             "removeFillers", "hesitations", "hesitationPhrases", "collapseRepeats", "repetitionScope",
             "spokenCommands", "selfCorrections", "autoCapitalize", "lists", "listStyle", "bulletMarker",

@@ -7,7 +7,7 @@ import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 
-enum class Route { HOME, HISTORY, BUTTON, MODEL, LANGUAGE, STYLE, DICTIONARY, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT, ACCOUNT }
+enum class Route { HOME, HISTORY, BUTTON, KEYBOARD, MODEL, LANGUAGE, STYLE, DICTIONARY, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT, ACCOUNT }
 
 /**
  * A plain back stack held in Compose state. Screens are reached two ways: [open] pushes one on top

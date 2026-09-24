@@ -31,11 +31,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.keyboard.KeyboardPresence
 import app.murmur.android.overlay.OverlayArrangement
 import app.murmur.android.overlay.OverlayDefaults
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
+import app.murmur.android.overlay.PillPresentation
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.OverlayShape
@@ -53,6 +55,7 @@ import app.murmur.android.ui.components.Segmented
 import app.murmur.android.ui.components.Stage
 import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
+import app.murmur.android.ui.theme.Space
 import kotlinx.coroutines.delay
 import kotlin.math.sin
 
@@ -65,6 +68,9 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
     val keyboard = LocalSoftwareKeyboardController.current
     val layout = settings.overlayLayout
     val defaultLayout = store.defaultOverlayLayout
+    val context = LocalContext.current
+    val posture by remember(context) { KeyboardPresence.get(context) }.posture.collectAsState()
+    val desktopPill = PillPresentation.resolve(settings.keyboard, posture) is PillPresentation.Desktop
 
     Screen(
         title = "Dictation button",
@@ -72,6 +78,16 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
         nav = nav
     ) {
         PillPreview(settings, height = 136.dp)
+
+        if (desktopPill) {
+            Spacer(Modifier.height(Space.lg))
+            Notice(
+                "Right now the desktop pill is showing instead of the button" +
+                    (if (posture.hardwareKeyboard) ", because a keyboard is connected" else "") +
+                    ". Its position and the shortcuts are under Keyboard; the spots below apply once the button is back.",
+                NoticeTone.NEUTRAL
+            )
+        }
 
         SectionGap()
 
@@ -126,6 +142,7 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
                     PrimaryButton(
                         "Edit spots",
                         modifier = Modifier.weight(1f),
+                        enabled = !desktopPill,
                         onClick = {
                             editError = if (OverlayEditor.start()) null
                             else "Turn on the accessibility service under Permissions first; it is what draws the button."

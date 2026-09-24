@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
  * share a voice with the chevrons and arrows in Components.kt.
  */
 enum class Glyph {
-    MENU, HOME, HISTORY, DICTIONARY, STYLE, BUTTON, MODEL, LANGUAGE, APPEARANCE, PERMISSIONS, UPDATES,
+    MENU, HOME, HISTORY, DICTIONARY, STYLE, BUTTON, KEYBOARD, MODEL, LANGUAGE, APPEARANCE, PERMISSIONS, UPDATES,
     TRY_IT, ACCOUNT, WORDS, PACE, TIME, STREAK, SEARCH
 }
 
@@ -95,6 +95,18 @@ fun DrawScope.draw(glyph: Glyph, color: Color) {
                 style = stroke()
             )
             drawCircle(color, size.width * 0.05f, p(0.5f, 0.5f))
+        }
+        Glyph.KEYBOARD -> {
+            val r = size.height * 0.1f
+            drawRoundRect(
+                color,
+                topLeft = p(0.12f, 0.28f),
+                size = Size(size.width * 0.76f, size.height * 0.44f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
+                style = stroke()
+            )
+            for (x in listOf(0.3f, 0.5f, 0.7f)) drawCircle(color, size.width * 0.035f, p(x, 0.41f))
+            line(color, 0.32f, 0.59f, 0.68f, 0.59f)
         }
         Glyph.MODEL -> {
             line(color, 0.18f, 0.42f, 0.18f, 0.58f)

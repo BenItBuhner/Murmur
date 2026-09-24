@@ -158,8 +158,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             }
         }
         mainScope.launch {
-            ShortcutRecorder.capturing.collect { capturing ->
-                if (capturing) shortcuts.startCapture { ShortcutRecorder.publish(it) } else shortcuts.stopCapture()
+            ShortcutRecorder.session.collect { session ->
+                if (session != null) shortcuts.startCapture { ShortcutRecorder.publish(it) } else shortcuts.stopCapture()
             }
         }
         // The only long-lived part of the app: the daily update check lives here. An unattended

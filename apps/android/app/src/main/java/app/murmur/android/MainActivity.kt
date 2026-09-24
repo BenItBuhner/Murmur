@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.murmur.android.cloud.AccountMode
@@ -34,7 +35,10 @@ import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.RecordingStore
+import app.murmur.android.keyboard.KeyboardPresence
+import app.murmur.android.keyboard.Keys
 import app.murmur.android.overlay.OverlayEditor
+import app.murmur.android.overlay.PillPresentation
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.ThemeMode
@@ -47,6 +51,7 @@ import app.murmur.android.ui.DictionaryScreen
 import app.murmur.android.ui.DrawerRow
 import app.murmur.android.ui.HistoryScreen
 import app.murmur.android.ui.HomeScreen
+import app.murmur.android.ui.KeyboardScreen
 import app.murmur.android.ui.LanguageScreen
 import app.murmur.android.ui.OnboardingScreen
 import app.murmur.android.ui.PermissionsScreen
@@ -211,6 +216,18 @@ private fun Main(
     val inference = rememberInferenceView(settings)
     val modelReady = inference.sttReady
     val ready = permissions.allGranted && modelReady
+    // A keyboard attached or detached recreates the activity; read the device again each time.
+    val presence = remember(context) { KeyboardPresence.get(context) }
+    val configuration = LocalConfiguration.current
+    LaunchedEffect(configuration) { presence.refresh(configuration) }
+    val posture by presence.posture.collectAsState()
+    val desktopPill = PillPresentation.resolve(settings.keyboard, posture) is PillPresentation.Desktop
+    val readyHint = when {
+        posture.hardwareKeyboard && settings.keyboard.shortcuts && settings.keyboard.pushToTalk.isNotEmpty() ->
+            "hold ${Keys.chordLabel(settings.keyboard.pushToTalk, settings.keyboard.sideSensitive)} to dictate"
+        desktopPill -> "tap the pill to dictate"
+        else -> "tap the button beside your keyboard"
+    }
     // Murmur models only need a signed-in account; the user's own provider needs the model screen.
     val modelRoute = if (inference.routing.murmurStt) Route.ACCOUNT else Route.MODEL
     val sections = sections(
@@ -233,7 +250,7 @@ private fun Main(
                     c.ember, false
                 )
                 !permissions.allGranted -> StatusRow("Setup needed", "${permissions.total - permissions.granted} permissions to allow", c.ember, false)
-                else -> StatusRow("Ready", "tap the button beside your keyboard", c.sage, false)
+                else -> StatusRow("Ready", readyHint, c.sage, false)
             }
             DrawerRow(
                 label = label,
@@ -267,9 +284,10 @@ private fun Main(
         }
     ) { entry, nav ->
         when (entry.route) {
-            Route.HOME -> HomeScreen(config, settings, signedIn, firstName, syncStatus, nav, onOpen = navigator::open)
+            Route.HOME -> HomeScreen(config, settings, signedIn, firstName, syncStatus, nav, onOpen = navigator::open, howTo = readyHint)
             Route.HISTORY -> HistoryScreen(HistoryStore.get(context), store, RecordingStore.get(context), nav)
             Route.BUTTON -> DictationButtonScreen(store, settings, nav)
+            Route.KEYBOARD -> KeyboardScreen(store, settings, nav)
             Route.MODEL -> SpeechModelScreen(store, settings, nav)
             Route.LANGUAGE -> LanguageScreen(store, settings, signedIn, nav)
             Route.STYLE -> StyleScreen(store, settings, nav)
@@ -295,6 +313,7 @@ private fun sections(cloud: Boolean, modelReady: Boolean, permissionsGranted: Bo
     add(Section(Route.DICTIONARY, "Dictionary", Glyph.DICTIONARY, group = "Personalize"))
     add(Section(Route.STYLE, "Style", Glyph.STYLE))
     add(Section(Route.BUTTON, "Dictation button", Glyph.BUTTON, group = "Setup"))
+    add(Section(Route.KEYBOARD, "Keyboard", Glyph.KEYBOARD))
     add(Section(Route.MODEL, "Speech model", Glyph.MODEL, attention = !modelReady))
     add(Section(Route.LANGUAGE, "Language", Glyph.LANGUAGE))
     add(Section(Route.APPEARANCE, "Appearance", Glyph.APPEARANCE))

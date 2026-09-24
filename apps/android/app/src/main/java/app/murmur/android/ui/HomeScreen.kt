@@ -81,7 +81,9 @@ fun HomeScreen(
     firstName: String?,
     syncStatus: SyncStatus?,
     nav: TopNav,
-    onOpen: (Route) -> Unit
+    onOpen: (Route) -> Unit,
+    /** How to start a dictation on this device right now ("tap the button beside your keyboard", "hold Ctrl + Meta to dictate"). */
+    howTo: String = "tap the button beside your keyboard"
 ) {
     val c = Murmur.colors
     val context = LocalContext.current
@@ -132,7 +134,7 @@ fun HomeScreen(
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "Tap the button beside your keyboard, speak, and finished text lands where your cursor is.",
+                        "${howTo.replaceFirstChar { it.uppercase() }}, speak, and finished text lands where your cursor is.",
                         style = Murmur.type.body,
                         color = c.inkSoft
                     )

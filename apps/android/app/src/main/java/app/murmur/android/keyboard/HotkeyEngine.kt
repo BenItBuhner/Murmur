@@ -2,6 +2,7 @@ package app.murmur.android.keyboard
 
 import app.murmur.android.dictation.DictationMode
 import app.murmur.android.settings.HandsFreeTrigger
+import app.murmur.android.settings.KeyboardSettings
 
 sealed class HotkeyAction {
     data class Start(val mode: DictationMode) : HotkeyAction()
@@ -19,6 +20,18 @@ data class HotkeyEngineConfig(
     val doubleTapWindowMs: Int,
     val sideSensitive: Boolean,
     val escapeCancels: Boolean
+)
+
+/** The engine's view of the keyboard settings (desktop: `HookService.engineConfig`). */
+fun KeyboardSettings.toEngineConfig(): HotkeyEngineConfig = HotkeyEngineConfig(
+    pushToTalk = pushToTalk,
+    handsFree = handsFree,
+    commandMode = commandMode,
+    handsFreeTrigger = handsFreeTrigger,
+    tapThresholdMs = tapThresholdMs,
+    doubleTapWindowMs = doubleTapWindowMs,
+    sideSensitive = sideSensitive,
+    escapeCancels = escapeCancels
 )
 
 /**

@@ -177,6 +177,9 @@ const val COPIED_NO_CONNECTION = "Copied — turn Murmur's accessibility service
 /** Keyboard support is on but the OS is older than Android 13. */
 const val COPIED_KEYBOARD_UNSUPPORTED = "Copied — keyboard support needs Android 13 or newer"
 
+/** Command mode: the text that was selected is no longer in the field as it was. */
+const val COPIED_SELECTION_CHANGED = "Copied — the selected text changed, paste over it"
+
 /**
  * Puts dictated text into a focused field using accessibility actions.
  *

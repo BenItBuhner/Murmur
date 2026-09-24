@@ -8,6 +8,7 @@ import android.widget.EditText
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.dictation.TextSink
+import app.murmur.android.history.HistoryEntry
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.service.InsertOutcome
@@ -98,7 +99,7 @@ class DictationFlowTest {
         DictationController.sink = null
     }
 
-    /** A focused field in a real activity, with the controller's sink pointed at it. */
+    /** A focused field in a real activity, with the controller's sink pointed at it, and no formatting model. */
     private fun setUpField(mode: FormattingMode = FormattingMode.LIGHT): Pair<Activity, EditText> {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val field = EditText(activity).apply { hint = "Dictate into me…" }
@@ -112,6 +113,8 @@ class DictationFlowTest {
                 sttModel = "mock-whisper",
                 sttFallbackModel = "",
                 formattingMode = mode,
+                llmSameAsStt = true,
+                llmModel = "",
                 useFixtureAudio = true,
                 onboardingComplete = true
             )
@@ -246,33 +249,41 @@ class DictationFlowTest {
     }
 
     /**
-     * The speech model's captured `verbose_json` for "I don't think so. It's not what we need.",
-     * with the "t" it dropped ([LiveFixtures]), parsed by the real client and inserted into the field.
+     * The speech model's captured `verbose_json` ([LiveFixtures]) with the "t" it dropped from a
+     * negative contraction, parsed by the real client and inserted into the field. Murmur never
+     * patches a model's text with rules of its own: what the speech model wrote is what goes in.
      */
-    private fun dictateCutContraction(mode: FormattingMode): String {
-        sttBody = LiveFixtures.raw("transcribe-1.verbose.dont-think-so.json")
+    private fun dictateCaptured(fixture: String, mode: FormattingMode): Pair<String, HistoryEntry> {
+        sttBody = LiveFixtures.raw(fixture)
         val (activity, field) = setUpField(mode)
         DictationController.start(activity)
         DictationController.stopAndInsert(activity)
         assertEquals(DictationState.Success("Inserted"), awaitOutcome(timeoutMs = 30_000))
         val entry = HistoryStore.get(activity).entries.value.first()
-        assertEquals("History keeps what the speech model returned", "I don' think so. It's not what we need.", entry.rawText)
-        return field.text.toString()
+        assertEquals("History keeps what the speech model returned", LiveFixtures.transcript(fixture), entry.rawText)
+        return field.text.toString() to entry
     }
 
     @Test
-    fun `a contraction the speech model cut lands whole with formatting off`() {
-        assertEquals("I don't think so. It's not what we need. ", dictateCutContraction(FormattingMode.OFF))
+    fun `a word the speech model cut at an apostrophe lands as it came with formatting off`() {
+        val (text, entry) = dictateCaptured("transcribe-1.verbose.dont-think-so.json", FormattingMode.OFF)
+        assertEquals("I don' think so. It's not what we need. ", text)
+        assertFalse(entry.llmUsed)
     }
 
     @Test
-    fun `a contraction the speech model cut lands whole in light mode`() {
-        assertEquals("I don't think so. It's not what we need. ", dictateCutContraction(FormattingMode.LIGHT))
+    fun `a word the speech model cut at an apostrophe lands as it came in light mode`() {
+        val (text, entry) = dictateCaptured("transcribe-1.verbose.dont-think-so.json", FormattingMode.LIGHT)
+        assertEquals("I don' think so. It's not what we need. ", text)
+        assertFalse(entry.llmUsed)
     }
 
     @Test
-    fun `a contraction the speech model cut lands whole in smart mode without a model`() {
-        assertEquals("I don't think so. It's not what we need. ", dictateCutContraction(FormattingMode.SMART))
+    fun `a word the speech model cut at an apostrophe lands as it came in smart mode without a model`() {
+        val (text, entry) = dictateCaptured("transcribe-1.verbose.dont-think-so.json", FormattingMode.SMART)
+        assertEquals("I don' think so. It's not what we need. ", text)
+        assertFalse(entry.llmUsed)
+        assertTrue("no chat completion was requested: $requests", requests.none { "/v1/chat/completions" in it })
     }
 
     /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */

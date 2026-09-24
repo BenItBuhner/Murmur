@@ -356,16 +356,15 @@ class KeyboardInsertionTest {
     }
 
     @Test
-    fun `a transcript the speech model cut reaches the field whole by set-text, keyboard commit and paste`() = runTest {
+    fun `a word the speech model cut at an apostrophe reaches the field as it came by set-text, keyboard commit and paste`() = runTest {
         val context = FormatContext(AppCategory.UNKNOWN, Tone.NEUTRAL, language = "auto")
-        val cases = listOf(
-            LiveFixtures.transcript("transcribe-1.verbose.didnt-call-back.json"),
-            LiveFixtures.transcript("transcribe-1.verbose.didnt-call-back.json").replace('\'', '’')
-        )
-        for (raw in cases) {
+        val captured = LiveFixtures.transcript("transcribe-1.verbose.didnt-call-back.json")
+        assertEquals("we couldn't find it and they didn' call back.", captured)
+        for (raw in listOf(captured, captured.replace('\'', '’'))) {
+            // Without a model the rule-based fallback writes the capital and leaves the cut word alone.
             val formatted = Engine.formatTranscript(FormatInput(raw, FormattingMode.SMART, context, emptyList()), null)
             val text = finish(formatted.text, AppCategory.UNKNOWN, emptyList(), trailingSpace = true).text
-            assertTrue(text, text.contains("didn't call") || text.contains("didn’t call"))
+            assertEquals("W" + raw.substring(1) + " ", text)
 
             val connection = field.onCreateInputConnection(EditorInfo())!!
             val commitOnly = object : KeyboardInput {

@@ -123,9 +123,9 @@ describe('alreadyClean', () => {
     expect(reason('Todo: fix the build.')).toBe('characters')
   })
 
-  it('finishes a cut negative contraction itself and sends any other bare apostrophe to the model', () => {
-    expect(decide("I don' think so.")).toEqual({ clean: true })
-    expect(decide('They didn’ call back.')).toEqual({ clean: true })
+  it('sends a word the speech model cut at an apostrophe to the model; a plural possessive is whole', () => {
+    expect(reason("I don' think so.")).toBe('truncated')
+    expect(reason('They didn’ call back.')).toBe('truncated')
     expect(reason("It' fine, we' see.")).toBe('truncated')
     expect(reason('That’ right.')).toBe('truncated')
     expect(decide("The dogs' bowls are empty.")).toEqual({ clean: true })

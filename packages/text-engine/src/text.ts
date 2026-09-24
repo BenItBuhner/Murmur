@@ -18,31 +18,6 @@ export function countWords(text: string): number {
   return m ? m.length : 0
 }
 
-/** Negative contractions without their "t". None of them otherwise ends a word in an apostrophe. */
-export const NEGATIVE_CONTRACTION_STEMS: readonly string[] = [
-  'ain', 'aren', 'can', 'couldn', 'daren', 'didn', 'doesn', 'don', 'hadn', 'hasn', 'haven',
-  'isn', 'mightn', 'mustn', 'needn', 'oughtn', 'shan', 'shouldn', 'wasn', 'weren', 'won', 'wouldn'
-]
-
-const CUT_NEGATION = new RegExp(
-  `(?<![\\p{L}\\p{N}'’‘])(${NEGATIVE_CONTRACTION_STEMS.join('|')})(['’])(?![\\p{L}\\p{N}])`,
-  'giu'
-)
-
-/**
- * Restore a negative contraction whose "t" the speech model dropped: "I don' think so" becomes
- * "I don't think so", with the apostrophe it wrote. Whisper-style models cut "n't" this way in
- * front of a consonant in their timestamped transcripts (`verbose_json`, which the clients ask for
- * to get word timings); the plain transcript of the same audio keeps it. A word the speaker quoted
- * ('won') opens with a quote and is left alone.
- */
-export function repairContractions(text: string): string {
-  return text.replace(
-    CUT_NEGATION,
-    (_m, stem: string, apostrophe: string) => stem + apostrophe + (stem === stem.toUpperCase() ? 'T' : 't')
-  )
-}
-
 export function capitalizeFirst(s: string): string {
   const idx = s.search(/\p{L}/u)
   if (idx < 0) return s

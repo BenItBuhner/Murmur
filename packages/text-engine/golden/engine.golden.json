@@ -240,6 +240,74 @@
       ]
     }
   ],
+  "commands": [
+    {
+      "name": "plain chat edit",
+      "input": {
+        "selection": "hey can u send me the report tmrw",
+        "instruction": "make it more formal",
+        "category": "chat",
+        "dictionary": []
+      },
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are an in-place text editor driven by voice. The user highlighted some text and spoke an instruction. Apply the instruction to the text and return only the edited text.\n- Keep the original language unless asked to translate.\n- Preserve formatting (line breaks, lists, markdown) unless the instruction changes it.\n- Never add commentary, notes, quotes or code fences around the result. Never explain what you changed.\n- If the instruction cannot be applied, return the text unchanged.\n- The text lives in a chat message."
+        },
+        {
+          "role": "user",
+          "content": "Instruction: make it more formal\n\nText:\nhey can u send me the report tmrw"
+        }
+      ]
+    },
+    {
+      "name": "terminal with dictionary and language",
+      "input": {
+        "selection": "kubectl get pods -n default",
+        "instruction": " show all namespaces ",
+        "category": "terminal",
+        "dictionary": [
+          {
+            "word": "kubectl",
+            "aliases": [
+              "cube control"
+            ]
+          }
+        ],
+        "language": "en"
+      },
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are an in-place text editor driven by voice. The user highlighted some text and spoke an instruction. Apply the instruction to the text and return only the edited text.\n- The user speaks English, so the instruction is in English. Keep the text in its original language unless the instruction asks to translate.\n- Preserve formatting (line breaks, lists, markdown) unless the instruction changes it.\n- Never add commentary, notes, quotes or code fences around the result. Never explain what you changed.\n- If the instruction cannot be applied, return the text unchanged.\n- Dictionary: kubectl (heard as \"cube control\").\n- The text lives in a terminal; keep identifiers and syntax intact."
+        },
+        {
+          "role": "user",
+          "content": "Instruction: show all namespaces\n\nText:\nkubectl get pods -n default"
+        }
+      ]
+    },
+    {
+      "name": "document in german",
+      "input": {
+        "selection": "Wir treffen uns morgen.\n\nBis dann!",
+        "instruction": "übersetze ins Englische",
+        "category": "document",
+        "dictionary": [],
+        "language": "de"
+      },
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are an in-place text editor driven by voice. The user highlighted some text and spoke an instruction. Apply the instruction to the text and return only the edited text.\n- The user speaks German, so the instruction is in German. Keep the text in its original language unless the instruction asks to translate.\n- Preserve formatting (line breaks, lists, markdown) unless the instruction changes it.\n- Never add commentary, notes, quotes or code fences around the result. Never explain what you changed.\n- If the instruction cannot be applied, return the text unchanged.\n- The text lives in a document."
+        },
+        {
+          "role": "user",
+          "content": "Instruction: übersetze ins Englische\n\nText:\nWir treffen uns morgen.\n\nBis dann!"
+        }
+      ]
+    }
+  ],
   "signatures": [
     {
       "text": "the budget is one million two hundred thousand dollars",

@@ -15,10 +15,12 @@ import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.animation.AnimationUtils
 import androidx.core.graphics.ColorUtils
+import app.murmur.android.dictation.DictationMode
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.inference.LimitNotice
 import app.murmur.android.inference.LimitStage
 import app.murmur.android.inference.Limits
+import app.murmur.android.settings.OverlayPosition
 import app.murmur.android.settings.OverlayShape
 import kotlin.math.PI
 import kotlin.math.abs
@@ -64,6 +66,23 @@ private const val SOFT_LIMIT_H_DP = 64f
 
 /** How far outside the pill a touch still counts; the touch window is padded by this. */
 private const val TOUCH_PAD_DP = 6f
+
+/**
+ * The desktop presentation (PillPresentation.Desktop), in the desktop overlay's own measurements:
+ * its window keeps [DESKTOP_MARGIN_DP] from the edge of the screen and the pill sits
+ * [DESKTOP_PAD_DP] inside it; the idle indicator is a [DESKTOP_IDLE_W_DP] x [DESKTOP_IDLE_H_DP] bar
+ * on the same edge; at bottom right the pill is centred [DESKTOP_RIGHT_CENTER_DP] in from the edge
+ * (half the desktop window's width).
+ */
+private const val DESKTOP_MARGIN_DP = 28f
+private const val DESKTOP_PAD_DP = 12f
+private const val DESKTOP_IDLE_W_DP = 56f
+private const val DESKTOP_IDLE_H_DP = 6f
+private const val DESKTOP_RIGHT_CENTER_DP = 180f
+
+/** The finger's target around the thin idle bar, and beside the pill, in the desktop presentation. */
+private const val DESKTOP_TOUCH_MIN_H_DP = 44f
+private const val DESKTOP_TOUCH_PAD_X_DP = 12f
 
 /** The pulsing "recording" dot: a fixed red-orange, whatever the theme, because that is what it means. */
 private const val RECORD = 0xFFFF5A36.toInt()
@@ -145,10 +164,17 @@ class OverlayPillView(context: Context) : View(context) {
         /** Error only: the entry whose recording can be sent again (draws Retry and a dismiss cross). */
         val retryId: String? = null,
         /** Limit only: what refused the dictation, explained on the pill with its ways forward. */
-        val limit: LimitNotice? = null
+        val limit: LimitNotice? = null,
+        /** Listening only: a command session wears the command tint. */
+        val mode: DictationMode = DictationMode.HANDS_FREE,
+        /** Listening in the desktop presentation: a locked session wears the hands-free badge. */
+        val locked: Boolean = false,
+        /** Laid out for the desktop presentation (the idle bar, the desktop listening row). */
+        val desktop: Boolean = false
     ) {
         fun sameContent(other: Look): Boolean =
-            kind == other.kind && text == other.text && retryId == other.retryId && limit == other.limit
+            kind == other.kind && text == other.text && retryId == other.retryId && limit == other.limit &&
+                mode == other.mode && locked == other.locked && desktop == other.desktop
     }
 
     /** Tappable pieces of the edit-mode panel. */
@@ -174,10 +200,15 @@ class OverlayPillView(context: Context) : View(context) {
     private var shape = OverlayShape.PILL
     private var layout = OverlayLayout.DEFAULT
     private var palette = PillPalette.DEFAULT
+    private var presentation: PillPresentation = PillPresentation.Button
     private var editing = false
     private var screenW = 0f
     private var screenH = 0f
     private var keyboardTop: Float? = null
+
+    /** How the session in flight was started, and whether it runs until stopped (from the listening state). */
+    private var mode = DictationMode.HANDS_FREE
+    private var lockedSession = true
 
     // ---- morph model ----------------------------------------------------------------------------
 
@@ -331,6 +362,31 @@ class OverlayPillView(context: Context) : View(context) {
     }
 
     /**
+     * Switch between the floating button and the desktop pill. The change morphs like any other:
+     * the button slides from its spot to the desktop position and thins into the idle bar, or the
+     * reverse when the keyboard goes away. A drag or an edit in progress is dropped.
+     */
+    fun setPresentation(next: PillPresentation) {
+        if (next == presentation) return
+        presentation = next
+        cancelGesture()
+        springX = null
+        springY = null
+        if (next !is PillPresentation.Button && editing) {
+            editing = false
+            hits.clear()
+            panelBottom = 0f
+        }
+        // The canvas is rebuilt for the new presentation rather than grown around both.
+        canvasApplied = false
+        retarget()
+        requestFrames()
+        invalidate()
+    }
+
+    val isDesktop: Boolean get() = presentation is PillPresentation.Desktop
+
+    /**
      * Theme colours. A new tint morphs in like any other look change; a flip between light and dark
      * snaps, since the ink changes with it and dark ink on a body still fading out of dark would be
      * illegible for the whole morph.
@@ -348,6 +404,8 @@ class OverlayPillView(context: Context) : View(context) {
     private fun ink(alpha: Int): Int = ColorUtils.setAlphaComponent(palette.ink, alpha)
 
     fun setEditing(editing: Boolean) {
+        // Spots belong to the floating button; the desktop pill has a position setting instead.
+        if (editing && presentation !is PillPresentation.Button) return
         if (this.editing == editing) return
         this.editing = editing
         cancelGesture()
@@ -368,7 +426,10 @@ class OverlayPillView(context: Context) : View(context) {
             is DictationState.Listening -> {
                 latestLevel = next.level
                 lastElapsedSec = next.elapsedSec
+                mode = next.mode
+                lockedSession = next.locked
             }
+            is DictationState.Processing -> mode = next.mode
             is DictationState.Idle -> latestLevel = 0f
             else -> Unit
         }
@@ -377,15 +438,43 @@ class OverlayPillView(context: Context) : View(context) {
 
     // ---- looks ----------------------------------------------------------------------------------
 
-    private fun idleLook(): Look = when (shape) {
-        OverlayShape.PILL -> Look(Kind.IDLE, dp(64f), dp(36f), palette.background)
-        OverlayShape.CIRCLE -> Look(Kind.IDLE, dp(36f), dp(36f), palette.background)
+    private fun idleLook(): Look {
+        if (presentation is PillPresentation.Desktop) {
+            return Look(Kind.IDLE, dp(DESKTOP_IDLE_W_DP), dp(DESKTOP_IDLE_H_DP), palette.background, desktop = true)
+        }
+        return when (shape) {
+            OverlayShape.PILL -> Look(Kind.IDLE, dp(64f), dp(36f), palette.background)
+            OverlayShape.CIRCLE -> Look(Kind.IDLE, dp(36f), dp(36f), palette.background)
+        }
     }
 
     private fun listeningLook(): Look {
         val maxW = if (screenW > 0f) screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP) else Float.MAX_VALUE
-        return Look(Kind.LISTENING, min(dp(232f), maxW), dp(TALL_DP), palette.background)
+        val command = mode == DictationMode.COMMAND
+        val bg = if (command) palette.commandBackground else palette.background
+        val p = presentation
+        if (p is PillPresentation.Desktop) {
+            // Dot, waveform, elapsed time and the mode badge, laid out as the desktop pill lays them out.
+            val badge = listeningBadge(mode, lockedSession)
+            var w = dp(16f) + dp(10f) + dp(12f) + barsWidth() + dp(12f) + textPaint.measureText("0:00") + dp(16f)
+            if (badge != null) w += dp(10f) + badgeWidth(badge, mode)
+            if (p.touchControls) w += 2 * dp(34f)
+            return Look(Kind.LISTENING, min(w, maxW), dp(TALL_DP), bg, mode = mode, locked = lockedSession, desktop = true)
+        }
+        return Look(Kind.LISTENING, min(dp(232f), maxW), dp(TALL_DP), bg, mode = mode)
     }
+
+    /** "Hands-free" on a locked session, "Command" on an instruction, nothing while a key is held. */
+    private fun listeningBadge(mode: DictationMode, locked: Boolean): String? = when {
+        mode == DictationMode.COMMAND -> "Command"
+        locked -> "Hands-free"
+        else -> null
+    }
+
+    private fun badgeWidth(badge: String, mode: DictationMode): Float =
+        tinyTextPaint.measureText(badge) + dp(14f) + if (mode == DictationMode.COMMAND) 0f else dp(13f)
+
+    private fun barsWidth(): Float = BAR_COUNT * (dp(2.6f) + dp(2.2f)) - dp(2.2f)
 
     private fun lookFor(s: DictationState): Look = when (s) {
         is DictationState.Idle -> idleLook()
@@ -428,12 +517,35 @@ class OverlayPillView(context: Context) : View(context) {
         return OverlayGeometry.anchorPoint(spot, screenW, screenH, keyboardTop, density, idle.w, idle.h)
     }
 
-    /** Screen-space centre of the resting button (the point every state grows out of). */
-    private fun anchorPointNow(): Pair<Float, Float> {
+    /**
+     * Screen-space centre of [look]. The floating button grows every state out of the centre of its
+     * resting button; the desktop pill keeps the edge it sits on (the bottom, or the top at top
+     * centre) and grows away from it, the way the desktop overlay's window lays its pill out.
+     */
+    private fun anchorPointNow(look: Look): Pair<Float, Float> {
         if (previewMode) return (screenW / 2f) to (screenH / 2f)
+        (presentation as? PillPresentation.Desktop)?.let { return desktopAnchor(look, it) }
         dragPosition?.let { return it }
         return spotPoint(layout.active)
     }
+
+    /** Where the desktop pill's centre goes for [look]: the desktop's margin from the edge, above any keyboard. */
+    private fun desktopAnchor(look: Look, p: PillPresentation.Desktop): Pair<Float, Float> {
+        val margin = dp(DESKTOP_MARGIN_DP) + dp(DESKTOP_PAD_DP)
+        val x = when (p.position) {
+            OverlayPosition.BOTTOM_RIGHT -> screenW - dp(DESKTOP_MARGIN_DP) - dp(DESKTOP_RIGHT_CENTER_DP)
+            OverlayPosition.BOTTOM_CENTER, OverlayPosition.TOP_CENTER -> screenW / 2f
+        }
+        val y = if (p.position == OverlayPosition.TOP_CENTER) {
+            statusBarInset() + dp(DESKTOP_MARGIN_DP) + look.h / 2f
+        } else {
+            desktopFloor() - margin - look.h / 2f
+        }
+        return x to y
+    }
+
+    /** The edge the desktop pill rests above: the navigation bar, or the soft keyboard when one is up. */
+    private fun desktopFloor(): Float = min(screenH - navigationBarInset(), keyboardTop?.takeIf { it > 0f } ?: Float.MAX_VALUE)
 
     private fun boxFor(look: Look, ax: Float, ay: Float): Box =
         OverlayGeometry.place(ax, ay, look.w, look.h, screenW, screenH, density)
@@ -442,7 +554,7 @@ class OverlayPillView(context: Context) : View(context) {
     private fun retarget(animate: Boolean = true) {
         if (screenW <= 0f || screenH <= 0f) return
         val newLook = if (editing) idleLook() else lookFor(state)
-        val (ax, ay) = anchorPointNow()
+        val (ax, ay) = anchorPointNow(newLook)
         val lookChanged = newLook != toLook
         val anchorChanged = abs(ax - toAx) > 0.5f || abs(ay - toAy) > 0.5f
         if (!lookChanged && !anchorChanged) return
@@ -467,7 +579,7 @@ class OverlayPillView(context: Context) : View(context) {
         } else {
             // The outgoing layer is whatever was (becoming) visible, starting at its current alpha.
             outgoingAlpha0 = if (fromLook.sameContent(toLook)) 1f else curIncomingAlpha
-            fromLook = Look(toLook.kind, curW, curH, curBg, toLook.text, toLook.restingW)
+            fromLook = toLook.copy(w = curW, h = curH, bg = curBg)
             fromAx = curAx
             fromAy = curAy
             toLook = newLook
@@ -483,6 +595,34 @@ class OverlayPillView(context: Context) : View(context) {
 
     /** The canvas covers the whole screen while the button is dragged, lands on a spot, or is edited. */
     private fun canvasCoversScreen(): Boolean = editing || dragging || springX != null
+
+    /**
+     * The desktop pill's canvas: a band along the edge it rests on, tall enough for its tallest
+     * state (the limit notice) plus the shadow, so nothing about it changes as the pill grows.
+     */
+    private fun desktopBand(p: PillPresentation.Desktop): Box {
+        val pad = dp(SHADOW_PAD_DP) + dp(DESKTOP_PAD_DP)
+        val tallest = dp(LIMIT_H_DP)
+        val idle = idleLook()
+        val (_, cy) = desktopAnchor(idle, p)
+        return if (p.position == OverlayPosition.TOP_CENTER) {
+            val top = cy - idle.h / 2f
+            Box(0f, top - pad, screenW, top + tallest + pad)
+        } else {
+            val bottom = cy + idle.h / 2f
+            Box(0f, bottom - tallest - pad, screenW, bottom + pad)
+        }
+    }
+
+    /** The finger's target in the desktop presentation: the pill, at least [DESKTOP_TOUCH_MIN_H_DP] tall. */
+    private fun desktopTouchFrame(box: Box): Box {
+        val dy = max(dp(TOUCH_PAD_DP), (dp(DESKTOP_TOUCH_MIN_H_DP) - box.height) / 2f)
+        return Box(box.left - dp(DESKTOP_TOUCH_PAD_X_DP), box.top - dy, box.right + dp(DESKTOP_TOUCH_PAD_X_DP), box.bottom + dy)
+    }
+
+    /** Where a touch counts as being on the pill. */
+    private fun hitBox(): Box =
+        if (presentation is PillPresentation.Desktop) desktopTouchFrame(pillBox) else pillBox.inflate(dp(6f))
 
     /**
      * Every box the pill can occupy at this spot: the resting button, the listening bar and the
@@ -509,6 +649,11 @@ class OverlayPillView(context: Context) : View(context) {
         }
         if (screenW <= 0f || screenH <= 0f) return
         val screen = Box(0f, 0f, screenW, screenH)
+        (presentation as? PillPresentation.Desktop)?.let { p ->
+            requestCanvas(desktopBand(p).intersect(screen))
+            requestTouch(desktopTouchFrame(boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy))).intersect(screen))
+            return
+        }
         if (editing) {
             requestCanvas(screen)
             requestTouch(screen)
@@ -558,7 +703,9 @@ class OverlayPillView(context: Context) : View(context) {
     private fun tightenTouchFrame() {
         if (previewMode || host == null || editing || dragging || morphStart >= 0L || springX != null) return
         val screen = Box(0f, 0f, screenW, screenH)
-        requestTouch(boxFor(toLook, toAx, toAy).inflate(dp(TOUCH_PAD_DP)).intersect(screen))
+        val resting = boxFor(toLook, toAx, toAy)
+        val frame = if (presentation is PillPresentation.Desktop) desktopTouchFrame(resting) else resting.inflate(dp(TOUCH_PAD_DP))
+        requestTouch(frame.intersect(screen))
     }
 
     // ---- measure / layout -----------------------------------------------------------------------
@@ -664,8 +811,9 @@ class OverlayPillView(context: Context) : View(context) {
 
         // A light catch along the top of the pill (as on the desktop pill): the one thin mark it
         // keeps, so the button still reads as a surface on a keyboard of its own brightness. It
-        // goes with the shadow: a flat pill (PillPalette.elevated off) has neither.
-        if (palette.elevated) {
+        // goes with the shadow: a flat pill (PillPalette.elevated off) has neither. The desktop
+        // idle bar is too thin to carry one.
+        if (palette.elevated && drawn.height >= dp(12f)) {
             strokePaint.color = ink(0x14)
             strokePaint.strokeWidth = dp(1f)
             scratchRect.inset(dp(0.5f), dp(0.5f))
@@ -704,8 +852,9 @@ class OverlayPillView(context: Context) : View(context) {
             canvas.scale(scale, scale, box.centerX, box.centerY)
         }
         when (look.kind) {
-            Kind.IDLE -> drawIdle(canvas, box)
-            Kind.LISTENING -> drawListening(canvas, box, now, dt)
+            // The desktop idle indicator is the bar itself; there is nothing on it.
+            Kind.IDLE -> if (!look.desktop) drawIdle(canvas, box)
+            Kind.LISTENING -> if (look.desktop) drawDesktopListening(canvas, box, look, now, dt) else drawListening(canvas, box, now, dt)
             Kind.PROCESSING -> drawProcessing(canvas, box, look.text, now)
             Kind.SUCCESS -> drawMessage(canvas, box, look, palette.successForeground, true, now)
             Kind.ERROR -> drawMessage(canvas, box, look, palette.errorForeground, false, now)
@@ -782,6 +931,107 @@ class OverlayPillView(context: Context) : View(context) {
         strokePaint.strokeWidth = dp(2.2f)
         canvas.drawLine(confirmCx - dp(4.6f), cy + dp(0.5f), confirmCx - dp(1f), cy + dp(4f), strokePaint)
         canvas.drawLine(confirmCx - dp(1f), cy + dp(4f), confirmCx + dp(5f), cy - dp(3.5f), strokePaint)
+    }
+
+    /**
+     * The desktop pill while listening: the pulsing dot, the waveform, the elapsed time and, on a
+     * locked session, the hands-free badge with its lock (the desktop `Overlay.tsx` row); a command
+     * session wears the command tint and its badge instead. A touch-only screen also gets the
+     * cancel and confirm buttons at the ends, since it has no Esc and no shortcut to stop with.
+     */
+    private fun drawDesktopListening(canvas: Canvas, box: Box, look: Look, now: Long, dt: Long) {
+        val cy = box.centerY
+        val command = look.mode == DictationMode.COMMAND
+        val fg = if (command) palette.commandForeground else palette.ink
+        val controls = (presentation as? PillPresentation.Desktop)?.touchControls == true
+        cancelBox = Box.EMPTY
+        confirmBox = Box.EMPTY
+        var x = box.left + dp(16f)
+        if (controls) {
+            val r = dp(14f)
+            val cx = x + r - dp(4f)
+            cancelBox = Box.centered(cx, cy, r * 2, r * 2)
+            paint.color = ink(0x1F)
+            canvas.drawCircle(cx, cy, r - dp(2f), paint)
+            strokePaint.color = palette.inkSoft
+            strokePaint.strokeWidth = dp(2f)
+            val xr = dp(4.5f)
+            canvas.drawLine(cx - xr, cy - xr, cx + xr, cy + xr, strokePaint)
+            canvas.drawLine(cx - xr, cy + xr, cx + xr, cy - xr, strokePaint)
+            x += dp(34f)
+        }
+
+        val dotCx = x + dp(5f)
+        val pulse = 1f + 0.18f * sin(2.0 * PI * (now % 1200L) / 1200.0).toFloat()
+        paint.color = if (command) fg else RECORD
+        canvas.drawCircle(dotCx, cy, dp(4f) * pulse, paint)
+        x = dotCx + dp(5f) + dp(12f)
+
+        advanceBars(now, dt)
+        val barW = dp(2.6f)
+        val gap = dp(2.2f)
+        val pitch = barW + gap
+        val barsLeft = x
+        val barsRight = barsLeft + BAR_COUNT * pitch - gap
+        val frac = 1f - ((nextBarShiftAt - now).toFloat() / BAR_STEP_MS).coerceIn(0f, 1f)
+        canvas.save()
+        canvas.clipRect(barsLeft - dp(1f), box.top, barsRight + dp(1f), box.bottom)
+        paint.color = fg
+        for (i in 0..BAR_COUNT) {
+            val v = barLevels[i]
+            val bh = max(dp(3f), v * dp(22f))
+            var a = 0.55f + v * 0.45f
+            if (i == 0) a *= 1f - frac
+            if (i == BAR_COUNT) a *= frac
+            paint.alpha = (a * 255f).toInt().coerceIn(0, 255)
+            val bx = barsLeft + (i - frac) * pitch
+            canvas.drawRoundRect(bx, cy - bh / 2, bx + barW, cy + bh / 2, barW / 2, barW / 2, paint)
+        }
+        paint.alpha = 255
+        canvas.restore()
+        x = barsRight + dp(12f)
+
+        textPaint.color = ColorUtils.setAlphaComponent(fg, 0xB3)
+        canvas.drawText(elapsedText(), x, cy + textPaint.textSize / 2.8f, textPaint)
+        textPaint.color = palette.ink
+        x += textPaint.measureText("0:00")
+
+        val badge = listeningBadge(look.mode, look.locked)
+        if (badge != null) {
+            x += dp(10f)
+            val w = badgeWidth(badge, look.mode)
+            val h = dp(20f)
+            scratchRect.set(x, cy - h / 2f, x + w, cy + h / 2f)
+            paint.color = ColorUtils.setAlphaComponent(fg, 0x1A)
+            canvas.drawRoundRect(scratchRect, h / 2f, h / 2f, paint)
+            var tx = x + dp(7f)
+            if (!command) {
+                // The lock: a body and a shackle, as on the desktop badge.
+                strokePaint.color = ColorUtils.setAlphaComponent(fg, 0xD9)
+                strokePaint.strokeWidth = dp(1.4f)
+                val lx = tx + dp(4.5f)
+                scratchRect.set(lx - dp(3.5f), cy - dp(0.5f), lx + dp(3.5f), cy + dp(4f))
+                canvas.drawRoundRect(scratchRect, dp(1f), dp(1f), strokePaint)
+                scratchRect.set(lx - dp(2.2f), cy - dp(4.5f), lx + dp(2.2f), cy + dp(0.5f))
+                canvas.drawArc(scratchRect, 180f, 180f, false, strokePaint)
+                tx += dp(13f)
+            }
+            tinyTextPaint.color = ColorUtils.setAlphaComponent(fg, 0xD9)
+            canvas.drawText(badge, tx, cy + tinyTextPaint.textSize / 2.8f, tinyTextPaint)
+            tinyTextPaint.color = palette.ink
+        }
+
+        if (controls) {
+            val r = dp(14f)
+            val cx = box.right - dp(16f) - r + dp(4f)
+            confirmBox = Box.centered(cx, cy, r * 2, r * 2)
+            paint.color = palette.accent
+            canvas.drawCircle(cx, cy, r - dp(2f), paint)
+            strokePaint.color = palette.onAccent
+            strokePaint.strokeWidth = dp(2.2f)
+            canvas.drawLine(cx - dp(4.6f), cy + dp(0.5f), cx - dp(1f), cy + dp(4f), strokePaint)
+            canvas.drawLine(cx - dp(1f), cy + dp(4f), cx + dp(5f), cy - dp(3.5f), strokePaint)
+        }
     }
 
     private fun advanceBars(now: Long, dt: Long) {
@@ -1015,7 +1265,8 @@ class OverlayPillView(context: Context) : View(context) {
      * (or, long finished, still be recorded as where the last morph came from) when the finger
      * lands, and a grab simply completes it.
      */
-    private fun canFlick(): Boolean = !previewMode && host != null && !editing && toLook.kind == Kind.IDLE
+    private fun canFlick(): Boolean =
+        !previewMode && host != null && !editing && presentation is PillPresentation.Button && toLook.kind == Kind.IDLE
 
     private fun startFlick(x: Float, y: Float) {
         dragging = true
@@ -1303,6 +1554,16 @@ class OverlayPillView(context: Context) : View(context) {
         }
     }
 
+    private fun navigationBarInset(): Float {
+        val insets = rootWindowInsets ?: return 0f
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            insets.getInsets(WindowInsets.Type.navigationBars()).bottom.toFloat()
+        } else {
+            @Suppress("DEPRECATION")
+            insets.systemWindowInsetBottom.toFloat()
+        }
+    }
+
     // ---- animation helpers ----------------------------------------------------------------------
 
     private fun isAnimating(now: Long): Boolean {
@@ -1348,7 +1609,7 @@ class OverlayPillView(context: Context) : View(context) {
         if (editing) return onEditTouch(event, x, y)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (!pillBox.inflate(dp(6f)).contains(x, y)) return false
+                if (!hitBox().contains(x, y)) return false
                 pressed = true
                 downX = x
                 downY = y
@@ -1365,7 +1626,7 @@ class OverlayPillView(context: Context) : View(context) {
                     dragFree(x, y)
                 } else if (pressed && canFlick() && hypot(x - downX, y - downY) > touchSlop) {
                     startFlick(x, y)
-                } else if (pressed && !pillBox.inflate(dp(28f)).contains(x, y)) {
+                } else if (pressed && !hitBox().inflate(dp(22f)).contains(x, y)) {
                     pressed = false
                     invalidate()
                 }
@@ -1397,7 +1658,8 @@ class OverlayPillView(context: Context) : View(context) {
     private fun tap(x: Float, y: Float) {
         when (toLook.kind) {
             Kind.IDLE -> onMicTap?.invoke()
-            Kind.LISTENING -> if (cancelBox.inflate(dp(4f)).contains(x, y)) onCancelTap?.invoke() else onConfirmTap?.invoke()
+            // Without a cancel button (the desktop pill with a keyboard) a tap anywhere stops and inserts.
+            Kind.LISTENING -> if (cancelBox != Box.EMPTY && cancelBox.inflate(dp(4f)).contains(x, y)) onCancelTap?.invoke() else onConfirmTap?.invoke()
             Kind.ERROR -> {
                 val retryId = toLook.retryId ?: return
                 when {

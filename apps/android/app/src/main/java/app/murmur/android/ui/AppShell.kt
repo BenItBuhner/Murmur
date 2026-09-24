@@ -26,6 +26,8 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.PermanentDrawerSheet
+import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -36,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -43,6 +46,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.murmur.android.keyboard.WidthClass
 import app.murmur.android.ui.components.ArrowLeft
 import app.murmur.android.ui.components.Chevron
 import app.murmur.android.ui.components.Dot
@@ -53,15 +57,20 @@ import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.PageMargin
 import app.murmur.android.ui.components.Wordmark
 import app.murmur.android.ui.theme.Elevation
+import app.murmur.android.ui.theme.Layout
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
 import app.murmur.android.ui.theme.Space
 import kotlinx.coroutines.launch
 
-/** What the button at the top left of a screen does: open the sections, or go back. */
+/**
+ * What the button at the top left of a screen does: open the sections, or go back. [None] on a
+ * wide screen, where the sections stay open beside the screen and there is nothing to open.
+ */
 sealed interface TopNav {
     data class Menu(val onOpen: () -> Unit) : TopNav
     data class Back(val onBack: () -> Unit) : TopNav
+    data object None : TopNav
 }
 
 /** One destination in the drawer, grouped the way the desktop sidebar is. */
@@ -79,7 +88,8 @@ data class Section(
  * The app's frame once set up: a drawer down the left with every section, opened by the button at
  * the top left of a top-level screen or by dragging in from the edge, and the back stack in front
  * of it. Picking a section closes the drawer and fades the section through; the back gesture then
- * leads home.
+ * leads home. On a screen as wide as a laptop's (the expanded width class) the drawer stays open
+ * as a rail beside the screens, the way the desktop sidebar does, and the menu button goes away.
  */
 @Composable
 fun AppShell(
@@ -89,6 +99,28 @@ fun AppShell(
     content: @Composable (entry: NavEntry, nav: TopNav) -> Unit
 ) {
     val c = Murmur.colors
+    if (windowWidthClass == WidthClass.EXPANDED) {
+        PermanentNavigationDrawer(
+            drawerContent = {
+                PermanentDrawerSheet(
+                    modifier = Modifier.width(Layout.rail).fillMaxHeight().testTag("drawer"),
+                    drawerShape = RectangleShape,
+                    drawerContainerColor = c.rail,
+                    drawerContentColor = c.ink,
+                    drawerTonalElevation = 0.dp
+                ) {
+                    DrawerBody(sections, navigator.current, onSelect = navigator::select, footer = { footer(navigator::select) })
+                }
+            }
+        ) {
+            NavHost(navigator) { entry ->
+                val nav = if (entry.topLevel) TopNav.None else TopNav.Back { navigator.back() }
+                content(entry, nav)
+            }
+        }
+        return
+    }
+
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val open: () -> Unit = { scope.launch { drawer.open() } }
@@ -148,29 +180,40 @@ private fun Drawer(
         drawerContentColor = c.ink,
         drawerTonalElevation = 0.dp
     ) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(horizontal = PageMargin),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Wordmark()
-        }
-        Column(
-            Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp)
-        ) {
-            Spacer(Modifier.height(4.dp))
-            for (section in sections) {
-                if (section.group != null) {
-                    Overline(section.group, Modifier.padding(start = 14.dp, top = 24.dp, bottom = 8.dp))
-                }
-                DrawerItem(section, selected = section.route == current, onClick = { onSelect(section.route) })
-            }
-            Spacer(Modifier.height(16.dp))
-        }
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), content = footer)
+        DrawerBody(sections, current, onSelect, footer)
     }
+}
+
+/** What both drawers hold: the wordmark, the grouped sections, the footer. */
+@Composable
+private fun ColumnScope.DrawerBody(
+    sections: List<Section>,
+    current: Route,
+    onSelect: (Route) -> Unit,
+    footer: @Composable ColumnScope.() -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().height(64.dp).padding(horizontal = PageMargin),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Wordmark()
+    }
+    Column(
+        Modifier
+            .weight(1f)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp)
+    ) {
+        Spacer(Modifier.height(4.dp))
+        for (section in sections) {
+            if (section.group != null) {
+                Overline(section.group, Modifier.padding(start = 14.dp, top = 24.dp, bottom = 8.dp))
+            }
+            DrawerItem(section, selected = section.route == current, onClick = { onSelect(section.route) })
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), content = footer)
 }
 
 @Composable
@@ -254,7 +297,7 @@ fun DrawerRow(
     }
 }
 
-/** The round button at the top left of a screen: three lines for the sections, an arrow for back. */
+/** The round button at the top left of a screen: three lines for the sections, an arrow for back, nothing beside a rail. */
 @Composable
 fun TopNavButton(nav: TopNav, modifier: Modifier = Modifier) {
     val c = Murmur.colors
@@ -267,5 +310,6 @@ fun TopNavButton(nav: TopNav, modifier: Modifier = Modifier) {
             onClick = nav.onBack,
             modifier = modifier.semantics { contentDescription = "Back" }
         ) { ArrowLeft(c.ink) }
+        TopNav.None -> Unit
     }
 }

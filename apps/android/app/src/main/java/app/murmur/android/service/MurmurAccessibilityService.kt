@@ -1,6 +1,7 @@
 package app.murmur.android.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -10,10 +11,12 @@ import android.net.Uri
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
+import android.os.Bundle
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -23,10 +26,16 @@ import android.view.accessibility.AccessibilityWindowInfo
 import app.murmur.android.MainActivity
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.dictation.Selection
 import app.murmur.android.dictation.TextSink
+import app.murmur.android.keyboard.HardwareShortcuts
+import app.murmur.android.keyboard.KeyboardPresence
+import app.murmur.android.keyboard.ShortcutRecorder
+import app.murmur.android.keyboard.toEngineConfig
 import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.OverlayPillView
+import app.murmur.android.overlay.PillPresentation
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
@@ -39,6 +48,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 private const val TAG = "MurmurA11y"
@@ -73,6 +83,11 @@ private const val PRECEDING_TEXT_MAX = 600
  * for two windows: a canvas it draws in, which is never touchable and never moves while the mic
  * turns on or off, and an invisible touch window that hugs the pill and relays taps to it.
  *
+ * With a physical keyboard attached (or a screen as wide as a laptop's) the overlay takes the
+ * desktop app's form instead ([PillPresentation.Desktop]): a pill parked at the desktop's position
+ * with an idle bar, driven by the same shortcuts as the desktop, which arrive here through the
+ * service's key-event filter ([onKeyEvent], [HardwareShortcuts]).
+ *
  * This service is also the injection backend ([TextSink]); see [TextInserter] for the
  * ACTION_SET_TEXT / ACTION_SET_SELECTION / ACTION_PASTE strategy.
  */
@@ -80,6 +95,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
 
     private var windowManager: WindowManager? = null
     private var pill: OverlayPillView? = null
+    private var shortcuts: HardwareShortcuts? = null
+    private var presence: KeyboardPresence? = null
+    private var presentation: PillPresentation = PillPresentation.Button
 
     /** Draws the pill. Never touchable, and only ever grows, so state changes never move it. */
     private var canvasWindow: OverlayWindow? = null
@@ -101,9 +119,17 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         DictationController.sink = this
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val settings = SettingsStore.get(this)
+        val presence = KeyboardPresence.get(this).also { this.presence = it }
+        val shortcuts = HardwareShortcuts(settings.get().keyboard.toEngineConfig()) { action ->
+            DictationController.handle(this, action)
+        }
+        this.shortcuts = shortcuts
+        presentation = PillPresentation.resolve(settings.get().keyboard, presence.posture.value)
         mainScope.launch {
             DictationController.state.collect { state ->
                 pill?.render(state)
+                val listening = state as? DictationState.Listening
+                shortcuts.syncSession(listening != null, listening?.mode, SystemClock.uptimeMillis())
                 // Keep the pill on screen while a dictation is in flight even if the
                 // keyboard gets dismissed underneath it.
                 if (state !is DictationState.Idle) showPill() else syncPillVisibility()
@@ -113,6 +139,15 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             settings.flow.collect { s ->
                 pill?.setPalette(PillTheme.resolve(this@MurmurAccessibilityService, s))
                 pill?.configure(s.overlayShape, s.overlayLayout)
+                shortcuts.applyConfig(s.keyboard.toEngineConfig())
+                applyPresentation()
+            }
+        }
+        mainScope.launch {
+            presence.posture.collect { posture ->
+                // A keyboard that went away mid-chord never sends its releases.
+                if (!posture.hardwareKeyboard) shortcuts.reset()
+                applyPresentation()
             }
         }
         mainScope.launch {
@@ -120,6 +155,11 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                 if (editing) showPill()
                 pill?.setEditing(editing)
                 syncPillVisibility()
+            }
+        }
+        mainScope.launch {
+            ShortcutRecorder.session.collect { session ->
+                if (session != null) shortcuts.startCapture { ShortcutRecorder.publish(it) } else shortcuts.stopCapture()
             }
         }
         // The only long-lived part of the app: the daily update check lives here. An unattended
@@ -135,6 +175,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         if (instance === this) instance = null
         if (DictationController.sink === this) DictationController.sink = null
         OverlayEditor.stop()
+        ShortcutRecorder.stop()
+        shortcuts = null
         removePill()
         mainScope.cancel()
         super.onDestroy()
@@ -142,10 +184,36 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
 
     override fun onInterrupt() = Unit
 
-    /** A new wallpaper (or dark mode flip) arrives as a configuration change; re-read the theme colours. */
+    /**
+     * A new wallpaper (or dark mode flip) arrives as a configuration change; so does a keyboard
+     * being attached or detached, and a change of window size (a fold, a DeX session).
+     */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         pill?.setPalette(PillTheme.resolve(this, SettingsStore.get(this).get()))
+        presence?.refresh(newConfig)
+    }
+
+    /**
+     * Hardware keys, before the rest of the system sees them. [HardwareShortcuts] decides what a key
+     * does and whether it is taken; with shortcuts turned off nothing is filtered (the recorder
+     * still captures, since a capture is how the shortcuts get set in the first place).
+     */
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        val shortcuts = shortcuts ?: return false
+        if (!SettingsStore.get(this).get().keyboard.shortcuts && !shortcuts.isCapturing) return false
+        return shortcuts.onKeyEvent(event, SystemClock.uptimeMillis())
+    }
+
+    /** The presentation the settings and the device call for right now; a change morphs the pill over. */
+    private fun applyPresentation() {
+        val posture = presence?.posture?.value ?: return
+        val next = PillPresentation.resolve(SettingsStore.get(this).get().keyboard, posture)
+        if (next == presentation) return
+        presentation = next
+        if (next !is PillPresentation.Button) OverlayEditor.stop()
+        pill?.setPresentation(next)
+        syncPillVisibility()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -192,9 +260,17 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         syncPillVisibility()
     }
 
+    /**
+     * The floating button shows with the keyboard; the desktop pill stays as its idle bar (unless
+     * the idle indicator is off). Both stay for a dictation in flight and the button for its editor.
+     */
     private fun syncPillVisibility() {
         val busy = DictationController.state.value !is DictationState.Idle
-        if (keyboardVisible || busy || OverlayEditor.editing.value) showPill() else removePill()
+        val visible = when (val p = presentation) {
+            is PillPresentation.Desktop -> busy || p.showIdle
+            PillPresentation.Button -> keyboardVisible || busy || OverlayEditor.editing.value
+        }
+        if (visible) showPill() else removePill()
     }
 
     /** Where the pill measures its vertical offset from: the keyboard's top edge, or the last known one while busy. */
@@ -237,6 +313,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val s = settings.get()
         view.setPalette(PillTheme.resolve(this, s))
         view.configure(s.overlayShape, s.overlayLayout)
+        view.setPresentation(presentation)
         view.setEditing(OverlayEditor.editing.value)
         // Computes the first frames and, through the Host callbacks, adds both windows.
         view.setScreen(screenW, screenH, keyboardReference())
@@ -295,6 +372,63 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val caret = node.textSelectionStart.takeIf { it in 0..text.length } ?: text.length
         text.substring(0, caret).takeIf { it.isNotBlank() }?.takeLast(PRECEDING_TEXT_MAX)
     }
+
+    /**
+     * Command mode: what is selected in the focused field, from the node's own selection offsets.
+     * Null when no field is focused, the field hides its text, or nothing (or only whitespace) is
+     * selected. Web content reports approximate offsets; they are still what the edit replaces.
+     */
+    override suspend fun readSelection(): Selection? = withContext(Dispatchers.Main.immediate) {
+        val node = runCatching { findEditableTarget() }.getOrNull() ?: return@withContext null
+        if (node.isPassword || node.isShowingHintText) return@withContext null
+        val text = node.text?.toString() ?: return@withContext null
+        val a = node.textSelectionStart
+        val b = node.textSelectionEnd
+        if (a < 0 || b < 0 || a == b) return@withContext null
+        val start = min(a, b)
+        val end = max(a, b)
+        if (end > text.length) return@withContext null
+        val selected = text.substring(start, end)
+        if (selected.isBlank()) null else Selection(selected, start, end)
+    }
+
+    /**
+     * Command mode: put the model's answer where the selection was. The selection is put back
+     * first if the field lost it while the instruction was spoken; the insertion strategy then
+     * replaces the selected range (`ACTION_SET_TEXT` splices over it, `ACTION_PASTE` and an IME
+     * commit replace it natively). A field whose text has changed underneath is left alone.
+     */
+    override suspend fun replaceSelection(selection: Selection, text: String): String? =
+        withContext(Dispatchers.Main.immediate) {
+            val node = awaitEditableTarget()
+            if (node == null) {
+                copyToClipboard(text)
+                return@withContext COPIED_NO_FIELD
+            }
+            val current = node.text?.toString() ?: ""
+            val stillThere = selection.end <= current.length && current.substring(selection.start, selection.end) == selection.text
+            if (!stillThere) {
+                copyToClipboard(text)
+                return@withContext COPIED_SELECTION_CHANGED
+            }
+            if (node.textSelectionStart != selection.start || node.textSelectionEnd != selection.end) {
+                val args = Bundle().apply {
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, selection.start)
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, selection.end)
+                }
+                if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)) {
+                    Log.w(TAG, "field refused to restore the selection; the edit goes in at the cursor")
+                }
+            }
+            val (keyboard, keyboardStatus) = keyboardSupport(SettingsStore.get(this@MurmurAccessibilityService).get())
+            when (val outcome = TextInserter.insert(NodeTarget(node), text, false, ::copyToClipboard, keyboard, keyboardStatus)) {
+                is InsertOutcome.Inserted -> {
+                    Log.i(TAG, "replaced ${selection.text.length} selected chars with ${text.length} via ${outcome.method}")
+                    null
+                }
+                is InsertOutcome.Failed -> outcome.message
+            }
+        }
 
     /**
      * Accessibility node calls are plain binder IPC and work from any thread, but the framework
@@ -418,6 +552,17 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             private set
 
         val isRunning: Boolean get() = instance != null
+
+        /**
+         * Whether the system lets this service filter key events. The capability is read when the
+         * service is enabled, so an install that gained it in an update needs the service turned
+         * off and on once; the Keyboard screen says so while this is false.
+         */
+        val canFilterKeys: Boolean
+            get() {
+                val info = runCatching { instance?.serviceInfo }.getOrNull() ?: return false
+                return (info.capabilities and AccessibilityServiceInfo.CAPABILITY_CAN_REQUEST_FILTER_KEY_EVENTS) != 0
+            }
     }
 }
 

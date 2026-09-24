@@ -4,6 +4,7 @@ import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.Tone
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.Clean
+import app.murmur.android.text.CommandPromptInput
 import app.murmur.android.text.DictionaryTerm
 import app.murmur.android.text.FormatContext
 import app.murmur.android.text.NumberSignature
@@ -66,6 +67,38 @@ class GoldenEngineTest {
             val case = prompts.getJSONObject(i)
             val expected = case.getJSONArray("messages")
             val actual = Prompt.buildFormatMessages(case.getString("transcript"), contextOf(case.getJSONObject("context")), strict = case.optBoolean("strict", false))
+            assertEquals("${case.getString("name")}: message count", expected.length(), actual.size)
+            for (k in 0 until expected.length()) {
+                val e = expected.getJSONObject(k)
+                assertEquals("${case.getString("name")}: role of message $k", e.getString("role"), actual[k].role)
+                assertEquals("${case.getString("name")}: content of message $k", e.getString("content"), actual[k].content)
+            }
+        }
+    }
+
+    @Test
+    fun `command prompts are byte-identical to the TypeScript engine`() {
+        val cases = golden.getJSONArray("commands")
+        assertTrue(cases.length() >= 3)
+        for (i in 0 until cases.length()) {
+            val case = cases.getJSONObject(i)
+            val input = case.getJSONObject("input")
+            val dictionary = input.optJSONArray("dictionary")?.let { arr ->
+                (0 until arr.length()).map { k ->
+                    val d = arr.getJSONObject(k)
+                    DictionaryTerm(d.getString("word"), d.optJSONArray("aliases")?.strings() ?: emptyList(), d.optBoolean("fuzzy", false))
+                }
+            } ?: emptyList()
+            val actual = Prompt.buildCommandMessages(
+                CommandPromptInput(
+                    selection = input.getString("selection"),
+                    instruction = input.getString("instruction"),
+                    category = AppCategory.entries.first { it.id == input.getString("category") },
+                    dictionary = dictionary,
+                    language = input.optString("language").takeIf { input.has("language") && !input.isNull("language") }
+                )
+            )
+            val expected = case.getJSONArray("messages")
             assertEquals("${case.getString("name")}: message count", expected.length(), actual.size)
             for (k in 0 until expected.length()) {
                 val e = expected.getJSONObject(k)

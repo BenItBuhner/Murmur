@@ -2,6 +2,7 @@ package app.murmur.android.history
 
 import android.content.Context
 import android.util.Log
+import app.murmur.android.dictation.DictationMode
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,8 @@ enum class LlmOutcome {
 data class HistoryEntry(
     val id: String,
     val createdAt: Long,
+    /** How the dictation was started; entries from before shortcuts existed were all button sessions. */
+    val mode: DictationMode = DictationMode.HANDS_FREE,
     /** What the speech model heard. */
     val rawText: String,
     /** What was inserted; empty when the dictation failed. */

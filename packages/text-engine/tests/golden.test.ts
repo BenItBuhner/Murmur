@@ -15,7 +15,7 @@ import {
 import { prepareTranscript } from '../src/cleanup'
 import { applyDictionary } from '../src/dictionary'
 import { digitSignature } from '../src/numbers'
-import { buildFormatMessages } from '../src/prompt'
+import { buildCommandMessages, buildFormatMessages, type CommandPromptInput } from '../src/prompt'
 import type { DictionaryTerm, FormatContext } from '../src/types'
 import { cleanModelOutput, verifyOutput } from '../src/verify'
 import { contextOf, loadFixtures } from '../eval/score'
@@ -82,6 +82,39 @@ const PROMPT_CASES: PromptCase[] = [
       tone: 'neutral',
       dictionary: [],
       precedingText: 'x'.repeat(450) + ' tail'
+    }
+  }
+]
+
+/** Command mode (edit the selection by voice): the same prompt on the desktop and on Android. */
+const COMMAND_CASES: Array<{ name: string; input: CommandPromptInput }> = [
+  {
+    name: 'plain chat edit',
+    input: {
+      selection: 'hey can u send me the report tmrw',
+      instruction: 'make it more formal',
+      category: 'chat',
+      dictionary: []
+    }
+  },
+  {
+    name: 'terminal with dictionary and language',
+    input: {
+      selection: 'kubectl get pods -n default',
+      instruction: ' show all namespaces ',
+      category: 'terminal',
+      dictionary: [{ word: 'kubectl', aliases: ['cube control'] }],
+      language: 'en'
+    }
+  },
+  {
+    name: 'document in german',
+    input: {
+      selection: 'Wir treffen uns morgen.\n\nBis dann!',
+      instruction: 'übersetze ins Englische',
+      category: 'document',
+      dictionary: [],
+      language: 'de'
     }
   }
 ]
@@ -215,6 +248,11 @@ function build(): unknown {
       context: c.context,
       strict: c.strict ?? false,
       messages: buildFormatMessages(c.transcript, c.context, { strict: c.strict })
+    })),
+    commands: COMMAND_CASES.map((c) => ({
+      name: c.name,
+      input: c.input,
+      messages: buildCommandMessages(c.input)
     })),
     signatures: SIGNATURE_CASES.map((text) => ({ text, signature: digitSignature(text) })),
     clean: CLEAN_CASES.map(([output, transcript]) => ({

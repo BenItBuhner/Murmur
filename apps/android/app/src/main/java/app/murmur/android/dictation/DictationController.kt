@@ -196,18 +196,19 @@ object DictationController {
     fun handle(context: Context, action: HotkeyAction) {
         when (action) {
             is HotkeyAction.Start -> start(context, action.mode)
-            HotkeyAction.Lock -> lock()
+            HotkeyAction.Lock -> lock(context)
             HotkeyAction.Stop -> stopAndInsert(context)
             HotkeyAction.Cancel -> cancel(context)
         }
     }
 
     /** A tap of the held shortcut, or the hands-free shortcut on top of it: keep recording until stopped. */
-    fun lock() {
+    fun lock(context: Context) {
         if (!isListening) return
         locked = true
         if (mode == DictationMode.HOLD) mode = DictationMode.HANDS_FREE
         (_state.value as? DictationState.Listening)?.let { _state.value = it.copy(mode = mode, locked = true) }
+        Cues.play(context, Cue.LOCK)
     }
 
     /**
@@ -274,6 +275,9 @@ object DictationController {
             }
         }
 
+        // The desktop marks a command session with the lock cue; a dictation with the start cue.
+        Cues.play(appContext, if (mode == DictationMode.COMMAND) Cue.LOCK else Cue.START)
+
         val selection = selectionJob
         if (mode == DictationMode.COMMAND && selection != null) {
             // Nothing selected: say so now rather than after the user has spoken the instruction.
@@ -294,6 +298,7 @@ object DictationController {
         recorder.cancel()
         RecordingService.stop(context.applicationContext)
         _state.value = DictationState.Idle
+        Cues.play(context, Cue.CANCEL)
     }
 
     fun stopAndInsert(context: Context) {
@@ -306,6 +311,7 @@ object DictationController {
         val mode = this.mode
         val selectionJob = this.selectionJob
         _state.value = DictationState.Processing("Transcribing…", mode)
+        Cues.play(appContext, Cue.STOP)
 
         scope.launch {
             val id = sessionId
@@ -343,7 +349,7 @@ object DictationController {
                 val message = friendlyError(e)
                 val failed = run ?: Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = null, mode = mode)
                 recordFailure(appContext, settings, failed, raw = "", error = message)
-                showError(message, failed, planLimitOf(e))
+                showError(appContext, message, failed, planLimitOf(e))
             } finally {
                 run?.let { releaseRecording(appContext, it) }
             }
@@ -391,7 +397,7 @@ object DictationController {
                 Log.e(TAG, "retry failed", e)
                 val message = friendlyError(e)
                 recordFailure(appContext, settings, run, raw = "", error = message)
-                showError(message, run, planLimitOf(e))
+                showError(appContext, message, run, planLimitOf(e))
             } finally {
                 releaseRecording(appContext, run)
             }
@@ -455,7 +461,7 @@ object DictationController {
                 context, s, run, raw, "Nothing heard", StageTimings(recordMs = recordMs, sttMs = sttMs),
                 provider = resolved.provider, model = resolved.cfg.model
             )
-            showError("Nothing heard", run)
+            showError(context, "Nothing heard", run)
             return
         }
 
@@ -481,14 +487,14 @@ object DictationController {
             val selection = run.selection
             if (selection == null || selection.text.isBlank()) {
                 recordFailure(context, s, run, raw, NO_SELECTION, StageTimings(recordMs = recordMs, sttMs = sttMs), resolved.provider, resolved.cfg.model)
-                showError(NO_SELECTION, run)
+                showError(context, NO_SELECTION, run)
                 return
             }
             _state.value = DictationState.Processing("Editing…", run.mode)
             val cfg = router.llm().cfg
             if (cfg.baseUrl.isEmpty() || cfg.model.isEmpty()) {
                 recordFailure(context, s, run, raw, NO_COMMAND_MODEL, StageTimings(recordMs = recordMs, sttMs = sttMs), resolved.provider, resolved.cfg.model)
-                showError(NO_COMMAND_MODEL, run)
+                showError(context, NO_COMMAND_MODEL, run)
                 return
             }
             val messages = Prompt.buildCommandMessages(
@@ -506,7 +512,7 @@ object DictationController {
             if (edited.isEmpty()) {
                 val timings = StageTimings(recordMs = recordMs, sttMs = sttMs, llmMs = llmMs)
                 recordFailure(context, s, run, raw, "The model returned nothing", timings, resolved.provider, resolved.cfg.model)
-                showError("The model returned nothing", run)
+                showError(context, "The model returned nothing", run)
                 return
             }
             final = edited
@@ -578,7 +584,7 @@ object DictationController {
         val timings = StageTimings(recordMs = recordMs, sttMs = sttMs, formatMs = formatMs, llmMs = llmMs)
         if (final.isBlank()) {
             recordFailure(context, s, run, raw, "Nothing to insert", timings, resolved.provider, resolved.cfg.model)
-            showError("Nothing to insert", run)
+            showError(context, "Nothing to insert", run)
             return
         }
 
@@ -586,7 +592,7 @@ object DictationController {
         val currentSink = sink
         if (run.insert && currentSink == null) {
             recordFailure(context, s, run, raw, "Accessibility service not running", timings, resolved.provider, resolved.cfg.model)
-            showError("Accessibility service not running", run)
+            showError(context, "Accessibility service not running", run)
             return
         }
         _state.value = DictationState.Processing(if (run.insert) "Inserting…" else "Copying…", run.mode)
@@ -636,7 +642,7 @@ object DictationController {
             }
             CloudSync.get()?.recordSession(sessionId = entry.id, words = entry.wordCount, speechMs = entry.speechMs)
         } else {
-            showError(error, run)
+            showError(context, error, run)
         }
     }
 
@@ -731,7 +737,8 @@ object DictationController {
      * it again and waits much longer for the answer than a plain message would. A plan limit is
      * explained on the pill, with the ways forward, and waits longer still.
      */
-    private fun showError(message: String, run: Run, limit: LimitNotice? = null) {
+    private fun showError(context: Context, message: String, run: Run, limit: LimitNotice? = null) {
+        Cues.play(context, Cue.ERROR)
         val retryId = run.id.takeIf { run.recording != null }
         val hold = when {
             limit != null -> LIMIT_HOLD_MS

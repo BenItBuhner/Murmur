@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,9 +26,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -57,6 +61,7 @@ import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Space
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 @Composable
@@ -120,6 +125,7 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
             )
         }
 
+
         SectionGap()
 
         Group(
@@ -182,6 +188,39 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
                     keyboard?.show()
                 }
             }
+        }
+
+        SectionGap()
+
+        Group("Feedback", rows = true) {
+            ToggleRow(
+                title = "Sounds",
+                description = "Soft cues when recording starts, stops, or fails; the same tones as the desktop app.",
+                checked = settings.sounds,
+                onCheckedChange = { store.update { s -> s.copy(sounds = it) } }
+            )
+            if (settings.sounds) {
+                val c = Murmur.colors
+                Slider(
+                    value = settings.soundVolume,
+                    onValueChange = { v -> store.update { s -> s.copy(soundVolume = (v * 20).roundToInt() / 20f) } },
+                    valueRange = 0f..1f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = c.ink,
+                        activeTrackColor = c.ink,
+                        inactiveTrackColor = c.hairline,
+                        activeTickColor = Color.Transparent,
+                        inactiveTickColor = Color.Transparent
+                    ),
+                    modifier = Modifier.testTag("soundVolume")
+                )
+            }
+            ToggleRow(
+                title = "Haptics",
+                description = "A light tap when a dictation starts, stops, or fails.",
+                checked = settings.haptics,
+                onCheckedChange = { store.update { s -> s.copy(haptics = it) } }
+            )
         }
     }
 }

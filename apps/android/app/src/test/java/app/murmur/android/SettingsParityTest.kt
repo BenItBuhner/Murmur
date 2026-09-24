@@ -39,6 +39,7 @@ class SettingsParityTest {
     }
 
     private fun JSONArray.strings(): List<String> = (0 until length()).map { getString(it) }
+    private fun JSONArray.ints(): List<Int> = (0 until length()).map { getInt(it) }
 
     @Test
     fun `the defaults are the ones both apps ship`() {
@@ -63,6 +64,18 @@ class SettingsParityTest {
         assertEquals(d.getBoolean("updateAutoCheck"), s.updateAutoCheck)
         assertEquals(d.getBoolean("updateAutoInstall"), s.updateAutoInstall)
         assertEquals(d.getBoolean("updateIncludePrereleases"), s.updateIncludePrereleases)
+        assertEquals(d.getBoolean("sounds"), s.sounds)
+        assertEquals(d.getDouble("soundVolume"), s.soundVolume.toDouble(), 0.0001)
+        val k = s.keyboard
+        assertEquals(d.getString("overlayPosition"), k.overlayPosition.id)
+        assertEquals(d.getBoolean("showOverlayWhenIdle"), k.showOverlayWhenIdle)
+        assertEquals(d.getJSONArray("pushToTalk").ints(), k.pushToTalk)
+        assertEquals(d.getJSONArray("handsFree").ints(), k.handsFree)
+        assertEquals(d.getString("handsFreeTrigger"), k.handsFreeTrigger.id)
+        assertEquals(d.getInt("tapThresholdMs"), k.tapThresholdMs)
+        assertEquals(d.getInt("doubleTapWindowMs"), k.doubleTapWindowMs)
+        assertEquals(d.getBoolean("sideSensitive"), k.sideSensitive)
+        assertEquals(d.getBoolean("escapeCancels"), k.escapeCancels)
         // The session cap is off, so a session runs until the user stops it.
         assertNull(s.sessionDurationLimitSec)
         assertEquals(300, s.copy(limitDuration = true).sessionDurationLimitSec)

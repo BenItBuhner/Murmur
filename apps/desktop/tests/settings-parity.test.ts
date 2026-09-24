@@ -47,7 +47,20 @@ describe('settings parity contract', () => {
       llmSameAsStt: s.formatting.llm.sameAsStt,
       updateAutoCheck: s.updates.autoCheck,
       updateAutoInstall: s.updates.autoInstall,
-      updateIncludePrereleases: s.updates.includePrereleases
+      updateIncludePrereleases: s.updates.includePrereleases,
+      sounds: s.general.sounds,
+      soundVolume: s.general.soundVolume,
+      overlayPosition: s.general.overlayPosition,
+      showOverlayWhenIdle: s.general.showOverlayWhenIdle,
+      // The command chord is left out on purpose: the desktop's Alt + Meta toggles Caps Lock on
+      // Android, so the phone ships Shift + Meta there.
+      pushToTalk: s.hotkeys.pushToTalk,
+      handsFree: s.hotkeys.handsFree,
+      handsFreeTrigger: s.hotkeys.handsFreeTrigger,
+      tapThresholdMs: s.hotkeys.tapThresholdMs,
+      doubleTapWindowMs: s.hotkeys.doubleTapWindowMs,
+      sideSensitive: s.hotkeys.sideSensitive,
+      escapeCancels: s.hotkeys.escapeCancels
     }).toEqual(contract.defaults)
   })
 

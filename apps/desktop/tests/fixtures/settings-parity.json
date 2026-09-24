@@ -19,7 +19,18 @@
     "llmSameAsStt": true,
     "updateAutoCheck": true,
     "updateAutoInstall": true,
-    "updateIncludePrereleases": false
+    "updateIncludePrereleases": false,
+    "sounds": true,
+    "soundVolume": 0.35,
+    "overlayPosition": "bottom-center",
+    "showOverlayWhenIdle": true,
+    "pushToTalk": [29, 3675],
+    "handsFree": [29, 3675, 57],
+    "handsFreeTrigger": "tap",
+    "tapThresholdMs": 350,
+    "doubleTapWindowMs": 400,
+    "sideSensitive": false,
+    "escapeCancels": true
   },
   "ranges": {
     "sttTimeoutMs": { "min": 2000, "max": 120000 },

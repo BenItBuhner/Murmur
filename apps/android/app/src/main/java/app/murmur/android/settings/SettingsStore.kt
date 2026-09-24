@@ -225,6 +225,14 @@ data class MurmurSettings(
      * Off, it and its edit panel are drawn flat: same shape and colours, no shadow, no light catch.
      */
     val buttonShadow: Boolean = true,
+    /**
+     * Soft cues when recording starts, stops, locks, is cancelled or fails: the desktop's
+     * `general.sounds` and `general.soundVolume`, the same synthesized tones. Device-local.
+     */
+    val sounds: Boolean = true,
+    val soundVolume: Float = 0.35f,
+    /** A light tap from the vibrator on the same moments (phones and tablets have one; desktops do not). */
+    val haptics: Boolean = true,
     /** Per-stage timing bars on Home and in History (desktop: `general.showLatencyInHistory`). Device-local. */
     val showLatencyInHistory: Boolean = true,
     /** Device-level first-run flow finished (permissions, provider). */
@@ -433,6 +441,9 @@ class SettingsStore(context: Context) {
             dynamicColor = prefs.getBoolean("dynamicColor", d.dynamicColor),
             accent = AccentPreset.from(prefs.getString("accent", d.accent.id)),
             buttonShadow = prefs.getBoolean("buttonShadow", d.buttonShadow),
+            sounds = prefs.getBoolean("sounds", d.sounds),
+            soundVolume = prefs.getFloat("soundVolume", d.soundVolume).coerceIn(0f, 1f),
+            haptics = prefs.getBoolean("haptics", d.haptics),
             showLatencyInHistory = prefs.getBoolean("showLatencyInHistory", d.showLatencyInHistory),
             onboardingComplete = prefs.getBoolean("onboardingComplete", d.onboardingComplete),
             accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
@@ -490,6 +501,9 @@ class SettingsStore(context: Context) {
             .putBoolean("dynamicColor", s.dynamicColor)
             .putString("accent", s.accent.id)
             .putBoolean("buttonShadow", s.buttonShadow)
+            .putBoolean("sounds", s.sounds)
+            .putFloat("soundVolume", s.soundVolume.coerceIn(0f, 1f))
+            .putBoolean("haptics", s.haptics)
             .putBoolean("showLatencyInHistory", s.showLatencyInHistory)
             .putBoolean("onboardingComplete", s.onboardingComplete)
             .putBoolean("accountSkipped", s.accountSkipped)

@@ -106,6 +106,8 @@ fun isDarkTheme(mode: ThemeMode): Boolean = when (mode) {
 data class Paper(
     /** Page background: the canvas. */
     val paper: Color,
+    /** The rail beside the canvas on a wide screen (the permanent drawer): a step below the paper. */
+    val rail: Color,
     /** A raised surface resting on the paper: cards, tiles, sections, list cards. */
     val card: Color,
     /** A layer above the page: the drawer, menus and sheets. */
@@ -140,11 +142,12 @@ data class Paper(
 )
 
 /**
- * Map the Material roles onto the editorial ones. Light: paper tone 96, card tone 100 (white),
- * well tone 94. Dark: paper tone 6, card tone 12, floating and well tone 17.
+ * Map the Material roles onto the editorial ones. Light: rail tone 94, paper tone 96, card tone
+ * 100 (white), well tone 94. Dark: rail tone 4, paper tone 6, card tone 12, floating and well tone 17.
  */
 fun paperFrom(scheme: ColorScheme, extras: MurmurColors, dark: Boolean): Paper = Paper(
     paper = if (dark) scheme.background else scheme.surfaceContainerLow,
+    rail = if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainer,
     card = if (dark) scheme.surfaceContainer else scheme.surfaceContainerLowest,
     floating = if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest,
     paperRaised = if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainer,
@@ -279,6 +282,18 @@ object Space {
     val block = 32.dp
     /** The screen's side margin. */
     val gutter = 24.dp
+}
+
+/**
+ * Layout on wide screens (Material's medium and expanded width classes). Content is capped at a
+ * reading width and centred rather than stretched across a tablet; at the expanded width the
+ * drawer stays open as a rail beside it.
+ */
+object Layout {
+    /** The widest a screen's content gets; beyond it the margins grow instead. */
+    val contentMaxWidth = 720.dp
+    /** The permanent drawer on an expanded screen. */
+    val rail = 288.dp
 }
 
 /**

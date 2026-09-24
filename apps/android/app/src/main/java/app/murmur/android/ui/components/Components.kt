@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.murmur.android.ui.TopNav
 import app.murmur.android.ui.TopNavButton
+import app.murmur.android.ui.contentWidth
 import app.murmur.android.ui.theme.Elevation
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
@@ -754,13 +755,15 @@ fun Screen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        TopBar(nav, trailing)
-        Column(Modifier.padding(horizontal = PageMargin)) {
-            Spacer(Modifier.height(12.dp))
-            Heading(title, description)
-            Spacer(Modifier.height(Space.block))
-            content()
-            Spacer(Modifier.height(40.dp))
+        Column(Modifier.fillMaxWidth().contentWidth()) {
+            TopBar(nav, trailing)
+            Column(Modifier.padding(horizontal = PageMargin)) {
+                Spacer(Modifier.height(12.dp))
+                Heading(title, description)
+                Spacer(Modifier.height(Space.block))
+                content()
+                Spacer(Modifier.height(40.dp))
+            }
         }
     }
 }
@@ -788,9 +791,9 @@ fun LazyScreen(
             .statusBarsPadding()
             .imePadding()
     ) {
-        TopBar(nav, trailing)
+        Box(Modifier.fillMaxWidth().contentWidth()) { TopBar(nav, trailing) }
         LazyColumn(
-            Modifier.weight(1f),
+            Modifier.weight(1f).fillMaxWidth().contentWidth(),
             state = state,
             contentPadding = PaddingValues(start = PageMargin, end = PageMargin, bottom = bottom + 40.dp)
         ) {

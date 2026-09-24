@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +60,7 @@ import app.murmur.android.ui.components.RollingText
 import app.murmur.android.ui.components.StatTile
 import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.components.Wordmark
+import app.murmur.android.keyboard.WidthClass
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
 import app.murmur.android.ui.theme.Space
@@ -112,143 +114,148 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .navigationBarsPadding()
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = PageMargin - 10.dp).height(64.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TopNavButton(nav)
-            Spacer(Modifier.width(6.dp))
-            Wordmark()
-            Spacer(Modifier.weight(1f))
-            StatusLine(dictation, ready, onClick = { onOpen(if (!permissions.allGranted) Route.PERMISSIONS else modelRoute) })
-        }
+        Column(Modifier.fillMaxWidth().contentWidth()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = PageMargin - 10.dp).height(64.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Beside a rail the sections and the wordmark are already on screen.
+                if (nav !is TopNav.None) {
+                    TopNavButton(nav)
+                    Spacer(Modifier.width(6.dp))
+                    Wordmark()
+                }
+                Spacer(Modifier.weight(1f))
+                StatusLine(dictation, ready, onClick = { onOpen(if (!permissions.allGranted) Route.PERMISSIONS else modelRoute) })
+            }
 
-        Column(Modifier.padding(horizontal = PageMargin)) {
-            Reveal(0) {
-                Column {
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "$greeting${firstName?.let { ", $it" } ?: ""}.",
-                        style = Murmur.type.displayMedium,
-                        color = c.ink
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "${howTo.replaceFirstChar { it.uppercase() }}, speak, and finished text lands where your cursor is.",
-                        style = Murmur.type.body,
-                        color = c.inkSoft
-                    )
-                    planLine(inference)?.let { line ->
+            Column(Modifier.padding(horizontal = PageMargin)) {
+                Reveal(0) {
+                    Column {
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "$greeting${firstName?.let { ", $it" } ?: ""}.",
+                            style = Murmur.type.displayMedium,
+                            color = c.ink
+                        )
                         Spacer(Modifier.height(10.dp))
-                        TextLink(line, onClick = { onOpen(Route.ACCOUNT) }, modifier = Modifier.offset(x = (-6).dp))
-                    }
-                    Spacer(Modifier.height(24.dp))
-                }
-            }
-
-            Appear(!modelReady) {
-                Column {
-                    if (inference.routing.murmurStt) {
-                        AttentionCard(
-                            "Sign in to use Murmur's speech model",
-                            "Your account includes speech and formatting models. Or connect your own provider under Speech model.",
-                            onClick = { onOpen(modelRoute) }
+                        Text(
+                            "${howTo.replaceFirstChar { it.uppercase() }}, speak, and finished text lands where your cursor is.",
+                            style = Murmur.type.body,
+                            color = c.inkSoft
                         )
-                    } else {
-                        AttentionCard(
-                            "Connect a speech model",
-                            "Murmur needs a transcription endpoint: OpenAI, Groq, Deepgram, or a local whisper server.",
-                            onClick = { onOpen(modelRoute) }
-                        )
+                        planLine(inference)?.let { line ->
+                            Spacer(Modifier.height(10.dp))
+                            TextLink(line, onClick = { onOpen(Route.ACCOUNT) }, modifier = Modifier.offset(x = (-6).dp))
+                        }
+                        Spacer(Modifier.height(24.dp))
                     }
-                    Spacer(Modifier.height(12.dp))
                 }
-            }
-            Appear(!permissions.allGranted) {
-                Column {
-                    AttentionCard(
-                        if (permissions.total - permissions.granted == 1) "One permission to go" else "${permissions.total - permissions.granted} permissions to go",
-                        "The microphone, drawing the button and typing for you each need a system grant.",
-                        onClick = { onOpen(Route.PERMISSIONS) }
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-            }
-            Appear(updateReady) {
-                Column {
-                    AttentionCard(
-                        "Version ${updateState.release?.version ?: ""} is ready".trim(),
-                        "Downloaded and checked; it installs the next time nothing is being dictated.",
-                        onClick = { onOpen(Route.UPDATES) }
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-            }
 
-            Reveal(1) {
-                Column {
-                    Spacer(Modifier.height(12.dp))
-                    StatsGrid(stats)
+                Appear(!modelReady) {
+                    Column {
+                        if (inference.routing.murmurStt) {
+                            AttentionCard(
+                                "Sign in to use Murmur's speech model",
+                                "Your account includes speech and formatting models. Or connect your own provider under Speech model.",
+                                onClick = { onOpen(modelRoute) }
+                            )
+                        } else {
+                            AttentionCard(
+                                "Connect a speech model",
+                                "Murmur needs a transcription endpoint: OpenAI, Groq, Deepgram, or a local whisper server.",
+                                onClick = { onOpen(modelRoute) }
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
                 }
-            }
+                Appear(!permissions.allGranted) {
+                    Column {
+                        AttentionCard(
+                            if (permissions.total - permissions.granted == 1) "One permission to go" else "${permissions.total - permissions.granted} permissions to go",
+                            "The microphone, drawing the button and typing for you each need a system grant.",
+                            onClick = { onOpen(Route.PERMISSIONS) }
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
+                Appear(updateReady) {
+                    Column {
+                        AttentionCard(
+                            "Version ${updateState.release?.version ?: ""} is ready".trim(),
+                            "Downloaded and checked; it installs the next time nothing is being dictated.",
+                            onClick = { onOpen(Route.UPDATES) }
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
 
-            Appear(insights.isNotEmpty()) {
-                Column {
-                    Spacer(Modifier.height(28.dp))
-                    Overline("Worth knowing")
-                    Spacer(Modifier.height(10.dp))
-                    Card(padding = PaddingValues(horizontal = Space.card, vertical = Space.sm)) {
-                        for (line in insights) {
-                            Text(line, style = Murmur.type.body, color = c.ink, modifier = Modifier.padding(vertical = 9.dp))
+                Reveal(1) {
+                    Column {
+                        Spacer(Modifier.height(12.dp))
+                        StatsGrid(stats)
+                    }
+                }
+
+                Appear(insights.isNotEmpty()) {
+                    Column {
+                        Spacer(Modifier.height(28.dp))
+                        Overline("Worth knowing")
+                        Spacer(Modifier.height(10.dp))
+                        Card(padding = PaddingValues(horizontal = Space.card, vertical = Space.sm)) {
+                            for (line in insights) {
+                                Text(line, style = Murmur.type.body, color = c.ink, modifier = Modifier.padding(vertical = 9.dp))
+                            }
                         }
                     }
                 }
-            }
 
-            Reveal(2) {
-                Column {
-                    Spacer(Modifier.height(36.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Overline("Your button")
-                        Spacer(Modifier.weight(1f))
-                        TextLink("Adjust", onClick = { onOpen(Route.BUTTON) })
+                Reveal(2) {
+                    Column {
+                        Spacer(Modifier.height(36.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Overline("Your button")
+                            Spacer(Modifier.weight(1f))
+                            TextLink("Adjust", onClick = { onOpen(Route.BUTTON) })
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        PillPreview(settings, height = 128.dp)
                     }
-                    Spacer(Modifier.height(10.dp))
-                    PillPreview(settings, height = 128.dp)
                 }
-            }
 
-            Reveal(3) {
-                Column {
-                    Spacer(Modifier.height(36.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Overline("Recent")
-                        Spacer(Modifier.weight(1f))
-                        if (history.isNotEmpty()) TextLink("View all", onClick = { onOpen(Route.HISTORY) })
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    if (recent.isEmpty()) {
-                        EmptyRecent(onTry = { onOpen(Route.TRY_IT) })
-                    } else {
-                        ListCard {
-                            for (entry in recent) RecentRow(entry, showLatency = settings.showLatencyInHistory, onClick = { onOpen(Route.HISTORY) })
+                Reveal(3) {
+                    Column {
+                        Spacer(Modifier.height(36.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Overline("Recent")
+                            Spacer(Modifier.weight(1f))
+                            if (history.isNotEmpty()) TextLink("View all", onClick = { onOpen(Route.HISTORY) })
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        if (recent.isEmpty()) {
+                            EmptyRecent(onTry = { onOpen(Route.TRY_IT) })
+                        } else {
+                            ListCard {
+                                for (entry in recent) RecentRow(entry, showLatency = settings.showLatencyInHistory, onClick = { onOpen(Route.HISTORY) })
+                            }
                         }
                     }
                 }
-            }
 
-            Appear(last != null && settings.showLatencyInHistory) {
-                Column {
-                    Spacer(Modifier.height(36.dp))
-                    Overline("Last dictation, where the time went")
-                    Spacer(Modifier.height(10.dp))
-                    Card { last?.let { LatencyBar(it.timings) } }
+                Appear(last != null && settings.showLatencyInHistory) {
+                    Column {
+                        Spacer(Modifier.height(36.dp))
+                        Overline("Last dictation, where the time went")
+                        Spacer(Modifier.height(10.dp))
+                        Card { last?.let { LatencyBar(it.timings) } }
+                    }
                 }
-            }
 
-            Spacer(Modifier.height(44.dp))
-            Text("Murmur ${BuildConfig.VERSION_NAME}", style = Murmur.type.labelSmall, color = c.inkMuted)
-            Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(44.dp))
+                Text("Murmur ${BuildConfig.VERSION_NAME}", style = Murmur.type.labelSmall, color = c.inkMuted)
+                Spacer(Modifier.height(28.dp))
+            }
         }
     }
 }
@@ -280,31 +287,38 @@ fun planLine(inference: InferenceView, now: Long = System.currentTimeMillis()): 
     }
 }
 
-/** Words, pace, time saved and streak, two by two, counting up as they arrive. */
+/** Words, pace, time saved and streak, two by two (all four in a row on a wide screen), counting up as they arrive. */
 @Composable
 private fun StatsGrid(stats: DictationStats) {
     val wpm = wordsPerMinute(stats)
     val savedSec = (timeSavedMs(stats) / 1000).toInt()
+    val words: @Composable RowScope.() -> Unit = {
+        StatTile(Glyph.WORDS, "Words dictated", Modifier.weight(1f).fillMaxHeight(), hint = if (stats.isEmpty) "Nothing yet" else pluralize(stats.totalSessions, "dictation")) {
+            CountUp(stats.totalWords, format = ::formatCount)
+        }
+        StatTile(Glyph.PACE, "Speaking pace", Modifier.weight(1f).fillMaxHeight(), hint = if (wpm > 0) "vs ~$TYPING_WPM typing" else null) {
+            if (wpm > 0) CountUp(wpm, format = { "$it wpm" }) else EmptyFigure()
+        }
+    }
+    val time: @Composable RowScope.() -> Unit = {
+        StatTile(Glyph.TIME, "Time saved", Modifier.weight(1f).fillMaxHeight(), hint = if (savedSec > 0) "over typing it out" else null) {
+            if (savedSec > 0) CountUp(savedSec, format = { formatDurationShort(it * 1000L) }) else EmptyFigure()
+        }
+        StatTile(Glyph.STREAK, "Day streak", Modifier.weight(1f).fillMaxHeight(), hint = if (stats.streakDays > 0) "dictated every day" else null) {
+            if (stats.streakDays > 0) CountUp(stats.streakDays) else EmptyFigure()
+        }
+    }
     // Tiles in a row share the taller one's height, so a wrapped label never leaves a step.
+    if (windowWidthClass == WidthClass.EXPANDED) {
+        Row(Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            words()
+            time()
+        }
+        return
+    }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val tile = Modifier.weight(1f).fillMaxHeight()
-            StatTile(Glyph.WORDS, "Words dictated", tile, hint = if (stats.isEmpty) "Nothing yet" else pluralize(stats.totalSessions, "dictation")) {
-                CountUp(stats.totalWords, format = ::formatCount)
-            }
-            StatTile(Glyph.PACE, "Speaking pace", tile, hint = if (wpm > 0) "vs ~$TYPING_WPM typing" else null) {
-                if (wpm > 0) CountUp(wpm, format = { "$it wpm" }) else EmptyFigure()
-            }
-        }
-        Row(Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val tile = Modifier.weight(1f).fillMaxHeight()
-            StatTile(Glyph.TIME, "Time saved", tile, hint = if (savedSec > 0) "over typing it out" else null) {
-                if (savedSec > 0) CountUp(savedSec, format = { formatDurationShort(it * 1000L) }) else EmptyFigure()
-            }
-            StatTile(Glyph.STREAK, "Day streak", tile, hint = if (stats.streakDays > 0) "dictated every day" else null) {
-                if (stats.streakDays > 0) CountUp(stats.streakDays) else EmptyFigure()
-            }
-        }
+        Row(Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp), content = words)
+        Row(Modifier.height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp), content = time)
     }
 }
 

@@ -36,9 +36,10 @@ private const val MORPH_MS = 340L
 
 /**
  * The windows the pill asks its host for. Moving a window and redrawing into it are not atomic on
- * Android, so the window the pill is drawn in must not move while the mic turns on and off: the
- * recording that motivated this showed the pill jumping 5 dp for a few frames at every idle
- * transition, once when the window grew for the morph and once when it was tightened afterwards.
+ * Android, so the window the pill is drawn in must not move at all: an earlier recording showed the
+ * pill jumping 5 dp at every idle transition when the window grew for the morph and was tightened
+ * afterwards, and a later one showed it teleporting across the screen whenever the window switched
+ * between hugging the pill and covering the screen. It now covers the screen, placed once.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -125,28 +126,28 @@ class OverlayPillWindowTest {
     }
 
     @Test
-    fun `the canvas only grows when the anchor moves, and not again when it moves back`() {
-        val before = host.canvas.single()
+    fun `the canvas stays put when the keyboard moves, and the touch window follows the pill`() {
+        val screen = Box(0f, 0f, SCREEN_W.toFloat(), SCREEN_H.toFloat())
+        val restingTouch = host.touch.last()
         // The keyboard's suggestion strip appears: the anchor rises with it.
         view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP - 120); settle()
-        assertEquals(2, host.canvas.size)
-        val grown = host.canvas.last()
-        assertTrue(grown.encloses(before))
-        assertTrue(grown.top < before.top)
-        // ...and goes away again: the canvas already covers that, so nothing happens.
+        assertEquals(listOf(screen), host.canvas)
+        val raised = host.touch.last()
+        assertEquals(restingTouch.top - 120f, raised.top, 0.5f)
+        // ...and goes away again.
         view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP); settle()
-        view.setScreen(SCREEN_W, SCREEN_H, KEYBOARD_TOP - 120); settle()
-        assertEquals(2, host.canvas.size)
+        assertEquals(listOf(screen), host.canvas)
+        assertTrue(host.touch.last().approximately(restingTouch))
     }
 
     @Test
-    fun `edit mode takes the whole screen and hands it back afterwards`() {
-        val resting = host.canvas.single()
+    fun `edit mode takes the whole screen for touches and hands it back afterwards`() {
+        val screen = Box(0f, 0f, SCREEN_W.toFloat(), SCREEN_H.toFloat())
+        val restingTouch = host.touch.last()
         view.setEditing(true); settle()
-        assertEquals(Box(0f, 0f, SCREEN_W.toFloat(), SCREEN_H.toFloat()), host.canvas.last())
-        assertEquals(Box(0f, 0f, SCREEN_W.toFloat(), SCREEN_H.toFloat()), host.touch.last())
+        assertEquals(screen, host.touch.last())
         view.setEditing(false); settle()
-        assertTrue(host.canvas.last().approximately(resting))
-        assertTrue(resting.encloses(host.touch.last()))
+        assertEquals(listOf(screen), host.canvas)
+        assertTrue(host.touch.last().approximately(restingTouch))
     }
 }

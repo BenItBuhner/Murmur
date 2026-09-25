@@ -34,7 +34,6 @@ private const val BAR_COUNT = 16
 private const val MORPH_MS = 340L
 private const val MOVE_MS = 240L
 private const val BAR_STEP_MS = 64L
-private const val SHADOW_PAD_DP = 12f
 private const val NUDGE_REPEAT_DELAY_MS = 360L
 private const val NUDGE_REPEAT_MS = 45L
 
@@ -106,25 +105,24 @@ private const val RECORD = 0xFFFF5A36.toInt()
  * time-based morph: size, corner radius and colour interpolate while the old and new contents
  * cross-fade.
  *
- * The view lives in a *canvas* window that is never touchable and is sized for every state the
- * pill can take at its resting spot, so turning the mic on or off never moves or resizes it; it
- * covers the whole screen while the button is dragged, lands, or is edited (that is where the
- * ghost spots, guides and editor toolbar are drawn). Taps at rest arrive through a separate,
- * invisible *touch* window that hugs the pill. Android delivers every later event of a gesture to
- * the window that took its first touch, wherever the finger goes, so that window is left exactly
- * where it is until the finger lifts: a drag never depends on a window being moved or resized
- * underneath it. Only in edit mode, where the whole screen is a control surface, does the touch
- * window cover it. Without a [host] the view is a self-contained preview that handles its own
- * touches.
+ * The view lives in a *canvas* window that is never touchable and covers the whole screen for as
+ * long as the pill is shown, so every movement of the pill (a drag, a landing, the keyboard moving
+ * underneath it, a morph) is a redraw inside a window that stays where it is. A window cannot be
+ * moved in step with its contents: WindowManager eases a window that is moved and resized at once
+ * from its old place to the new one while the view has already drawn for the new place, which is
+ * how the pill used to be shown at the top of the screen after a drag and flying in from below
+ * when picked up. Taps at rest arrive through a separate, invisible *touch* window that hugs the
+ * pill. Android delivers every later event of a gesture to the window that took its first touch,
+ * wherever the finger goes, so that window is left exactly where it is until the finger lifts: a
+ * drag never depends on a window being moved or resized underneath it. Only in edit mode, where the
+ * whole screen is a control surface, does the touch window cover it. Without a [host] the view is a
+ * self-contained preview that handles its own touches.
  */
 class OverlayPillView(context: Context) : View(context) {
 
     /** Owner of the two overlay windows this view drives (all frames in screen coordinates). */
     interface Host {
-        /**
-         * The window the pill is drawn in. At rest it only grows and never moves while the mic
-         * turns on or off; it covers the screen while dragging or editing. Must not be touchable.
-         */
+        /** The window the pill is drawn in: the whole screen, placed once per screen size. Must not be touchable. */
         fun applyCanvasFrame(frame: Box)
 
         /** The window that receives touches and relays them via [onScreenTouch]; hugs the pill at rest. */
@@ -239,7 +237,6 @@ class OverlayPillView(context: Context) : View(context) {
     /** The canvas window's frame; everything is drawn translated by its origin. */
     private var windowFrame = Box.EMPTY
     private var canvasApplied = false
-    private var canvasIsScreen = false
     private var touchFrame = Box.EMPTY
     private var touchApplied = false
 
@@ -343,13 +340,17 @@ class OverlayPillView(context: Context) : View(context) {
 
     // ---- public API -----------------------------------------------------------------------------
 
-    /** Screen size and the keyboard's top edge (null when no keyboard is showing). */
+    /**
+     * Screen size and the keyboard's top edge (null when no keyboard is showing). The pill is parked
+     * relative to the keyboard, so it is drawn where the new edge puts it in the very next frame; a
+     * morph or landing already under way carries on around the moved spot.
+     */
     fun setScreen(widthPx: Int, heightPx: Int, keyboardTopPx: Int?) {
         if (previewMode) return
         screenW = widthPx.toFloat()
         screenH = heightPx.toFloat()
         keyboardTop = keyboardTopPx?.toFloat()
-        retarget()
+        retarget(anchorFollows = true)
     }
 
     fun configure(shape: OverlayShape, layout: OverlayLayout) {
@@ -377,8 +378,6 @@ class OverlayPillView(context: Context) : View(context) {
             hits.clear()
             panelBottom = 0f
         }
-        // The canvas is rebuilt for the new presentation rather than grown around both.
-        canvasApplied = false
         retarget()
         requestFrames()
         invalidate()
@@ -550,14 +549,36 @@ class OverlayPillView(context: Context) : View(context) {
     private fun boxFor(look: Look, ax: Float, ay: Float): Box =
         OverlayGeometry.place(ax, ay, look.w, look.h, screenW, screenH, density)
 
-    /** Re-evaluate the target look and anchor; start a morph from wherever the pill currently is. */
-    private fun retarget(animate: Boolean = true) {
+    /**
+     * Re-evaluate the target look and anchor; start a morph from wherever the pill currently is.
+     * With [anchorFollows] (the keyboard moved) the anchor is not animated: the pill, any morph in
+     * progress and a landing spring all move with the keyboard at once, and only a change of look
+     * still morphs.
+     */
+    private fun retarget(animate: Boolean = true, anchorFollows: Boolean = false) {
         if (screenW <= 0f || screenH <= 0f) return
         val newLook = if (editing) idleLook() else lookFor(state)
         val (ax, ay) = anchorPointNow(newLook)
         val lookChanged = newLook != toLook
         val anchorChanged = abs(ax - toAx) > 0.5f || abs(ay - toAy) > 0.5f
         if (!lookChanged && !anchorChanged) return
+        if (anchorFollows && anchorChanged && hasDrawn && !dragging) {
+            val dx = ax - toAx
+            val dy = ay - toAy
+            fromAx += dx
+            fromAy += dy
+            curAx += dx
+            curAy += dy
+            toAx = ax
+            toAy = ay
+            springX?.shift(dx)
+            springY?.shift(dy)
+            if (!lookChanged) {
+                requestFrames()
+                invalidate()
+                return
+            }
+        }
         val now = AnimationUtils.currentAnimationTimeMillis()
         springX = null
         springY = null
@@ -593,27 +614,6 @@ class OverlayPillView(context: Context) : View(context) {
         invalidate()
     }
 
-    /** The canvas covers the whole screen while the button is dragged, lands on a spot, or is edited. */
-    private fun canvasCoversScreen(): Boolean = editing || dragging || springX != null
-
-    /**
-     * The desktop pill's canvas: a band along the edge it rests on, tall enough for its tallest
-     * state (the limit notice) plus the shadow, so nothing about it changes as the pill grows.
-     */
-    private fun desktopBand(p: PillPresentation.Desktop): Box {
-        val pad = dp(SHADOW_PAD_DP) + dp(DESKTOP_PAD_DP)
-        val tallest = dp(LIMIT_H_DP)
-        val idle = idleLook()
-        val (_, cy) = desktopAnchor(idle, p)
-        return if (p.position == OverlayPosition.TOP_CENTER) {
-            val top = cy - idle.h / 2f
-            Box(0f, top - pad, screenW, top + tallest + pad)
-        } else {
-            val bottom = cy + idle.h / 2f
-            Box(0f, bottom - tallest - pad, screenW, bottom + pad)
-        }
-    }
-
     /** The finger's target in the desktop presentation: the pill, at least [DESKTOP_TOUCH_MIN_H_DP] tall. */
     private fun desktopTouchFrame(box: Box): Box {
         val dy = max(dp(TOUCH_PAD_DP), (dp(DESKTOP_TOUCH_MIN_H_DP) - box.height) / 2f)
@@ -625,22 +625,10 @@ class OverlayPillView(context: Context) : View(context) {
         if (presentation is PillPresentation.Desktop) desktopTouchFrame(pillBox) else pillBox.inflate(dp(6f))
 
     /**
-     * Every box the pill can occupy at this spot: the resting button, the listening bar and the
-     * widest message (plus whatever the outline is actually doing, should a look exceed the cap).
-     */
-    private fun statesUnion(ax: Float, ay: Float): Box {
-        val wide = min(dp(MESSAGE_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)).coerceAtLeast(1f)
-        return boxFor(idleLook(), ax, ay)
-            .union(OverlayGeometry.place(ax, ay, wide, dp(TALL_DP), screenW, screenH, density))
-            .union(boxFor(fromLook, fromAx, fromAy))
-            .union(boxFor(toLook, toAx, toAy))
-    }
-
-    /**
-     * Ask the host for the windows the current state needs. The canvas hugs the pill's states at
-     * rest and covers the screen while dragging, landing or editing. The touch window hugs the pill
-     * at rest and covers the screen in edit mode only; while a finger holds the button it is not
-     * moved or resized at all (see the class comment), it is re-placed once the finger lifts.
+     * Ask the host for the windows the current state needs. The canvas is the whole screen,
+     * whatever the pill is doing. The touch window hugs the pill at rest and covers the screen in
+     * edit mode only; while a finger holds the button it is not moved or resized at all (see the
+     * class comment), it is re-placed once the finger lifts.
      */
     private fun requestFrames() {
         if (previewMode || host == null) {
@@ -649,22 +637,14 @@ class OverlayPillView(context: Context) : View(context) {
         }
         if (screenW <= 0f || screenH <= 0f) return
         val screen = Box(0f, 0f, screenW, screenH)
-        (presentation as? PillPresentation.Desktop)?.let { p ->
-            requestCanvas(desktopBand(p).intersect(screen))
+        requestCanvas(screen)
+        if (presentation is PillPresentation.Desktop) {
             requestTouch(desktopTouchFrame(boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy))).intersect(screen))
             return
         }
         if (editing) {
-            requestCanvas(screen)
             requestTouch(screen)
             return
-        }
-        if (canvasCoversScreen()) {
-            requestCanvas(screen)
-        } else {
-            requestCanvas(
-                statesUnion(fromAx, fromAy).union(statesUnion(toAx, toAy)).inflate(dp(SHADOW_PAD_DP)).intersect(screen)
-            )
         }
         if (!dragging) {
             requestTouch(
@@ -673,23 +653,12 @@ class OverlayPillView(context: Context) : View(context) {
         }
     }
 
-    /**
-     * The canvas only ever grows while resting (an anchor that wobbles as a suggestion strip comes
-     * and goes settles on a window covering both), and is rebuilt from scratch when it switches
-     * between hugging the states and covering the screen. Shrinking or moving it at rest would
-     * change its origin, and an origin change is precisely the jump this design exists to avoid.
-     */
-    private fun requestCanvas(required: Box) {
-        val screenMode = canvasCoversScreen()
-        val next = when {
-            !canvasApplied || canvasIsScreen != screenMode -> required
-            windowFrame.encloses(required) -> return
-            else -> windowFrame.union(required)
-        }
+    /** Placed once for the screen and left alone: a new frame only comes with a new screen size (a rotation, a fold). */
+    private fun requestCanvas(screen: Box) {
+        if (canvasApplied && windowFrame == screen) return
         canvasApplied = true
-        canvasIsScreen = screenMode
-        windowFrame = next
-        host?.applyCanvasFrame(next)
+        windowFrame = screen
+        host?.applyCanvasFrame(screen)
     }
 
     private fun requestTouch(frame: Box) {
@@ -764,8 +733,8 @@ class OverlayPillView(context: Context) : View(context) {
             if (sx.settled && sy.settled) {
                 springX = null
                 springY = null
-                // Landed: this is where the pill rests now. Shrink the canvas back around it and
-                // pull the touch window in from the release-to-landing span it covered in flight.
+                // Landed: this is where the pill rests now. Pull the touch window in from the
+                // release-to-landing span it covered in flight.
                 fromLook = toLook
                 fromAx = toAx
                 fromAy = toAy

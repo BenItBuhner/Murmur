@@ -12,6 +12,8 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
@@ -80,8 +82,9 @@ private const val PRECEDING_TEXT_MAX = 600
  * cleaned text is inserted into the focused text field via accessibility actions.
  *
  * The pill view owns its geometry and animations and asks this service (its [OverlayPillView.Host])
- * for two windows: a canvas it draws in, which is never touchable and never moves while the mic
- * turns on or off, and an invisible touch window that hugs the pill and relays taps to it.
+ * for two windows: a canvas it draws in, which covers the screen, is never touchable and never
+ * moves, and an invisible touch window that hugs the pill and relays taps to it. Where the keyboard
+ * is comes from the accessibility window list ([KeyboardTracker]).
  *
  * With a physical keyboard attached (or a screen as wide as a laptop's) the overlay takes the
  * desktop app's form instead ([PillPresentation.Desktop]): a pill parked at the desktop's position
@@ -99,24 +102,33 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     private var presence: KeyboardPresence? = null
     private var presentation: PillPresentation = PillPresentation.Button
 
-    /** Draws the pill. Never touchable, and only ever grows, so state changes never move it. */
+    /** Draws the pill. The whole screen, never touchable, never moved while the pill is shown. */
     private var canvasWindow: OverlayWindow? = null
 
     /** Invisible; hugs the pill and relays its touches. Free to follow the pill, nothing is drawn in it. */
     private var touchWindow: OverlayWindow? = null
-    private var keyboardVisible = false
 
-    /** Top edge of the keyboard the last time it was on screen; kept while a dictation is in flight. */
-    private var keyboardTop = -1
+    /** Where the keyboard is; its last top edge is kept while a dictation is in flight. */
+    private val keyboard by lazy { KeyboardTracker(resources.displayMetrics.density) }
+    private var lastKeyboardWindow: ImeWindow? = null
+    private val arrivalCheck = Runnable { updateKeyboardState(force = true) }
     private var lastWindowScanAt = 0L
     private var lastEditable: AccessibilityNodeInfo? = null
     private var lastPackage: String = ""
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         DictationController.sink = this
+        // The keyboard's window arriving or leaving is reported the moment it happens; a notification
+        // timeout would hold that report back, and the pill with it. Installs whose service was bound
+        // with an older configuration pick the value up here.
+        serviceInfo?.takeIf { it.notificationTimeout != 0L }?.let { info ->
+            info.notificationTimeout = 0L
+            serviceInfo = info
+        }
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val settings = SettingsStore.get(this)
         val presence = KeyboardPresence.get(this).also { this.presence = it }
@@ -165,7 +177,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         // The only long-lived part of the app: the daily update check lives here. An unattended
         // install waits until no dictation is in flight and the keyboard is away.
         UpdateManager.get(this).apply {
-            isIdle = { DictationController.state.value is DictationState.Idle && !keyboardVisible }
+            isIdle = { DictationController.state.value is DictationState.Idle && !keyboard.visible }
             startBackgroundChecks(mainScope)
         }
         Log.i(TAG, "accessibility service connected")
@@ -177,6 +189,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         OverlayEditor.stop()
         ShortcutRecorder.stop()
         shortcuts = null
+        mainHandler.removeCallbacks(arrivalCheck)
         removePill()
         mainScope.cancel()
         super.onDestroy()
@@ -238,26 +251,38 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val now = SystemClock.uptimeMillis()
         if (!force && now - lastWindowScanAt < WINDOW_SCAN_MIN_INTERVAL_MS) return
         lastWindowScanAt = now
-        var visible = false
-        var top = -1
-        try {
-            for (w in windows) {
-                if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
-                    val bounds = Rect()
-                    w.getBoundsInScreen(bounds)
-                    // Some keyboards keep a zero-height window alive while hidden.
-                    if (bounds.height() > 80) {
-                        visible = true
-                        top = bounds.top
-                    }
-                }
-            }
+        keyboard.update(keyboardWindow(), now, screenSize().second.toFloat())
+        mainHandler.removeCallbacks(arrivalCheck)
+        keyboard.arrivalDeadline?.let { mainHandler.postAtTime(arrivalCheck, it) }
+        syncPillVisibility()
+    }
+
+    /**
+     * The keyboard's window in the current window list, with the frame its views are laid out in.
+     * The frame is read from the window's root (a round trip to the keyboard's process) only when
+     * the reported bounds changed; a window list that did not move the keyboard reuses it.
+     */
+    private fun keyboardWindow(): ImeWindow? {
+        val ime = try {
+            windows.filter { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                .maxByOrNull { w -> Rect().also { w.getBoundsInScreen(it) }.height() }
         } catch (e: Exception) {
             Log.w(TAG, "window scan failed", e)
+            null
         }
-        keyboardVisible = visible
-        if (visible) keyboardTop = top
-        syncPillVisibility()
+        if (ime == null) {
+            lastKeyboardWindow = null
+            return null
+        }
+        val bounds = Rect().also { ime.getBoundsInScreen(it) }.toBox()
+        val last = lastKeyboardWindow
+        val frame = if (last != null && last.id == ime.id && last.bounds == bounds && last.frame != null) {
+            last.frame
+        } else {
+            runCatching { ime.root }.getOrNull()?.let { root -> Rect().also { root.getBoundsInScreen(it) } }
+                ?.takeIf { !it.isEmpty }?.toBox()
+        }
+        return ImeWindow(ime.id, bounds, frame).also { lastKeyboardWindow = it }
     }
 
     /**
@@ -268,16 +293,16 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val busy = DictationController.state.value !is DictationState.Idle
         val visible = when (val p = presentation) {
             is PillPresentation.Desktop -> busy || p.showIdle
-            PillPresentation.Button -> keyboardVisible || busy || OverlayEditor.editing.value
+            PillPresentation.Button -> keyboard.visible || busy || OverlayEditor.editing.value
         }
         if (visible) showPill() else removePill()
     }
 
     /** Where the pill measures its vertical offset from: the keyboard's top edge, or the last known one while busy. */
     private fun keyboardReference(): Int? {
-        if (keyboardVisible) return keyboardTop
+        if (keyboard.visible) return keyboard.top
         val busy = DictationController.state.value !is DictationState.Idle || OverlayEditor.editing.value
-        return if (busy && keyboardTop > 0) keyboardTop else null
+        return if (busy && keyboard.top > 0) keyboard.top else null
     }
 
     private fun showPill() {
@@ -588,6 +613,9 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
+        // A window that is moved and resized at once is otherwise eased to its new place over
+        // WindowManager's move animation, and its touch area travels with it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) setCanPlayMoveAnimation(false)
     }
 
     var attached = false
@@ -619,6 +647,8 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
         }
     }
 }
+
+private fun Rect.toBox(): Box = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
 
 /** Draws nothing; hands every touch to the pill, which does its own hit-testing in screen space. */
 private class TouchRelayView(context: Context, private val relay: (MotionEvent) -> Boolean) : View(context) {

@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.5.7': [
+    "**The floating button leaves as the keyboard starts to close.** Tapping the keyboard's close chevron (or the system Back button, or a hardware Back key) takes the Android button away the moment your finger lifts, before the keys start sliding, instead of leaving it over the app until the keyboard has gone. A close by the back gesture, Done or the app itself gives no earlier signal, so there the button still hides when the keyboard is fully gone, in one go and without moving.",
+    '**It fades in where the keyboard rests.** When the keyboard opens, the button fades in at its resting spot instead of popping in partway up the slide and easing into place, and it no longer dips and snaps back when an app scrolls the keyboard slightly. The very first open of a keyboard after installing waits about half a second, once, to learn where that keyboard rests.'
+  ],
   '0.5.6': [
     "**The floating button stays where your finger is.** Picking the Android button up and dropping it on another spot no longer flashes it at the top of the screen or flies it in from below: the button's canvas covers the screen and is placed once for as long as the button is shown, so every move is a redraw inside it rather than a window move Android animates from the old place.",
     "**It follows the keyboard without the old ease and delay.** The button appears at its spot the moment Android first reports the keyboard, measured from where the keyboard will rest, and is gone in the frame the keyboard's window goes; every reported change is drawn in the next frame, with no easing, no restarted slide and no 50 ms hold. A keyboard lifted above its resting edge is on its way to Recents and counts as gone instead of pulling the button up the screen.",

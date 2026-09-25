@@ -191,6 +191,12 @@ class Spring(
     /** Within half a pixel and nearly still: snapped exactly onto the target. */
     val settled: Boolean get() = position == target && velocity == 0f
 
+    /** Moves the whole flight, where it is and where it is going, by [d] (the spot moved with the keyboard). */
+    fun shift(d: Float) {
+        position += d
+        target += d
+    }
+
     fun advance(dtMs: Long) {
         if (settled) return
         var remaining = dtMs.coerceIn(0L, 250L) / 1000f

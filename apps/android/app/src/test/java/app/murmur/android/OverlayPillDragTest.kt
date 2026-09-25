@@ -16,7 +16,6 @@ import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.settings.OverlayShape
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -195,7 +194,7 @@ class OverlayPillDragTest {
         assertEquals(listOf(1), layoutChanges.map { it.activeIndex })
         settle()
 
-        assertTrue("the canvas hands the screen back after landing", host.canvas.last() != screen)
+        assertEquals("the canvas was placed once, over the screen, and never moved", listOf(screen), host.canvas)
         assertTrue("the touch window hugs the button on its new spot: ${host.touch.last()}", host.touch.last().approximately(idleTouchBox(1), 1f))
         assertTrue(host.canvas.last().encloses(host.touch.last()))
         assertEquals("a drag is not a tap", 0, micTaps)
@@ -298,7 +297,7 @@ class OverlayPillDragTest {
         touch(MotionEvent.ACTION_UP, x0 + 4f, y0 + 3f)
         assertEquals(2, micTaps)
         assertTrue(layoutChanges.isEmpty())
-        assertTrue(host.canvas.none { it == screen })
+        assertEquals(listOf(screen), host.canvas)
     }
 
     @Test
@@ -310,7 +309,7 @@ class OverlayPillDragTest {
         settle()
         assertTrue(layoutChanges.isEmpty())
         assertTrue(host.touch.last().approximately(idleTouchBox(0), 1f))
-        assertNotEquals(screen, host.canvas.last())
+        assertEquals(listOf(screen), host.canvas)
         assertEquals(0, micTaps)
     }
 
@@ -339,7 +338,7 @@ class OverlayPillDragTest {
         touch(MotionEvent.ACTION_UP, x0 + 200f, y0 - 200f)
         settle()
         assertTrue(layoutChanges.isEmpty())
-        assertTrue(host.canvas.none { it == screen })
+        assertEquals(listOf(screen), host.canvas)
         assertEquals(touchFrames, host.touch.size)
     }
 }

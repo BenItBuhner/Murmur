@@ -251,7 +251,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val now = SystemClock.uptimeMillis()
         if (!force && now - lastWindowScanAt < WINDOW_SCAN_MIN_INTERVAL_MS) return
         lastWindowScanAt = now
-        keyboard.update(keyboardWindow(), now)
+        keyboard.update(keyboardWindow(), now, screenSize().second.toFloat())
         mainHandler.removeCallbacks(arrivalCheck)
         keyboard.arrivalDeadline?.let { mainHandler.postAtTime(arrivalCheck, it) }
         syncPillVisibility()

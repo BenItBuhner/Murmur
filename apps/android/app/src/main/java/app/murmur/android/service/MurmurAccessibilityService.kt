@@ -297,12 +297,13 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      * told the keyboard to go: the back button of the navigation bar a keyboard draws under its keys
      * (Android's `input_method_nav_back`, a down chevron while the keyboard is up), the system bar's
      * back button, or a maker's hide-keyboard button in that strip: a small button along the bottom
-     * edge, in the keyboard's window or a system window. Not the keyboard switcher.
+     * edge, in the keyboard's window or a system window. Not a keyboard switcher, nor the
+     * accessibility button, which leave the keyboard up.
      */
     private fun isKeyboardDismissButton(event: AccessibilityEvent): Boolean {
         val source = event.source ?: return false
         val id = source.viewIdResourceName.orEmpty()
-        if (id.endsWith("ime_switcher")) return false
+        if ("switcher" in id || id.endsWith("accessibility_button")) return false
         if (id.endsWith(":id/input_method_nav_back") || id == "com.android.systemui:id/back") return true
         val type = runCatching { windows.firstOrNull { it.id == event.windowId }?.type }.getOrNull()
         if (type != AccessibilityWindowInfo.TYPE_INPUT_METHOD && type != AccessibilityWindowInfo.TYPE_SYSTEM) return false

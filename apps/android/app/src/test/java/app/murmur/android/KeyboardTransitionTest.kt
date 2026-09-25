@@ -336,11 +336,13 @@ class KeyboardTransitionTest {
     }
 
     @Test
-    fun `a tap on the keyboard switcher leaves the pill where it is`() {
+    fun `a tap on the keyboard switcher or the accessibility button leaves the pill where it is`() {
         openSettled()
         val switcher = click(IME_ID, "android:id/input_method_nav_ime_switcher", Rect(SCREEN_W - 216, SCREEN_H - 132, SCREEN_W - 20, SCREEN_H))
-        val looks = listOf(frame(ime(FRAME_TOP)) { service.onAccessibilityEvent(switcher) }) + (1..60).map { frame(ime(FRAME_TOP)) }
-        assertTrue("never dimmed, never moved:\n" + describe(looks, 0), looks.all { settledAt(it) })
+        val accessibility = click(NAV_BAR_ID, "com.android.systemui:id/accessibility_button", Rect(SCREEN_W - 180, SCREEN_H - 144, SCREEN_W - 36, SCREEN_H))
+        val looks = listOf(frame(ime(FRAME_TOP)) { service.onAccessibilityEvent(switcher) }) + (1..30).map { frame(ime(FRAME_TOP)) } +
+            listOf(frame(ime(FRAME_TOP)) { service.onAccessibilityEvent(accessibility) }) + (1..30).map { frame(ime(FRAME_TOP)) }
+        assertTrue("never dimmed, never moved:\n" + describe(looks, looks.indexOfFirst { !settledAt(it) }.coerceAtLeast(0)), looks.all { settledAt(it) })
     }
 
     private fun typingIn(app: String) {

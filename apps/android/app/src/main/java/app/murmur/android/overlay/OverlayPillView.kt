@@ -254,6 +254,11 @@ class OverlayPillView(context: Context) : View(context) {
     private var pressed = false
     private var pressScale = 1f
 
+    /** 0: not shown, 1: fully there. Fades and scales the whole pill in where it rests, and out. */
+    private var presence = 1f
+    private var presenceTarget = 1f
+    private var whenGone: (() -> Unit)? = null
+
     // ---- dragging (both modes) ------------------------------------------------------------------
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
@@ -401,6 +406,34 @@ class OverlayPillView(context: Context) : View(context) {
 
     /** The palette's ink at [alpha] (0..255): hairlines, translucent fills and secondary text. */
     private fun ink(alpha: Int): Int = ColorUtils.setAlphaComponent(palette.ink, alpha)
+
+    /**
+     * Brings the pill in with a short fade and scale where it rests, from nothing when [fromNothing]
+     * (a fresh window), or back from wherever a [dismiss] had got to.
+     */
+    fun appear(fromNothing: Boolean = false) {
+        if (fromNothing) presence = 0f
+        presenceTarget = 1f
+        whenGone = null
+        invalidate()
+    }
+
+    /** Fades the pill out where it is, in two frames; [onGone] runs once it is fully gone (unless it [appear]s again first). */
+    fun dismiss(onGone: () -> Unit) {
+        presenceTarget = 0f
+        // As a cancelled touch: a drag lands on its spot, so a pill that comes back is where it rests.
+        if (dragging) endFlick()
+        pressed = false
+        if (presence <= 0f) {
+            whenGone = null
+            onGone()
+            return
+        }
+        whenGone = onGone
+        invalidate()
+    }
+
+    val isDismissing: Boolean get() = presenceTarget == 0f
 
     fun setEditing(editing: Boolean) {
         // Spots belong to the floating button; the desktop pill has a position setting instead.
@@ -707,8 +740,9 @@ class OverlayPillView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         if (screenW <= 0f || screenH <= 0f) return
         val now = AnimationUtils.currentAnimationTimeMillis()
-        val dt = if (lastFrameAt == 0L) 16L else (now - lastFrameAt).coerceIn(1L, 100L)
-        lastFrameAt = now
+        // A second draw within the same frame (same frame time) moves nothing on.
+        val dt = if (lastFrameAt == 0L) 16L else (now - lastFrameAt).coerceIn(0L, 100L)
+        lastFrameAt = max(lastFrameAt, now)
 
         if (morphStart == 0L) morphStart = now
         var t = 1f
@@ -750,16 +784,31 @@ class OverlayPillView(context: Context) : View(context) {
         if (morphStart < 0L && toLook.kind != Kind.LISTENING) resetBars()
 
         pressScale = approach(pressScale, pressTarget(), dt, 55f)
+        if (presence != presenceTarget) {
+            val step = dt.toFloat() / if (presenceTarget > presence) APPEAR_MS else DISMISS_MS
+            presence = if (presenceTarget > presence) min(1f, presence + step) else max(0f, presence - step)
+            if (abs(presence - presenceTarget) < 0.001f) presence = presenceTarget
+            if (presence == 0f) whenGone?.let { gone -> whenGone = null; post(gone) }
+        }
+
+        val box = OverlayGeometry.place(curAx, curAy, curW, curH, screenW, screenH, density)
+        pillBox = box
+        if (presence <= 0f) {
+            hasDrawn = true
+            return
+        }
+        val scale = pressScale * lerp(PRESENCE_SCALE, 1f, easeOutCubic(presence))
+        val drawn = if (abs(scale - 1f) > 0.001f) {
+            Box.centered(box.centerX, box.centerY, box.width * scale, box.height * scale)
+        } else box
 
         // Everything below is in screen coordinates.
         canvas.save()
         canvas.translate(-windowFrame.left, -windowFrame.top)
-
-        val box = OverlayGeometry.place(curAx, curAy, curW, curH, screenW, screenH, density)
-        pillBox = box
-        val drawn = if (abs(pressScale - 1f) > 0.001f) {
-            Box.centered(box.centerX, box.centerY, box.width * pressScale, box.height * pressScale)
-        } else box
+        if (presence < 1f) {
+            val reach = drawn.inflate(dp(PRESENCE_LAYER_PAD_DP))
+            canvas.saveLayerAlpha(reach.left, reach.top, reach.right, reach.bottom, (presence * 255f).toInt().coerceIn(0, 255))
+        }
 
         if (editing) {
             drawGhostSpots(canvas)
@@ -803,6 +852,7 @@ class OverlayPillView(context: Context) : View(context) {
             drawEditChrome(canvas, drawn)
         }
 
+        if (presence < 1f) canvas.restore()
         canvas.restore()
         hasDrawn = true
         if (isAnimating(now)) postInvalidateOnAnimation()
@@ -1536,6 +1586,7 @@ class OverlayPillView(context: Context) : View(context) {
     // ---- animation helpers ----------------------------------------------------------------------
 
     private fun isAnimating(now: Long): Boolean {
+        if (presence != presenceTarget) return true
         if (morphStart >= 0L || editing || dragging || springX != null) return true
         if (releasedAt > 0L && now - releasedAt < FLICK_GHOST_FADE_MS) return true
         if (abs(pressScale - pressTarget()) > 0.002f) return true
@@ -1575,6 +1626,7 @@ class OverlayPillView(context: Context) : View(context) {
      * drag, so window-relative coordinates would jump with it.
      */
     fun onScreenTouch(event: MotionEvent, x: Float, y: Float): Boolean {
+        if (isDismissing) return false
         if (editing) return onEditTouch(event, x, y)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -1842,6 +1894,22 @@ class OverlayPillView(context: Context) : View(context) {
 
     private companion object {
         const val FLICK_GHOST_FADE_MS = 220L
+
+        /** Coming in where it rests: long enough to read as an arrival, short next to the keyboard's own slide. */
+        const val APPEAR_MS = 160f
+
+        /**
+         * Going when the keyboard starts to leave: two frames at 120 Hz. The earliest sign of a close
+         * (the hide button's click) comes about as the keyboard starts to move, and a keyboard slides
+         * out in about nine frames, so anything slower is seen sitting where the keyboard was.
+         */
+        const val DISMISS_MS = 16f
+
+        /** How small the pill starts when it comes in (and ends when it goes). */
+        const val PRESENCE_SCALE = 0.86f
+
+        /** Room around the pill for its shadow in the layer a fade draws through. */
+        const val PRESENCE_LAYER_PAD_DP = 20f
         const val RETRY_LABEL = "Retry"
         const val UPGRADE_LABEL = "Upgrade"
         const val OWN_MODEL_LABEL = "Own model"

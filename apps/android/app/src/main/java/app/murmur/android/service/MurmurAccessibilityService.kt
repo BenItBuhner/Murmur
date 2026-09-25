@@ -98,10 +98,11 @@ private const val PRECEDING_TEXT_MAX = 600
  * moves, and an invisible touch window that hugs the pill and relays taps to it. Where the keyboard
  * is comes from the accessibility window list ([KeyboardTracker]).
  *
- * With a physical keyboard attached (or a screen as wide as a laptop's) the overlay takes the
- * desktop app's form instead ([PillPresentation.Desktop]): a pill parked at the desktop's position
- * with an idle bar, driven by the same shortcuts as the desktop, which arrive here through the
- * service's key-event filter ([onKeyEvent], [HardwareShortcuts]).
+ * With a physical keyboard attached (or on a tablet-sized screen) the overlay takes the desktop
+ * app's form instead ([PillPresentation.Desktop]): a pill parked at the desktop's position with an
+ * idle bar, driven by the same shortcuts as the desktop, which arrive here through the service's
+ * key-event filter ([onKeyEvent], [HardwareShortcuts]). As on the desktop, the idle bar lets taps
+ * through unless it is set (or, without a keyboard, needed) to start a dictation.
  *
  * This service is also the injection backend ([TextSink]); see [TextInserter] for the
  * ACTION_SET_TEXT / ACTION_SET_SELECTION / ACTION_PASTE strategy.
@@ -470,6 +471,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         touchWindow?.place(frame)
     }
 
+    override fun applyTouchable(touchable: Boolean) {
+        touchWindow?.setTouchable(touchable)
+    }
+
     private fun removePill() {
         touchWindow?.remove()
         canvasWindow?.remove()
@@ -736,6 +741,23 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
 
     var attached = false
         private set
+
+    /** Off, the window is skipped by input dispatch: a tap on it goes to whatever is underneath. */
+    fun setTouchable(touchable: Boolean) {
+        val flags = if (touchable) {
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        } else {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        if (flags == params.flags) return
+        params.flags = flags
+        if (!attached) return
+        try {
+            wm.updateViewLayout(view, params)
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to update overlay window", e)
+        }
+    }
 
     fun place(frame: Box) {
         params.x = frame.left.roundToInt()

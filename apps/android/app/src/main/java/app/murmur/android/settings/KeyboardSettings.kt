@@ -70,7 +70,13 @@ data class KeyboardSettings(
     val desktopOverlay: DesktopOverlay = DesktopOverlay.AUTO,
     val overlayPosition: OverlayPosition = OverlayPosition.BOTTOM_CENTER,
     /** A small bar stays visible when Murmur is ready, as on the desktop. */
-    val showOverlayWhenIdle: Boolean = true
+    val showOverlayWhenIdle: Boolean = true,
+    /**
+     * A tap on the idle bar starts a dictation. Off, the bar only shows that Murmur is ready and
+     * every tap goes to whatever is underneath, as the desktop's idle indicator lets every click
+     * through; the shortcuts start a dictation. Android-only: the desktop has no such setting.
+     */
+    val tapIdleBarToDictate: Boolean = false
 ) {
     companion object {
         val DEFAULT_PUSH_TO_TALK: List<Int> = listOf(Key.CTRL, Key.META)
@@ -95,7 +101,8 @@ object KeyboardSettingsCodec {
         val escapeCancels: Boolean = true,
         val desktopOverlay: String = DesktopOverlay.AUTO.id,
         val overlayPosition: String = OverlayPosition.BOTTOM_CENTER.id,
-        val showOverlayWhenIdle: Boolean = true
+        val showOverlayWhenIdle: Boolean = true,
+        val tapIdleBarToDictate: Boolean = false
     )
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -113,7 +120,8 @@ object KeyboardSettingsCodec {
             escapeCancels = s.escapeCancels,
             desktopOverlay = s.desktopOverlay.id,
             overlayPosition = s.overlayPosition.id,
-            showOverlayWhenIdle = s.showOverlayWhenIdle
+            showOverlayWhenIdle = s.showOverlayWhenIdle,
+            tapIdleBarToDictate = s.tapIdleBarToDictate
         )
     )
 
@@ -137,7 +145,8 @@ object KeyboardSettingsCodec {
             escapeCancels = parsed.escapeCancels,
             desktopOverlay = DesktopOverlay.from(parsed.desktopOverlay),
             overlayPosition = OverlayPosition.from(parsed.overlayPosition),
-            showOverlayWhenIdle = parsed.showOverlayWhenIdle
+            showOverlayWhenIdle = parsed.showOverlayWhenIdle,
+            tapIdleBarToDictate = parsed.tapIdleBarToDictate
         )
     }
 }

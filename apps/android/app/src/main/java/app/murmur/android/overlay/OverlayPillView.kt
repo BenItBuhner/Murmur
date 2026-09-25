@@ -127,6 +127,9 @@ class OverlayPillView(context: Context) : View(context) {
 
         /** The window that receives touches and relays them via [onScreenTouch]; hugs the pill at rest. */
         fun applyTouchFrame(frame: Box)
+
+        /** Whether that window takes touches at all; when it does not, every tap goes to what is underneath. */
+        fun applyTouchable(touchable: Boolean) {}
     }
 
     var host: Host? = null
@@ -239,6 +242,7 @@ class OverlayPillView(context: Context) : View(context) {
     private var canvasApplied = false
     private var touchFrame = Box.EMPTY
     private var touchApplied = false
+    private var touchable: Boolean? = null
 
     /** Landing on a spot after a drag: the anchor follows these instead of the timed morph. */
     private var springX: Spring? = null
@@ -647,10 +651,21 @@ class OverlayPillView(context: Context) : View(context) {
         invalidate()
     }
 
-    /** The finger's target in the desktop presentation: the pill, at least [DESKTOP_TOUCH_MIN_H_DP] tall. */
+    /**
+     * The finger's target in the desktop presentation. Heading for the idle bar: the bar and
+     * [TOUCH_PAD_DP] around it, nothing reaching over what lies beside it. Otherwise the pill, at
+     * least [DESKTOP_TOUCH_MIN_H_DP] tall, so its buttons are easy to hit.
+     */
     private fun desktopTouchFrame(box: Box): Box {
+        if (toLook.kind == Kind.IDLE) return box.inflate(dp(TOUCH_PAD_DP))
         val dy = max(dp(TOUCH_PAD_DP), (dp(DESKTOP_TOUCH_MIN_H_DP) - box.height) / 2f)
         return Box(box.left - dp(DESKTOP_TOUCH_PAD_X_DP), box.top - dy, box.right + dp(DESKTOP_TOUCH_PAD_X_DP), box.bottom + dy)
+    }
+
+    /** False only for the desktop presentation's idle bar without [PillPresentation.Desktop.idleTap]: it lets every tap through. */
+    private fun takesTouches(): Boolean {
+        val p = presentation
+        return p !is PillPresentation.Desktop || p.idleTap || toLook.kind != Kind.IDLE
     }
 
     /** Where a touch counts as being on the pill. */
@@ -671,19 +686,25 @@ class OverlayPillView(context: Context) : View(context) {
         if (screenW <= 0f || screenH <= 0f) return
         val screen = Box(0f, 0f, screenW, screenH)
         requestCanvas(screen)
+        requestTouchable(takesTouches())
         if (presentation is PillPresentation.Desktop) {
-            requestTouch(desktopTouchFrame(boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy))).intersect(screen))
+            requestTouch(desktopTouchFrame(extent()).intersect(screen))
             return
         }
         if (editing) {
             requestTouch(screen)
             return
         }
-        if (!dragging) {
-            requestTouch(
-                boxFor(fromLook, fromAx, fromAy).union(boxFor(toLook, toAx, toAy)).inflate(dp(TOUCH_PAD_DP)).intersect(screen)
-            )
-        }
+        if (!dragging) requestTouch(extent().inflate(dp(TOUCH_PAD_DP)).intersect(screen))
+    }
+
+    /**
+     * Where the pill is: while it morphs or lands, both ends of the move; at rest, only where it
+     * rests (a finished move keeps its starting point, which the touch window must not reach back to).
+     */
+    private fun extent(): Box {
+        val to = boxFor(toLook, toAx, toAy)
+        return if (morphStart >= 0L || springX != null) boxFor(fromLook, fromAx, fromAy).union(to) else to
     }
 
     /** Placed once for the screen and left alone: a new frame only comes with a new screen size (a rotation, a fold). */
@@ -699,6 +720,12 @@ class OverlayPillView(context: Context) : View(context) {
         touchFrame = frame
         touchApplied = true
         host?.applyTouchFrame(frame)
+    }
+
+    private fun requestTouchable(on: Boolean) {
+        if (touchable == on) return
+        touchable = on
+        host?.applyTouchable(on)
     }
 
     /** After a morph settles, pull the touch window back in around the pill. */
@@ -1630,7 +1657,7 @@ class OverlayPillView(context: Context) : View(context) {
         if (editing) return onEditTouch(event, x, y)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (!hitBox().contains(x, y)) return false
+                if (!takesTouches() || !hitBox().contains(x, y)) return false
                 pressed = true
                 downX = x
                 downY = y

@@ -34,21 +34,28 @@ data class KeyboardDevice(val name: String, val alphabetic: Boolean, val virtual
 
 /**
  * How the device is being used right now, as far as the overlay and the shortcuts care: is a
- * keyboard attached, how wide is the window, is this a desktop-style session (Samsung DeX, a PC).
+ * keyboard attached, is the screen a tablet's, is this a desktop-style session (Samsung DeX, a PC).
  */
 data class DevicePosture(
     val hardwareKeyboard: Boolean,
-    val widthClass: WidthClass,
+    /**
+     * A tablet-sized screen: its shorter side is at least [TABLET_MIN_DP] (Android's own line for
+     * large-screen layouts, `sw600dp`). Measured on the shorter side so that turning the device does
+     * not change it: a phone on its side is as wide as a small laptop, but still a phone.
+     */
+    val tabletScreen: Boolean,
     val desktopSession: Boolean,
     /** The attached keyboard's name, for the settings screen; null without one. */
     val keyboardName: String? = null
 ) {
-    /** What the automatic setting follows: a keyboard, a desktop session, or a screen as wide as a laptop's. */
-    val desktopLike: Boolean get() = hardwareKeyboard || desktopSession || widthClass == WidthClass.EXPANDED
+    /** What the automatic setting follows: a keyboard, a desktop session, or a tablet-sized screen. */
+    val desktopLike: Boolean get() = hardwareKeyboard || desktopSession || tabletScreen
 
     companion object {
+        const val TABLET_MIN_DP = 600
+
         /** A touch-only phone; what every code path starts from before the device has been read. */
-        val PHONE = DevicePosture(hardwareKeyboard = false, widthClass = WidthClass.COMPACT, desktopSession = false)
+        val PHONE = DevicePosture(hardwareKeyboard = false, tabletScreen = false, desktopSession = false)
     }
 }
 
@@ -63,7 +70,7 @@ fun desktopOverlayOn(mode: DesktopOverlay, posture: DevicePosture): Boolean = wh
 fun describeAutoOverlay(posture: DevicePosture): String = when {
     posture.hardwareKeyboard -> "On right now: ${posture.keyboardName ?: "a keyboard"} is connected."
     posture.desktopSession -> "On right now: this is a desktop session."
-    posture.widthClass == WidthClass.EXPANDED -> "On right now: the screen is as wide as a laptop's."
+    posture.tabletScreen -> "On right now: this is a tablet-sized screen."
     else -> "Off right now: no keyboard is connected and the screen is phone-sized."
 }
 
@@ -125,7 +132,7 @@ class KeyboardPresence internal constructor(
             val hardware = configSaysKeyboard || (keyboard != null && !hidden)
             return DevicePosture(
                 hardwareKeyboard = hardware,
-                widthClass = WidthClass.of(config.screenWidthDp),
+                tabletScreen = config.smallestScreenWidthDp >= DevicePosture.TABLET_MIN_DP,
                 desktopSession = desktopSession,
                 keyboardName = if (hardware) keyboard?.name?.takeIf { it.isNotBlank() } else null
             )

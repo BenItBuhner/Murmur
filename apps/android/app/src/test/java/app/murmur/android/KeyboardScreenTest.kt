@@ -1,9 +1,16 @@
 package app.murmur.android
 
 import android.content.Context
+import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -13,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import app.murmur.android.keyboard.Key
+import app.murmur.android.keyboard.KeyboardPresence
 import app.murmur.android.keyboard.ShortcutCapture
 import app.murmur.android.keyboard.ShortcutRecorder
 import app.murmur.android.settings.DesktopOverlay
@@ -33,6 +41,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * The Keyboard screen: the defaults on their key caps, the recorder taking a chord from the
@@ -47,6 +57,7 @@ class KeyboardScreenTest {
     val compose = createComposeRule()
 
     private lateinit var store: SettingsStore
+    private lateinit var root: View
     private var serviceRunning = true
 
     @Before
@@ -54,8 +65,10 @@ class KeyboardScreenTest {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("murmur_settings", Context.MODE_PRIVATE).edit().clear().commit()
         store = SettingsStore(context)
+        KeyboardPresence.get(context).refresh(Configuration())
         ShortcutRecorder.serviceRunning = { serviceRunning }
         compose.setContent {
+            root = LocalView.current
             val settings by store.flow.collectAsState()
             MurmurTheme(settings.copy(dynamicColor = false)) {
                 KeyboardScreen(store, settings, TopNav.Back {})
@@ -68,6 +81,8 @@ class KeyboardScreenTest {
     fun tearDown() {
         ShortcutRecorder.stop()
         ShortcutRecorder.serviceRunning = { app.murmur.android.service.MurmurAccessibilityService.isRunning }
+        // KeyboardPresence is one per process and outlives this test: leave it a keyboard-less phone.
+        KeyboardPresence.get(RuntimeEnvironment.getApplication()).refresh(Configuration())
     }
 
     private fun keyboard(): KeyboardSettings = store.get().keyboard
@@ -148,5 +163,45 @@ class KeyboardScreenTest {
         compose.waitForIdle()
         assertEquals(DesktopOverlay.OFF, keyboard().desktopOverlay)
         compose.onNodeWithText("The floating button beside the keyboard, whatever is attached.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `Tap the idle bar to dictate is off by default, waits for keyboard mode and writes the setting`() {
+        // A phone with nothing attached: keyboard mode is off, so the switch is shown but greyed out.
+        compose.onNodeWithText("Tap the idle bar to dictate").performScrollTo().assertIsOff().assertIsNotEnabled()
+        assertFalse(keyboard().tapIdleBarToDictate)
+
+        // A keyboard is attached: keyboard mode turns on by itself and the switch can be used.
+        KeyboardPresence.get(RuntimeEnvironment.getApplication()).refresh(
+            Configuration().apply {
+                keyboard = Configuration.KEYBOARD_QWERTY
+                hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_NO
+            }
+        )
+        compose.waitForIdle()
+        compose.onNodeWithText("A keyboard is connected").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Tap the idle bar to dictate").performScrollTo().assertIsEnabled().assertIsOff()
+        snap("android-keyboard-mode-tap-idle-bar-setting")
+
+        compose.onNodeWithText("Tap the idle bar to dictate").performClick()
+        compose.waitForIdle()
+        assertTrue(keyboard().tapIdleBarToDictate)
+        compose.onNodeWithText("Tap the idle bar to dictate").assertIsOn()
+
+        // Without the idle indicator there is no bar to tap.
+        compose.onNodeWithText("Show idle indicator").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Tap the idle bar to dictate").assertIsNotEnabled()
+    }
+
+    /** The screen as rendered, written under build/reports/pill-screenshots/keyboard-mode. */
+    private fun snap(name: String) {
+        val dir = System.getProperty("murmur.screenshotDir")?.takeIf { it.isNotBlank() }?.let { File(it, "keyboard-mode") } ?: return
+        dir.mkdirs()
+        compose.waitForIdle()
+        val view = root.rootView
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        compose.runOnUiThread { view.draw(Canvas(bitmap)) }
+        FileOutputStream(File(dir, "$name.png")).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

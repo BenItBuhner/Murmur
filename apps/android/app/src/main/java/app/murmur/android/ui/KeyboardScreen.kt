@@ -202,7 +202,7 @@ fun KeyboardScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) 
             Spacer(Modifier.height(12.dp))
             Text(
                 when (k.desktopOverlay) {
-                    DesktopOverlay.AUTO -> "Follows the device: a keyboard, a desktop session or a screen as wide as a laptop's turns the pill on. ${describeAutoOverlay(posture)}"
+                    DesktopOverlay.AUTO -> "Follows the device: a keyboard, a desktop session or a tablet-sized screen turns the pill on. ${describeAutoOverlay(posture)}"
                     DesktopOverlay.ON -> "The desktop pill, whatever is attached."
                     DesktopOverlay.OFF -> "The floating button beside the keyboard, whatever is attached."
                 },
@@ -228,6 +228,13 @@ fun KeyboardScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) 
                 checked = k.showOverlayWhenIdle,
                 enabled = desktopOn,
                 onCheckedChange = { on -> update { it.copy(showOverlayWhenIdle = on) } }
+            )
+            ToggleRow(
+                title = "Tap the idle bar to dictate",
+                description = "Off, the bar only shows that Murmur is ready: taps go to whatever is under it, and your shortcut starts a dictation. Without a keyboard attached there is no shortcut, so the bar always takes a tap.",
+                checked = k.tapIdleBarToDictate,
+                enabled = desktopOn && k.showOverlayWhenIdle,
+                onCheckedChange = { on -> update { it.copy(tapIdleBarToDictate = on) } }
             )
         }
 

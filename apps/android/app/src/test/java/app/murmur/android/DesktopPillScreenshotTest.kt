@@ -20,6 +20,7 @@ import app.murmur.android.settings.OverlayShape
 import app.murmur.android.ui.theme.Oklch
 import app.murmur.android.ui.theme.schemeFromSeed
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -61,8 +62,10 @@ class DesktopPillScreenshotTest {
     private class RecordingHost : OverlayPillView.Host {
         val canvas = ArrayList<Box>()
         val touch = ArrayList<Box>()
+        var touchable = true
         override fun applyCanvasFrame(frame: Box) { canvas += frame }
         override fun applyTouchFrame(frame: Box) { touch += frame }
+        override fun applyTouchable(touchable: Boolean) { this.touchable = touchable }
     }
 
     private lateinit var view: OverlayPillView
@@ -73,6 +76,9 @@ class DesktopPillScreenshotTest {
     private fun dp(v: Float): Float = v * DENSITY
 
     private val keyboardDesktop = PillPresentation.Desktop(OverlayPosition.BOTTOM_CENTER, showIdle = true, touchControls = false)
+
+    /** The same with "Tap the idle bar to dictate" on: the bar's target is where the bar is recovered from. */
+    private val keyboardDesktopTap = keyboardDesktop.copy(idleTap = true)
 
     @Before
     fun setUp() {
@@ -99,9 +105,13 @@ class DesktopPillScreenshotTest {
 
     private fun settle() = frames((MORPH_MS / FRAME_MS).toInt() + 8)
 
-    /** The pill's outline, recovered from the touch window the view asked for (it hugs the pill, padded). */
+    /**
+     * The pill's outline, recovered from the touch window the view asked for: 6 dp around the idle
+     * bar; around the pill, 12 dp either side and at least 44 dp tall.
+     */
     private fun pillFromTouch(pillH: Float): Box {
         val t = host.touch.last()
+        if (pillH <= dp(6f)) return t.inflate(-dp(6f))
         val dy = maxOf(dp(6f), (dp(44f) - pillH) / 2f)
         return Box(t.left + dp(12f), t.top + dy, t.right - dp(12f), t.bottom - dy)
     }
@@ -115,6 +125,12 @@ class DesktopPillScreenshotTest {
 
         view.setPresentation(keyboardDesktop)
         settle()
+        assertFalse("with a keyboard the idle bar lets every tap through, as on the desktop", host.touchable)
+
+        // Asked to take a tap, the bar's target is the bar and 6 dp around it, nothing more.
+        view.setPresentation(keyboardDesktopTap)
+        settle()
+        assertTrue(host.touchable)
 
         // The canvas is a band along the bottom; the idle bar is 56 x 6 dp, centred, 40 dp up.
         val band = host.canvas.last()
@@ -125,7 +141,9 @@ class DesktopPillScreenshotTest {
         assertEquals(SCREEN_W / 2f, bar.centerX, 1f)
         assertEquals(SCREEN_H - dp(DESKTOP_EDGE_DP), bar.bottom, 1f)
         assertEquals(dp(56f), bar.width, 1f)
-        assertTrue("the bar's touch target is at least 44 dp tall", host.touch.last().height >= dp(44f) - 0.5f)
+        assertEquals("the bar's target: 6 dp around the bar", dp(18f), host.touch.last().height, 0.5f)
+        view.setPresentation(keyboardDesktop)
+        settle()
 
         val idle = renderDesktop(bar, "idle bar, ready · Ctrl + Meta to dictate")
         assertTrue("the bar is a light surface", lightness(idle.getPixel(bar.centerX.roundToInt(), bar.centerY.roundToInt())) > 0.9)
@@ -138,6 +156,7 @@ class DesktopPillScreenshotTest {
         view.render(DictationState.Listening(7, 0.6f, DictationMode.HANDS_FREE, locked = true))
         settle()
         val pill = pillFromTouch(dp(46f))
+        assertTrue("the listening pill takes taps", host.touchable)
         assertEquals(bar.bottom, pill.bottom, 1f)
         assertEquals(bar.centerX, pill.centerX, 1f)
         assertEquals(dp(46f), pill.height, 1f)
@@ -163,17 +182,18 @@ class DesktopPillScreenshotTest {
         view.setPresentation(PillPresentation.Button)
         settle()
         assertTrue(host.touch.last().approximately(buttonTouch, 1.5f))
+        assertTrue("the floating button takes taps again", host.touchable)
     }
 
     @Test
     fun `the other desktop positions`() {
-        view.setPresentation(PillPresentation.Desktop(OverlayPosition.TOP_CENTER, showIdle = true, touchControls = false))
+        view.setPresentation(PillPresentation.Desktop(OverlayPosition.TOP_CENTER, showIdle = true, touchControls = false, idleTap = true))
         settle()
         val top = pillFromTouch(dp(6f))
         assertEquals(SCREEN_W / 2f, top.centerX, 1f)
         assertTrue("the bar hangs from the top margin: ${top.top / DENSITY} dp", top.top / DENSITY in 28f..80f)
 
-        view.setPresentation(PillPresentation.Desktop(OverlayPosition.BOTTOM_RIGHT, showIdle = true, touchControls = false))
+        view.setPresentation(PillPresentation.Desktop(OverlayPosition.BOTTOM_RIGHT, showIdle = true, touchControls = false, idleTap = true))
         settle()
         val right = pillFromTouch(dp(6f))
         assertEquals(SCREEN_W - dp(28f) - dp(180f), right.centerX, 1f)

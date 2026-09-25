@@ -200,12 +200,12 @@ class KeyboardWindowTimingTest {
     }
 
     @Test
-    fun `the pill appears in the frame the keyboard's window arrives, where the keyboard comes to rest`() {
+    fun `the pill appears in the frame the keyboard's window is reported, where the keyboard comes to rest`() {
         frame(null, windowSetChanged = false)
         assertNull(pillView())
         frame(imeWindow(visibleTop = 2250, frameTop = KEYBOARD_TOP), windowSetChanged = true)
         val pill = pillView()
-        assertNotNull("the keyboard's window arrived this frame; the pill must be up in it", pill)
+        assertNotNull("the keyboard's window was reported this frame; the pill must be up in it", pill)
         val shown = drawnPill(pill!!)
         val (ex, ey) = restingCenter(KEYBOARD_TOP)
         assertNotNull(shown)
@@ -214,11 +214,11 @@ class KeyboardWindowTimingTest {
     }
 
     @Test
-    fun `the pill is gone in the frame the keyboard's window leaves`() {
+    fun `the pill is gone in the frame the keyboard's window is reported gone`() {
         assertEquals(0, openKeyboard())
         assertNotNull(pillView())
         frame(null, windowSetChanged = true)
-        assertNull("the keyboard's window left this frame; the pill must be gone in it", pillView())
+        assertNull("the keyboard's window was reported gone this frame; the pill must be gone in it", pillView())
         assertTrue(overlayViews().isEmpty())
     }
 

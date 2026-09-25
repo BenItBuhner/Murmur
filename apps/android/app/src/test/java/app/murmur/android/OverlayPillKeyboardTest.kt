@@ -180,7 +180,7 @@ class OverlayPillKeyboardTest {
         curve.map { p -> (gone + (rest - gone) * p).roundToInt() } + List(30) { (gone + (rest - gone) * curve.last()).roundToInt() }
 
     @Test
-    fun `the pill is where the keyboard's top edge puts it in every frame while the keyboard moves`() {
+    fun `the pill is drawn at each keyboard edge it is given in that same frame while the keyboard is dragged and resized`() {
         // The app drags the keyboard down with a scroll and lets it spring back (recording, 3.2-4.5 s).
         val drag = (0..12).map { KEYBOARD_TOP + it * 8 } + (12 downTo 0).map { KEYBOARD_TOP + it * 8 }
         // The keyboard grows (a toolbar or the number row appears) and shrinks back.
@@ -190,8 +190,9 @@ class OverlayPillKeyboardTest {
     }
 
     @Test
-    fun `the pill travels with the keyboard frame by frame as it opens and closes`() {
-        // Offered one keyboard top per frame, as Samsung Keyboard moves on the recording.
+    fun `given the keyboard's edge every frame as it opens and closes, the pill is drawn at it in that frame`() {
+        // One keyboard top per frame, as Samsung Keyboard moves on the recording. On a phone the service learns
+        // the keyboard's edge in snapshots, not every frame; whatever it learns is drawn in the next frame.
         val misses = follow(travel(CLOSING, rest = KEYBOARD_TOP, gone = SCREEN_H)) +
             follow(travel(OPENING, rest = KEYBOARD_TOP, gone = SCREEN_H))
         assertTrue("the pill lagged the keyboard in ${misses.size} frames:\n" + misses.take(12).joinToString("\n"), misses.isEmpty())

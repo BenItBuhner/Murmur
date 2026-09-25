@@ -45,9 +45,9 @@ class MemoryKeyboardOffsets : KeyboardOffsets {
  * whether a keyboard is [visible]; whether it is [ready], i.e. where it rests is known (its frame's top
  * plus what this keyboard is known to sit below it, or a report of it at rest); and whether it is
  * [displaced], reported well below where it rests (on its way out, or pulled most of the way out by
- * an app's scroll). [top] is always the resting edge. A keyboard reported well above where it rests is being
- * carried by a system animation (swiping to Recents lifts and shrinks the app with its keyboard) and
- * counts as gone: nothing else puts a keyboard above its own resting edge.
+ * an app's scroll). [top] is always the resting edge. A keyboard reported well above where it rests
+ * is being carried by a system animation (swiping to Recents lifts and shrinks the app with its
+ * keyboard) and counts as gone: nothing else puts a keyboard above its own resting edge.
  */
 class KeyboardTracker(private val density: Float, private val offsets: KeyboardOffsets = MemoryKeyboardOffsets()) {
     /** A keyboard is on screen. */

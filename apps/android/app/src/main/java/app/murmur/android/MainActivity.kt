@@ -285,7 +285,7 @@ private fun Main(
     ) { entry, nav ->
         when (entry.route) {
             Route.HOME -> HomeScreen(config, settings, signedIn, firstName, syncStatus, nav, onOpen = navigator::open, howTo = readyHint)
-            Route.HISTORY -> HistoryScreen(HistoryStore.get(context), store, RecordingStore.get(context), nav)
+            Route.HISTORY -> HistoryScreen(HistoryStore.get(context), store, RecordingStore.get(context), nav, syncStatus)
             Route.BUTTON -> DictationButtonScreen(store, settings, nav)
             Route.KEYBOARD -> KeyboardScreen(store, settings, nav)
             Route.MODEL -> SpeechModelScreen(store, settings, nav)

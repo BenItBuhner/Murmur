@@ -2,6 +2,10 @@ package app.murmur.android.cloud
 
 import android.content.Context
 import android.content.SharedPreferences
+import app.murmur.android.dictation.DictationMode
+import app.murmur.android.history.HistoryEntry
+import app.murmur.android.history.LlmOutcome
+import app.murmur.android.history.StageTimings
 import app.murmur.android.settings.AppRule
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
@@ -199,6 +203,48 @@ data class DeviceDto(
 )
 
 /**
+ * One synced dictation as `history:recent` returns it (`historyEntryDtoValidator`): the text and
+ * the facts about it, never the audio. [deviceName] is joined in from the account's device list
+ * and missing once that device was removed from it.
+ */
+@Serializable
+data class HistoryEntryDto(
+    val id: String,
+    val entryId: String,
+    val deviceId: String,
+    val deviceName: String? = null,
+    val createdAt: Double,
+    val mode: String = "hands-free",
+    val rawText: String? = null,
+    val finalText: String,
+    val wordCount: Double = 0.0,
+    val speechMs: Double = 0.0,
+    val appName: String? = null,
+    val provider: String = "",
+    val model: String = "",
+    val llmUsed: Boolean = false
+)
+
+/**
+ * One dictation on its way to `history:push` (`historyEntryInputValidator`), as the outbox keeps
+ * it. Only what the desktop sends: text, counts, the app, the models; no recording, no timings.
+ */
+@Serializable
+data class HistoryPushEntry(
+    val entryId: String,
+    val createdAt: Long,
+    val mode: DictationMode,
+    val rawText: String? = null,
+    val finalText: String,
+    val wordCount: Int,
+    val speechMs: Long,
+    val appName: String? = null,
+    val provider: String,
+    val model: String,
+    val llmUsed: Boolean
+)
+
+/**
  * The account's style preferences as the server holds them. Fields older clients still write
  * (fillers, hesitations, lists, numbers, ...) are ignored on the way in and never written.
  */
@@ -232,14 +278,19 @@ data class PreferencesDto(
     val updatedAt: Double = 0.0
 )
 
-/** Style preferences this app knows about; the subset of the account's preferences it syncs. */
+/**
+ * The preferences that follow the user across devices (desktop: `SyncedPreferences`): the style
+ * section, the language and whether dictation history is kept in the account. The last one is an
+ * account preference like the others, so a switch flipped on one device flips on every device.
+ */
 @Serializable
 data class StylePreferences(
     val mode: String,
     val tone: String,
     val trailingSpace: Boolean,
     val language: String,
-    val llmInstructions: String = ""
+    val llmInstructions: String = "",
+    val historySync: Boolean = false
 ) {
     companion object {
         fun of(s: MurmurSettings) = StylePreferences(
@@ -247,7 +298,8 @@ data class StylePreferences(
             tone = s.tone.id,
             trailingSpace = s.trailingSpace,
             language = s.language,
-            llmInstructions = s.llmInstructions
+            llmInstructions = s.llmInstructions,
+            historySync = s.historySync
         )
     }
 
@@ -260,8 +312,9 @@ data class StylePreferences(
             "llmInstructions" to llmInstructions
         )
         val args = LinkedHashMap<String, Any?>()
-        if (previous == null || previous.copy(language = language) != this) args["formatting"] = formatting
+        if (previous == null || previous.copy(language = language, historySync = historySync) != this) args["formatting"] = formatting
         if (previous == null || previous.language != language) args["language"] = language
+        if (previous == null || previous.historySync != historySync) args["sync"] = mapOf("history" to historySync)
         return args
     }
 }
@@ -274,7 +327,8 @@ fun applyRemotePreferences(s: MurmurSettings, remote: PreferencesDto): MurmurSet
         tone = f?.tone?.let { Tone.from(it) } ?: s.tone,
         trailingSpace = f?.trailingSpace ?: s.trailingSpace,
         llmInstructions = f?.llmInstructions ?: s.llmInstructions,
-        language = remote.language ?: s.language
+        language = remote.language ?: s.language,
+        historySync = remote.sync?.history ?: s.historySync
     )
 }
 
@@ -369,6 +423,21 @@ sealed class SyncOp {
     @Serializable
     @SerialName("users.completeOnboarding")
     data class CompleteOnboarding(override val id: String) : SyncOp()
+
+    /** Dictations for the account (`history:push`); a burst becomes one request. Idempotent by entry id. */
+    @Serializable
+    @SerialName("history.push")
+    data class HistoryPush(override val id: String, val entries: List<HistoryPushEntry>) : SyncOp()
+
+    /** The user deleted one dictation here; every device drops it (`history:remove`). */
+    @Serializable
+    @SerialName("history.remove")
+    data class HistoryRemove(override val id: String, val entryId: String) : SyncOp()
+
+    /** The user cleared History here; the account's copy goes too (`history:clear`). */
+    @Serializable
+    @SerialName("history.clear")
+    data class HistoryClear(override val id: String) : SyncOp()
 }
 
 fun newOpId(): String = UUID.randomUUID().toString()
@@ -614,4 +683,85 @@ object SyncReducers {
         }
         return out
     }
+
+    // ---- history (desktop: historyToPush, historyFromRemote, queueHistoryPush) ----------------
+
+    /**
+     * What of a dictation goes to the account: the text and the facts about it, never the audio
+     * or the timings. A dictation that produced nothing (failed, or empty) is not sent at all.
+     */
+    fun historyToPush(entry: HistoryEntry): HistoryPushEntry? {
+        if (entry.finalText.isBlank() || entry.error != null) return null
+        return HistoryPushEntry(
+            entryId = entry.id,
+            createdAt = entry.createdAt,
+            mode = entry.mode,
+            rawText = entry.rawText.takeIf { it.isNotEmpty() },
+            finalText = entry.finalText,
+            wordCount = entry.wordCount,
+            speechMs = entry.speechMs,
+            appName = entry.appName,
+            provider = entry.provider,
+            model = entry.model,
+            llmUsed = entry.llmUsed
+        )
+    }
+
+    /**
+     * A dictation made on another device, as History shows it here: marked remote with its device,
+     * counted as inserted there, its timings unknown but for the speech itself (the desktop fills
+     * `recordMs` from `speechMs` the same way).
+     */
+    fun historyFromRemote(dto: HistoryEntryDto): HistoryEntry = HistoryEntry(
+        id = dto.entryId,
+        createdAt = dto.createdAt.toLong(),
+        mode = DictationMode.entries.firstOrNull { it.id == dto.mode } ?: DictationMode.HANDS_FREE,
+        rawText = dto.rawText ?: "",
+        finalText = dto.finalText,
+        wordCount = dto.wordCount.toInt(),
+        speechMs = dto.speechMs.toLong(),
+        appName = dto.appName,
+        provider = dto.provider,
+        model = dto.model,
+        injected = true,
+        llmUsed = dto.llmUsed,
+        llm = if (dto.llmUsed) LlmOutcome.USED else null,
+        timings = StageTimings(recordMs = dto.speechMs.toLong()),
+        deviceId = dto.deviceId,
+        deviceName = dto.deviceName,
+        remote = true
+    )
+
+    /** Append to the trailing push when possible so a burst of dictations becomes one request. */
+    fun queueHistoryPush(ops: List<SyncOp>, entry: HistoryPushEntry, opId: String, maxBatch: Int = 100): List<SyncOp> {
+        val last = ops.lastOrNull()
+        if (last is SyncOp.HistoryPush && last.entries.size < maxBatch) {
+            return ops.dropLast(1) + last.copy(entries = last.entries + entry)
+        }
+        return ops + SyncOp.HistoryPush(opId, listOf(entry))
+    }
+
+    /** Clearing History supersedes every push and removal still waiting; one clear goes instead. */
+    fun queueHistoryClear(ops: List<SyncOp>, opId: String): List<SyncOp> =
+        ops.filterNot { it is SyncOp.HistoryPush || it is SyncOp.HistoryRemove } + SyncOp.HistoryClear(opId)
+
+    /** `history:push` arguments: numbers as doubles, `v.optional` fields omitted rather than null. */
+    fun historyPushArgs(deviceId: String, entries: List<HistoryPushEntry>): Map<String, Any?> = mapOf(
+        "deviceId" to deviceId,
+        "entries" to entries.map { e ->
+            buildMap<String, Any?> {
+                put("entryId", e.entryId)
+                put("createdAt", e.createdAt.toDouble())
+                put("mode", e.mode.id)
+                e.rawText?.let { put("rawText", it) }
+                put("finalText", e.finalText)
+                put("wordCount", e.wordCount.toDouble())
+                put("speechMs", e.speechMs.toDouble())
+                e.appName?.let { put("appName", it) }
+                put("provider", e.provider)
+                put("model", e.model)
+                put("llmUsed", e.llmUsed)
+            }
+        }
+    )
 }

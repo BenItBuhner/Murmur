@@ -53,6 +53,7 @@ class SettingsParityTest {
         assertEquals(d.getBoolean("useDictionaryPrompt"), s.useDictionaryPrompt)
         assertEquals(d.getBoolean("showLatencyInHistory"), s.showLatencyInHistory)
         assertEquals(d.getBoolean("buttonShadow"), s.buttonShadow)
+        assertEquals(d.getBoolean("historySync"), s.historySync)
         assertEquals(d.getString("formattingMode"), s.formattingMode.id)
         assertEquals(d.getString("tone"), s.tone.id)
         assertEquals(d.getBoolean("trailingSpace"), s.trailingSpace)

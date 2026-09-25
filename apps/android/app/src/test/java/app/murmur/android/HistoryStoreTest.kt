@@ -1,6 +1,8 @@
 package app.murmur.android
 
 import app.murmur.android.history.HistoryEntry
+import app.murmur.android.history.HistoryEvent
+import app.murmur.android.history.HistoryOrigin
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
@@ -147,6 +149,77 @@ class HistoryStoreTest {
         store.add(entry("e5").copy(recording = recordings.save("e5", pcm, 16_000)))
         store.clear()
         assertEquals(0, recordings.info().count)
+    }
+
+    private fun remote(id: String, at: Long, device: String? = "Ben's desk") =
+        entry(id, at, text = "from the desk $id").copy(recording = null, timings = StageTimings(recordMs = 1800), deviceId = "desk", deviceName = device, remote = true)
+
+    @Test
+    fun `merging remote entries never touches this phone's and drops the ones gone upstream`() {
+        val store = HistoryStore(file())
+        store.add(entry("a", at = 10, text = "mine").copy(recording = "a.wav"))
+        store.mergeRemote(listOf(remote("r1", 30), remote("r2", 20), remote("a", 10).copy(finalText = "the account's copy of mine")))
+        assertEquals(listOf("r1", "r2", "a"), store.entries.value.map { it.id })
+        // The phone's own copy stands, recording and timings included; the server's echo of it is ignored.
+        val own = store.get("a")!!
+        assertEquals("mine", own.finalText)
+        assertEquals("a.wav", own.recording)
+        assertFalse(own.remote)
+        assertTrue(store.get("r1")!!.remote)
+        assertEquals("Ben's desk", store.get("r1")!!.deviceName)
+
+        // The same snapshot again changes nothing; one without r2 drops it; a newer one slots in by date.
+        store.mergeRemote(listOf(remote("r1", 30), remote("r2", 20)))
+        assertEquals(listOf("r1", "r2", "a"), store.entries.value.map { it.id })
+        store.mergeRemote(listOf(remote("r1", 30), remote("r3", 15)))
+        assertEquals(listOf("r1", "r3", "a"), store.entries.value.map { it.id })
+        // A remote entry already here keeps its first copy even if the server's changed.
+        store.mergeRemote(listOf(remote("r1", 30, device = null), remote("r3", 15)))
+        assertEquals("Ben's desk", store.get("r1")!!.deviceName)
+
+        // Remote entries are persisted with their device, and removeRemote leaves only the phone's own.
+        val reopened = HistoryStore(file())
+        assertEquals(listOf("r1", "r3", "a"), reopened.entries.value.map { it.id })
+        assertTrue(reopened.get("r3")!!.remote)
+        assertEquals("desk", reopened.get("r3")!!.deviceId)
+        store.removeRemote()
+        assertEquals(listOf("a"), store.entries.value.map { it.id })
+        assertEquals(listOf("a"), HistoryStore(file()).entries.value.map { it.id })
+    }
+
+    @Test
+    fun `the cap applies across local and remote entries alike`() {
+        val store = HistoryStore(file(), maxEntries = 3)
+        store.add(entry("a", at = 10))
+        store.add(entry("b", at = 40))
+        store.mergeRemote(listOf(remote("r1", 30), remote("r2", 20), remote("r3", 50)))
+        assertEquals(listOf("r3", "b", "r1"), store.entries.value.map { it.id })
+    }
+
+    @Test
+    fun `listeners hear the user's changes with their origin, and nothing of a remote merge`() {
+        val store = HistoryStore(file())
+        val events = ArrayList<HistoryEvent>()
+        store.addListener { events += it }
+        store.add(entry("a", at = 10))
+        store.replace(entry("a", at = 10, text = "again"))
+        store.mergeRemote(listOf(remote("r1", 30)))
+        store.removeRemote()
+        store.delete("a")
+        store.delete("r1", HistoryOrigin.CLOUD)
+        store.clear()
+        store.clear(HistoryOrigin.CLOUD)
+        assertEquals(
+            listOf(
+                HistoryEvent.Added(entry("a", at = 10)),
+                HistoryEvent.Replaced(entry("a", at = 10, text = "again")),
+                HistoryEvent.Deleted("a", HistoryOrigin.LOCAL),
+                HistoryEvent.Deleted("r1", HistoryOrigin.CLOUD),
+                HistoryEvent.Cleared(HistoryOrigin.LOCAL),
+                HistoryEvent.Cleared(HistoryOrigin.CLOUD)
+            ),
+            events
+        )
     }
 
     @Test

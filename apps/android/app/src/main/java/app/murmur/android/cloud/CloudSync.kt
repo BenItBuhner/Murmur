@@ -4,6 +4,10 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import app.murmur.android.BuildConfig
+import app.murmur.android.history.HistoryEntry
+import app.murmur.android.history.HistoryEvent
+import app.murmur.android.history.HistoryOrigin
+import app.murmur.android.history.HistoryStore
 import app.murmur.android.settings.AppRule
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
@@ -25,18 +29,26 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "MurmurCloud"
 private const val RETRY_MS = 15_000L
 private const val ONBOARDING_VERSION = 1.0
+
+/** How many dictations follow the account: the newest this many are pushed when sync is turned on and mirrored from `history:recent`. */
+private const val HISTORY_BACKLOG = 200
+
+/** A burst of dictations is sent as one request once it has settled for this long. */
+private const val HISTORY_PUSH_DELAY_MS = 250L
 
 enum class SyncPhase { DISABLED, SIGNED_OUT, CONNECTING, SYNCING, SYNCED, OFFLINE, ERROR }
 
@@ -61,18 +73,24 @@ data class SyncStatus(
 
 /**
  * Android counterpart of the desktop sync engine (apps/desktop/src/main/cloud/sync-engine.ts).
- * Clerk reports who is signed in; Convex subscriptions deliver the account's dictionary and style
- * preferences; local edits are diffed into an idempotent outbox and replayed. The dictionary the
- * dictation pipeline reads is always derive(server snapshot, pending ops), so the app works offline.
+ * Clerk reports who is signed in; Convex subscriptions deliver the account's dictionary, snippets,
+ * rules, style preferences and (opt-in) dictation history; local edits are diffed into an
+ * idempotent outbox and replayed. The dictionary the dictation pipeline reads is always
+ * derive(server snapshot, pending ops), so the app works offline.
+ *
+ * The constructor takes every outside dependency so a test can run the whole engine against a
+ * fake Convex client (see HistorySyncTest); [init] wires the real ones.
  */
-class CloudSync private constructor(
+class CloudSync internal constructor(
     private val app: Context,
     val config: CloudConfig,
-    private val settings: SettingsStore
+    private val settings: SettingsStore,
+    private val history: HistoryStore,
+    /** Clerk user id of whoever is signed in, null for nobody; nothing until Clerk is ready. */
+    private val account: Flow<String?>,
+    private val scope: CoroutineScope,
+    private val client: ConvexClientWithAuth<ClerkCredentials>?
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val client: ConvexClientWithAuth<ClerkCredentials>? =
-        if (config.enabled) ConvexClientWithAuth(config.convexUrl, ClerkAuthProvider(), scope) else null
     private val outbox = Outbox(app)
     private val flushMutex = Mutex()
 
@@ -96,15 +114,19 @@ class CloudSync private constructor(
     private var preferencesLoaded = false
     private var mirrorPrefs: StylePreferences = StylePreferences.of(settings.get())
     private var subscriptions: Job? = null
+    /** The `history:recent` subscription, running only while history sync is on. */
+    private var historySubscription: Job? = null
     private var generation = 0
     @Volatile private var applying = false
 
     private val settingsListener: (MurmurSettings, MurmurSettings, SettingsOrigin) -> Unit =
         { previous, next, origin -> onSettingsChange(previous, next, origin) }
+    private val historyListener: (HistoryEvent) -> Unit = { event -> onHistoryEvent(event) }
 
     fun start() {
         val convex = client ?: return
         settings.addListener(settingsListener)
+        history.addListener(historyListener)
         scope.launch {
             convex.webSocketStateFlow.collect { state ->
                 val was = connected
@@ -124,12 +146,9 @@ class CloudSync private constructor(
             }
         }
         scope.launch {
-            combine(Clerk.isInitialized, Clerk.userFlow) { ready, user -> ready to user?.id }
-                .distinctUntilChanged()
-                .collect { (ready, userId) ->
-                    if (!ready) return@collect
-                    if (userId != null) onSignedIn(userId) else onSignedOut()
-                }
+            account.distinctUntilChanged().collect { userId ->
+                if (userId != null) onSignedIn(userId) else onSignedOut()
+            }
         }
         publish()
         Log.i(TAG, "sync engine started (${config.accountMode}, ${config.convexUrl})")
@@ -156,6 +175,12 @@ class CloudSync private constructor(
         }
     }
 
+    /**
+     * Signed out: the account's data leaves the phone, as it leaves the desktop (`disconnectAccount`
+     * with `wipe`): dictionary, snippets, rules, the history mirror and the opt-in itself. History
+     * is cleared as the desktop clears it, with the cloud origin so nothing is queued for an account
+     * nobody is signed in to.
+     */
     private fun onSignedOut() {
         if (!signedIn) {
             publish()
@@ -166,6 +191,7 @@ class CloudSync private constructor(
         generation++
         subscriptions?.cancel()
         subscriptions = null
+        stopHistorySubscription()
         authenticated = false
         user = null
         devices = emptyList()
@@ -179,8 +205,15 @@ class CloudSync private constructor(
         error = null
         outbox.clear()
         settings.update(SettingsOrigin.CLOUD) {
-            it.copy(dictionaryEntries = emptyList(), snippets = emptyList(), appRules = emptyList(), lastSignedInUserId = "")
+            it.copy(
+                dictionaryEntries = emptyList(),
+                snippets = emptyList(),
+                appRules = emptyList(),
+                lastSignedInUserId = "",
+                historySync = false
+            )
         }
+        history.clear(HistoryOrigin.CLOUD)
         mirrorPrefs = StylePreferences.of(settings.get())
         scope.launch { client?.logout(app) }
         publish()
@@ -332,6 +365,8 @@ class CloudSync private constructor(
             }
             launch { subscribeStatus(gen) }
         }
+        stopHistorySubscription()
+        updateHistorySubscription(gen)
     }
 
     /**
@@ -368,6 +403,40 @@ class CloudSync private constructor(
         }
     }
 
+    /**
+     * Mirror the account's recent dictations while the user has opted in and the account is
+     * connected (desktop: `updateHistorySubscription`). The phone's own entries come back with its
+     * device id and are left out: the local copies carry the timings and the recording. Off, the
+     * mirror is dropped; the account keeps its copies until a device clears them.
+     */
+    private fun updateHistorySubscription(gen: Int = generation) {
+        val convex = client
+        val wanted = convex != null && authenticated && signedIn && settings.get().historySync
+        if (!wanted) {
+            if (historySubscription != null) {
+                stopHistorySubscription()
+                history.removeRemote()
+            }
+            return
+        }
+        if (historySubscription != null || convex == null) return
+        val mine = settings.get().deviceId
+        historySubscription = scope.launch {
+            convex.subscribe<List<HistoryEntryDto>>("history:recent", mapOf("limit" to HISTORY_BACKLOG.toDouble())).collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess { list ->
+                    history.mergeRemote(list.filter { it.deviceId != mine }.map(SyncReducers::historyFromRemote))
+                }.onFailure { error = it.message }
+                publish()
+            }
+        }
+    }
+
+    private fun stopHistorySubscription() {
+        historySubscription?.cancel()
+        historySubscription = null
+    }
+
     private fun applyDerived() {
         val s = settings.get()
         val ops = outbox.ops
@@ -388,6 +457,12 @@ class CloudSync private constructor(
             applying = false
         }
         mirrorPrefs = StylePreferences.of(settings.get())
+        // Another device flipped the account's history opt-in: follow it here.
+        val historySync = settings.get().historySync
+        if (historySync != s.historySync) {
+            if (historySync) queueHistoryBacklog()
+            updateHistorySubscription()
+        }
     }
 
     // ---- local changes -> outbox ------------------------------------------------------------
@@ -460,15 +535,80 @@ class CloudSync private constructor(
             }
         }
         val prefs = StylePreferences.of(next)
+        val historyToggled = prefs.historySync != mirrorPrefs.historySync
         if (prefs != mirrorPrefs) {
             touched = true
             outbox.update { SyncReducers.queuePreferences(it, prefs, newOpId()) }
         }
         mirrorPrefs = prefs
+        // The opt-in flipped here: the account learns of it with the preferences, and the phone's
+        // recent dictations follow it up (on) or the other devices' entries go (off).
+        if (historyToggled) {
+            if (prefs.historySync) queueHistoryBacklog()
+            updateHistorySubscription()
+        }
         if (touched) {
             publish()
             scope.launch { flush() }
         }
+    }
+
+    /**
+     * A change to History made on this phone (desktop: `onHistoryAdded`, `onHistoryDeleted`,
+     * `onHistoryCleared`). Nothing leaves the phone unless the user opted in; entries that came
+     * from other devices are never sent back; a change the cloud made is not echoed either.
+     */
+    private fun onHistoryEvent(event: HistoryEvent) {
+        if (!signedIn || !settings.get().historySync) return
+        when (event) {
+            is HistoryEvent.Added -> queueHistoryEntry(event.entry)
+            is HistoryEvent.Replaced -> queueHistoryEntry(event.entry)
+            is HistoryEvent.Deleted -> {
+                if (event.origin == HistoryOrigin.CLOUD) return
+                outbox.update { it + SyncOp.HistoryRemove(newOpId(), event.id) }
+                publish()
+                scope.launch { flush() }
+            }
+            is HistoryEvent.Cleared -> {
+                if (event.origin == HistoryOrigin.CLOUD) return
+                outbox.update { SyncReducers.queueHistoryClear(it, newOpId()) }
+                publish()
+                scope.launch { flush() }
+            }
+        }
+    }
+
+    private fun queueHistoryEntry(entry: HistoryEntry) {
+        if (entry.remote) return
+        val push = SyncReducers.historyToPush(entry) ?: return
+        outbox.update { SyncReducers.queueHistoryPush(it, push, newOpId()) }
+        publish()
+        scope.launch {
+            delay(HISTORY_PUSH_DELAY_MS)
+            flush()
+        }
+    }
+
+    /**
+     * Sync just turned on, here or on another device: the phone's recent dictations (its own, that
+     * produced text) join the account. Sent right away; the desktop leaves its backlog for the next
+     * flush, which on a phone that is put away could be a while.
+     */
+    private fun queueHistoryBacklog() {
+        val local = history.entries.value
+            .asSequence()
+            .filter { !it.remote }
+            .take(HISTORY_BACKLOG)
+            .mapNotNull(SyncReducers::historyToPush)
+            .toList()
+        if (local.isEmpty()) return
+        outbox.update { ops ->
+            var next = ops
+            for (entry in local) next = SyncReducers.queueHistoryPush(next, entry, newOpId())
+            next
+        }
+        publish()
+        scope.launch { flush() }
     }
 
     /** Called after every finished dictation. */
@@ -496,12 +636,14 @@ class CloudSync private constructor(
         client?.logout(app)
     }
 
+    /** Erase the account's data in the cloud; the subscriptions then empty the local mirror, as on the desktop. */
     suspend fun deleteMyData(): Result<Unit> {
         val convex = client ?: return Result.failure(IllegalStateException("Cloud is not configured"))
         if (!authenticated) return Result.failure(IllegalStateException("Not connected to your account"))
         return try {
             outbox.update { emptyList() }
             convex.mutation("users:deleteMyData")
+            history.clear(HistoryOrigin.CLOUD)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -592,6 +734,12 @@ class CloudSync private constructor(
                 ))
             is SyncOp.CompleteOnboarding ->
                 convex.mutation<UserDto>("users:completeOnboarding", mapOf("version" to ONBOARDING_VERSION))
+            is SyncOp.HistoryPush ->
+                convex.mutation<Map<String, Double>>("history:push", SyncReducers.historyPushArgs(settings.get().deviceId, op.entries))
+            is SyncOp.HistoryRemove ->
+                convex.mutation<Boolean>("history:remove", mapOf("entryId" to op.entryId))
+            is SyncOp.HistoryClear ->
+                convex.mutation<Double>("history:clear")
         }
         outbox.remove(op.id)
     }
@@ -645,11 +793,22 @@ class CloudSync private constructor(
             if (r.createdAt > 0) put("createdAt", r.createdAt.toDouble())
         }
 
-        fun init(context: Context, config: CloudConfig, settings: SettingsStore): CloudSync =
+        /** Who is signed in with Clerk, once it is ready: the user id, or null for nobody. */
+        private fun clerkAccount(): Flow<String?> =
+            combine(Clerk.isInitialized, Clerk.userFlow) { ready, user -> ready to user?.id }
+                .filter { it.first }
+                .map { it.second }
+
+        fun init(context: Context, config: CloudConfig, settings: SettingsStore, history: HistoryStore): CloudSync =
             instance ?: synchronized(this) {
-                instance ?: CloudSync(context.applicationContext, config, settings).also {
-                    instance = it
-                    it.start()
+                instance ?: run {
+                    val app = context.applicationContext
+                    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+                    val client = if (config.enabled) ConvexClientWithAuth(config.convexUrl, ClerkAuthProvider(), scope) else null
+                    CloudSync(app, config, settings, history, clerkAccount(), scope, client).also {
+                        instance = it
+                        it.start()
+                    }
                 }
             }
 
@@ -675,5 +834,6 @@ private fun StylePreferences.toDto() = PreferencesDto(
         trailingSpace = trailingSpace,
         llmInstructions = llmInstructions
     ),
-    language = language
+    language = language,
+    sync = SyncPreferencesDto(history = historySync)
 )

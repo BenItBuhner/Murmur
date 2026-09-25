@@ -15,9 +15,12 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.filterToOne
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onChildren
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -27,13 +30,24 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import app.murmur.android.cloud.CloudConfig
+import app.murmur.android.cloud.DeviceDto
+import app.murmur.android.cloud.HistoryEntryDto
+import app.murmur.android.cloud.SyncPhase
+import app.murmur.android.cloud.SyncReducers
+import app.murmur.android.cloud.SyncStatus
+import app.murmur.android.cloud.UserDto
+import app.murmur.android.history.HistoryEntry
 import app.murmur.android.history.HistoryStore
+import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
+import app.murmur.android.history.StageTimings
 import app.murmur.android.inference.InferenceRouting
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.Tone
+import app.murmur.android.ui.AccountContent
 import app.murmur.android.ui.AppearanceScreen
 import app.murmur.android.ui.DictionaryScreen
 import app.murmur.android.ui.HistoryScreen
@@ -253,6 +267,117 @@ class ParitySettingsScreensTest {
         compose.onNodeWithText("Add snippet").performScrollTo().performClick()
         assertEquals(1, store.get().snippets.size)
         compose.onNodeWithText("“My Email” is already a snippet trigger").performScrollTo().assertIsDisplayed()
+    }
+
+    // ---- history sync: the Account opt-in and the synced entries in History --------------------
+
+    private val cloudConfig = CloudConfig.resolve("https://a.convex.cloud", "pk_test_Y2xlcmsuZXhhbXBsZS5jb20k", "")
+
+    /** A cloud build signed in to an account with managed models, as the Account screen sees it. */
+    private val cloudView = localView.copy(
+        cloudEnabled = true, managedAvailable = true,
+        routing = InferenceRouting(InferenceSource.MURMUR, InferenceSource.MURMUR),
+        signedIn = true, planState = "pro", plan = "pro"
+    )
+
+    private fun syncedStatus(deviceId: String) = SyncStatus(
+        phase = SyncPhase.SYNCED, signedIn = true, authenticated = true, connected = true, pendingOps = 0,
+        user = UserDto(id = "u1", clerkId = "user_1", email = "ann@example.com", name = "Ann Example", plan = "pro", planState = "pro"),
+        devices = listOf(
+            DeviceDto("d1", deviceId, "Pixel 9", "android", "0.5.4", 1.0, 1.0),
+            DeviceDto("d2", "desk", "Ben's desk", "win32", "0.5.4", 1.0, 1.0)
+        ),
+        error = null
+    )
+
+    private fun ownEntry(id: String, at: Long, text: String) = HistoryEntry(
+        id = id, createdAt = at, rawText = "um $text", finalText = text, wordCount = text.split(' ').size, speechMs = 2400,
+        appName = "Messages", provider = "murmur", model = "murmur-stt", injected = true, llmUsed = true, llm = LlmOutcome.USED,
+        stages = listOf("capitalize"), timings = StageTimings(recordMs = 2400, sttMs = 610, formatMs = 4, llmMs = 380, injectMs = 30, totalMs = 1024)
+    )
+
+    private fun remoteDto(entryId: String, deviceId: String, deviceName: String?, at: Long, text: String) = HistoryEntryDto(
+        id = "srv-$entryId", entryId = entryId, deviceId = deviceId, deviceName = deviceName, createdAt = at.toDouble(), mode = "hold",
+        rawText = "um $text", finalText = text, wordCount = text.split(' ').size.toDouble(), speechMs = 3100.0, appName = "Slack",
+        provider = "murmur", model = "murmur-stt", llmUsed = true
+    )
+
+    @Test
+    fun `Account carries the history opt-in, off by default, in the desktop's words`() {
+        var flipped: Boolean? = null
+        compose.setContent {
+            val settings by store.flow.collectAsState()
+            CompositionLocalProvider(LocalInferenceView provides cloudView) {
+                MurmurTheme(settings.copy(dynamicColor = false)) {
+                    AccountContent(
+                        config = cloudConfig, status = syncedStatus(settings.deviceId), name = "Ann Example", email = "ann@example.com",
+                        settings = settings, nav = TopNav.Back {}, onSyncNow = {}, onSignOut = {},
+                        onHistorySyncChange = { on ->
+                            flipped = on
+                            store.update { it.copy(historySync = on) }
+                        }
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Sync dictation history").performScrollTo().assertIsDisplayed().assertIsOff()
+        compose.onNodeWithText(
+            "Also keep the text of your dictations in your account so History shows what you dictated on other devices. Off by default because history contains what you said."
+        ).assertIsDisplayed()
+        assertFalse(store.get().historySync)
+        snap("android-history-sync-account-toggle")
+
+        compose.onNodeWithText("Sync dictation history").performClick()
+        assertEquals(true, flipped)
+        assertTrue(store.get().historySync)
+        compose.onNodeWithText("Sync dictation history").assertIsOn()
+        snap("android-history-sync-account-toggle-on")
+        compose.onNodeWithText("Sync dictation history").performClick()
+        assertFalse(store.get().historySync)
+    }
+
+    @Test
+    fun `History lists what other devices dictated, each with its device, once history sync is on`() {
+        val history = HistoryStore.get(context)
+        val recordings = RecordingStore.get(context)
+        history.clear()
+        val now = System.currentTimeMillis()
+        history.add(ownEntry("own-1", now - 7 * 60_000, "Running ten minutes late, order without me."))
+        history.mergeRemote(
+            listOf(
+                remoteDto("desk-1", "desk", "Ben's desk", now - 3 * 60_000, "Ship the release notes before the standup."),
+                remoteDto("old-1", "gone", null, now - 40 * 60_000, "Remind me to renew the domain on Friday.")
+            ).map(SyncReducers::historyFromRemote)
+        )
+        store.update { it.copy(historySync = true) }
+        show { HistoryScreen(history, store, recordings, TopNav.Back {}, syncStatus = syncedStatus(store.get().deviceId)) }
+
+        compose.onNodeWithText("3 dictations, synced across your devices.").assertIsDisplayed()
+        compose.onNodeWithText("Synced").assertIsDisplayed()
+        // The other devices' entries carry their device's name; one whose device left the account says so.
+        compose.onNodeWithText("Ben's desk").assertIsDisplayed()
+        compose.onNodeWithText("other device").assertIsDisplayed()
+        // The phone's own entry carries no device label (the rows are clickable, so their children merge: look under them).
+        assertEquals(2, compose.onAllNodesWithTag("history-device", useUnmergedTree = true).fetchSemanticsNodes().size)
+        snap("android-history-sync-history-entries")
+
+        // A synced entry can be read and deleted here, but there is no audio to play and nothing to send again.
+        compose.onNodeWithText("Ship the release notes before the standup.").performClick()
+        compose.onNodeWithText("Copy").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Delete").assertIsDisplayed()
+        compose.onNodeWithText("Play").assertDoesNotExist()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
+        // All three in one view: the open synced entry, the phone's own, and the one from a device since removed.
+        compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Remind me to renew the domain on Friday."))
+        compose.onNodeWithText("Remind me to renew the domain on Friday.").assertIsDisplayed()
+        snap("android-history-sync-history-entry-open")
+
+        // Off again, History says so (the header is scrolled away by now; it is the words that matter).
+        store.update { it.copy(historySync = false) }
+        compose.waitForIdle()
+        compose.onNodeWithText("3 dictations, stored only on this phone.").assertExists()
+        compose.onNodeWithText("Synced").assertDoesNotExist()
     }
 
     @Test

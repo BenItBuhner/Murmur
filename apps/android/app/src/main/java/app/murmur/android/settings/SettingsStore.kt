@@ -245,6 +245,13 @@ data class MurmurSettings(
     val lastSignedInUserId: String = "",
     /** Account whose cloud data absorbed this device's pre-account local dictionary. */
     val importedForUserId: String = "",
+    /**
+     * Mirror of the account preference `sync.history` (desktop: `cloud.historySync`): keep the text
+     * of dictations in the account so History shows every device. Off by default because history
+     * contains what was said; it follows the account, so turning it on anywhere turns it on
+     * everywhere. Recordings never sync, whatever this says.
+     */
+    val historySync: Boolean = false,
     // Device-local update preferences (never synced), same defaults as the desktop app.
     /** Look for new releases when the app opens and daily from the accessibility service. */
     val updateAutoCheck: Boolean = true,
@@ -450,6 +457,7 @@ class SettingsStore(context: Context) {
             deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
             lastSignedInUserId = prefs.getString("lastSignedInUserId", d.lastSignedInUserId) ?: "",
             importedForUserId = prefs.getString("importedForUserId", d.importedForUserId) ?: "",
+            historySync = prefs.getBoolean("historySync", d.historySync),
             updateAutoCheck = prefs.getBoolean("updateAutoCheck", d.updateAutoCheck),
             updateAutoInstall = prefs.getBoolean("updateAutoInstall", d.updateAutoInstall),
             updateIncludePrereleases = prefs.getBoolean("updateIncludePrereleases", d.updateIncludePrereleases),
@@ -510,6 +518,7 @@ class SettingsStore(context: Context) {
             .putString("deviceId", s.deviceId)
             .putString("lastSignedInUserId", s.lastSignedInUserId)
             .putString("importedForUserId", s.importedForUserId)
+            .putBoolean("historySync", s.historySync)
             .putBoolean("updateAutoCheck", s.updateAutoCheck)
             .putBoolean("updateAutoInstall", s.updateAutoInstall)
             .putBoolean("updateIncludePrereleases", s.updateIncludePrereleases)

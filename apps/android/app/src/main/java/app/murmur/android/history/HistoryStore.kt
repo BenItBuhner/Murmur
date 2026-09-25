@@ -82,12 +82,37 @@ data class HistoryEntry(
      */
     val recording: String? = null,
     /** How many times this audio has been sent for transcription. */
-    val attempts: Int = 1
+    val attempts: Int = 1,
+    /**
+     * Set on entries that arrived through account history sync from another device (desktop:
+     * the same three fields on `HistoryEntry`). [deviceName] is the name that device reported to
+     * the account's device list, when the server still knew it.
+     */
+    val deviceId: String? = null,
+    val deviceName: String? = null,
+    val remote: Boolean = false
 ) {
     val failed: Boolean get() = error != null
 
     /** Nothing was inserted and the audio is still here: the dictation can be sent again. */
     val retryable: Boolean get() = finalText.isEmpty() && recording != null
+}
+
+/** Who made a change: the user on this device, or the sync engine mirroring the account. */
+enum class HistoryOrigin { LOCAL, CLOUD }
+
+/**
+ * What changed in the store, for the sync engine (desktop: the `added`, `replaced`, `deleted` and
+ * `cleared` events of `HistoryStore`). Remote merges announce nothing: they are the account's
+ * data arriving, not something to send back.
+ */
+sealed class HistoryEvent {
+    data class Added(val entry: HistoryEntry) : HistoryEvent()
+
+    /** A dictation sent again and now transcribed: new text for the account too. */
+    data class Replaced(val entry: HistoryEntry) : HistoryEvent()
+    data class Deleted(val id: String, val origin: HistoryOrigin) : HistoryEvent()
+    data class Cleared(val origin: HistoryOrigin) : HistoryEvent()
 }
 
 /**
@@ -109,13 +134,29 @@ class HistoryStore(
     /** Every dictation kept, newest first. */
     val entries: StateFlow<List<HistoryEntry>> = _entries
 
+    /** Told of every change the user makes here, in order; none of them blocks. */
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(HistoryEvent) -> Unit>()
+
     val size: Int get() = _entries.value.size
 
     fun get(id: String): HistoryEntry? = _entries.value.firstOrNull { it.id == id }
 
+    fun addListener(listener: (HistoryEvent) -> Unit) {
+        listeners.add(listener)
+    }
+
+    fun removeListener(listener: (HistoryEvent) -> Unit) {
+        listeners.remove(listener)
+    }
+
+    private fun emit(event: HistoryEvent) {
+        for (l in listeners) l(event)
+    }
+
     @Synchronized
     fun add(entry: HistoryEntry) {
         commit(listOf(entry) + _entries.value.filter { it.id != entry.id })
+        emit(HistoryEvent.Added(entry))
     }
 
     /**
@@ -131,18 +172,47 @@ class HistoryStore(
             return
         }
         commit(current.toMutableList().also { it[index] = entry })
+        emit(HistoryEvent.Replaced(entry))
     }
 
     @Synchronized
-    fun delete(id: String) {
+    fun delete(id: String, origin: HistoryOrigin = HistoryOrigin.LOCAL) {
         val current = _entries.value
         val next = current.filter { it.id != id }
         if (next.size != current.size) commit(next)
+        emit(HistoryEvent.Deleted(id, origin))
     }
 
     @Synchronized
-    fun clear() {
+    fun clear(origin: HistoryOrigin = HistoryOrigin.LOCAL) {
         if (_entries.value.isNotEmpty()) commit(emptyList())
+        emit(HistoryEvent.Cleared(origin))
+    }
+
+    /**
+     * Fold in entries dictated on the account's other devices (desktop: `mergeRemote`). Entries
+     * already known by id are left alone, so nothing this phone recorded is ever overwritten;
+     * remote entries that vanished upstream (deleted on their device, pruned by the account) are
+     * dropped. Newest first, like the phone's own.
+     */
+    @Synchronized
+    fun mergeRemote(remote: List<HistoryEntry>) {
+        val current = _entries.value
+        val localIds = current.filter { !it.remote }.map { it.id }.toSet()
+        val remoteIds = remote.map { it.id }.toSet()
+        val kept = current.filter { !it.remote || it.id in remoteIds }
+        val keptIds = kept.map { it.id }.toSet()
+        val additions = remote.filter { it.id !in localIds && it.id !in keptIds }
+        if (additions.isEmpty() && kept.size == current.size) return
+        commit((kept + additions).sortedByDescending { it.createdAt })
+    }
+
+    /** Drop the entries that came from other devices (history sync turned off, or signed out). */
+    @Synchronized
+    fun removeRemote() {
+        val current = _entries.value
+        val next = current.filter { !it.remote }
+        if (next.size != current.size) commit(next)
     }
 
     /** The user deleted every recording: the entries stay, their audio references go. */

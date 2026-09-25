@@ -21,14 +21,28 @@ sealed interface PillPresentation {
          * Draw the cancel and confirm buttons on the listening pill. A desktop with a keyboard has
          * Esc and the shortcut for those; a large touch-only screen has nothing else.
          */
-        val touchControls: Boolean
+        val touchControls: Boolean,
+        /**
+         * The idle bar takes a tap, on the bar itself and a hair around it, to start a dictation.
+         * Otherwise it takes no touches at all and every tap goes to what is underneath, as the
+         * desktop's idle indicator lets every click through.
+         */
+        val idleTap: Boolean = touchControls
     ) : PillPresentation
 
     companion object {
-        /** The presentation for the keyboard settings on a device in [posture]. */
+        /**
+         * The presentation for the keyboard settings on a device in [posture]. Without a keyboard
+         * there are no shortcuts, so the idle bar is the only way to start and always takes a tap.
+         */
         fun resolve(keyboard: KeyboardSettings, posture: DevicePosture): PillPresentation =
             if (desktopOverlayOn(keyboard.desktopOverlay, posture)) {
-                Desktop(keyboard.overlayPosition, keyboard.showOverlayWhenIdle, touchControls = !posture.hardwareKeyboard)
+                Desktop(
+                    keyboard.overlayPosition,
+                    keyboard.showOverlayWhenIdle,
+                    touchControls = !posture.hardwareKeyboard,
+                    idleTap = keyboard.tapIdleBarToDictate || !posture.hardwareKeyboard
+                )
             } else {
                 Button
             }

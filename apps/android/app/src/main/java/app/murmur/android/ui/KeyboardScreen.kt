@@ -229,6 +229,13 @@ fun KeyboardScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) 
                 enabled = desktopOn,
                 onCheckedChange = { on -> update { it.copy(showOverlayWhenIdle = on) } }
             )
+            ToggleRow(
+                title = "Tap the idle bar to dictate",
+                description = "Off, the bar only shows that Murmur is ready: taps go to whatever is under it, and your shortcut starts a dictation. Without a keyboard attached there is no shortcut, so the bar always takes a tap.",
+                checked = k.tapIdleBarToDictate,
+                enabled = desktopOn && k.showOverlayWhenIdle,
+                onCheckedChange = { on -> update { it.copy(tapIdleBarToDictate = on) } }
+            )
         }
 
         Spacer(Modifier.height(Space.xl))

@@ -589,7 +589,11 @@ class CloudSync internal constructor(
         }
     }
 
-    /** Sync just turned on: the phone's recent dictations (its own, that produced text) join the account. */
+    /**
+     * Sync just turned on, here or on another device: the phone's recent dictations (its own, that
+     * produced text) join the account. Sent right away; the desktop leaves its backlog for the next
+     * flush, which on a phone that is put away could be a while.
+     */
     private fun queueHistoryBacklog() {
         val local = history.entries.value
             .asSequence()
@@ -604,6 +608,7 @@ class CloudSync internal constructor(
             next
         }
         publish()
+        scope.launch { flush() }
     }
 
     /** Called after every finished dictation. */

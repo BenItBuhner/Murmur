@@ -187,13 +187,15 @@ fun HistoryScreen(
         }
     }
 
+    // History follows the account: the opt-in is on and this build has an account to follow.
+    val synced = prefs.historySync && syncStatus != null && syncStatus.phase != SyncPhase.DISABLED
     LazyScreen(
         title = "History",
-        description = "${pluralize(entries.size, "dictation")}, ${if (prefs.historySync) "synced across your devices." else "stored only on this phone."}",
+        description = "${pluralize(entries.size, "dictation")}, ${if (synced) "synced across your devices." else "stored only on this phone."}",
         nav = nav,
         trailing = {
             // The desktop's sync badge beside the title while history follows the account.
-            if (prefs.historySync && syncStatus != null && syncStatus.phase != SyncPhase.DISABLED) {
+            if (synced && syncStatus != null) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 10.dp)) {
                     Dot(syncColor(syncStatus), size = 6.dp, pulsing = syncStatus.phase == SyncPhase.SYNCING)
                     Spacer(Modifier.width(6.dp))

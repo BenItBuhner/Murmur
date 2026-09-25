@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.5.8': [
+    '**The keyboard-mode idle bar lets taps through.** With a hardware keyboard attached, the thin idle bar on Android no longer catches taps meant for the app icons beneath it: taps pass through, and the shortcuts start dictation, as on desktop. A new setting under Keyboard → Overlay, **Tap the idle bar to dictate** (off by default), makes the bar itself take a tap again, with no invisible padding around it. Without a hardware keyboard the bar still takes a tap, since there is no shortcut to start dictation with.',
+    "**Phones stay in touch mode when turned.** Keyboard mode used to switch on when a phone was rotated to landscape, because the rule looked at the width in the current orientation. It now looks at the screen's shorter side (Android's own tablet line), so a phone never enters keyboard mode by rotating, and a tablet, or an unfolded foldable, uses keyboard mode in either orientation. A keyboard or a DeX session still switches it live."
+  ],
   '0.5.7': [
     "**The floating button leaves as the keyboard starts to close.** Tapping the keyboard's close chevron (or the system Back button, or a hardware Back key) takes the Android button away the moment your finger lifts, before the keys start sliding, instead of leaving it over the app until the keyboard has gone. A close by the back gesture, Done or the app itself gives no earlier signal, so there the button still hides when the keyboard is fully gone, in one go and without moving.",
     '**It fades in where the keyboard rests.** When the keyboard opens, the button fades in at its resting spot instead of popping in partway up the slide and easing into place, and it no longer dips and snaps back when an app scrolls the keyboard slightly. The very first open of a keyboard after installing waits about half a second, once, to learn where that keyboard rests.'

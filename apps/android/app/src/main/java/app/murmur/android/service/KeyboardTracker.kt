@@ -79,14 +79,14 @@ class KeyboardTracker(private val density: Float) {
                 arriving = false
                 arrivalDeadline = null
                 // Still lower than its frame after the longest slide: that is where this keyboard rests.
-                if (!atRest && frame != null) {
-                    val restOffset = reported - frame.top
+                if (resting != null && !atRest) {
+                    val restOffset = reported - (resting - offset)
                     if (abs(restOffset) <= MAX_REST_OFFSET_DP * density) restOffsets[ime.id] = restOffset else untrustedFrames += ime.id
                 }
             }
         }
         visible = true
-        top = (if (arriving && resting != null) resting else reported).toInt()
+        top = ((if (arriving) resting else null) ?: reported).toInt()
         return !wasVisible || top != oldTop
     }
 

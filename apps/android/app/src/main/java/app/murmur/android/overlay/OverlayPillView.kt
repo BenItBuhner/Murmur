@@ -34,7 +34,6 @@ private const val BAR_COUNT = 16
 private const val MORPH_MS = 340L
 private const val MOVE_MS = 240L
 private const val BAR_STEP_MS = 64L
-private const val SHADOW_PAD_DP = 12f
 private const val NUDGE_REPEAT_DELAY_MS = 360L
 private const val NUDGE_REPEAT_MS = 45L
 

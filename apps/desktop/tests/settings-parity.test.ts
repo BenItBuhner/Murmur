@@ -37,6 +37,8 @@ describe('settings parity contract', () => {
       useDictionaryPrompt: s.stt.useDictionaryPrompt,
       showLatencyInHistory: s.general.showLatencyInHistory,
       buttonShadow: s.general.buttonShadow,
+      // The history opt-in is an account preference (`preferences.sync.history`) both apps mirror.
+      historySync: s.cloud.historySync,
       formattingMode: s.formatting.mode,
       tone: s.formatting.tone,
       trailingSpace: s.formatting.trailingSpace,

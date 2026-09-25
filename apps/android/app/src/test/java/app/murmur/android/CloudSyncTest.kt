@@ -6,13 +6,20 @@ import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.DictionaryEntryDto
 import app.murmur.android.cloud.FormattingPreferencesDto
+import app.murmur.android.cloud.HistoryEntryDto
+import app.murmur.android.cloud.HistoryPushEntry
 import app.murmur.android.cloud.PreferencesDto
 import app.murmur.android.cloud.SnippetDto
 import app.murmur.android.cloud.StylePreferences
 import app.murmur.android.cloud.SyncOp
+import app.murmur.android.cloud.SyncPreferencesDto
 import app.murmur.android.cloud.SyncReducers
 import app.murmur.android.cloud.applyRemotePreferences
 import app.murmur.android.cloud.isAcked
+import app.murmur.android.dictation.DictationMode
+import app.murmur.android.history.HistoryEntry
+import app.murmur.android.history.LlmOutcome
+import app.murmur.android.history.StageTimings
 import app.murmur.android.settings.AppRule
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
@@ -111,7 +118,7 @@ class CloudSyncTest {
     @Test
     fun `style preferences patch only what changed and apply remote over local`() {
         val base = StylePreferences.of(MurmurSettings())
-        assertEquals(setOf("formatting", "language"), base.patchArgs(null).keys)
+        assertEquals(setOf("formatting", "language", "sync"), base.patchArgs(null).keys)
         assertEquals(setOf("language"), base.copy(language = "en").patchArgs(base).keys)
         assertEquals(setOf("formatting"), base.copy(tone = "casual").patchArgs(base).keys)
         assertTrue(base.patchArgs(base).isEmpty())
@@ -126,6 +133,113 @@ class CloudSyncTest {
         assertTrue(applied.trailingSpace) // untouched field keeps its local value
         assertEquals("", applied.llmInstructions)
         assertNull(PreferencesDto().formatting)
+    }
+
+    @Test
+    fun `the history opt-in travels as the preferences' sync section, the desktop's shape`() {
+        val base = StylePreferences.of(MurmurSettings())
+        assertFalse(base.historySync)
+        assertEquals(mapOf("history" to false), base.patchArgs(null)["sync"])
+        val on = base.copy(historySync = true)
+        assertEquals(mapOf("sync" to mapOf("history" to true)), on.patchArgs(base))
+        // A style change alone leaves the section out, so a toggle from another device is never clobbered.
+        assertEquals(setOf("formatting"), on.copy(tone = "casual").patchArgs(on).keys)
+
+        val applied = applyRemotePreferences(MurmurSettings(), PreferencesDto(sync = SyncPreferencesDto(history = true)))
+        assertTrue(applied.historySync)
+        assertEquals(FormattingMode.SMART, applied.formattingMode)
+        // A server that never saw the section leaves the local value alone.
+        assertTrue(applyRemotePreferences(MurmurSettings(historySync = true), PreferencesDto(language = "de")).historySync)
+        assertFalse(applyRemotePreferences(MurmurSettings(), PreferencesDto(sync = SyncPreferencesDto())).historySync)
+    }
+
+    // ---- history: the same mapping and batching as apps/desktop/src/main/cloud/reducers.ts ----
+
+    private val dictation = HistoryEntry(
+        id = "h1",
+        createdAt = 123,
+        mode = DictationMode.HOLD,
+        rawText = "um hello",
+        finalText = "Hello.",
+        wordCount = 1,
+        speechMs = 800,
+        appName = "Slack",
+        provider = "openai-compatible",
+        model = "whisper-1",
+        injected = true,
+        llmUsed = true,
+        llm = LlmOutcome.USED,
+        stages = listOf("capitalize"),
+        timings = StageTimings(recordMs = 800, sttMs = 2, formatMs = 3, llmMs = 4, injectMs = 5, totalMs = 15),
+        recording = "h1.wav"
+    )
+
+    @Test
+    fun `only successful dictations are pushed, as text and facts, and remote entries round-trip with their device`() {
+        assertEquals(
+            HistoryPushEntry("h1", 123, DictationMode.HOLD, "um hello", "Hello.", 1, 800, "Slack", "openai-compatible", "whisper-1", true),
+            SyncReducers.historyToPush(dictation)
+        )
+        assertNull("a failed dictation stays on the phone", SyncReducers.historyToPush(dictation.copy(error = "failed", finalText = "")))
+        assertNull("a dictation without text has nothing to sync", SyncReducers.historyToPush(dictation.copy(finalText = " ")))
+        assertNull("no transcript is no transcript, not an empty one", SyncReducers.historyToPush(dictation.copy(rawText = ""))!!.rawText)
+
+        // Over the wire: doubles for every number, optionals left out rather than sent as null, and
+        // never the recording or the timings.
+        val args = SyncReducers.historyPushArgs("phone", listOf(SyncReducers.historyToPush(dictation)!!, SyncReducers.historyToPush(dictation.copy(id = "h2", rawText = "", appName = null))!!))
+        assertEquals("phone", args["deviceId"])
+        @Suppress("UNCHECKED_CAST")
+        val entries = args["entries"] as List<Map<String, Any?>>
+        assertEquals(
+            mapOf(
+                "entryId" to "h1", "createdAt" to 123.0, "mode" to "hold", "rawText" to "um hello", "finalText" to "Hello.",
+                "wordCount" to 1.0, "speechMs" to 800.0, "appName" to "Slack", "provider" to "openai-compatible", "model" to "whisper-1", "llmUsed" to true
+            ),
+            entries[0]
+        )
+        assertEquals(setOf("entryId", "createdAt", "mode", "finalText", "wordCount", "speechMs", "provider", "model", "llmUsed"), entries[1].keys)
+
+        val back = SyncReducers.historyFromRemote(
+            HistoryEntryDto(
+                id = "srv1", entryId = "h1", deviceId = "phone", deviceName = "Pixel", createdAt = 123.0, mode = "hold",
+                rawText = "um hello", finalText = "Hello.", wordCount = 1.0, speechMs = 800.0, appName = "Slack",
+                provider = "openai-compatible", model = "whisper-1", llmUsed = true
+            )
+        )
+        assertEquals(
+            dictation.copy(
+                llm = LlmOutcome.USED, stages = emptyList(), recording = null,
+                timings = StageTimings(recordMs = 800),
+                deviceId = "phone", deviceName = "Pixel", remote = true
+            ),
+            back
+        )
+        assertTrue(back.remote)
+        assertFalse(back.retryable)
+        // A device the account forgot has no name (History labels it "other device"); an unknown mode reads as a button session.
+        val nameless = SyncReducers.historyFromRemote(HistoryEntryDto(id = "s2", entryId = "h3", deviceId = "gone", createdAt = 1.0, mode = "voice", finalText = "Hi.", llmUsed = false))
+        assertNull(nameless.deviceName)
+        assertEquals(DictationMode.HANDS_FREE, nameless.mode)
+        assertNull(nameless.llm)
+        assertEquals("", nameless.rawText)
+    }
+
+    @Test
+    fun `history pushes batch into the trailing op, and a clear supersedes what is waiting`() {
+        val push = SyncReducers.historyToPush(dictation)!!
+        var ops = emptyList<SyncOp>()
+        ops = SyncReducers.queueHistoryPush(ops, push.copy(entryId = "a"), "op1", maxBatch = 2)
+        ops = SyncReducers.queueHistoryPush(ops, push.copy(entryId = "b"), "op2", maxBatch = 2)
+        ops = SyncReducers.queueHistoryPush(ops, push.copy(entryId = "c"), "op3", maxBatch = 2)
+        assertEquals(listOf(2, 1), ops.map { (it as SyncOp.HistoryPush).entries.size })
+        assertEquals(listOf("op1", "op3"), ops.map { it.id })
+        // Something else in between starts a new batch rather than reordering the queue.
+        val mixed = SyncReducers.queueHistoryPush(ops + SyncOp.HistoryRemove("op4", "z"), push.copy(entryId = "d"), "op5")
+        assertEquals(listOf("op1", "op3", "op4", "op5"), mixed.map { it.id })
+
+        val cleared = SyncReducers.queueHistoryClear(mixed + SyncOp.PreferencesUpdate("op6", StylePreferences.of(MurmurSettings())), "op7")
+        assertEquals(listOf("op6", "op7"), cleared.map { it.id })
+        assertTrue(cleared.last() is SyncOp.HistoryClear)
     }
 
     // ---- snippets and app rules: the same rules as the dictionary, through the collection spec ----
@@ -247,10 +361,14 @@ class CloudSyncTest {
             SyncOp.SnippetRemove("op3", "r2"),
             SyncOp.AppRuleUpsert("op4", "a", rule = rule("a", "slack", Tone.CASUAL, FormattingMode.OFF, trailingSpace = true)),
             SyncOp.AppRuleRemove("op5", "r3"),
-            SyncOp.PreferencesUpdate("op6", StylePreferences.of(MurmurSettings()))
+            SyncOp.PreferencesUpdate("op6", StylePreferences.of(MurmurSettings()).copy(historySync = true)),
+            SyncOp.HistoryPush("op7", listOf(SyncReducers.historyToPush(dictation)!!, SyncReducers.historyToPush(dictation.copy(id = "h2", appName = null, rawText = ""))!!)),
+            SyncOp.HistoryRemove("op8", "h1"),
+            SyncOp.HistoryClear("op9")
         )
         val encoded = json.encodeToString(ops)
         assertTrue(encoded, encoded.contains("\"snippets.upsert\"") && encoded.contains("\"appRules.remove\""))
+        assertTrue(encoded, encoded.contains("\"history.push\"") && encoded.contains("\"history.remove\"") && encoded.contains("\"history.clear\""))
         assertEquals(ops, json.decodeFromString<List<SyncOp>>(encoded))
     }
 }

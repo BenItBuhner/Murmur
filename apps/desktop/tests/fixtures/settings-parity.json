@@ -9,6 +9,7 @@
     "useDictionaryPrompt": true,
     "showLatencyInHistory": true,
     "buttonShadow": true,
+    "historySync": false,
     "formattingMode": "smart",
     "tone": "auto",
     "trailingSpace": true,

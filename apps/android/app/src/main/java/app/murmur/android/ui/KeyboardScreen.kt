@@ -202,7 +202,7 @@ fun KeyboardScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) 
             Spacer(Modifier.height(12.dp))
             Text(
                 when (k.desktopOverlay) {
-                    DesktopOverlay.AUTO -> "Follows the device: a keyboard, a desktop session or a screen as wide as a laptop's turns the pill on. ${describeAutoOverlay(posture)}"
+                    DesktopOverlay.AUTO -> "Follows the device: a keyboard, a desktop session or a tablet-sized screen turns the pill on. ${describeAutoOverlay(posture)}"
                     DesktopOverlay.ON -> "The desktop pill, whatever is attached."
                     DesktopOverlay.OFF -> "The floating button beside the keyboard, whatever is attached."
                 },

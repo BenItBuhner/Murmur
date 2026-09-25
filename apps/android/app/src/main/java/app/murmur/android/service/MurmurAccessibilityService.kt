@@ -72,6 +72,18 @@ private const val TARGET_LOOKUP_RETRY_MS = 90L
  * events (the keyboard actually appearing or leaving) always scan.
  */
 private const val WINDOW_SCAN_MIN_INTERVAL_MS = 120L
+
+/**
+ * After a sign that the keyboard is leaving, how long the pill stays aside if the keyboard does not
+ * go: longer than a keyboard's slide out plus the report of it having gone.
+ */
+private const val LEAVE_GRACE_MS = 450L
+
+/**
+ * Height of the strip along the bottom edge where navigation buttons (and a keyboard's hide button)
+ * live: a 48 dp navigation bar, with room for a maker's taller one.
+ */
+private const val NAV_STRIP_DP = 56f
 /** How much of the field before the cursor the formatting model is shown. */
 private const val PRECEDING_TEXT_MAX = 600
 
@@ -109,9 +121,20 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     private var touchWindow: OverlayWindow? = null
 
     /** Where the keyboard is; its last top edge is kept while a dictation is in flight. */
-    private val keyboard by lazy { KeyboardTracker(resources.displayMetrics.density) }
+    private val keyboard by lazy { KeyboardTracker(resources.displayMetrics.density, StoredKeyboardOffsets(this)) }
     private var lastKeyboardWindow: ImeWindow? = null
     private val arrivalCheck = Runnable { updateKeyboardState(force = true) }
+
+    /**
+     * Something said the keyboard is about to go (its hide button, Back, another app coming up). The
+     * keyboard's slide out is only reported once it is over, so the pill steps aside on these instead;
+     * if the keyboard is still there a moment later, it comes back.
+     */
+    private var leaving = false
+    private val leaveCheck = Runnable {
+        updateKeyboardState(force = true)
+        if (keyboard.visible) keyboardStaying()
+    }
     private var lastWindowScanAt = 0L
     private var lastEditable: AccessibilityNodeInfo? = null
     private var lastPackage: String = ""
@@ -123,11 +146,16 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         instance = this
         DictationController.sink = this
         // The keyboard's window arriving or leaving is reported the moment it happens; a notification
-        // timeout would hold that report back, and the pill with it. Installs whose service was bound
-        // with an older configuration pick the value up here.
-        serviceInfo?.takeIf { it.notificationTimeout != 0L }?.let { info ->
-            info.notificationTimeout = 0L
-            serviceInfo = info
+        // timeout would hold that report back, and the pill with it. Taps on the keyboard's own hide
+        // button come as clicks. Installs whose service was bound with an older configuration pick
+        // both up here.
+        serviceInfo?.let { info ->
+            val types = info.eventTypes or AccessibilityEvent.TYPE_VIEW_CLICKED
+            if (info.notificationTimeout != 0L || info.eventTypes != types) {
+                info.notificationTimeout = 0L
+                info.eventTypes = types
+                serviceInfo = info
+            }
         }
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val settings = SettingsStore.get(this)
@@ -190,6 +218,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         ShortcutRecorder.stop()
         shortcuts = null
         mainHandler.removeCallbacks(arrivalCheck)
+        mainHandler.removeCallbacks(leaveCheck)
         removePill()
         mainScope.cancel()
         super.onDestroy()
@@ -213,6 +242,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      * still captures, since a capture is how the shortcuts get set in the first place).
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) onBackKey(event)
         val shortcuts = shortcuts ?: return false
         if (!SettingsStore.get(this).get().keyboard.shortcuts && !shortcuts.isCapturing) return false
         return shortcuts.onKeyEvent(event, SystemClock.uptimeMillis())
@@ -240,9 +270,75 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                 }
                 updateKeyboardState(force = false)
             }
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> updateKeyboardState(force = true)
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> if (keyboard.visible && isKeyboardDismissButton(event)) keyboardLeaving()
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                if (keyboard.visible && isAnotherAppComingUp(event)) keyboardLeaving()
+                updateKeyboardState(force = true)
+            }
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> updateKeyboardState(force = true)
         }
+    }
+
+    /**
+     * A hardware Back key while the keyboard is up closes the keyboard (Android hands it to the
+     * keyboard first), so it is seen here as the key goes down, before the keyboard starts to slide; a
+     * press that is cancelled leaves it up. Only real keys pass through this filter: the on-screen
+     * back buttons and the back gesture inject theirs straight into the input dispatcher.
+     */
+    private fun onBackKey(event: KeyEvent) {
+        when {
+            event.action == KeyEvent.ACTION_UP && event.isCanceled -> keyboardStaying()
+            event.repeatCount == 0 && keyboard.visible -> keyboardLeaving()
+        }
+    }
+
+    /**
+     * A tap on the keyboard's own way out, reported as the finger lifts, right after the button has
+     * told the keyboard to go: the back button of the navigation bar a keyboard draws under its keys
+     * (Android's `input_method_nav_back`, a down chevron while the keyboard is up), the system bar's
+     * back button, or a maker's hide-keyboard button in that strip: a small button along the bottom
+     * edge, in the keyboard's window or a system window. Not the keyboard switcher.
+     */
+    private fun isKeyboardDismissButton(event: AccessibilityEvent): Boolean {
+        val source = event.source ?: return false
+        val id = source.viewIdResourceName.orEmpty()
+        if (id.endsWith("ime_switcher")) return false
+        if (id.endsWith(":id/input_method_nav_back") || id == "com.android.systemui:id/back") return true
+        val type = runCatching { windows.firstOrNull { it.id == event.windowId }?.type }.getOrNull()
+        if (type != AccessibilityWindowInfo.TYPE_INPUT_METHOD && type != AccessibilityWindowInfo.TYPE_SYSTEM) return false
+        val bounds = Rect().also { source.getBoundsInScreen(it) }
+        val strip = NAV_STRIP_DP * resources.displayMetrics.density
+        return bounds.top >= screenSize().second - strip && bounds.height() <= strip && bounds.width() <= 2 * strip
+    }
+
+    /**
+     * Another app's window coming up (the launcher for Recents or home, an app switched to) takes the
+     * keyboard down with the one it belonged to. The keyboard (and its panels), the system UI and
+     * Murmur itself do not count, nor the app being typed into; nothing counts before that app is known.
+     */
+    private fun isAnotherAppComingUp(event: AccessibilityEvent): Boolean {
+        if (event.contentChangeTypes != 0 || lastPackage.isEmpty()) return false
+        val pkg = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return false
+        if (pkg == lastPackage || pkg == packageName || pkg == lastKeyboardWindow?.packageName) return false
+        if (pkg == "com.android.systemui" || pkg == "android") return false
+        val type = runCatching { windows.firstOrNull { it.id == event.windowId }?.type }.getOrNull()
+        return type != AccessibilityWindowInfo.TYPE_INPUT_METHOD
+    }
+
+    private fun keyboardLeaving() {
+        if (!leaving) {
+            leaving = true
+            syncPillVisibility()
+        }
+        mainHandler.removeCallbacks(leaveCheck)
+        mainHandler.postDelayed(leaveCheck, LEAVE_GRACE_MS)
+    }
+
+    private fun keyboardStaying() {
+        mainHandler.removeCallbacks(leaveCheck)
+        if (!leaving) return
+        leaving = false
+        syncPillVisibility()
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
@@ -251,9 +347,15 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val now = SystemClock.uptimeMillis()
         if (!force && now - lastWindowScanAt < WINDOW_SCAN_MIN_INTERVAL_MS) return
         lastWindowScanAt = now
+        val wasVisible = keyboard.visible
         keyboard.update(keyboardWindow(), now, screenSize().second.toFloat())
         mainHandler.removeCallbacks(arrivalCheck)
         keyboard.arrivalDeadline?.let { mainHandler.postAtTime(arrivalCheck, it) }
+        // A keyboard that has gone, or a new one arriving, starts from a clean slate.
+        if (keyboard.visible != wasVisible && leaving) {
+            leaving = false
+            mainHandler.removeCallbacks(leaveCheck)
+        }
         syncPillVisibility()
     }
 
@@ -276,26 +378,36 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         }
         val bounds = Rect().also { ime.getBoundsInScreen(it) }.toBox()
         val last = lastKeyboardWindow
-        val frame = if (last != null && last.id == ime.id && last.bounds == bounds && last.frame != null) {
-            last.frame
-        } else {
-            runCatching { ime.root }.getOrNull()?.let { root -> Rect().also { root.getBoundsInScreen(it) } }
-                ?.takeIf { !it.isEmpty }?.toBox()
-        }
-        return ImeWindow(ime.id, bounds, frame).also { lastKeyboardWindow = it }
+        if (last != null && last.id == ime.id && last.bounds == bounds && last.frame != null) return last
+        val root = runCatching { ime.root }.getOrNull()
+        val frame = root?.let { r -> Rect().also { r.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }?.toBox()
+        return ImeWindow(ime.id, bounds, frame, root?.packageName?.toString()).also { lastKeyboardWindow = it }
     }
 
     /**
-     * The floating button shows with the keyboard; the desktop pill stays as its idle bar (unless
-     * the idle indicator is off). Both stay for a dictation in flight and the button for its editor.
+     * The floating button shows with the keyboard, but only where it rests: it comes in once the
+     * keyboard's resting edge is known and steps aside, within two frames, the moment anything says
+     * the keyboard is leaving or has been pulled well down. The desktop pill stays as its idle bar
+     * (unless the idle indicator is off). Both stay for a dictation in flight and the button for its
+     * editor.
      */
     private fun syncPillVisibility() {
         val busy = DictationController.state.value !is DictationState.Idle
-        val visible = when (val p = presentation) {
-            is PillPresentation.Desktop -> busy || p.showIdle
-            PillPresentation.Button -> keyboard.visible || busy || OverlayEditor.editing.value
+        when (val p = presentation) {
+            is PillPresentation.Desktop -> if (busy || p.showIdle) showPill() else removePill()
+            PillPresentation.Button -> when {
+                busy || OverlayEditor.editing.value -> showPill()
+                keyboard.visible && keyboard.ready && !keyboard.displaced && !leaving -> showPill(appear = true)
+                keyboard.visible -> dismissPill()
+                else -> removePill()
+            }
         }
-        if (visible) showPill() else removePill()
+    }
+
+    /** Fades the pill out where it is and drops its windows once it is gone. */
+    private fun dismissPill() {
+        val view = pill ?: return
+        if (!view.isDismissing) view.dismiss { if (pill === view) removePill() }
     }
 
     /** Where the pill measures its vertical offset from: the keyboard's top edge, or the last known one while busy. */
@@ -305,12 +417,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         return if (busy && keyboard.top > 0) keyboard.top else null
     }
 
-    private fun showPill() {
+    /** Shows the pill; with [appear] a fresh one fades and scales in where it rests instead of popping up. */
+    private fun showPill(appear: Boolean = false) {
         val wm = windowManager ?: return
         val (screenW, screenH) = screenSize()
         val existing = pill
         if (existing != null) {
             existing.setScreen(screenW, screenH, keyboardReference())
+            if (existing.isDismissing) existing.appear()
             return
         }
         val settings = SettingsStore.get(this)
@@ -340,6 +454,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         view.configure(s.overlayShape, s.overlayLayout)
         view.setPresentation(presentation)
         view.setEditing(OverlayEditor.editing.value)
+        if (appear) view.appear(fromNothing = true)
         // Computes the first frames and, through the Host callbacks, adds both windows.
         view.setScreen(screenW, screenH, keyboardReference())
         view.render(DictationController.state.value)
@@ -649,6 +764,24 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
 }
 
 private fun Rect.toBox(): Box = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+
+/**
+ * Keyboards' resting offsets, kept across restarts so a keyboard's resting edge is known from the
+ * first report of it after a reboot or an update. Stored in dp, so a change of screen resolution does
+ * not skew them; only keyboards identified by their app are kept.
+ */
+private class StoredKeyboardOffsets(private val context: Context) : KeyboardOffsets {
+    private val prefs = context.getSharedPreferences("keyboard_offsets", Context.MODE_PRIVATE)
+    private val density: Float get() = context.resources.displayMetrics.density
+
+    override fun get(keyboard: String): Float? =
+        if (prefs.contains(keyboard)) prefs.getFloat(keyboard, 0f) * density else null
+
+    override fun set(keyboard: String, offset: Float) {
+        if (keyboard.startsWith("window:")) return
+        prefs.edit().putFloat(keyboard, offset / density).apply()
+    }
+}
 
 /** Draws nothing; hands every touch to the pill, which does its own hit-testing in screen space. */
 private class TouchRelayView(context: Context, private val relay: (MotionEvent) -> Boolean) : View(context) {

@@ -48,6 +48,7 @@ import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.components.Tag
 import app.murmur.android.ui.components.TextLink
+import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Paper
 import app.murmur.android.ui.theme.Radii
@@ -115,6 +116,7 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
         nav = nav,
         onSyncNow = { sync.syncNow() },
         onSignOut = { scope.launch { sync.signOut() } },
+        onHistorySyncChange = { on -> store.update { it.copy(historySync = on) } },
         onManageAccount = { profileOpen = true }
     )
     if (profileOpen) {
@@ -139,6 +141,8 @@ fun AccountContent(
     nav: TopNav,
     onSyncNow: () -> Unit,
     onSignOut: () -> Unit,
+    /** The history opt-in flipped (see `MurmurSettings.historySync`); the sync engine takes it from the store. */
+    onHistorySyncChange: (Boolean) -> Unit = {},
     /** Opens the identity provider's account sheet; null when there is none (previews, tests). */
     onManageAccount: (() -> Unit)? = null
 ) {
@@ -164,7 +168,7 @@ fun AccountContent(
         SectionGap()
 
         Group(rows = true) {
-            ControlRow("Sync", description = "Dictionary and style preferences. Your model choice and any API keys of your own stay on this phone.") {
+            ControlRow("Sync", description = "Dictionary, snippets, style and app rules, dictation stats. Your choice of speech model and any API keys of your own are device settings and are never uploaded.") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Dot(syncColor(status), size = 6.dp, pulsing = status.phase == SyncPhase.SYNCING)
                     Spacer(Modifier.width(8.dp))
@@ -177,6 +181,13 @@ fun AccountContent(
             ControlRow("Dictionary") {
                 Text(pluralize(settings.dictionaryEntries.size, "word"), style = Murmur.type.labelSmall, color = c.inkSoft)
             }
+            // The desktop's opt-in, word for word: an account preference, so it follows the user to every device.
+            ToggleRow(
+                title = "Sync dictation history",
+                description = "Also keep the text of your dictations in your account so History shows what you dictated on other devices. Off by default because history contains what you said.",
+                checked = settings.historySync,
+                onCheckedChange = onHistorySyncChange
+            )
         }
 
         Spacer(Modifier.height(28.dp))

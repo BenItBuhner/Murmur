@@ -98,8 +98,11 @@ fun averageWords(entries: List<HistoryEntry>): Int {
 fun longestDictation(entries: List<HistoryEntry>): HistoryEntry? =
     entries.filter { !it.failed }.maxByOrNull { it.wordCount }
 
-/** The most recent dictation that produced text, whose timings the home screen breaks down. */
-fun lastSuccessful(entries: List<HistoryEntry>): HistoryEntry? = entries.firstOrNull { !it.failed && it.injected }
+/**
+ * The most recent dictation that produced text, whose timings the home screen breaks down. One
+ * made on another device has no timings here, so it is passed over.
+ */
+fun lastSuccessful(entries: List<HistoryEntry>): HistoryEntry? = entries.firstOrNull { !it.failed && it.injected && !it.remote }
 
 /** Short lines worth a glance under the stat tiles. Empty until there is something to say. */
 fun insightLines(entries: List<HistoryEntry>, today: DaySummary): List<String> {

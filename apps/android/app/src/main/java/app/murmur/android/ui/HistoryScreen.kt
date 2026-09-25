@@ -41,9 +41,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.murmur.android.cloud.SyncPhase
+import app.murmur.android.cloud.SyncStatus
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.history.HistoryEntry
@@ -57,6 +60,7 @@ import app.murmur.android.ui.components.EmphasizedAccelerate
 import app.murmur.android.ui.components.EmphasizedDecelerate
 import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.ControlRow
+import app.murmur.android.ui.components.Dot
 import app.murmur.android.ui.components.Field
 import app.murmur.android.ui.components.LatencyBar
 import app.murmur.android.ui.components.LazyScreen
@@ -96,10 +100,19 @@ fun formatBytes(bytes: Long): String {
 /**
  * Every dictation made on this phone, newest first: what was inserted, and on a tap what was heard,
  * what each stage did and how long it took. Recordings play back from here, and a dictation that
- * failed can be sent again.
+ * failed can be sent again. With history sync on, the dictations made on the account's other
+ * devices are listed too, each marked with its device; they carry text only, never audio.
+ *
+ * [syncStatus] is the account's state for the header badge; null (no cloud, tests) shows none.
  */
 @Composable
-fun HistoryScreen(store: HistoryStore, settings: SettingsStore, recordings: RecordingStore, nav: TopNav) {
+fun HistoryScreen(
+    store: HistoryStore,
+    settings: SettingsStore,
+    recordings: RecordingStore,
+    nav: TopNav,
+    syncStatus: SyncStatus? = null
+) {
     val c = Murmur.colors
     val context = LocalContext.current
     val entries by store.entries.collectAsState()
@@ -176,9 +189,17 @@ fun HistoryScreen(store: HistoryStore, settings: SettingsStore, recordings: Reco
 
     LazyScreen(
         title = "History",
-        description = "${pluralize(entries.size, "dictation")}, stored only on this phone.",
+        description = "${pluralize(entries.size, "dictation")}, ${if (prefs.historySync) "synced across your devices." else "stored only on this phone."}",
         nav = nav,
         trailing = {
+            // The desktop's sync badge beside the title while history follows the account.
+            if (prefs.historySync && syncStatus != null && syncStatus.phase != SyncPhase.DISABLED) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 10.dp)) {
+                    Dot(syncColor(syncStatus), size = 6.dp, pulsing = syncStatus.phase == SyncPhase.SYNCING)
+                    Spacer(Modifier.width(6.dp))
+                    Text(syncLabel(syncStatus), style = Murmur.type.labelSmall, color = c.inkSoft)
+                }
+            }
             if (entries.isNotEmpty()) {
                 AnimatedContent(
                     confirmClear,
@@ -416,6 +437,8 @@ private fun HistoryRow(
                         LlmOutcome.SKIPPED_CLEAN -> Tag("clean")
                         else -> Unit
                     }
+                    // Dictated on another device: its name, as the desktop labels synced entries.
+                    if (entry.remote) Tag(entry.deviceName ?: "other device", modifier = Modifier.testTag("history-device"))
                     if (entry.failed && entry.finalText.isNotEmpty()) Tag("not inserted", c.clay)
                     if (entry.attempts > 1) Tag("attempt ${entry.attempts}")
                 }

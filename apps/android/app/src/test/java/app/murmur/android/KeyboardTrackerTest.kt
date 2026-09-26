@@ -64,15 +64,15 @@ class KeyboardTrackerTest {
 
     @Test
     fun `a keyboard whose touch area starts below its frame is learned once, remembered, and then placed exactly`() {
-        // First sighting: the report settles 15 px under the frame; that cannot be told from a slide.
+        // First sighting: reported sliding in, far below its frame; then at rest 15 px under it,
+        // within what a keyboard at rest can be: ready on that report, with no timer.
         tracker.feed(2000f, nowMs = 0)
-        tracker.feed(REST + 15f, nowMs = 200)
         assertFalse(tracker.ready)
-        // Past the longest slide, the report is trusted and the offset remembered.
-        tracker.feed(REST + 15f, nowMs = 460)
+        tracker.feed(REST + 15f, nowMs = 200)
         assertTrue(tracker.ready)
         assertEquals((REST + 15f).toInt(), tracker.top)
         assertEquals(15f, offsets[KEYBOARD])
+        assertNull(tracker.arrivalDeadline)
         tracker.update(null, nowMs = 2000, screenH = H)
         assertFalse(tracker.visible)
         // Next time, and after a restart (a new tracker on the same store), ready from the first report.
@@ -178,20 +178,62 @@ class KeyboardTrackerTest {
     }
 
     @Test
-    fun `a keyboard that rests far below its frame stops being placed by its frame`() {
-        // A docked-looking frame, but the keyboard settles 200 px (67 dp) lower than it.
+    fun `a keyboard that appears without sliding, a little below its frame, is ready on its first report`() {
+        tracker.feed(REST + 15f, nowMs = 0)
+        assertTrue(tracker.ready)
+        assertEquals((REST + 15f).toInt(), tracker.top)
+        assertEquals(15f, offsets[KEYBOARD])
+    }
+
+    @Test
+    fun `a keyboard resting well below its frame is waited for once, then known from its first report`() {
+        // It settles 200 px (67 dp) under a docked frame: past what passes for at rest at once.
         tracker.feed(2000f, nowMs = 0, frameTop = 1300f)
+        tracker.feed(REST, nowMs = 220, frameTop = 1300f)
+        assertFalse(tracker.ready)
         tracker.feed(REST, nowMs = 460, frameTop = 1300f)
         assertTrue(tracker.ready)
         assertEquals(REST.toInt(), tracker.top)
+        assertEquals(200f, offsets[KEYBOARD])
+        tracker.update(null, nowMs = 1000, screenH = H)
+        // Next time, even after a restart: its resting edge is known from the first report of it.
+        val restarted = KeyboardTracker(DENSITY, offsets)
+        restarted.feed(2000f, nowMs = 2000, frameTop = 1300f)
+        assertTrue(restarted.ready)
+        assertEquals(REST.toInt(), restarted.top)
+    }
+
+    @Test
+    fun `a keyboard resting more than halfway down its window stops being placed by its frame`() {
+        // A docked-looking frame 1100 px tall, but the keyboard settles 600 px down it.
+        tracker.feed(2200f, nowMs = 0, frameTop = 1300f)
+        tracker.feed(1900f, nowMs = 460, frameTop = 1300f)
+        assertTrue(tracker.ready)
+        assertEquals(1900, tracker.top)
         assertNull(offsets[KEYBOARD])
         tracker.update(null, nowMs = 1000, screenH = H)
         // Next time it is waited for like a keyboard without a frame, and taken where it settles.
-        tracker.feed(2000f, nowMs = 2000, frameTop = 1300f)
+        tracker.feed(2200f, nowMs = 2000, frameTop = 1300f)
         assertFalse(tracker.ready)
-        tracker.feed(REST, nowMs = 2460, frameTop = 1300f)
+        tracker.feed(1900f, nowMs = 2460, frameTop = 1300f)
         assertTrue(tracker.ready)
-        assertEquals(REST.toInt(), tracker.top)
+        assertEquals(1900, tracker.top)
+    }
+
+    @Test
+    fun `the first sliver of a keyboard sliding in counts, and a known keyboard is ready on it`() {
+        offsets[KEYBOARD] = 15f
+        // Its window has just appeared: 60 px of it in view, its frame the whole keyboard.
+        assertTrue(tracker.feed(H - 60f, nowMs = 0))
+        assertTrue(tracker.visible)
+        assertTrue(tracker.ready)
+        assertFalse(tracker.displaced)
+        assertEquals((REST + 15f).toInt(), tracker.top)
+        // Unknown, the same sliver is a keyboard on its way in, not yet placed.
+        val fresh = KeyboardTracker(DENSITY, MemoryKeyboardOffsets())
+        fresh.feed(H - 60f, nowMs = 0)
+        assertTrue(fresh.visible)
+        assertFalse(fresh.ready)
     }
 
     @Test

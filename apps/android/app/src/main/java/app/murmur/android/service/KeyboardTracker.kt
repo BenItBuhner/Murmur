@@ -1,7 +1,6 @@
 package app.murmur.android.service
 
 import app.murmur.android.overlay.Box
-import kotlin.math.abs
 
 /**
  * The on-screen keyboard as one accessibility window list reports it.
@@ -84,8 +83,11 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
         val known = key?.let { offsets[it] }
         // A docked keyboard's window is the keyboard, at the bottom; a full-screen one says nothing about where it rests.
         var docked = frame != null && key !in untrustedFrames && frame.top >= screenH * MIN_DOCKED_TOP_FRACTION
-        // Some keyboards keep a zero-height window alive while hidden.
-        val usable = ime != null && ime.bounds.height > MIN_HEIGHT_PX &&
+        // Some keyboards keep a zero-height window alive while hidden. A sliver of a keyboard-sized
+        // window is a keyboard just starting to slide in: the first report of one comes the moment its
+        // window appears, when only its top row has risen into view.
+        val usable = ime != null && ime.bounds.height > 0f &&
+            (ime.bounds.height > MIN_HEIGHT_PX || (frame != null && frame.height > MIN_HEIGHT_PX)) &&
             (frame == null || ime.bounds.top >= frame.top + (known ?: 0f) - MAX_LIFT_DP * density)
         if (ime == null || key == null || !usable) {
             visible = false
@@ -106,8 +108,10 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
         if (arriving) {
             when {
                 rest != null && reported <= rest + slop -> arriving = false
-                // Level with its frame: a keyboard's touch area never starts above its window, so it rests here.
-                docked && known == null && reported <= frame!!.top + slop -> {
+                // Not known yet, but reported within a hair of its frame: at rest. A keyboard is first
+                // reported the moment its window appears, as it starts to slide in, far below its frame;
+                // its next report comes once it has stopped moving (AccessibilityWindowsPopulator).
+                docked && known == null && reported <= frame!!.top + MAX_REST_OFFSET_DP * density -> {
                     rest = reported
                     offsets[key] = reported - frame.top
                     arriving = false
@@ -115,8 +119,10 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
                 nowMs - appearedAt >= ARRIVAL_MAX_MS -> {
                     arriving = false
                     if (docked) {
+                        // Resting further below its frame than that (room it keeps above its keys, or
+                        // lower than remembered): learnt now, and known from its first report next time.
                         val offset = reported - frame!!.top
-                        if (abs(offset) <= MAX_REST_OFFSET_DP * density) {
+                        if (offset >= -slop && offset <= frame.height * MAX_OFFSET_FRACTION) {
                             offsets[key] = offset
                             rest = reported
                         } else {
@@ -164,12 +170,23 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
          */
         const val DISPLACED_DP = 48f
 
-        /** Longer than any keyboard's slide in: after it, the report is where it rests. */
+        /**
+         * Longer than any keyboard's slide in: after it, the report is where it rests. Waited for only
+         * by a keyboard that cannot be placed sooner: one whose frame is unknown or not docked, or
+         * seen for the first time resting more than [MAX_REST_OFFSET_DP] below its frame.
+         */
         const val ARRIVAL_MAX_MS = 450L
 
-        /** A keyboard's touchable area may start a little below its frame; anything further is a drag in progress. */
+        /**
+         * A keyboard's touch area may start a little below its frame. Reported no further than this
+         * below it, a keyboard seen for the first time is at rest: sliding in, it is far lower.
+         */
         const val MAX_REST_OFFSET_DP = 24f
 
+        /** Past the longest slide, a keyboard may rest this far down its own window; any lower, the window is not the keyboard. */
+        const val MAX_OFFSET_FRACTION = 0.5f
+
+        /** Shorter than this, a keyboard window whose frame is unknown, or no taller either, is not a keyboard on screen. */
         const val MIN_HEIGHT_PX = 80f
 
         /** Lifted this far above its resting edge, the keyboard is riding a system animation. */

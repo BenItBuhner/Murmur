@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.5.10': [
+    "**No half-second wait for keyboards Murmur could not place.** Keyboards whose resting position could not be read from their window (a keyboard that hides its views from accessibility services, one in a full-screen window, or one resting low in its window) made the floating button wait about half a second on every opening. Where such a keyboard rests is now remembered, per keyboard and screen size, and kept across restarts, so the button appears at that spot from the keyboard's first report; only the very first opening still waits to learn it. Keyboards that were already placed from their window are unchanged.",
+    '**Copy keyboard timing log.** Setup → Permissions gains a Diagnostics group with a **Copy keyboard timing log** button: it copies a timestamped trace of the last few keyboard openings and closings (what Android reported and when, what the button did with it) so you can share it when the button is late or in the wrong place. The log stays on the device, is never sent anywhere, and never contains typed text.'
+  ],
   '0.5.9': [
     '**The floating button appears the instant the keyboard opens.** It is fully there from its first frame, already at its final spot, even while the keyboard is still sliding in, instead of fading in after a delay (a regression in 0.5.7, where a 160 ms fade started only once the keyboard had been reported at rest). The very first time a new keyboard opens, the button can still wait until that keyboard has settled, once, to learn where it rests; from the next opening on it is instant.'
   ],

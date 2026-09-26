@@ -1,6 +1,8 @@
 package app.murmur.android.ui
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -16,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import app.murmur.android.service.KeyboardTimingLog
 import app.murmur.android.service.MurmurAccessibilityService
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.Card
@@ -37,6 +41,7 @@ import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
+import kotlinx.coroutines.delay
 
 data class PermissionState(val microphone: Boolean, val overlay: Boolean, val accessibility: Boolean) {
     val allGranted: Boolean get() = microphone && overlay && accessibility
@@ -94,8 +99,46 @@ fun PermissionsScreen(nav: TopNav) {
                 )
             }
         }
+
+        SectionGap()
+        Group("Diagnostics", rows = true) {
+            KeyboardTimingLogRow()
+        }
     }
 }
+
+/**
+ * Copies the keyboard timing log: how the last few keyboard openings and closings reached the
+ * accessibility service and when the button appeared. It lives only on the phone until pasted.
+ */
+@Composable
+private fun KeyboardTimingLogRow() {
+    val context = LocalContext.current
+    var copies by remember { mutableIntStateOf(0) }
+    LaunchedEffect(copies) {
+        if (copies > 0) {
+            delay(COPIED_LABEL_MS)
+            copies = 0
+        }
+    }
+    ControlRow(
+        "Copy keyboard timing log",
+        "When the button is slow to appear, this shows where the time went the last few times the keyboard came up. " +
+            "It names apps and keyboards, never what you typed, and stays on this phone until you paste it."
+    ) {
+        SecondaryButton(
+            if (copies > 0) "Copied" else "Copy",
+            onClick = {
+                val clipboard = context.getSystemService(ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(ClipData.newPlainText("Murmur keyboard timing log", KeyboardTimingLog.report(context)))
+                copies++
+            },
+            compact = true
+        )
+    }
+}
+
+private const val COPIED_LABEL_MS = 2000L
 
 /** The permission rows, shared by the settings screen and onboarding. */
 @Composable

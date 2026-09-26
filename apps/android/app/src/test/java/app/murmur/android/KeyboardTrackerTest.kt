@@ -204,20 +204,93 @@ class KeyboardTrackerTest {
     }
 
     @Test
-    fun `a keyboard resting more than halfway down its window stops being placed by its frame`() {
+    fun `a keyboard resting more than halfway down its window stops being placed by its frame, and is placed where it rested`() {
         // A docked-looking frame 1100 px tall, but the keyboard settles 600 px down it.
         tracker.feed(2200f, nowMs = 0, frameTop = 1300f)
         tracker.feed(1900f, nowMs = 460, frameTop = 1300f)
         assertTrue(tracker.ready)
         assertEquals(1900, tracker.top)
         assertNull(offsets[KEYBOARD])
+        assertEquals(600f, offsets["$KEYBOARD|1080x1100"])
         tracker.update(null, nowMs = 1000, screenH = H)
-        // Next time it is waited for like a keyboard without a frame, and taken where it settles.
+        // Next time, and after a restart: where it rested in that window, from its first report.
         tracker.feed(2200f, nowMs = 2000, frameTop = 1300f)
-        assertFalse(tracker.ready)
-        tracker.feed(1900f, nowMs = 2460, frameTop = 1300f)
         assertTrue(tracker.ready)
         assertEquals(1900, tracker.top)
+        val restarted = KeyboardTracker(DENSITY, offsets)
+        restarted.feed(2200f, nowMs = 0, frameTop = 1300f)
+        assertTrue(restarted.ready)
+        assertEquals(1900, restarted.top)
+    }
+
+    @Test
+    fun `a keyboard in a full-screen window is waited for once, then placed from its first report`() {
+        val full = { top: Float -> ime(reportedTop = top, frameTop = 0f) }
+        tracker.update(full(2100f), nowMs = 0, screenH = H)
+        assertFalse(tracker.ready)
+        tracker.update(full(1500f), nowMs = 460, screenH = H)
+        assertTrue(tracker.ready)
+        assertEquals(1500, tracker.top)
+        assertEquals(1500f, offsets["$KEYBOARD|1080x2400"])
+        tracker.update(null, nowMs = 1000, screenH = H)
+        val restarted = KeyboardTracker(DENSITY, offsets)
+        assertTrue(restarted.update(full(2100f), nowMs = 0, screenH = H))
+        assertTrue(restarted.ready)
+        assertEquals(1500, restarted.top)
+        assertNotNull("still checked against where it comes to rest", restarted.arrivalDeadline)
+        // It comes to rest there: nothing moves, and nothing is left to wait for.
+        assertFalse(restarted.update(full(1500f), nowMs = 220, screenH = H))
+        assertNull(restarted.arrivalDeadline)
+    }
+
+    /** A keyboard whose root cannot be read, known by its app as the system names it. */
+    private fun frameless(reportedTop: Float) = ImeWindow(7, Box(0f, reportedTop, W, H), null, KEYBOARD)
+
+    @Test
+    fun `a keyboard whose frame cannot be read is remembered by its app and the screen's height`() {
+        tracker.update(frameless(1800f), nowMs = 0, screenH = H)
+        assertFalse(tracker.ready)
+        tracker.update(frameless(1500f), nowMs = 460, screenH = H)
+        assertTrue(tracker.ready)
+        assertEquals(1500f, offsets["$KEYBOARD|h2400"])
+        tracker.update(null, nowMs = 1000, screenH = H)
+        // Back: at its resting edge from the first report, part of the way up.
+        tracker.update(frameless(2000f), nowMs = 2000, screenH = H)
+        assertTrue(tracker.ready)
+        assertEquals(1500, tracker.top)
+        tracker.update(null, nowMs = 3000, screenH = H)
+        // Turned sideways the screen is another height: not known there yet.
+        tracker.update(ImeWindow(7, Box(0f, 900f, H, W), null, KEYBOARD), nowMs = 4000, screenH = W)
+        assertTrue(tracker.visible)
+        assertFalse(tracker.ready)
+    }
+
+    @Test
+    fun `a remembered keyboard that comes to rest lower is moved there once, at the deadline, and placed there next time`() {
+        offsets["$KEYBOARD|h2400"] = 1500f
+        tracker.update(frameless(2100f), nowMs = 0, screenH = H)
+        assertEquals(1500, tracker.top)
+        // A shorter layout: at rest 200 px lower. Until the deadline it could still be sliding in.
+        tracker.update(frameless(1700f), nowMs = 220, screenH = H)
+        assertTrue(tracker.ready)
+        assertEquals(1500, tracker.top)
+        assertTrue(tracker.update(frameless(1700f), nowMs = 450, screenH = H))
+        assertEquals(1700, tracker.top)
+        assertEquals(1700f, offsets["$KEYBOARD|h2400"])
+        tracker.update(null, nowMs = 1000, screenH = H)
+        tracker.update(frameless(2100f), nowMs = 2000, screenH = H)
+        assertEquals(1700, tracker.top)
+    }
+
+    @Test
+    fun `a remembered keyboard that comes to rest higher is taken there at once`() {
+        offsets["$KEYBOARD|h2400"] = 1500f
+        tracker.update(frameless(2100f), nowMs = 0, screenH = H)
+        assertEquals(1500, tracker.top)
+        tracker.update(frameless(1350f), nowMs = 220, screenH = H)
+        assertEquals(1350, tracker.top)
+        assertNull(tracker.arrivalDeadline)
+        assertEquals(1350f, offsets["$KEYBOARD|h2400"])
     }
 
     @Test

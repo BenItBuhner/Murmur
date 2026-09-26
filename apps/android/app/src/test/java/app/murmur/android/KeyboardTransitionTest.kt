@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -542,5 +543,46 @@ class KeyboardTransitionTest {
     fun `a keyboard whose frame cannot be read is not shown part of the way up`() {
         val looks = open(firstTop = 2000, restTop = FRAME_TOP, frameTop = null)
         assertArrives(looks, FRAME_TOP, atFrame = ARRIVAL_WAIT_FRAME)
+    }
+
+    /** The keyboard the system has selected, as Settings names it: all that identifies a keyboard whose root is hidden. */
+    private fun selectKeyboard() {
+        Settings.Secure.putString(service.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD, "$IME_PACKAGE/.service.HoneyBoardService")
+    }
+
+    @Test
+    fun `a keyboard whose frame cannot be read is waited for once, then shown at once on every opening`() {
+        selectKeyboard()
+        val first = open(firstTop = 2000, restTop = FRAME_TOP, frameTop = null)
+        assertArrives(first, FRAME_TOP, atFrame = ARRIVAL_WAIT_FRAME)
+        closeKeyboard()
+        restartService()
+        val again = open(firstTop = 2000, restTop = FRAME_TOP, frameTop = null, frames = 70)
+        assertArrives(again, FRAME_TOP, atFrame = 0)
+    }
+
+    @Test
+    fun `a keyboard in a full-screen window is waited for once, then shown at once on every opening`() {
+        val first = open(firstTop = 2250, restTop = FRAME_TOP, frameTop = 0)
+        assertArrives(first, FRAME_TOP, atFrame = ARRIVAL_WAIT_FRAME)
+        closeKeyboard()
+        restartService()
+        val again = open(firstTop = 2250, restTop = FRAME_TOP, frameTop = 0, frames = 70)
+        assertArrives(again, FRAME_TOP, atFrame = 0)
+    }
+
+    @Test
+    fun `a keyboard its window does not place that comes to rest lower than last time is moved there once, at the deadline`() {
+        selectKeyboard()
+        open(firstTop = 2000, restTop = FRAME_TOP, frameTop = null)
+        closeKeyboard()
+        // A shorter layout this time: at rest 150 px lower. Where it rested last time is all there is
+        // to go on until it has had the time any keyboard takes to come to rest.
+        val shorter = open(firstTop = 2000, restTop = FRAME_TOP + 150, frameTop = null, frames = 70)
+        assertTrue("shown at once, where it rested last time:\n" + describe(shorter, 0), shorter.take(ARRIVAL_WAIT_FRAME).all { it != null && it.opacity > 0.99f && at(it, FRAME_TOP) })
+        assertTrue("then where it rests now:\n" + describe(shorter, ARRIVAL_WAIT_FRAME - 2), shorter.drop(ARRIVAL_WAIT_FRAME).all { settledAt(it, FRAME_TOP + 150) })
+        closeKeyboard()
+        val again = open(firstTop = 2000, restTop = FRAME_TOP + 150, frameTop = null, frames = 70)
+        assertArrives(again, FRAME_TOP + 150, atFrame = 0)
     }
 }

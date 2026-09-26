@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
@@ -364,7 +365,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     /**
      * The keyboard's window in the current window list, with the frame its views are laid out in.
      * The frame is read from the window's root (a round trip to the keyboard's process) only when
-     * the reported bounds changed; a window list that did not move the keyboard reuses it.
+     * the reported bounds changed; a window list that did not move the keyboard reuses it. A root
+     * that cannot be read (a keyboard can hide its views from services that are not accessibility
+     * tools) still leaves the keyboard known by the system's default keyboard, so what is learnt
+     * about it is kept.
      */
     private fun keyboardWindow(): ImeWindow? {
         val ime = try {
@@ -383,8 +387,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         if (last != null && last.id == ime.id && last.bounds == bounds && last.frame != null) return last
         val root = runCatching { ime.root }.getOrNull()
         val frame = root?.let { r -> Rect().also { r.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }?.toBox()
-        return ImeWindow(ime.id, bounds, frame, root?.packageName?.toString()).also { lastKeyboardWindow = it }
+        val packageName = root?.packageName?.toString() ?: defaultKeyboardPackage()
+        return ImeWindow(ime.id, bounds, frame, packageName).also { lastKeyboardWindow = it }
     }
+
+    /** The package of the keyboard the system has selected; read from settings, no round trip to the keyboard. */
+    private fun defaultKeyboardPackage(): String? =
+        runCatching { Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) }.getOrNull()
+            ?.substringBefore('/')?.takeIf { it.isNotEmpty() }
 
     /**
      * The floating button shows with the keyboard, but only where it rests: fully there the moment
@@ -791,18 +801,26 @@ private fun Rect.toBox(): Box = Box(left.toFloat(), top.toFloat(), right.toFloat
 /**
  * Keyboards' resting offsets, kept across restarts so a keyboard's resting edge is known from the
  * first report of it after a reboot or an update. Stored in dp, so a change of screen resolution does
- * not skew them; only keyboards identified by their app are kept.
+ * not skew them. A keyboard known only by its window (neither its root nor the system says which
+ * keyboard it is) is remembered until the service stops.
  */
-private class StoredKeyboardOffsets(private val context: Context) : KeyboardOffsets {
-    private val prefs = context.getSharedPreferences("keyboard_offsets", Context.MODE_PRIVATE)
+internal class StoredKeyboardOffsets(private val context: Context) : KeyboardOffsets {
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val density: Float get() = context.resources.displayMetrics.density
+    private val unnamed = HashMap<String, Float>()
 
-    override fun get(keyboard: String): Float? =
-        if (prefs.contains(keyboard)) prefs.getFloat(keyboard, 0f) * density else null
+    override fun get(keyboard: String): Float? = when {
+        keyboard.startsWith("window:") -> unnamed[keyboard]
+        prefs.contains(keyboard) -> prefs.getFloat(keyboard, 0f) * density
+        else -> null
+    }
 
     override fun set(keyboard: String, offset: Float) {
-        if (keyboard.startsWith("window:")) return
-        prefs.edit().putFloat(keyboard, offset / density).apply()
+        if (keyboard.startsWith("window:")) unnamed[keyboard] = offset else prefs.edit().putFloat(keyboard, offset / density).apply()
+    }
+
+    companion object {
+        const val PREFS = "keyboard_offsets"
     }
 }
 

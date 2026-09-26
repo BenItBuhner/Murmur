@@ -54,6 +54,15 @@ private const val IME_PACKAGE = "com.samsung.android.honeyboard"
 /** Samsung Keyboard's slide out as the recording shows it (frames 752-767), counted in 8 ms frames. */
 private const val SLIDE_FRAMES = 16
 
+/** Its slide in (frames 908-931 of the recording): 23 frames. */
+private const val SLIDE_IN_FRAMES = 23
+
+/** The report of the keyboard at rest: the window list is computed once nothing has moved for 35 ms (184 + 35 ms). */
+private const val REST_REPORT_FRAME = 28
+
+/** The frame in which a 450 ms wait from the first report ends (456 ms). */
+private const val ARRIVAL_WAIT_FRAME = 57
+
 /**
  * The pill as the keyboard comes and goes, one 8 ms frame at a time, through the real accessibility
  * service fed the way Android feeds it.
@@ -428,56 +437,110 @@ class KeyboardTransitionTest {
     // ---- opening ----------------------------------------------------------------------------------
 
     /**
-     * An opening reported the way Android reports it: the keyboard's window first seen [firstTop]
-     * part of the way up, then at rest at [restTop] once it has stopped (the list settles 35 ms after
-     * the last movement), then nothing. Returns every frame's look.
+     * An opening reported the way Android reports it (AccessibilityWindowsPopulator): the keyboard's
+     * window reported the moment it appears, [firstTop] as it starts to slide in; the slide as the
+     * recording shows it (frames 908-931, [SLIDE_IN_FRAMES] frames); then the report of it at rest at
+     * [restTop], once it has not moved for 35 ms ([REST_REPORT_FRAME]); then nothing. Frame 0 is the
+     * first report. Returns every frame's look.
      */
     private fun open(firstTop: Int, restTop: Int, frameTop: Int?, frames: Int = 90): List<Look?> =
         (0 until frames).map { i ->
             when {
                 i == 0 -> frame(ime(firstTop, frameTop), report = true)
-                i < 18 -> frame(ime(firstTop + (restTop - firstTop) * i / 18, frameTop))
-                else -> frame(ime(restTop, frameTop), report = i == 18)
+                i < SLIDE_IN_FRAMES -> frame(ime(firstTop + (restTop - firstTop) * i / SLIDE_IN_FRAMES, frameTop))
+                else -> frame(ime(restTop, frameTop), report = i == REST_REPORT_FRAME)
             }
         }
+
+    private fun closeKeyboard() {
+        frame(null, report = true)
+        repeat(10) { frame(null) }
+    }
 
     private fun assertOnlyAtRest(looks: List<Look?>, restTop: Int) {
         val elsewhere = looks.withIndex().filter { (_, l) -> l != null && !at(l, restTop) }
         assertTrue("drawn away from where the keyboard rests in ${elsewhere.size} frames:\n" + describe(looks, elsewhere.firstOrNull()?.index ?: 0), elsewhere.isEmpty())
     }
 
-    private fun assertFadesIn(looks: List<Look?>) {
-        val first = looks.indexOfFirst { it != null }
-        assertTrue("the pill never came in:\n" + describe(looks, 0), first >= 0)
-        assertTrue("it comes in faintly, not popping up:\n" + describe(looks, first), looks[first]!!.opacity < 0.5f)
-        val ramp = looks.drop(first).takeWhile { it != null && it.opacity < 0.99f }.map { it!!.opacity }
-        assertTrue("and grows steadily to full strength over a few frames: $ramp", ramp.size in 8..30 && ramp.zipWithNext().all { (a, b) -> b >= a })
-        assertTrue("and stays there:\n" + describe(looks, first + ramp.size), looks.drop(first + ramp.size).all { it != null && it.opacity > 0.99f })
+    /** From the keyboard's first report (frame 0): the pill's first frame on screen, and its first at full strength. */
+    private class Arrival(looks: List<Look?>) {
+        val visible = looks.indexOfFirst { it != null }.takeIf { it >= 0 }
+        val full = looks.indexOfFirst { it != null && it.opacity > 0.99f }.takeIf { it >= 0 }
+        private val firstOpacity = visible?.let { looks[it]!!.opacity }
+        override fun toString() =
+            "first on screen at frame $visible (${firstOpacity?.let { (it * 100).toInt() }}% there), at full strength at frame $full"
+    }
+
+    /** At full strength from frame [atFrame] on, never before it, and only ever where the keyboard comes to rest. */
+    private fun assertArrives(looks: List<Look?>, restTop: Int, atFrame: Int) {
+        val arrival = Arrival(looks)
+        assertTrue(
+            "$arrival; wanted at full strength at frame $atFrame:\n" + describe(looks, max(0, min(atFrame, arrival.visible ?: atFrame) - 2)),
+            arrival.visible == atFrame && arrival.full == atFrame
+        )
+        assertTrue("and there from then on:\n" + describe(looks, atFrame), looks.drop(atFrame).all { it != null && it.opacity > 0.99f })
+        assertOnlyAtRest(looks, restTop)
+    }
+
+    /** A new service on the same device: what the old one learnt survives only if it was kept. */
+    private fun restartService() {
+        service.onDestroy()
+        setUp()
     }
 
     @Test
-    fun `a keyboard seen for the first time is waited for, then the pill fades in where it rests`() {
-        // Its touch area starts 15 px below its frame: from the frame alone the pill would sit 5 dp too high.
-        val looks = open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
-        assertOnlyAtRest(looks, FRAME_TOP + 15)
-        assertFadesIn(looks)
-    }
-
-    @Test
-    fun `once the keyboard is known the pill fades in on its first report, where it will rest`() {
+    fun `a returning keyboard's pill is at full strength at its final spot in the frame the keyboard is first reported`() {
+        // First time: its touch area starts 15 px below its frame, which is learnt and kept.
         open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
-        frame(null, report = true)
-        repeat(10) { frame(null) }
+        closeKeyboard()
+        restartService()
+        // Back, after a restart: in at its final spot on the report of it just starting to slide in.
         val looks = open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 40)
-        assertTrue("in on the first report of it:\n" + describe(looks, 0), looks[0] != null)
-        assertOnlyAtRest(looks, FRAME_TOP + 15)
-        assertFadesIn(looks)
+        assertArrives(looks, FRAME_TOP + 15, atFrame = 0)
+    }
+
+    @Test
+    fun `a returning keyboard first reported as a sliver rising into view is shown in that frame too`() {
+        open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
+        closeKeyboard()
+        // The recording's frame 908: the keyboard's window has just appeared, only its top 60-odd px in view.
+        val looks = open(firstTop = SCREEN_H - 60, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 40)
+        assertArrives(looks, FRAME_TOP + 15, atFrame = 0)
+    }
+
+    @Test
+    fun `a keyboard seen for the first time is at full strength where it rests on the report of it at rest`() {
+        val looks = open(firstTop = 2250, restTop = FRAME_TOP, frameTop = FRAME_TOP)
+        assertArrives(looks, FRAME_TOP, atFrame = REST_REPORT_FRAME)
+    }
+
+    @Test
+    fun `a keyboard seen for the first time whose touch area starts a little below its frame needs no timer either`() {
+        // 15 px below its frame: from the frame alone the pill would sit 5 dp too high, so it waits for the report at rest.
+        val looks = open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
+        assertArrives(looks, FRAME_TOP + 15, atFrame = REST_REPORT_FRAME)
+    }
+
+    @Test
+    fun `a keyboard that appears without sliding is shown in the frame it is first reported`() {
+        val looks = open(firstTop = FRAME_TOP + 15, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
+        assertArrives(looks, FRAME_TOP + 15, atFrame = 0)
+    }
+
+    @Test
+    fun `a keyboard resting well below its frame is waited for once, then shown at once on every opening`() {
+        // 90 px (30 dp) below its frame: past what is taken for a keyboard at rest without waiting.
+        val first = open(firstTop = 2250, restTop = FRAME_TOP + 90, frameTop = FRAME_TOP)
+        assertArrives(first, FRAME_TOP + 90, atFrame = ARRIVAL_WAIT_FRAME)
+        closeKeyboard()
+        restartService()
+        val again = open(firstTop = 2250, restTop = FRAME_TOP + 90, frameTop = FRAME_TOP, frames = 40)
+        assertArrives(again, FRAME_TOP + 90, atFrame = 0)
     }
 
     @Test
     fun `a keyboard whose frame cannot be read is not shown part of the way up`() {
         val looks = open(firstTop = 2000, restTop = FRAME_TOP, frameTop = null)
-        assertOnlyAtRest(looks, FRAME_TOP)
-        assertFadesIn(looks)
+        assertArrives(looks, FRAME_TOP, atFrame = ARRIVAL_WAIT_FRAME)
     }
 }

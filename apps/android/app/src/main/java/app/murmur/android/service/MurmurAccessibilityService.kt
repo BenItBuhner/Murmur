@@ -387,8 +387,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     }
 
     /**
-     * The floating button shows with the keyboard, but only where it rests: it comes in once the
-     * keyboard's resting edge is known and steps aside, within two frames, the moment anything says
+     * The floating button shows with the keyboard, but only where it rests: fully there the moment
+     * the keyboard's resting edge is known (from its first report, still sliding in, when the
+     * keyboard has been seen before), and stepping aside within two frames the moment anything says
      * the keyboard is leaving or has been pulled well down. The desktop pill stays as its idle bar
      * (unless the idle indicator is off). Both stay for a dictation in flight and the button for its
      * editor.
@@ -399,7 +400,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             is PillPresentation.Desktop -> if (busy || p.showIdle) showPill() else removePill()
             PillPresentation.Button -> when {
                 busy || OverlayEditor.editing.value -> showPill()
-                keyboard.visible && keyboard.ready && !keyboard.displaced && !leaving -> showPill(appear = true)
+                keyboard.visible && keyboard.ready && !keyboard.displaced && !leaving -> showPill()
                 keyboard.visible -> dismissPill()
                 else -> removePill()
             }
@@ -419,8 +420,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         return if (busy && keyboard.top > 0) keyboard.top else null
     }
 
-    /** Shows the pill; with [appear] a fresh one fades and scales in where it rests instead of popping up. */
-    private fun showPill(appear: Boolean = false) {
+    /** Shows the pill, drawn fully there from its first frame; one that was going comes back. */
+    private fun showPill() {
         val wm = windowManager ?: return
         val (screenW, screenH) = screenSize()
         val existing = pill
@@ -456,7 +457,6 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         view.configure(s.overlayShape, s.overlayLayout)
         view.setPresentation(presentation)
         view.setEditing(OverlayEditor.editing.value)
-        if (appear) view.appear(fromNothing = true)
         // Computes the first frames and, through the Host callbacks, adds both windows.
         view.setScreen(screenW, screenH, keyboardReference())
         view.render(DictationController.state.value)

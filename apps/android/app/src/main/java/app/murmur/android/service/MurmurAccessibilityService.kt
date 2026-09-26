@@ -407,7 +407,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         mainHandler.removeCallbacks(arrivalCheck)
         val deadline = keyboard.arrivalDeadline
         deadline?.let { mainHandler.postAtTime(arrivalCheck, it) }
-        if (deadline != null && deadline != armedDeadline) trace("arrival deadline armed for +${deadline - now}ms")
+        if (deadline != null && deadline != armedDeadline) {
+            trace("arrival deadline armed for +${deadline - now}ms" + if (keyboard.ready) ", the pill is not waiting for it" else "")
+        }
         armedDeadline = deadline
         // A keyboard that has gone, or a new one arriving, starts from a clean slate.
         if (keyboard.visible != wasVisible && leaving) {

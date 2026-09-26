@@ -123,8 +123,8 @@ private fun KeyboardTimingLogRow() {
     }
     ControlRow(
         "Copy keyboard timing log",
-        "When the button is slow to appear, this says where the time went over the last few times the keyboard came " +
-            "up. Nothing is sent anywhere; paste it into your report."
+        "When the button is slow to appear, this shows where the time went the last few times the keyboard came up. " +
+            "It names apps and keyboards, never what you typed, and stays on this phone until you paste it."
     ) {
         SecondaryButton(
             if (copies > 0) "Copied" else "Copy",

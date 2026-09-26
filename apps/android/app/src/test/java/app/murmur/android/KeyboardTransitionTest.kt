@@ -618,6 +618,7 @@ class KeyboardTransitionTest {
         assertTrue(lines[at], "frame=[0,$FRAME_TOP,1080,2400] $IME_PACKAGE" in lines[at])
         at = after(at, "== keyboard up #2")
         at = after(at, "kb visible=1 ready=1 displaced=0 top=${FRAME_TOP + 90}: arriving; rest known from its frame")
+        at = after(at, "arrival deadline armed for +450ms, the pill is not waiting for it")
         at = after(at, "pill shown")
         at = after(at, "pill windows added")
         after(at, "pill first drawn")

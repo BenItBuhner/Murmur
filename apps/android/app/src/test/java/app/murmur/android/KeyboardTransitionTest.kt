@@ -16,6 +16,7 @@ import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayGeometry
 import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
+import app.murmur.android.service.KeyboardTimingLog
 import app.murmur.android.service.MurmurAccessibilityService
 import app.murmur.android.settings.DesktopOverlay
 import app.murmur.android.settings.OverlayShape
@@ -131,6 +132,7 @@ class KeyboardTransitionTest {
         // The pill's window is attached here, so its frames go through the Choreographer, which would
         // otherwise move the clock on by its frame delay each time the pill asks for one.
         ShadowChoreographer.setPaused(true)
+        KeyboardTimingLog.clear()
         service = Robolectric.buildService(MurmurAccessibilityService::class.java).create().get()
         SettingsStore.get(service).update {
             it.copy(
@@ -584,5 +586,42 @@ class KeyboardTransitionTest {
         closeKeyboard()
         val again = open(firstTop = 2000, restTop = FRAME_TOP + 150, frameTop = null, frames = 70)
         assertArrives(again, FRAME_TOP + 150, atFrame = 0)
+    }
+
+    @Test
+    fun `the timing log follows an opening from the keyboard's first report to the pill's first frame`() {
+        open(firstTop = 2250, restTop = FRAME_TOP + 90, frameTop = FRAME_TOP)
+        closeKeyboard()
+        open(firstTop = 2250, restTop = FRAME_TOP + 90, frameTop = FRAME_TOP, frames = 40)
+        val log = KeyboardTimingLog.text()
+        val lines = log.lines()
+        fun after(from: Int, text: String): Int {
+            val i = lines.withIndex().indexOfFirst { (n, line) -> n > from && text in line }
+            assertTrue("no \"$text\" after line $from in:\n$log", i >= 0)
+            return i
+        }
+        // The first opening: unknown, so the deadline is armed, fires, and what was learnt is said.
+        var at = after(-1, "== keyboard up #1")
+        at = after(at, "kb visible=1 ready=0")
+        at = after(at, "arrival deadline armed for +450ms")
+        at = after(at, "arrival deadline fired")
+        at = after(at, "learnt 90px for $IME_PACKAGE")
+        at = after(at, "pill windows added")
+        at = after(at, "pill first drawn")
+        at = after(at, "== keyboard gone #1")
+        // The second: the report, the window list read with the keyboard's window, its frame, the
+        // tracker's verdict and the pill's first frame, all in the frame the keyboard is first reported.
+        at = after(at, "ev WINDOWS")
+        at = after(at, "win n=2")
+        assertTrue(lines[at], "ime#$IME_ID" in lines[at] && "[0,2250,1080,2400]" in lines[at])
+        at = after(at, "root ")
+        assertTrue(lines[at], "frame=[0,$FRAME_TOP,1080,2400] $IME_PACKAGE" in lines[at])
+        at = after(at, "== keyboard up #2")
+        at = after(at, "kb visible=1 ready=1 displaced=0 top=${FRAME_TOP + 90}: arriving; rest known from its frame")
+        at = after(at, "pill shown")
+        at = after(at, "pill windows added")
+        after(at, "pill first drawn")
+        val shown = lines.indexOfFirst { "== keyboard up #2" in it }
+        assertTrue("nothing waited on in the second opening:\n$log", lines.drop(shown).none { "deadline fired" in it })
     }
 }

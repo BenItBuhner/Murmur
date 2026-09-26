@@ -152,6 +152,9 @@ class OverlayPillView(context: Context) : View(context) {
     /** The spots changed: one was moved, added, removed or re-arranged, or the button landed on another one. */
     var onLayoutChanged: ((OverlayLayout) -> Unit)? = null
 
+    /** Each frame drawn, with how much of the pill it shows (0..1) and the frame's time; for the keyboard timing log. */
+    var onFrameDrawn: ((presence: Float, frameTimeMs: Long) -> Unit)? = null
+
     private enum class Kind { IDLE, LISTENING, PROCESSING, SUCCESS, ERROR, LIMIT }
 
     /** [restingW] is the width the contents were laid out for; [w] may be a mid-morph snapshot. */
@@ -816,6 +819,7 @@ class OverlayPillView(context: Context) : View(context) {
             if (abs(presence - presenceTarget) < 0.001f) presence = presenceTarget
             if (presence == 0f) whenGone?.let { gone -> whenGone = null; post(gone) }
         }
+        onFrameDrawn?.invoke(presence, now)
 
         val box = OverlayGeometry.place(curAx, curAy, curW, curH, screenW, screenH, density)
         pillBox = box

@@ -88,6 +88,9 @@ private const val NAV_STRIP_DP = 56f
 /** How much of the field before the cursor the formatting model is shown. */
 private const val PRECEDING_TEXT_MAX = 600
 
+/** An event whose handling blocks the main thread this long says so in the timing log. */
+private const val SLOW_EVENT_MS = 8L
+
 /**
  * The Wispr Flow pattern on Android: whenever the keyboard comes up, a floating dictation
  * button appears next to it (by default centred just above it; the user can park it anywhere,
@@ -125,7 +128,13 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     /** Where the keyboard is; its last top edge is kept while a dictation is in flight. */
     private val keyboard by lazy { KeyboardTracker(resources.displayMetrics.density, StoredKeyboardOffsets(this)) }
     private var lastKeyboardWindow: ImeWindow? = null
-    private val arrivalCheck = Runnable { updateKeyboardState(force = true) }
+    private val arrivalCheck = Runnable {
+        trace("arrival deadline fired")
+        updateKeyboardState(force = true)
+    }
+    private var armedDeadline: Long? = null
+    private var lastKeyboardTrace = ""
+    private var lastPillReason = ""
 
     /**
      * Something said the keyboard is about to go (its hide button, Back, another app coming up). The
@@ -134,8 +143,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      */
     private var leaving = false
     private val leaveCheck = Runnable {
+        trace("leave check fired")
         updateKeyboardState(force = true)
-        if (keyboard.visible) keyboardStaying()
+        if (keyboard.visible) keyboardStaying("the keyboard is still up")
     }
     private var lastWindowScanAt = 0L
     private var lastEditable: AccessibilityNodeInfo? = null
@@ -167,6 +177,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         }
         this.shortcuts = shortcuts
         presentation = PillPresentation.resolve(settings.get().keyboard, presence.posture.value)
+        KeyboardTimingLog.section(SystemClock.uptimeMillis(), "service connected")
+        val (screenW, screenH) = screenSize()
+        trace("presentation ${presentation.traceName()}; screen ${screenW}x$screenH")
         mainScope.launch {
             DictationController.state.collect { state ->
                 pill?.render(state)
@@ -234,6 +247,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        trace("configuration changed: ${newConfig.screenWidthDp}x${newConfig.screenHeightDp}dp, keyboard ${newConfig.keyboard}")
         pill?.setPalette(PillTheme.resolve(this, SettingsStore.get(this).get()))
         presence?.refresh(newConfig)
     }
@@ -256,28 +270,52 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val next = PillPresentation.resolve(SettingsStore.get(this).get().keyboard, posture)
         if (next == presentation) return
         presentation = next
+        trace("presentation ${next.traceName()}")
         if (next !is PillPresentation.Button) OverlayEditor.stop()
         pill?.setPresentation(next)
         syncPillVisibility()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        val start = SystemClock.uptimeMillis()
+        handleEvent(event, start)
+        val took = SystemClock.uptimeMillis() - start
+        if (took >= SLOW_EVENT_MS) trace("  that event held the main thread ${took}ms")
+    }
+
+    private fun handleEvent(event: AccessibilityEvent, start: Long) {
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-                val source = event.source ?: return
-                if (source.acceptsText()) {
+                val source = event.source
+                val editable = source?.acceptsText() == true
+                val seen = when {
+                    source == null -> "no view"
+                    editable -> "editable"
+                    else -> "not editable"
+                }
+                trace("${describe(event, start)} src=${SystemClock.uptimeMillis() - start}ms $seen")
+                if (source == null) return
+                if (editable) {
                     lastEditable = source
                     lastPackage = event.packageName?.toString() ?: lastPackage
                 }
                 updateKeyboardState(force = false)
             }
-            AccessibilityEvent.TYPE_VIEW_CLICKED -> if (keyboard.visible && isKeyboardDismissButton(event)) keyboardLeaving()
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                trace(describe(event, start))
+                if (keyboard.visible) keyboardDismissButton(event)?.let { keyboardLeaving(it) }
+            }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                if (keyboard.visible && isAnotherAppComingUp(event)) keyboardLeaving()
+                trace(describe(event, start))
+                if (keyboard.visible) anotherAppComingUp(event)?.let { keyboardLeaving(it) }
                 updateKeyboardState(force = true)
             }
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> updateKeyboardState(force = true)
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+                trace(describe(event, start))
+                updateKeyboardState(force = true)
+            }
+            else -> trace(describe(event, start))
         }
     }
 
@@ -289,8 +327,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      */
     private fun onBackKey(event: KeyEvent) {
         when {
-            event.action == KeyEvent.ACTION_UP && event.isCanceled -> keyboardStaying()
-            event.repeatCount == 0 && keyboard.visible -> keyboardLeaving()
+            event.action == KeyEvent.ACTION_UP && event.isCanceled -> keyboardStaying("Back press cancelled")
+            event.repeatCount == 0 && keyboard.visible ->
+                keyboardLeaving(if (event.action == KeyEvent.ACTION_DOWN) "Back key down" else "Back key up")
         }
     }
 
@@ -300,35 +339,40 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      * (Android's `input_method_nav_back`, a down chevron while the keyboard is up), the system bar's
      * back button, or a maker's hide-keyboard button in that strip: a small button along the bottom
      * edge, in the keyboard's window or a system window. Not a keyboard switcher, nor the
-     * accessibility button, which leave the keyboard up.
+     * accessibility button, which leave the keyboard up. Returns what was tapped, for the timing
+     * log, or null for any other tap.
      */
-    private fun isKeyboardDismissButton(event: AccessibilityEvent): Boolean {
-        val source = event.source ?: return false
+    private fun keyboardDismissButton(event: AccessibilityEvent): String? {
+        val source = event.source ?: return null
         val id = source.viewIdResourceName.orEmpty()
-        if ("switcher" in id || id.endsWith("accessibility_button")) return false
-        if (id.endsWith(":id/input_method_nav_back") || id == "com.android.systemui:id/back") return true
+        if ("switcher" in id || id.endsWith("accessibility_button")) return null
+        if (id.endsWith(":id/input_method_nav_back") || id == "com.android.systemui:id/back") return "hide button $id"
         val type = runCatching { windows.firstOrNull { it.id == event.windowId }?.type }.getOrNull()
-        if (type != AccessibilityWindowInfo.TYPE_INPUT_METHOD && type != AccessibilityWindowInfo.TYPE_SYSTEM) return false
+        if (type != AccessibilityWindowInfo.TYPE_INPUT_METHOD && type != AccessibilityWindowInfo.TYPE_SYSTEM) return null
         val bounds = Rect().also { source.getBoundsInScreen(it) }
         val strip = NAV_STRIP_DP * resources.displayMetrics.density
-        return bounds.top >= screenSize().second - strip && bounds.height() <= strip && bounds.width() <= 2 * strip
+        val hides = bounds.top >= screenSize().second - strip && bounds.height() <= strip && bounds.width() <= 2 * strip
+        return if (hides) "button in the bottom strip ${id.ifEmpty { "(no id)" }} ${bounds.short()} in a ${windowTypeName(type)} window" else null
     }
 
     /**
      * Another app's window coming up (the launcher for Recents or home, an app switched to) takes the
      * keyboard down with the one it belonged to. The keyboard (and its panels), the system UI and
      * Murmur itself do not count, nor the app being typed into; nothing counts before that app is known.
+     * Returns the app and its window, for the timing log, or null when it is not another app.
      */
-    private fun isAnotherAppComingUp(event: AccessibilityEvent): Boolean {
-        if (event.contentChangeTypes != 0 || lastPackage.isEmpty()) return false
-        val pkg = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return false
-        if (pkg == lastPackage || pkg == packageName || pkg == lastKeyboardWindow?.packageName) return false
-        if (pkg == "com.android.systemui" || pkg == "android") return false
+    private fun anotherAppComingUp(event: AccessibilityEvent): String? {
+        if (event.contentChangeTypes != 0 || lastPackage.isEmpty()) return null
+        val pkg = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return null
+        if (pkg == lastPackage || pkg == packageName || pkg == lastKeyboardWindow?.packageName) return null
+        if (pkg == "com.android.systemui" || pkg == "android") return null
         val type = runCatching { windows.firstOrNull { it.id == event.windowId }?.type }.getOrNull()
-        return type != AccessibilityWindowInfo.TYPE_INPUT_METHOD
+        if (type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) return null
+        return "another app coming up: $pkg (typing into $lastPackage), window ${event.windowId} ${windowTypeName(type)}"
     }
 
-    private fun keyboardLeaving() {
+    private fun keyboardLeaving(reason: String) {
+        trace("leaving: $reason")
         if (!leaving) {
             leaving = true
             syncPillVisibility()
@@ -337,9 +381,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         mainHandler.postDelayed(leaveCheck, LEAVE_GRACE_MS)
     }
 
-    private fun keyboardStaying() {
+    private fun keyboardStaying(reason: String) {
         mainHandler.removeCallbacks(leaveCheck)
         if (!leaving) return
+        trace("staying: $reason")
         leaving = false
         syncPillVisibility()
     }
@@ -352,8 +397,18 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         lastWindowScanAt = now
         val wasVisible = keyboard.visible
         keyboard.update(keyboardWindow(), now, screenSize().second.toFloat())
+        if (keyboard.visible != wasVisible) KeyboardTimingLog.keyboardChanged(SystemClock.uptimeMillis(), keyboard.visible)
+        val state = "kb visible=${keyboard.visible.bit()} ready=${keyboard.ready.bit()} displaced=${keyboard.displaced.bit()} " +
+            "top=${keyboard.top}: ${keyboard.decision}"
+        if (state != lastKeyboardTrace) {
+            lastKeyboardTrace = state
+            trace(state)
+        }
         mainHandler.removeCallbacks(arrivalCheck)
-        keyboard.arrivalDeadline?.let { mainHandler.postAtTime(arrivalCheck, it) }
+        val deadline = keyboard.arrivalDeadline
+        deadline?.let { mainHandler.postAtTime(arrivalCheck, it) }
+        if (deadline != null && deadline != armedDeadline) trace("arrival deadline armed for +${deadline - now}ms")
+        armedDeadline = deadline
         // A keyboard that has gone, or a new one arriving, starts from a clean slate.
         if (keyboard.visible != wasVisible && leaving) {
             leaving = false
@@ -371,23 +426,48 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      * about it is kept.
      */
     private fun keyboardWindow(): ImeWindow? {
-        val ime = try {
-            windows.filter { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-                .maxByOrNull { w -> Rect().also { w.getBoundsInScreen(it) }.height() }
+        val start = SystemClock.uptimeMillis()
+        val list = try {
+            windows
         } catch (e: Exception) {
             Log.w(TAG, "window scan failed", e)
-            null
+            trace("win read failed: ${e.javaClass.simpleName}")
+            emptyList()
+        }
+        val read = SystemClock.uptimeMillis() - start
+        val imes = list.filter { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        val ime = imes.maxByOrNull { w -> Rect().also { w.getBoundsInScreen(it) }.height() }
+        val seen = buildString {
+            append("win n=").append(list.size).append(' ').append(read).append("ms")
+            if (imes.isEmpty()) append(" no keyboard window")
+            for (w in imes) {
+                val r = Rect().also { w.getBoundsInScreen(it) }
+                append(" ime#").append(w.id).append(" L").append(w.layer)
+                append(" a").append(w.isActive.bit()).append(" f").append(w.isFocused.bit()).append(' ').append(r.short())
+            }
         }
         if (ime == null) {
+            trace(seen)
             lastKeyboardWindow = null
             return null
         }
         val bounds = Rect().also { ime.getBoundsInScreen(it) }.toBox()
         val last = lastKeyboardWindow
-        if (last != null && last.id == ime.id && last.bounds == bounds && last.frame != null) return last
+        if (last != null && last.id == ime.id && last.bounds == bounds && last.frame != null) {
+            trace("$seen frame as before")
+            return last
+        }
+        trace(seen)
+        val rootStart = SystemClock.uptimeMillis()
         val root = runCatching { ime.root }.getOrNull()
+        val rootRead = SystemClock.uptimeMillis() - rootStart
         val frame = root?.let { r -> Rect().also { r.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }?.toBox()
-        val packageName = root?.packageName?.toString() ?: defaultKeyboardPackage()
+        val rootPackage = root?.packageName?.toString()
+        val packageName = rootPackage ?: defaultKeyboardPackage()
+        trace(
+            "root ${rootRead}ms " + (if (frame != null) "frame=${frame.short()}" else if (root == null) "unreadable" else "no frame") +
+                if (rootPackage != null) " $rootPackage" else " key from the default keyboard: $packageName"
+        )
         return ImeWindow(ime.id, bounds, frame, packageName).also { lastKeyboardWindow = it }
     }
 
@@ -406,6 +486,20 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
      */
     private fun syncPillVisibility() {
         val busy = DictationController.state.value !is DictationState.Idle
+        val reason = when {
+            busy -> "a dictation is in flight"
+            OverlayEditor.editing.value -> "editing spots"
+            presentation is PillPresentation.Desktop -> "desktop pill"
+            !keyboard.visible -> "no keyboard"
+            !keyboard.ready -> "held back: where the keyboard rests is not known yet"
+            keyboard.displaced -> "held back: the keyboard is reported well below where it rests"
+            leaving -> "held back: the keyboard is leaving"
+            else -> "shown: the keyboard's resting edge is at ${keyboard.top}"
+        }
+        if (reason != lastPillReason) {
+            lastPillReason = reason
+            trace("pill $reason")
+        }
         when (val p = presentation) {
             is PillPresentation.Desktop -> if (busy || p.showIdle) showPill() else removePill()
             PillPresentation.Button -> when {
@@ -420,7 +514,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     /** Fades the pill out where it is and drops its windows once it is gone. */
     private fun dismissPill() {
         val view = pill ?: return
-        if (!view.isDismissing) view.dismiss { if (pill === view) removePill() }
+        if (view.isDismissing) return
+        trace("pill fading out")
+        view.dismiss { if (pill === view) removePill() }
     }
 
     /** Where the pill measures its vertical offset from: the keyboard's top edge, or the last known one while busy. */
@@ -437,9 +533,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val existing = pill
         if (existing != null) {
             existing.setScreen(screenW, screenH, keyboardReference())
-            if (existing.isDismissing) existing.appear()
+            if (existing.isDismissing) {
+                existing.appear()
+                trace("pill coming back from fading out")
+                watchFirstFrames(existing, SystemClock.uptimeMillis(), "coming back")
+            }
             return
         }
+        val created = SystemClock.uptimeMillis()
         val settings = SettingsStore.get(this)
         val view = OverlayPillView(this).apply {
             host = this@MurmurAccessibilityService
@@ -470,7 +571,30 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         // Computes the first frames and, through the Host callbacks, adds both windows.
         view.setScreen(screenW, screenH, keyboardReference())
         view.render(DictationController.state.value)
-        if (canvasWindow?.attached != true || touchWindow?.attached != true) removePill()
+        val added = SystemClock.uptimeMillis()
+        if (canvasWindow?.attached != true || touchWindow?.attached != true) {
+            trace("pill windows could not be added (${added - created}ms)")
+            removePill()
+            return
+        }
+        trace("pill windows added in ${added - created}ms, keyboard edge ${keyboardReference()}")
+        watchFirstFrames(view, added, "its windows were added")
+    }
+
+    /** Logs the frame the pill is first drawn in after [since], and the first frame it is fully there. */
+    private fun watchFirstFrames(view: OverlayPillView, since: Long, after: String) {
+        var first = true
+        view.onFrameDrawn = { presence, frameTime ->
+            val now = SystemClock.uptimeMillis()
+            val there = "${(presence * 100).roundToInt()}% there"
+            if (first) {
+                first = false
+                trace("pill first drawn ${now - since}ms after $after, $there (${now - frameTime}ms into its frame)")
+            } else if (presence >= 1f) {
+                trace("pill fully there ${now - since}ms after $after")
+            }
+            if (presence >= 1f) view.onFrameDrawn = null
+        }
     }
 
     override fun applyCanvasFrame(frame: Box) {
@@ -486,11 +610,39 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     }
 
     private fun removePill() {
+        if (pill != null) trace("pill windows removed")
+        pill?.onFrameDrawn = null
         touchWindow?.remove()
         canvasWindow?.remove()
         touchWindow = null
         canvasWindow = null
         pill = null
+    }
+
+    private fun trace(message: String) = KeyboardTimingLog.record(SystemClock.uptimeMillis(), message)
+
+    /** An event for the timing log: its type, app, view class, window, and how long it took to get here. */
+    private fun describe(event: AccessibilityEvent, now: Long): String = buildString {
+        append("ev ").append(
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_VIEW_FOCUSED -> "FOCUSED"
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> "SELECTION"
+                AccessibilityEvent.TYPE_VIEW_CLICKED -> "CLICKED"
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> "WINDOW_STATE"
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED -> "WINDOWS"
+                else -> "0x" + Integer.toHexString(event.eventType)
+            }
+        )
+        event.packageName?.let { append(' ').append(it) }
+        event.className?.let { append(' ').append(it.toString().substringAfterLast('.')) }
+        append(" win=").append(event.windowId)
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            append(" changes=").append(windowChangeNames(event.windowChanges))
+        }
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.contentChangeTypes != 0) {
+            append(" content=0x").append(Integer.toHexString(event.contentChangeTypes))
+        }
+        if (event.eventTime > 0L) append(" age=").append(now - event.eventTime).append("ms")
     }
 
     private fun screenSize(): Pair<Int, Int> {
@@ -797,6 +949,44 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
 }
 
 private fun Rect.toBox(): Box = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+
+private fun Rect.short() = "[$left,$top,$right,$bottom]"
+
+private fun Box.short() = "[${left.roundToInt()},${top.roundToInt()},${right.roundToInt()},${bottom.roundToInt()}]"
+
+private fun Boolean.bit() = if (this) 1 else 0
+
+private fun PillPresentation.traceName(): String = when (this) {
+    PillPresentation.Button -> "floating button"
+    is PillPresentation.Desktop -> "desktop pill (idle bar ${if (showIdle) "shown" else "hidden"})"
+}
+
+private fun windowTypeName(type: Int?): String = when (type) {
+    null -> "unlisted"
+    AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
+    AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "keyboard"
+    AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+    AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility overlay"
+    AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split-screen divider"
+    else -> "type $type"
+}
+
+private val WINDOW_CHANGES = listOf(
+    AccessibilityEvent.WINDOWS_CHANGE_ADDED to "added",
+    AccessibilityEvent.WINDOWS_CHANGE_REMOVED to "removed",
+    AccessibilityEvent.WINDOWS_CHANGE_TITLE to "title",
+    AccessibilityEvent.WINDOWS_CHANGE_BOUNDS to "bounds",
+    AccessibilityEvent.WINDOWS_CHANGE_LAYER to "layer",
+    AccessibilityEvent.WINDOWS_CHANGE_ACTIVE to "active",
+    AccessibilityEvent.WINDOWS_CHANGE_FOCUSED to "focused",
+    AccessibilityEvent.WINDOWS_CHANGE_ACCESSIBILITY_FOCUSED to "a11y-focused",
+    AccessibilityEvent.WINDOWS_CHANGE_PARENT to "parent",
+    AccessibilityEvent.WINDOWS_CHANGE_CHILDREN to "children",
+    AccessibilityEvent.WINDOWS_CHANGE_PIP to "pip"
+)
+
+private fun windowChangeNames(changes: Int): String =
+    WINDOW_CHANGES.filter { changes and it.first != 0 }.joinToString("|") { it.second }.ifEmpty { "0x" + Integer.toHexString(changes) }
 
 /**
  * Keyboards' resting offsets, kept across restarts so a keyboard's resting edge is known from the

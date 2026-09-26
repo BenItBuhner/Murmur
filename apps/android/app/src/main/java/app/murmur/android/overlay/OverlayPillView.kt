@@ -258,7 +258,7 @@ class OverlayPillView(context: Context) : View(context) {
     private var pressed = false
     private var pressScale = 1f
 
-    /** 0: not shown, 1: fully there. Fades and scales the whole pill in where it rests, and out. */
+    /** 0: not shown, 1: fully there. Fades and scales the whole pill out where it is, and back. */
     private var presence = 1f
     private var presenceTarget = 1f
     private var whenGone: (() -> Unit)? = null
@@ -412,11 +412,10 @@ class OverlayPillView(context: Context) : View(context) {
     private fun ink(alpha: Int): Int = ColorUtils.setAlphaComponent(palette.ink, alpha)
 
     /**
-     * Brings the pill in with a short fade and scale where it rests, from nothing when [fromNothing]
-     * (a fresh window), or back from wherever a [dismiss] had got to.
+     * Brings the pill back from wherever a [dismiss] had got to, in two frames. A new pill needs no
+     * such thing: it is drawn fully there from its first frame.
      */
-    fun appear(fromNothing: Boolean = false) {
-        if (fromNothing) presence = 0f
+    fun appear() {
         presenceTarget = 1f
         whenGone = null
         invalidate()
@@ -1922,8 +1921,8 @@ class OverlayPillView(context: Context) : View(context) {
     private companion object {
         const val FLICK_GHOST_FADE_MS = 220L
 
-        /** Coming in where it rests: long enough to read as an arrival, short next to the keyboard's own slide. */
-        const val APPEAR_MS = 160f
+        /** Coming back after a [dismiss] the keyboard did not follow: as quick as going, so it reads as not having left. */
+        const val APPEAR_MS = 16f
 
         /**
          * Going when the keyboard starts to leave: two frames at 120 Hz. The earliest sign of a close
@@ -1932,7 +1931,7 @@ class OverlayPillView(context: Context) : View(context) {
          */
         const val DISMISS_MS = 16f
 
-        /** How small the pill starts when it comes in (and ends when it goes). */
+        /** How small the pill ends when it goes (and starts when it comes back). */
         const val PRESENCE_SCALE = 0.86f
 
         /** Room around the pill for its shadow in the layer a fade draws through. */

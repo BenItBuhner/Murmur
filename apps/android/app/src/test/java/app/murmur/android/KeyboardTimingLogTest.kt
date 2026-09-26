@@ -91,6 +91,7 @@ class KeyboardTimingLogTest {
         val report = KeyboardTimingLog.report(context)
         assertTrue(report, report.startsWith("Murmur keyboard timing log\nMurmur ${BuildConfig.VERSION_NAME} on "))
         assertTrue(report, "keyboard: com.samsung.android.honeyboard/.service.HoneyBoardService" in report)
+        assertTrue(report, Regex("screen [1-9]\\d*x[1-9]\\d* px").containsMatchIn(report))
         assertTrue(report, "resting offsets remembered (dp): com.samsung.android.honeyboard=5.0" in report)
         assertTrue(report, report.trimEnd().endsWith("== keyboard up #1 at 100 ==\n100 +0 kb visible=1 ready=1"))
     }

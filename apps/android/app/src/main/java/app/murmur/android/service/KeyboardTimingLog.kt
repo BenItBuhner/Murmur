@@ -129,7 +129,7 @@ object KeyboardTimingLog {
         val wm = context.getSystemService(WindowManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wm != null) {
             val bounds = wm.maximumWindowMetrics.bounds
-            return bounds.width() to bounds.height()
+            if (!bounds.isEmpty) return bounds.width() to bounds.height()
         }
         val dm = context.resources.displayMetrics
         return dm.widthPixels to dm.heightPixels

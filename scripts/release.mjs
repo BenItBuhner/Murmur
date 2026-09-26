@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.5.9': [
+    '**The floating button appears the instant the keyboard opens.** It is fully there from its first frame, already at its final spot, even while the keyboard is still sliding in, instead of fading in after a delay (a regression in 0.5.7, where a 160 ms fade started only once the keyboard had been reported at rest). The very first time a new keyboard opens, the button can still wait until that keyboard has settled, once, to learn where it rests; from the next opening on it is instant.'
+  ],
   '0.5.8': [
     '**The keyboard-mode idle bar lets taps through.** With a hardware keyboard attached, the thin idle bar on Android no longer catches taps meant for the app icons beneath it: taps pass through, and the shortcuts start dictation, as on desktop. A new setting under Keyboard → Overlay, **Tap the idle bar to dictate** (off by default), makes the bar itself take a tap again, with no invisible padding around it. Without a hardware keyboard the bar still takes a tap, since there is no shortcut to start dictation with.',
     "**Phones stay in touch mode when turned.** Keyboard mode used to switch on when a phone was rotated to landscape, because the rule looked at the width in the current orientation. It now looks at the screen's shorter side (Android's own tablet line), so a phone never enters keyboard mode by rotating, and a tablet, or an unfolded foldable, uses keyboard mode in either orientation. A keyboard or a DeX session still switches it live."

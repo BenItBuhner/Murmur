@@ -39,6 +39,19 @@ if (releaseKeystore != null) {
     require(releaseKeystore.exists()) { "MURMUR_KEYSTORE_FILE points to a missing file: $releaseKeystore" }
 }
 
+// Robolectric's Android runtime, resolved by Gradle with the other dependencies rather than fetched
+// by Robolectric from Maven Central in the middle of the tests, where a dropped connection failed a
+// whole test class: Gradle retries a transient network failure, and setup-gradle caches what it has
+// resolved between CI runs. The tests read it offline from the synced directory. Every test runs on
+// SDK 35; a test on another SDK needs that SDK's jar here, and a Robolectric upgrade may move the
+// "-i" instrumentation suffix on (the tests then name the jar they are missing).
+val robolectricRuntime: Configuration by configurations.creating { isTransitive = false }
+val robolectricRuntimeDir = layout.buildDirectory.dir("robolectric-runtime")
+val syncRobolectricRuntime by tasks.registering(Sync::class) {
+    from(robolectricRuntime)
+    into(robolectricRuntimeDir)
+}
+
 android {
     namespace = "app.murmur.android"
     compileSdk = 36
@@ -120,6 +133,9 @@ android {
         // output, which the JUnit report keeps (the console stays quiet).
         unitTests.all {
             it.systemProperty("robolectric.logging", "stdout")
+            it.dependsOn(syncRobolectricRuntime)
+            it.systemProperty("robolectric.offline", "true")
+            it.systemProperty("robolectric.dependency.dir", robolectricRuntimeDir.get().asFile.absolutePath)
             // Robolectric screenshot tests (OverlayPillSpotScreenshotTest) drop their PNGs here.
             it.systemProperty(
                 "murmur.screenshotDir",
@@ -163,6 +179,7 @@ dependencies {
     // Runs the text-insertion strategy against a real EditText (TextInserterTest) and the whole
     // sample-clip dictation against an in-process STT endpoint (DictationFlowTest).
     testImplementation("org.robolectric:robolectric:4.15.1")
+    robolectricRuntime("org.robolectric:android-all-instrumented:15-robolectric-12650502-i7")
     // Compose UI tests under Robolectric (BackStackHostTest drives the predictive back gesture).
     // ui-test-manifest declares the bare ComponentActivity createComposeRule() launches; it only
     // ends up in debug builds.

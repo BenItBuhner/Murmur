@@ -45,8 +45,15 @@ object KeyboardTimingLog {
     }
 
     private val segments = ArrayDeque<Segment>()
+    private val tallies = LinkedHashMap<String, Int>()
     private var lastAt = -1L
     private var openings = 0
+
+    /** Counts one more of [what] (shown in the report's header), such as a pill shown ahead of the keyboard. */
+    @Synchronized
+    fun tally(what: String) {
+        tallies[what] = (tallies[what] ?: 0) + 1
+    }
 
     /** One line: its time, the time since the line before it, and [message]. */
     @Synchronized
@@ -89,9 +96,13 @@ object KeyboardTimingLog {
     @Synchronized
     fun clear() {
         segments.clear()
+        tallies.clear()
         lastAt = -1L
         openings = 0
     }
+
+    @Synchronized
+    private fun counts(): String = tallies.entries.joinToString(", ") { "${it.value} ${it.key}" }
 
     /** What "Copy keyboard timing log" puts on the clipboard: the phone, the keyboard, what was learnt, then [text]. */
     fun report(context: Context): String {
@@ -114,12 +125,14 @@ object KeyboardTimingLog {
                     "${if (MurmurAccessibilityService.isRunning) "on" else "off"}; uptime now ${SystemClock.uptimeMillis()}"
             )
             appendLine("resting offsets remembered (dp): ${offsets.ifEmpty { "none" }}")
+            appendLine("counted since the log started: ${counts().ifEmpty { "nothing yet" }}")
             appendLine(
                 "Each line: uptime ms, +ms since the line before, what happened. ev: accessibility event " +
                     "(age: ms since it was raised). win: window list read (ime#id L=layer a=active f=focused " +
                     "[left,top,right,bottom]). view read, root read: an event's view and the keyboard window's " +
                     "root, fetched on a thread of their own, never on the one that handles the keyboard's " +
-                    "reports. kb: what the tracker made of it. pill: the button."
+                    "reports. kb: what the tracker made of it. anticipating: the pill shown where the keyboard " +
+                    "will rest before its window is reported, then confirmed or cancelled. pill: the button."
             )
             appendLine()
             append(text())

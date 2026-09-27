@@ -95,6 +95,23 @@ private const val PRECEDING_TEXT_MAX = 600
 private const val SLOW_EVENT_MS = 8L
 
 /**
+ * How long a pill shown ahead of the keyboard waits for the keyboard's window to be reported before
+ * it goes again. On Bennett's recording (Galaxy S26 Ultra, One UI, Samsung Keyboard) the keyboard's
+ * window appeared 80 ms after the finger left the field, 90 ms after an app opened with its field
+ * focused and 140 ms after an app came back from Recents: this is twice the slowest of those.
+ */
+private const val ANTICIPATION_MS = 300L
+
+/** A field focused this soon after its app's window appeared was focused by the screen opening, not by a tap. */
+private const val SCREEN_OPEN_MS = 1000L
+
+/** Focus moving about as the keyboard goes away is the app settling, not someone asking for the keyboard. */
+private const val AFTER_CLOSE_MS = 500L
+
+/** How many fields are remembered for whether a keyboard came up when they were focused or tapped. */
+private const val FIELD_MEMORY = 128
+
+/**
  * The Wispr Flow pattern on Android: whenever the keyboard comes up, a floating dictation
  * button appears next to it (by default centred just above it; the user can park it anywhere,
  * including on the keyboard's own toolbar). Tap to dictate, tap again to stop; the transcribed,
@@ -104,7 +121,9 @@ private const val SLOW_EVENT_MS = 8L
  * for two windows: a canvas it draws in, which covers the screen, is never touchable and never
  * moves, and an invisible touch window that hugs the pill and relays taps to it. Both are created
  * when the service connects and kept, hidden, between showings, so showing the pill only makes them
- * visible. Where the keyboard is comes from the accessibility window list ([KeyboardTracker]).
+ * visible. Where the keyboard is comes from the accessibility window list ([KeyboardTracker]); a tap
+ * on a field that is about to bring up a keyboard whose resting edge is known shows the button there
+ * before the keyboard's window is reported ([anticipate]).
  *
  * With a physical keyboard attached (or on a tablet-sized screen) the overlay takes the desktop
  * app's form instead ([PillPresentation.Desktop]): a pill parked at the desktop's position with an
@@ -134,7 +153,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     /** Invisible; hugs the pill and relays its touches. Free to follow the pill, nothing is drawn in it. */
     private var touchWindow: OverlayWindow? = null
 
-    /** Where keyboards rest, kept across restarts. */
+    /** Where keyboards rest, kept across restarts: the tracker learns them, anticipation reads them. */
     private val keyboardOffsets by lazy { StoredKeyboardOffsets(this) }
 
     /** Where the keyboard is; its last top edge is kept while a dictation is in flight. */
@@ -160,6 +179,22 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
 
     @Volatile
     private var alive = true
+
+    /** The pill shown ahead of the keyboard, at the keyboard's remembered resting edge. */
+    private class Anticipation(val top: Int, val since: Long, val field: String)
+    private var anticipation: Anticipation? = null
+
+    /** A field focused or tapped with no keyboard up; what follows teaches whether it brings one. */
+    private class Watch(val field: String, val since: Long)
+    private var watch: Watch? = null
+    private val watchExpiry = Runnable { watchExpired() }
+    private val keyboardFollows = object : LinkedHashMap<String, Boolean>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > FIELD_MEMORY
+    }
+
+    /** When each app's window last appeared: a field focused just after is the screen opening. */
+    private val windowOpenedAt = HashMap<String, Long>()
+    private var keyboardGoneAt = -1L
     private val arrivalCheck = Runnable {
         trace("arrival deadline fired")
         updateKeyboardState(force = true)
@@ -239,6 +274,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             presence.posture.collect { posture ->
                 // A keyboard that went away mid-chord never sends its releases.
                 if (!posture.hardwareKeyboard) shortcuts.reset()
+                // With a keyboard attached the soft keyboard stays down: nothing to be ahead of.
+                if (posture.hardwareKeyboard) cancelAnticipation("a hardware keyboard was attached")
                 applyPresentation()
             }
         }
@@ -272,6 +309,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         shortcuts = null
         mainHandler.removeCallbacks(arrivalCheck)
         mainHandler.removeCallbacks(leaveCheck)
+        mainHandler.removeCallbacks(watchExpiry)
+        anticipation = null
+        watch = null
         destroyPill()
         readThread?.quitSafely()
         readThread = null
@@ -311,7 +351,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         if (next == presentation) return
         presentation = next
         trace("presentation ${next.traceName()}")
-        if (next !is PillPresentation.Button) OverlayEditor.stop()
+        if (next !is PillPresentation.Button) {
+            cancelAnticipation("keyboard mode")
+            OverlayEditor.stop()
+        }
         pill?.setPresentation(next)
         syncPillVisibility()
     }
@@ -338,6 +381,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 trace(describe(event, start))
+                if (event.contentChangeTypes == 0) event.packageName?.toString()?.let { windowOpenedAt[it] = start }
                 if (keyboard.visible) anotherAppComingUp(event)?.let { keyboardLeaving(it) }
                 updateKeyboardState(force = true)
             }
@@ -432,17 +476,20 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         // Before Android 13 an event is recycled once it has been handled; a copy keeps what fetching its view needs.
         @Suppress("DEPRECATION")
         val copy = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) event else AccessibilityEvent.obtain(event)
+        val type = event.eventType
         val pkg = event.packageName?.toString()
+        val windowId = event.windowId
+        val keyboardUp = keyboard.visible
         reads.execute {
             val start = SystemClock.uptimeMillis()
             val node = runCatching { readSource(copy) }.getOrNull()
             val view = node?.let { ViewRead(it, it.acceptsText(), it.isEditable, it.viewIdResourceName, it.className?.toString()) }
             val done = SystemClock.uptimeMillis()
-            postOnMain(Runnable { if (alive) viewRead(pkg, view, arrived, start, done) })
+            postOnMain(Runnable { if (alive) viewRead(type, pkg, windowId, view, keyboardUp, arrived, start, done) })
         }
     }
 
-    private fun viewRead(pkg: String?, view: ViewRead?, arrived: Long, start: Long, done: Long) {
+    private fun viewRead(type: Int, pkg: String?, windowId: Int, view: ViewRead?, keyboardUp: Boolean, arrived: Long, start: Long, done: Long) {
         val what = when {
             view == null -> "no view"
             view.takesText -> "takes text (${view.id ?: view.className})"
@@ -454,6 +501,105 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             lastEditable = view.node
             lastPackage = pkg ?: lastPackage
         }
+        val engaged = type == AccessibilityEvent.TYPE_VIEW_FOCUSED || type == AccessibilityEvent.TYPE_VIEW_CLICKED
+        if (engaged && view.editable && pkg != null && !keyboardUp && !keyboard.visible) {
+            fieldEngaged(type == AccessibilityEvent.TYPE_VIEW_CLICKED, pkg, windowId, view, arrived)
+        }
+    }
+
+    // ---- ahead of the keyboard ----------------------------------------------------------------
+
+    /**
+     * An editable field was focused or tapped while no keyboard was up. A keyboard usually follows in
+     * well under [ANTICIPATION_MS]; whether one does is learnt per field (a field an app focuses as
+     * its screen opens is counted apart from the same field tapped), and when one is expected and
+     * where it will rest is remembered, the pill is shown there now, ahead of One UI's report of the
+     * keyboard's window. It goes again, without a fade, if no keyboard is reported in time.
+     */
+    private fun fieldEngaged(tapped: Boolean, pkg: String, windowId: Int, view: ViewRead, at: Long) {
+        val opening = !tapped && windowOpenedAt[pkg]?.let { at - it < SCREEN_OPEN_MS } == true
+        val field = "$pkg/${view.id ?: view.className ?: "view"}" + if (opening) " focused as its screen opened" else ""
+        // Where no keyboard can come up, or whether one does says nothing about the field, nothing is anticipated or learnt.
+        val context = when {
+            presentation !is PillPresentation.Button -> "keyboard mode"
+            presence?.posture?.value?.hardwareKeyboard == true -> "a hardware keyboard is attached"
+            pillShown || DictationController.state.value !is DictationState.Idle || OverlayEditor.editing.value -> "the pill is up already"
+            leaving -> "the keyboard is leaving"
+            keyboardGoneAt >= 0L && at - keyboardGoneAt < AFTER_CLOSE_MS -> "the keyboard went away ${at - keyboardGoneAt}ms before"
+            else -> null
+        }
+        if (context != null) return notAnticipating(field, context)
+        watch = Watch(field, at)
+        mainHandler.removeCallbacks(watchExpiry)
+        postOnMain(watchExpiry, at + ANTICIPATION_MS)
+        // The keyboard that will come up is the system's current one, whatever the last one's root said.
+        val keyboardApp = defaultKeyboardPackage() ?: rootRead?.packageName
+        val rest = keyboardApp?.let { keyboardOffsets[KeyboardTracker.restKey(it, screenSize().second.toFloat())] }
+        val blocked = when {
+            keyboardFollows[field] == false -> "no keyboard came up for it last time"
+            opening && keyboardFollows[field] != true -> "a field focused as its screen opens brings a keyboard up only in some apps, and none has come for this one yet"
+            !inAppInFront(windowId) -> "it is not in the app in front"
+            keyboardApp == null -> "the keyboard is not known"
+            rest == null -> "where $keyboardApp rests on this screen is not known yet"
+            else -> null
+        }
+        if (blocked != null) return notAnticipating(field, blocked)
+        anticipate(field, keyboardApp!!, rest!!)
+    }
+
+    private fun notAnticipating(field: String, reason: String) {
+        KeyboardTimingLog.tally("anticipations skipped")
+        trace("not anticipating the keyboard for $field: $reason")
+    }
+
+    /** Shows the pill where [keyboardApp] will rest, before its window is reported. */
+    private fun anticipate(field: String, keyboardApp: String, rest: Float) {
+        anticipation = Anticipation(rest.toInt(), SystemClock.uptimeMillis(), field)
+        KeyboardTimingLog.tally("anticipations")
+        trace("anticipating the keyboard for $field: $keyboardApp rests at ${rest.toInt()} on this screen, the pill goes there now")
+        syncPillVisibility()
+    }
+
+    /** Whether [windowId] is the window of the app in front: the application window taking input, or the active one. */
+    private fun inAppInFront(windowId: Int): Boolean {
+        val window = runCatching { windows.firstOrNull { it.id == windowId } }.getOrNull() ?: return false
+        return window.type == AccessibilityWindowInfo.TYPE_APPLICATION && (window.isFocused || window.isActive)
+    }
+
+    /** The keyboard's window has just been reported: what was watched for came, and a pill shown ahead of it hands over to the tracker. */
+    private fun keyboardCame(now: Long) {
+        watch?.let { w ->
+            watch = null
+            mainHandler.removeCallbacks(watchExpiry)
+            val learnt = if (keyboardFollows.put(w.field, true) != true) "; learnt that it brings one up" else ""
+            trace("the keyboard was reported ${now - w.since}ms after ${w.field} was engaged$learnt")
+        }
+        val a = anticipation ?: return
+        anticipation = null
+        KeyboardTimingLog.tally("anticipations confirmed")
+        val where = when {
+            !keyboard.ready -> ", where it rests is not known yet"
+            keyboard.top != a.top -> ", resting at ${keyboard.top} rather than ${a.top}"
+            else -> ", resting where anticipated"
+        }
+        trace("anticipation confirmed: the keyboard was reported ${now - a.since}ms after the pill went up$where")
+    }
+
+    private fun watchExpired() {
+        val w = watch ?: return
+        watch = null
+        keyboardFollows[w.field] = false
+        trace("no keyboard within ${ANTICIPATION_MS}ms of ${w.field} being engaged: learnt that it does not bring one up")
+        cancelAnticipation("no keyboard was reported within ${ANTICIPATION_MS}ms")
+    }
+
+    /** Takes a pill shown ahead of the keyboard away again, at once. */
+    private fun cancelAnticipation(reason: String) {
+        val a = anticipation ?: return
+        anticipation = null
+        KeyboardTimingLog.tally("anticipations cancelled")
+        trace("anticipation cancelled after ${SystemClock.uptimeMillis() - a.since}ms: $reason")
+        syncPillVisibility()
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
@@ -464,6 +610,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         lastWindowScanAt = now
         val wasVisible = keyboard.visible
         keyboard.update(keyboardWindow(), now, screenSize().second.toFloat())
+        val came = keyboard.visible && !wasVisible
         if (keyboard.visible != wasVisible) KeyboardTimingLog.keyboardChanged(SystemClock.uptimeMillis(), keyboard.visible)
         val state = "kb visible=${keyboard.visible.bit()} ready=${keyboard.ready.bit()} displaced=${keyboard.displaced.bit()} " +
             "top=${keyboard.top}: ${keyboard.decision}"
@@ -471,6 +618,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             lastKeyboardTrace = state
             trace(state)
         }
+        if (came) keyboardCame(now) else if (wasVisible && !keyboard.visible) keyboardGoneAt = now
         mainHandler.removeCallbacks(arrivalCheck)
         val deadline = keyboard.arrivalDeadline
         deadline?.let { postOnMain(arrivalCheck, it) }
@@ -577,17 +725,20 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     /**
      * The floating button shows with the keyboard, but only where it rests: fully there the moment
      * the keyboard's resting edge is known (from its first report, still sliding in, when the
-     * keyboard has been seen before), and stepping aside within two frames the moment anything says
-     * the keyboard is leaving or has been pulled well down. The desktop pill stays as its idle bar
+     * keyboard has been seen before, or ahead of it when a field was tapped and where that keyboard
+     * rests is remembered), and stepping aside within two frames the moment anything says the
+     * keyboard is leaving or has been pulled well down. The desktop pill stays as its idle bar
      * (unless the idle indicator is off). Both stay for a dictation in flight and the button for its
      * editor.
      */
     private fun syncPillVisibility() {
         val busy = DictationController.state.value !is DictationState.Idle
+        val ahead = anticipation
         val reason = when {
             busy -> "a dictation is in flight"
             OverlayEditor.editing.value -> "editing spots"
             presentation is PillPresentation.Desktop -> "desktop pill"
+            !keyboard.visible && ahead != null -> "shown ahead of the keyboard, at its remembered edge ${ahead.top}"
             !keyboard.visible -> "no keyboard"
             !keyboard.ready -> "held back: where the keyboard rests is not known yet"
             keyboard.displaced -> "held back: the keyboard is reported well below where it rests"
@@ -604,6 +755,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                 busy || OverlayEditor.editing.value -> showPill()
                 keyboard.visible && keyboard.ready && !keyboard.displaced && !leaving -> showPill()
                 keyboard.visible -> dismissPill()
+                ahead != null -> showPill()
                 else -> hidePill()
             }
         }
@@ -617,9 +769,13 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         view.dismiss { hidePill() }
     }
 
-    /** Where the pill measures its vertical offset from: the keyboard's top edge, or the last known one while busy. */
+    /**
+     * Where the pill measures its vertical offset from: the keyboard's top edge, where it will rest
+     * when the pill is shown ahead of it, or the last known one while busy.
+     */
     private fun keyboardReference(): Int? {
         if (keyboard.visible) return keyboard.top
+        anticipation?.let { return it.top }
         val busy = DictationController.state.value !is DictationState.Idle || OverlayEditor.editing.value
         return if (busy && keyboard.top > 0) keyboard.top else null
     }

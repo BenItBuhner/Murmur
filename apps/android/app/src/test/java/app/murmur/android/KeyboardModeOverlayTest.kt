@@ -160,9 +160,11 @@ class KeyboardModeOverlayTest {
 
     // ---- the overlay windows ------------------------------------------------------------------------
 
+    /** The overlay windows on screen: the pill's two are kept, hidden, while it is not shown. */
     private fun overlays(): List<View> =
         Shadow.extract<ShadowWindowManagerImpl>(service.getSystemService(WindowManager::class.java)).views
             .filter { (it.layoutParams as? WindowManager.LayoutParams)?.type == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY }
+            .filter { it.visibility == View.VISIBLE }
 
     private fun pill(): OverlayPillView? = overlays().filterIsInstance<OverlayPillView>().singleOrNull()
 

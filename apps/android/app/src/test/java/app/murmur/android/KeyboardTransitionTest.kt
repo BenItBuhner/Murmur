@@ -22,6 +22,7 @@ import app.murmur.android.settings.DesktopOverlay
 import app.murmur.android.settings.OverlayShape
 import app.murmur.android.settings.SettingsStore
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -204,7 +205,10 @@ class KeyboardTransitionTest {
         return pillLook()
     }
 
-    private fun overlayViews(): List<View> =
+    /** The overlay windows on screen: the pill's two are kept, hidden, while it is not shown. */
+    private fun overlayViews(): List<View> = attachedViews().filter { it.visibility == View.VISIBLE }
+
+    private fun attachedViews(): List<View> =
         Shadow.extract<ShadowWindowManagerImpl>(service.getSystemService(WindowManager::class.java)).views
 
     private fun pillView(): OverlayPillView? = overlayViews().filterIsInstance<OverlayPillView>().singleOrNull()
@@ -600,15 +604,18 @@ class KeyboardTransitionTest {
             assertTrue("no \"$text\" after line $from in:\n$log", i >= 0)
             return i
         }
+        // The pill's windows, added hidden when the service connected.
+        var at = after(-1, "pill windows added, hidden")
         // The first opening: unknown, so the deadline is armed, fires, and what was learnt is said.
-        var at = after(-1, "== keyboard up #1")
+        at = after(at, "== keyboard up #1")
         at = after(at, "kb visible=1 ready=0")
         at = after(at, "arrival deadline armed for +450ms")
         at = after(at, "arrival deadline fired")
         at = after(at, "learnt 90px for $IME_PACKAGE")
-        at = after(at, "pill windows added")
+        at = after(at, "pill windows made visible")
         at = after(at, "pill first drawn")
         at = after(at, "== keyboard gone #1")
+        at = after(at, "pill windows hidden")
         // The second: the report, the window list read with the keyboard's window, its frame, the
         // tracker's verdict and the pill's first frame, all in the frame the keyboard is first reported.
         at = after(at, "ev WINDOWS")
@@ -620,9 +627,25 @@ class KeyboardTransitionTest {
         at = after(at, "kb visible=1 ready=1 displaced=0 top=${FRAME_TOP + 90}: arriving; rest known from its frame")
         at = after(at, "arrival deadline armed for +450ms, the pill is not waiting for it")
         at = after(at, "pill shown")
-        at = after(at, "pill windows added")
+        at = after(at, "pill windows made visible")
         after(at, "pill first drawn")
         val shown = lines.indexOfFirst { "== keyboard up #2" in it }
         assertTrue("nothing waited on in the second opening:\n$log", lines.drop(shown).none { "deadline fired" in it })
+    }
+
+    @Test
+    fun `the pill's two windows are added once, hidden, and shown and hidden again for every opening`() {
+        val windows = attachedViews()
+        assertEquals("the canvas and the touch window, added as the service connected", 2, windows.size)
+        assertTrue("hidden while no keyboard is up: no surface, nothing drawn", overlayViews().isEmpty())
+        fun same() = attachedViews().size == 2 && attachedViews().zip(windows).all { (a, b) -> a === b }
+        repeat(3) { n ->
+            val looks = open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 40)
+            assertTrue("opening ${n + 1}: the same two windows, shown", same() && overlayViews().size == 2)
+            if (n > 0) assertArrives(looks, FRAME_TOP + 15, atFrame = 0)
+            closeKeyboard()
+            assertTrue("closed ${n + 1}: hidden again, not removed", same() && overlayViews().isEmpty())
+            assertTrue(attachedViews().all { it.visibility == View.INVISIBLE })
+        }
     }
 }

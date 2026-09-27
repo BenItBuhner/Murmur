@@ -424,6 +424,34 @@ class OverlayPillView(context: Context) : View(context) {
         invalidate()
     }
 
+    /**
+     * Starts over as a pill that has never been shown, for a host that keeps its windows between
+     * showings: fully there from its next frame, drawn where its state puts it rather than morphing
+     * from wherever it was last, and nothing (a fade, a landing, a press) left in flight.
+     */
+    fun restart() {
+        cancelGesture()
+        presence = 1f
+        presenceTarget = 1f
+        whenGone = null
+        springX = null
+        springY = null
+        morphStart = -1L
+        fromLook = toLook
+        fromAx = toAx
+        fromAy = toAy
+        curW = toLook.w
+        curH = toLook.h
+        curBg = toLook.bg
+        curAx = toAx
+        curAy = toAy
+        curIncomingAlpha = 1f
+        pressScale = 1f
+        lastFrameAt = 0L
+        resetBars()
+        hasDrawn = false
+    }
+
     /** Fades the pill out where it is, in two frames; [onGone] runs once it is fully gone (unless it [appear]s again first). */
     fun dismiss(onGone: () -> Unit) {
         presenceTarget = 0f

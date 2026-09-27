@@ -99,8 +99,9 @@ private const val SLOW_EVENT_MS = 8L
  *
  * The pill view owns its geometry and animations and asks this service (its [OverlayPillView.Host])
  * for two windows: a canvas it draws in, which covers the screen, is never touchable and never
- * moves, and an invisible touch window that hugs the pill and relays taps to it. Where the keyboard
- * is comes from the accessibility window list ([KeyboardTracker]).
+ * moves, and an invisible touch window that hugs the pill and relays taps to it. Both are created
+ * when the service connects and kept, hidden, between showings, so showing the pill only makes them
+ * visible. Where the keyboard is comes from the accessibility window list ([KeyboardTracker]).
  *
  * With a physical keyboard attached (or on a tablet-sized screen) the overlay takes the desktop
  * app's form instead ([PillPresentation.Desktop]): a pill parked at the desktop's position with an
@@ -114,7 +115,12 @@ private const val SLOW_EVENT_MS = 8L
 class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPillView.Host {
 
     private var windowManager: WindowManager? = null
+
+    /** The pill, created with its windows when the service connects and kept until it stops. */
     private var pill: OverlayPillView? = null
+
+    /** The pill's windows are on screen. Hidden, they have no surface: nothing is drawn or composited, and no touch reaches them. */
+    private var pillShown = false
     private var shortcuts: HardwareShortcuts? = null
     private var presence: KeyboardPresence? = null
     private var presentation: PillPresentation = PillPresentation.Button
@@ -180,6 +186,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         KeyboardTimingLog.section(SystemClock.uptimeMillis(), "service connected")
         val (screenW, screenH) = screenSize()
         trace("presentation ${presentation.traceName()}; screen ${screenW}x$screenH")
+        createPill()
         mainScope.launch {
             DictationController.state.collect { state ->
                 pill?.render(state)
@@ -234,7 +241,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         shortcuts = null
         mainHandler.removeCallbacks(arrivalCheck)
         mainHandler.removeCallbacks(leaveCheck)
-        removePill()
+        destroyPill()
         mainScope.cancel()
         super.onDestroy()
     }
@@ -503,22 +510,22 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             trace("pill $reason")
         }
         when (val p = presentation) {
-            is PillPresentation.Desktop -> if (busy || p.showIdle) showPill() else removePill()
+            is PillPresentation.Desktop -> if (busy || p.showIdle) showPill() else hidePill()
             PillPresentation.Button -> when {
                 busy || OverlayEditor.editing.value -> showPill()
                 keyboard.visible && keyboard.ready && !keyboard.displaced && !leaving -> showPill()
                 keyboard.visible -> dismissPill()
-                else -> removePill()
+                else -> hidePill()
             }
         }
     }
 
-    /** Fades the pill out where it is and drops its windows once it is gone. */
+    /** Fades the pill out where it is and hides its windows once it is gone. */
     private fun dismissPill() {
         val view = pill ?: return
-        if (view.isDismissing) return
+        if (!pillShown || view.isDismissing) return
         trace("pill fading out")
-        view.dismiss { if (pill === view) removePill() }
+        view.dismiss { hidePill() }
     }
 
     /** Where the pill measures its vertical offset from: the keyboard's top edge, or the last known one while busy. */
@@ -528,21 +535,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         return if (busy && keyboard.top > 0) keyboard.top else null
     }
 
-    /** Shows the pill, drawn fully there from its first frame; one that was going comes back. */
-    private fun showPill() {
+    /**
+     * The pill and its two windows, added hidden. They are laid out here once and kept: showing the
+     * pill makes them visible and hiding it makes them invisible again, and an invisible window has no
+     * surface, so nothing is drawn, composited or touched while no pill is shown.
+     */
+    private fun createPill() {
         val wm = windowManager ?: return
-        val (screenW, screenH) = screenSize()
-        val existing = pill
-        if (existing != null) {
-            existing.setScreen(screenW, screenH, keyboardReference())
-            if (existing.isDismissing) {
-                existing.appear()
-                trace("pill coming back from fading out")
-                watchFirstFrames(existing, SystemClock.uptimeMillis(), "coming back")
-            }
-            return
-        }
-        val created = SystemClock.uptimeMillis()
+        val started = SystemClock.uptimeMillis()
         val settings = SettingsStore.get(this)
         val view = OverlayPillView(this).apply {
             host = this@MurmurAccessibilityService
@@ -570,17 +570,48 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         view.configure(s.overlayShape, s.overlayLayout)
         view.setPresentation(presentation)
         view.setEditing(OverlayEditor.editing.value)
-        // Computes the first frames and, through the Host callbacks, adds both windows.
-        view.setScreen(screenW, screenH, keyboardReference())
+        val (screenW, screenH) = screenSize()
+        // Computes the pill's frames and, through the Host callbacks, where both windows go.
+        view.setScreen(screenW, screenH, null)
         view.render(DictationController.state.value)
-        val added = SystemClock.uptimeMillis()
-        if (canvasWindow?.attached != true || touchWindow?.attached != true) {
-            trace("pill windows could not be added (${added - created}ms)")
-            removePill()
+        canvasWindow?.attach()
+        touchWindow?.attach()
+        val attached = canvasWindow?.attached == true && touchWindow?.attached == true
+        trace("pill windows ${if (attached) "added, hidden," else "could not be added"} in ${SystemClock.uptimeMillis() - started}ms")
+    }
+
+    /** Shows the pill, drawn fully there from its first frame; one that was going comes back. */
+    private fun showPill() {
+        val view = pill ?: return
+        val (screenW, screenH) = screenSize()
+        if (pillShown) {
+            view.setScreen(screenW, screenH, keyboardReference())
+            if (view.isDismissing) {
+                view.appear()
+                trace("pill coming back from fading out")
+                watchFirstFrames(view, SystemClock.uptimeMillis(), "coming back")
+            }
             return
         }
-        trace("pill windows added in ${added - created}ms, keyboard edge ${keyboardReference()}")
-        watchFirstFrames(view, added, "its windows were added")
+        val started = SystemClock.uptimeMillis()
+        val canvas = canvasWindow ?: return
+        val touch = touchWindow ?: return
+        canvas.attach()
+        touch.attach()
+        if (!canvas.attached || !touch.attached) {
+            trace("pill windows could not be added")
+            return
+        }
+        view.restart()
+        view.setScreen(screenW, screenH, keyboardReference())
+        view.render(DictationController.state.value)
+        canvas.show()
+        touch.show()
+        pillShown = true
+        val shown = SystemClock.uptimeMillis()
+        trace("pill windows made visible in ${shown - started}ms, keyboard edge ${keyboardReference()}")
+        watchFirstFrames(view, shown, "its windows were made visible")
+        watchFirstCommit(view, shown)
     }
 
     /** Logs the frame the pill is first drawn in after [since], and the first frame it is fully there. */
@@ -599,6 +630,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         }
     }
 
+    /** Logs when the first frame drawn after [since] is handed to the display (Android 10 and later report it). */
+    private fun watchFirstCommit(view: View, since: Long) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        view.viewTreeObserver.registerFrameCommitCallback {
+            trace("pill's first frame handed to the display ${SystemClock.uptimeMillis() - since}ms after its windows were made visible")
+        }
+    }
+
     override fun applyCanvasFrame(frame: Box) {
         canvasWindow?.place(frame)
     }
@@ -611,9 +650,18 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         touchWindow?.setTouchable(touchable)
     }
 
-    private fun removePill() {
-        if (pill != null) trace("pill windows removed")
+    /** Hides the pill's windows at once; they stay, laid out, for the next showing. */
+    private fun hidePill() {
+        if (!pillShown) return
+        pillShown = false
         pill?.onFrameDrawn = null
+        touchWindow?.hide()
+        canvasWindow?.hide()
+        trace("pill windows hidden")
+    }
+
+    private fun destroyPill() {
+        hidePill()
         touchWindow?.remove()
         canvasWindow?.remove()
         touchWindow = null
@@ -879,7 +927,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
 /**
  * One accessibility-overlay window placed in screen coordinates. A non-touchable window is skipped
  * by input dispatch entirely, so the pill's canvas can be as large as it likes without stealing
- * taps from the keyboard underneath it.
+ * taps from the keyboard underneath it. It is added once, hidden, and then shown and hidden through
+ * its view's visibility; a change made while it is hidden waits until it is next shown.
  */
 private class OverlayWindow(private val wm: WindowManager, private val view: View, touchable: Boolean) {
     private val params = WindowManager.LayoutParams(
@@ -906,6 +955,41 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
     var attached = false
         private set
 
+    /** On screen. Hidden, the window has no surface: nothing is drawn or composited, and input dispatch skips it. */
+    var shown = false
+        private set
+
+    /** Placed or made touchable or not while hidden: applied when it is next shown. */
+    private var stale = false
+
+    /** Adds the window, hidden: it is laid out now, and gets a surface only once it is shown. */
+    fun attach() {
+        if (attached) return
+        view.visibility = View.INVISIBLE
+        try {
+            wm.addView(view, params)
+            attached = true
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to add overlay window", e)
+        }
+    }
+
+    fun show() {
+        if (!attached || shown) return
+        shown = true
+        if (stale) {
+            stale = false
+            update()
+        }
+        view.visibility = View.VISIBLE
+    }
+
+    fun hide() {
+        if (!shown) return
+        shown = false
+        view.visibility = View.INVISIBLE
+    }
+
     /** Off, the window is skipped by input dispatch: a tap on it goes to whatever is underneath. */
     fun setTouchable(touchable: Boolean) {
         val flags = if (touchable) {
@@ -915,7 +999,28 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
         }
         if (flags == params.flags) return
         params.flags = flags
+        apply()
+    }
+
+    fun place(frame: Box) {
+        val x = frame.left.roundToInt()
+        val y = frame.top.roundToInt()
+        val width = max(1, frame.width.roundToInt())
+        val height = max(1, frame.height.roundToInt())
+        if (x == params.x && y == params.y && width == params.width && height == params.height) return
+        params.x = x
+        params.y = y
+        params.width = width
+        params.height = height
+        apply()
+    }
+
+    private fun apply() {
         if (!attached) return
+        if (shown) update() else stale = true
+    }
+
+    private fun update() {
         try {
             wm.updateViewLayout(view, params)
         } catch (e: Exception) {
@@ -923,26 +1028,10 @@ private class OverlayWindow(private val wm: WindowManager, private val view: Vie
         }
     }
 
-    fun place(frame: Box) {
-        params.x = frame.left.roundToInt()
-        params.y = frame.top.roundToInt()
-        params.width = max(1, frame.width.roundToInt())
-        params.height = max(1, frame.height.roundToInt())
-        try {
-            if (!attached) {
-                wm.addView(view, params)
-                attached = true
-            } else {
-                wm.updateViewLayout(view, params)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "failed to place overlay window", e)
-        }
-    }
-
     fun remove() {
         if (!attached) return
         attached = false
+        shown = false
         try {
             wm.removeView(view)
         } catch (_: Exception) {

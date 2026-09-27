@@ -1,9 +1,11 @@
 package app.murmur.android
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
@@ -12,6 +14,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import app.murmur.android.keyboard.KeyboardPresence
 import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayGeometry
 import app.murmur.android.overlay.OverlayLayout
@@ -22,6 +25,7 @@ import app.murmur.android.settings.DesktopOverlay
 import app.murmur.android.settings.OverlayShape
 import app.murmur.android.settings.SettingsStore
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -29,6 +33,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -40,6 +45,7 @@ import org.robolectric.shadows.ShadowSystemClock
 import org.robolectric.shadows.ShadowWindowManagerImpl
 import org.xmlpull.v1.XmlPullParser
 import java.time.Duration
+import java.util.concurrent.Executor
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -52,6 +58,8 @@ private const val FRAME_TOP = 1500
 private const val IME_ID = 7
 private const val NAV_BAR_ID = 9
 private const val IME_PACKAGE = "com.samsung.android.honeyboard"
+private const val APP_ID = 3
+private const val APP_PACKAGE = "com.example.chat"
 
 /** Samsung Keyboard's slide out as the recording shows it (frames 752-767), counted in 8 ms frames. */
 private const val SLIDE_FRAMES = 16
@@ -145,6 +153,8 @@ class KeyboardTransitionTest {
         val connected = android.accessibilityservice.AccessibilityService::class.java.getDeclaredMethod("onServiceConnected")
         connected.isAccessible = true
         connected.invoke(service)
+        // Reads of other apps' views answer at once here; the tests that care where they run put in their own.
+        service.reads = Executor { it.run() }
         ShadowLooper.idleMainLooper()
         dispatch = FrameworkDispatch(declaredNotificationTimeout()) { service.onAccessibilityEvent(it) }
     }
@@ -153,6 +163,8 @@ class KeyboardTransitionTest {
     fun tearDown() {
         service.onDestroy()
         ShadowChoreographer.setPaused(false)
+        // KeyboardPresence is one per process and outlives this test: leave it a keyboard-less phone.
+        KeyboardPresence.get(RuntimeEnvironment.getApplication()).refresh(Configuration())
     }
 
     // ---- the world ------------------------------------------------------------------------------
@@ -178,6 +190,21 @@ class KeyboardTransitionTest {
         return window
     }
 
+    /** Whether the app being typed into is in the window list, in front and taking input (the anticipation tests). */
+    private var appInFront = false
+
+    private fun appWindow(): AccessibilityWindowInfo {
+        val window = AccessibilityWindowInfo.obtain()
+        shadowOf(window).apply {
+            setType(AccessibilityWindowInfo.TYPE_APPLICATION)
+            setId(APP_ID)
+            setBoundsInScreen(Rect(0, 0, SCREEN_W, SCREEN_H))
+            setActive(true)
+            setFocused(true)
+        }
+        return window
+    }
+
     private fun navBar(): AccessibilityWindowInfo {
         val window = AccessibilityWindowInfo.obtain()
         shadowOf(window).apply {
@@ -196,7 +223,7 @@ class KeyboardTransitionTest {
     private fun frame(keyboard: AccessibilityWindowInfo?, report: Boolean = false, before: () -> Unit = {}): Look? {
         now += FRAME_MS
         ShadowSystemClock.advanceBy(Duration.ofMillis(FRAME_MS))
-        shadowOf(service).setWindows(listOfNotNull(keyboard, navBar().takeIf { keyboard != null }))
+        shadowOf(service).setWindows(listOfNotNull(appWindow().takeIf { appInFront }, keyboard, navBar().takeIf { keyboard != null }))
         before()
         if (report) dispatch.post(AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOWS_CHANGED), now)
         dispatch.deliverDue(now)
@@ -204,7 +231,10 @@ class KeyboardTransitionTest {
         return pillLook()
     }
 
-    private fun overlayViews(): List<View> =
+    /** The overlay windows on screen: the pill's two are kept, hidden, while it is not shown. */
+    private fun overlayViews(): List<View> = attachedViews().filter { it.visibility == View.VISIBLE }
+
+    private fun attachedViews(): List<View> =
         Shadow.extract<ShadowWindowManagerImpl>(service.getSystemService(WindowManager::class.java)).views
 
     private fun pillView(): OverlayPillView? = overlayViews().filterIsInstance<OverlayPillView>().singleOrNull()
@@ -600,29 +630,215 @@ class KeyboardTransitionTest {
             assertTrue("no \"$text\" after line $from in:\n$log", i >= 0)
             return i
         }
+        // The pill's windows, added hidden when the service connected.
+        var at = after(-1, "pill windows added, hidden")
         // The first opening: unknown, so the deadline is armed, fires, and what was learnt is said.
-        var at = after(-1, "== keyboard up #1")
+        at = after(at, "== keyboard up #1")
         at = after(at, "kb visible=1 ready=0")
         at = after(at, "arrival deadline armed for +450ms")
         at = after(at, "arrival deadline fired")
         at = after(at, "learnt 90px for $IME_PACKAGE")
-        at = after(at, "pill windows added")
+        at = after(at, "pill windows made visible")
         at = after(at, "pill first drawn")
         at = after(at, "== keyboard gone #1")
-        // The second: the report, the window list read with the keyboard's window, its frame, the
-        // tracker's verdict and the pill's first frame, all in the frame the keyboard is first reported.
+        at = after(at, "pill windows hidden")
+        // The second: the report and the window list read with the keyboard's window, placed by the
+        // frame read last time; the tracker's verdict and the pill; and only then the root, read again
+        // off the main thread. All in the frame the keyboard is first reported.
         at = after(at, "ev WINDOWS")
         at = after(at, "win n=2")
-        assertTrue(lines[at], "ime#$IME_ID" in lines[at] && "[0,2250,1080,2400]" in lines[at])
-        at = after(at, "root ")
-        assertTrue(lines[at], "frame=[0,$FRAME_TOP,1080,2400] $IME_PACKAGE" in lines[at])
+        assertTrue(lines[at], "ime#$IME_ID" in lines[at] && "[0,2250,1080,2400] frame as last read, reading it again" in lines[at])
         at = after(at, "== keyboard up #2")
         at = after(at, "kb visible=1 ready=1 displaced=0 top=${FRAME_TOP + 90}: arriving; rest known from its frame")
         at = after(at, "arrival deadline armed for +450ms, the pill is not waiting for it")
         at = after(at, "pill shown")
-        at = after(at, "pill windows added")
+        at = after(at, "pill windows made visible")
+        at = after(at, "root read")
+        assertTrue(lines[at], "on the read thread" in lines[at] && "frame=[0,$FRAME_TOP,1080,2400] $IME_PACKAGE" in lines[at])
         after(at, "pill first drawn")
         val shown = lines.indexOfFirst { "== keyboard up #2" in it }
         assertTrue("nothing waited on in the second opening:\n$log", lines.drop(shown).none { "deadline fired" in it })
+    }
+
+    // ---- the pill's windows, reads off the main thread, and the pill ahead of the keyboard -------
+
+    @Test
+    fun `the pill's two windows are added once, hidden, and shown and hidden again for every opening`() {
+        val windows = attachedViews()
+        assertEquals("the canvas and the touch window, added as the service connected", 2, windows.size)
+        assertTrue("hidden while no keyboard is up: no surface, nothing drawn", overlayViews().isEmpty())
+        fun same() = attachedViews().size == 2 && attachedViews().zip(windows).all { (a, b) -> a === b }
+        repeat(3) { n ->
+            val looks = open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 40)
+            assertTrue("opening ${n + 1}: the same two windows, shown", same() && overlayViews().size == 2)
+            if (n > 0) assertArrives(looks, FRAME_TOP + 15, atFrame = 0)
+            closeKeyboard()
+            assertTrue("closed ${n + 1}: hidden again, not removed", same() && overlayViews().isEmpty())
+            assertTrue(attachedViews().all { it.visibility == View.INVISIBLE })
+        }
+    }
+
+    @Test
+    fun `the keyboard's report is acted on in its own frame while the reads of other apps' views are still out, none of them on the main thread`() {
+        open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
+        closeKeyboard()
+        // A restart: nothing read yet about the keyboard's window, only where it rests is remembered.
+        restartService()
+        selectKeyboard()
+        val held = ArrayList<Runnable>()
+        val onMainThread = ArrayList<Boolean>()
+        service.reads = Executor { held += it }
+        service.readRoot = { window -> onMainThread += Looper.myLooper() == Looper.getMainLooper(); window.root }
+        service.readSource = { event -> onMainThread += Looper.myLooper() == Looper.getMainLooper(); event.source }
+        frame(null) { typingIn(APP_PACKAGE) }
+        val looks = open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 3)
+        assertTrue("at its final spot in the frame of the report:\n" + describe(looks, 0), looks.all { settledAt(it, FRAME_TOP + 15) })
+        assertTrue("with the field's view and the keyboard's root still to be read (${held.size} reads)", held.size >= 2 && onMainThread.isEmpty())
+        // The reads come back from a thread of their own; nothing moves.
+        Thread { held.toList().forEach { it.run() } }.apply {
+            start()
+            join()
+        }
+        held.clear()
+        val after = (1..20).map { frame(ime(FRAME_TOP + 15, FRAME_TOP)) }
+        assertTrue("unmoved once they are back:\n" + describe(after, 0), after.all { settledAt(it, FRAME_TOP + 15) })
+        assertTrue("every read was made off the main thread: $onMainThread", onMainThread.isNotEmpty() && onMainThread.none { it })
+        val log = KeyboardTimingLog.text()
+        assertTrue(log, "frame not read yet, reading it" in log && "root read" in log && "view read" in log)
+    }
+
+    /** The app in front reports [type] on its editable field [viewId]. */
+    private fun field(
+        type: Int = AccessibilityEvent.TYPE_VIEW_FOCUSED,
+        viewId: String = "$APP_PACKAGE:id/compose",
+        windowId: Int = APP_ID
+    ): AccessibilityEvent {
+        val event = AccessibilityEvent.obtain(type)
+        event.packageName = APP_PACKAGE
+        Shadow.extract<ShadowAccessibilityRecord>(event).apply {
+            setWindowId(windowId)
+            setSourceNode(AccessibilityNodeInfo.obtain().apply {
+                isEditable = true
+                packageName = APP_PACKAGE
+                viewIdResourceName = viewId
+                className = "android.widget.EditText"
+            })
+        }
+        return event
+    }
+
+    /** A first opening, 15 px under its frame, and a close, then long enough for the app to settle. */
+    private fun learnKeyboard() {
+        open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
+        closeKeyboard()
+        repeat(70) { frame(null) }
+    }
+
+    private fun attachHardwareKeyboard() {
+        service.onConfigurationChanged(
+            Configuration(service.resources.configuration).apply {
+                keyboard = Configuration.KEYBOARD_QWERTY
+                hardKeyboardHidden = Configuration.HARDKEYBOARDHIDDEN_NO
+            }
+        )
+    }
+
+    @Test
+    fun `a tap on a field brings the pill up at the keyboard's resting spot ahead of the keyboard, which then changes nothing`() {
+        appInFront = true
+        learnKeyboard()
+        val ahead = listOf(frame(null) { service.onAccessibilityEvent(field()) }) + (1 until 10).map { frame(null) }
+        // Bennett's recording, E4: the keyboard's window appears 80 ms after the finger leaves the field.
+        val looks = ahead + open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 40)
+        assertTrue("at its spot and fully there from the tap on:\n" + describe(looks, 0), looks.all { settledAt(it, FRAME_TOP + 15) })
+        val log = KeyboardTimingLog.text()
+        assertTrue(log, "anticipating the keyboard for $APP_PACKAGE/$APP_PACKAGE:id/compose" in log)
+        assertTrue(log, "anticipation confirmed: the keyboard was reported 80ms after the pill went up, resting where anticipated" in log)
+    }
+
+    @Test
+    fun `a tap on a field that is already focused counts too`() {
+        appInFront = true
+        learnKeyboard()
+        val ahead = listOf(frame(null) { service.onAccessibilityEvent(field(type = AccessibilityEvent.TYPE_VIEW_CLICKED)) }) +
+            (1 until 10).map { frame(null) }
+        assertTrue("up ahead of the keyboard:\n" + describe(ahead, 0), ahead.all { settledAt(it, FRAME_TOP + 15) })
+    }
+
+    @Test
+    fun `with no keyboard reported within 300 ms the pill shown ahead of it goes at once, and that field is not anticipated again`() {
+        appInFront = true
+        learnKeyboard()
+        val looks = listOf(frame(null) { service.onAccessibilityEvent(field()) }) + (1..45).map { frame(null) }
+        val gone = looks.indexOfFirst { it == null }
+        assertEquals("on screen for 38 frames (the tap's and 300 ms after it):\n" + describe(looks, 34), 38, gone)
+        assertTrue("fully there, at its spot, until then:\n" + describe(looks, 0), looks.take(gone).all { settledAt(it, FRAME_TOP + 15) })
+        assertTrue("then gone for good, without a fade:\n" + describe(looks, gone - 2), looks.drop(gone).all { it == null })
+        val again = listOf(frame(null) { service.onAccessibilityEvent(field()) }) + (1..45).map { frame(null) }
+        assertTrue("that field brought no keyboard up, so it gets no pill ahead of one:\n" + describe(again, 0), again.all { it == null })
+        assertTrue(KeyboardTimingLog.text(), "no keyboard came up for it last time" in KeyboardTimingLog.text())
+    }
+
+    @Test
+    fun `a hardware keyboard attached takes the pill shown ahead of the keyboard at once`() {
+        appInFront = true
+        learnKeyboard()
+        val looks = listOf(frame(null) { service.onAccessibilityEvent(field()) }) + (1..4).map { frame(null) } +
+            listOf(frame(null) { attachHardwareKeyboard() }) + (1..10).map { frame(null) }
+        assertTrue("up ahead of the keyboard:\n" + describe(looks, 0), looks.take(5).all { settledAt(it, FRAME_TOP + 15) })
+        assertTrue("gone in the frame the keyboard was attached:\n" + describe(looks, 3), looks.drop(5).all { it == null })
+    }
+
+    /** A field event nothing should be shown ahead of, for [reason] (each case on a field of its own, so what one learns does not decide another). */
+    private fun assertNothingAhead(reason: String, event: AccessibilityEvent) {
+        val looks = listOf(frame(null) { service.onAccessibilityEvent(event) }) + (1..40).map { frame(null) }
+        assertTrue("$reason: nothing shown:\n" + describe(looks, 0), looks.all { it == null })
+        assertTrue("$reason: said why:\n" + KeyboardTimingLog.text(), reason in KeyboardTimingLog.text())
+    }
+
+    @Test
+    fun `no pill ahead of the keyboard before its resting spot is known, for a field focused as its screen opens, just after the keyboard went away, or outside the app in front`() {
+        appInFront = true
+        selectKeyboard()
+        assertNothingAhead("where $IME_PACKAGE rests on this screen is not known yet", field(viewId = "$APP_PACKAGE:id/unknown"))
+        learnKeyboard()
+        frame(null) { service.onAccessibilityEvent(windowStateChanged(APP_PACKAGE)) }
+        assertNothingAhead("a field focused as its screen opens brings a keyboard up only in some apps", field(viewId = "$APP_PACKAGE:id/opening"))
+        repeat(130) { frame(null) }
+        assertNothingAhead("it is not in the app in front", field(viewId = "$APP_PACKAGE:id/behind", windowId = 99))
+        open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 40)
+        frame(null, report = true)
+        frame(null)
+        assertNothingAhead("the keyboard went away 16ms before", field(viewId = "$APP_PACKAGE:id/settling"))
+    }
+
+    @Test
+    fun `no pill ahead of the keyboard with a hardware keyboard attached or in keyboard mode`() {
+        appInFront = true
+        learnKeyboard()
+        attachHardwareKeyboard()
+        assertNothingAhead("a hardware keyboard is attached", field(viewId = "$APP_PACKAGE:id/hardware"))
+        KeyboardPresence.get(RuntimeEnvironment.getApplication()).refresh(Configuration())
+        SettingsStore.get(service).update {
+            it.copy(keyboard = it.keyboard.copy(desktopOverlay = DesktopOverlay.ON, showOverlayWhenIdle = false))
+        }
+        repeat(5) { frame(null) }
+        assertNothingAhead("keyboard mode", field(viewId = "$APP_PACKAGE:id/keyboard-mode"))
+    }
+
+    @Test
+    fun `a field focused as its screen opens gets the pill ahead of the keyboard once a keyboard has come up for it that way`() {
+        appInFront = true
+        learnKeyboard()
+        // The first time it waits for the keyboard, which comes, as it does for the app on Bennett's recording (E1).
+        frame(null) { service.onAccessibilityEvent(windowStateChanged(APP_PACKAGE)) }
+        val first = listOf(frame(null) { service.onAccessibilityEvent(field()) }) + (1 until 10).map { frame(null) }
+        assertTrue("not shown ahead the first time:\n" + describe(first, 0), first.all { it == null })
+        open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 40)
+        closeKeyboard()
+        repeat(130) { frame(null) }
+        frame(null) { service.onAccessibilityEvent(windowStateChanged(APP_PACKAGE)) }
+        val again = listOf(frame(null) { service.onAccessibilityEvent(field()) }) + (1 until 10).map { frame(null) }
+        assertTrue("shown ahead of it from then on:\n" + describe(again, 0), again.all { settledAt(it, FRAME_TOP + 15) })
     }
 }

@@ -46,6 +46,7 @@ import org.robolectric.shadows.ShadowLooper
 import org.robolectric.shadows.ShadowSystemClock
 import org.robolectric.shadows.ShadowWindowManagerImpl
 import java.time.Duration
+import java.util.concurrent.Executor
 import kotlin.math.abs
 
 private const val PHONE_PORTRAIT = "sw411dp-w411dp-h891dp-port-xxhdpi"
@@ -97,6 +98,7 @@ class KeyboardModeOverlayTest {
         val connected = android.accessibilityservice.AccessibilityService::class.java.getDeclaredMethod("onServiceConnected")
         connected.isAccessible = true
         connected.invoke(service)
+        service.reads = Executor { it.run() }
         ShadowLooper.idleMainLooper()
     }
 
@@ -160,9 +162,11 @@ class KeyboardModeOverlayTest {
 
     // ---- the overlay windows ------------------------------------------------------------------------
 
+    /** The overlay windows on screen: the pill's two are kept, hidden, while it is not shown. */
     private fun overlays(): List<View> =
         Shadow.extract<ShadowWindowManagerImpl>(service.getSystemService(WindowManager::class.java)).views
             .filter { (it.layoutParams as? WindowManager.LayoutParams)?.type == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY }
+            .filter { it.visibility == View.VISIBLE }
 
     private fun pill(): OverlayPillView? = overlays().filterIsInstance<OverlayPillView>().singleOrNull()
 

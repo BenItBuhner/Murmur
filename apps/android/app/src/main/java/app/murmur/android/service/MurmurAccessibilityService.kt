@@ -13,7 +13,9 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
+import android.os.Message
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.DisplayMetrics
@@ -50,6 +52,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.Executor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -131,9 +134,32 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     /** Invisible; hugs the pill and relays its touches. Free to follow the pill, nothing is drawn in it. */
     private var touchWindow: OverlayWindow? = null
 
+    /** Where keyboards rest, kept across restarts. */
+    private val keyboardOffsets by lazy { StoredKeyboardOffsets(this) }
+
     /** Where the keyboard is; its last top edge is kept while a dictation is in flight. */
-    private val keyboard by lazy { KeyboardTracker(resources.displayMetrics.density, StoredKeyboardOffsets(this)) }
+    private val keyboard by lazy { KeyboardTracker(resources.displayMetrics.density, keyboardOffsets) }
     private var lastKeyboardWindow: ImeWindow? = null
+
+    /** A read of the keyboard window's root: its frame and app, and the window, bounds and screen it was read at. */
+    private class RootRead(val windowId: Int, val bounds: Box, val screenH: Int, val frame: Box?, val packageName: String?)
+    private var rootRead: RootRead? = null
+    private var rootReadPending: Pair<Int, Box>? = null
+
+    /**
+     * Where reads that wait on another app's main thread run. A node (the keyboard window's root, the
+     * view an event came from) is fetched from that app's process, which answers from its main thread:
+     * the keyboard's is at its busiest just as the keyboard comes up, and an app's is laying out for
+     * it. On a thread of their own they cannot hold up this service's main thread, which handles the
+     * keyboard's window reports. Tests put their own in.
+     */
+    internal var reads: Executor = Executor { it.run() }
+    internal var readRoot: (AccessibilityWindowInfo) -> AccessibilityNodeInfo? = { it.root }
+    internal var readSource: (AccessibilityEvent) -> AccessibilityNodeInfo? = { it.source }
+    private var readThread: HandlerThread? = null
+
+    @Volatile
+    private var alive = true
     private val arrivalCheck = Runnable {
         trace("arrival deadline fired")
         updateKeyboardState(force = true)
@@ -186,6 +212,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         KeyboardTimingLog.section(SystemClock.uptimeMillis(), "service connected")
         val (screenW, screenH) = screenSize()
         trace("presentation ${presentation.traceName()}; screen ${screenW}x$screenH")
+        readThread = HandlerThread("MurmurReads").apply { start() }.also { thread ->
+            val handler = Handler(thread.looper)
+            reads = Executor { handler.post(it) }
+        }
         createPill()
         mainScope.launch {
             DictationController.state.collect { state ->
@@ -234,6 +264,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     }
 
     override fun onDestroy() {
+        alive = false
         if (instance === this) instance = null
         if (DictationController.sink === this) DictationController.sink = null
         OverlayEditor.stop()
@@ -242,6 +273,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         mainHandler.removeCallbacks(arrivalCheck)
         mainHandler.removeCallbacks(leaveCheck)
         destroyPill()
+        readThread?.quitSafely()
+        readThread = null
         mainScope.cancel()
         super.onDestroy()
     }
@@ -294,24 +327,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-                val source = event.source
-                val editable = source?.acceptsText() == true
-                val seen = when {
-                    source == null -> "no view"
-                    editable -> "editable"
-                    else -> "not editable"
-                }
-                trace("${describe(event, start)} src=${SystemClock.uptimeMillis() - start}ms $seen")
-                if (source == null) return
-                if (editable) {
-                    lastEditable = source
-                    lastPackage = event.packageName?.toString() ?: lastPackage
-                }
+                trace(describe(event, start))
+                readView(event, start)
                 updateKeyboardState(force = false)
             }
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 trace(describe(event, start))
-                if (keyboard.visible) keyboardDismissButton(event)?.let { keyboardLeaving(it) }
+                // With the keyboard up a click may be its hide button, which the pill has to follow at once.
+                if (keyboard.visible) keyboardDismissButton(event)?.let { keyboardLeaving(it) } else readView(event, start)
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 trace(describe(event, start))
@@ -385,7 +408,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             syncPillVisibility()
         }
         mainHandler.removeCallbacks(leaveCheck)
-        mainHandler.postDelayed(leaveCheck, LEAVE_GRACE_MS)
+        postOnMain(leaveCheck, SystemClock.uptimeMillis() + LEAVE_GRACE_MS)
     }
 
     private fun keyboardStaying(reason: String) {
@@ -394,6 +417,43 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         trace("staying: $reason")
         leaving = false
         syncPillVisibility()
+    }
+
+    // ---- other apps' views, read off the main thread -------------------------------------------
+
+    /** What an event's view turned out to be, read on [reads]. */
+    private class ViewRead(val node: AccessibilityNodeInfo, val takesText: Boolean, val editable: Boolean, val id: String?, val className: String?)
+
+    /**
+     * The view [event] came from, fetched on [reads] (its node comes from the app's process, from the
+     * app's main thread); [viewRead] takes what it says back on this thread.
+     */
+    private fun readView(event: AccessibilityEvent, arrived: Long) {
+        // Before Android 13 an event is recycled once it has been handled; a copy keeps what fetching its view needs.
+        @Suppress("DEPRECATION")
+        val copy = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) event else AccessibilityEvent.obtain(event)
+        val pkg = event.packageName?.toString()
+        reads.execute {
+            val start = SystemClock.uptimeMillis()
+            val node = runCatching { readSource(copy) }.getOrNull()
+            val view = node?.let { ViewRead(it, it.acceptsText(), it.isEditable, it.viewIdResourceName, it.className?.toString()) }
+            val done = SystemClock.uptimeMillis()
+            postOnMain(Runnable { if (alive) viewRead(pkg, view, arrived, start, done) })
+        }
+    }
+
+    private fun viewRead(pkg: String?, view: ViewRead?, arrived: Long, start: Long, done: Long) {
+        val what = when {
+            view == null -> "no view"
+            view.takesText -> "takes text (${view.id ?: view.className})"
+            else -> "does not take text"
+        }
+        trace("view read ${done - start}ms on the read thread, ${start - arrived}ms after its event: $what")
+        if (view == null) return
+        if (view.takesText) {
+            lastEditable = view.node
+            lastPackage = pkg ?: lastPackage
+        }
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
@@ -413,7 +473,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         }
         mainHandler.removeCallbacks(arrivalCheck)
         val deadline = keyboard.arrivalDeadline
-        deadline?.let { mainHandler.postAtTime(arrivalCheck, it) }
+        deadline?.let { postOnMain(arrivalCheck, it) }
         if (deadline != null && deadline != armedDeadline) {
             trace("arrival deadline armed for +${deadline - now}ms" + if (keyboard.ready) ", the pill is not waiting for it" else "")
         }
@@ -427,12 +487,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     }
 
     /**
-     * The keyboard's window in the current window list, with the frame its views are laid out in.
-     * The frame is read from the window's root (a round trip to the keyboard's process) only when
-     * the reported bounds changed; a window list that did not move the keyboard reuses it. A root
-     * that cannot be read (a keyboard can hide its views from services that are not accessibility
-     * tools) still leaves the keyboard known by the system's default keyboard, so what is learnt
-     * about it is kept.
+     * The keyboard's window in the current window list, placed by the frame its views are laid out in
+     * when that is known. The frame comes from the window's root, a round trip to the keyboard's
+     * process that waits on the keyboard's main thread, so it is never read here: a read goes to
+     * [reads] when the window is new or has moved since the last one ([onRootRead] places the keyboard
+     * again with what it finds), and meanwhile the frame last read for this window, if any, stands in.
+     * The keyboard is known by its app as its root last said, or else as the system's default keyboard
+     * (a keyboard can hide its views from services that are not accessibility tools), so where it
+     * rests is known from its first report.
      */
     private fun keyboardWindow(): ImeWindow? {
         val start = SystemClock.uptimeMillis()
@@ -461,23 +523,50 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             return null
         }
         val bounds = Rect().also { ime.getBoundsInScreen(it) }.toBox()
-        val last = lastKeyboardWindow
-        if (last != null && last.id == ime.id && last.bounds == bounds && last.frame != null) {
-            trace("$seen frame as before")
-            return last
+        val screenH = screenSize().second
+        val known = rootRead?.takeIf { it.windowId == ime.id && it.screenH == screenH }
+        val current = known != null && known.bounds == bounds
+        if (!current) requestRootRead(ime, bounds, screenH)
+        val packageName = known?.packageName ?: defaultKeyboardPackage()
+        val frameSeen = when {
+            current && known?.frame != null -> " frame as read"
+            current -> " root unreadable"
+            known?.frame != null -> " frame as last read, reading it again"
+            known != null -> " root unreadable last time, reading it again"
+            else -> " frame not read yet, reading it"
         }
-        trace(seen)
-        val rootStart = SystemClock.uptimeMillis()
-        val root = runCatching { ime.root }.getOrNull()
-        val rootRead = SystemClock.uptimeMillis() - rootStart
-        val frame = root?.let { r -> Rect().also { r.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }?.toBox()
-        val rootPackage = root?.packageName?.toString()
-        val packageName = rootPackage ?: defaultKeyboardPackage()
-        trace(
-            "root ${rootRead}ms " + (if (frame != null) "frame=${frame.short()}" else if (root == null) "unreadable" else "no frame") +
-                if (rootPackage != null) " $rootPackage" else " key from the default keyboard: $packageName"
-        )
-        return ImeWindow(ime.id, bounds, frame, packageName).also { lastKeyboardWindow = it }
+        trace(seen + frameSeen + if (known?.packageName == null) ", key from the default keyboard: $packageName" else "")
+        return ImeWindow(ime.id, bounds, known?.frame, packageName).also { lastKeyboardWindow = it }
+    }
+
+    /** Reads [ime]'s root on [reads]; [onRootRead] takes it back on this thread. */
+    private fun requestRootRead(ime: AccessibilityWindowInfo, bounds: Box, screenH: Int) {
+        val target = ime.id to bounds
+        if (rootReadPending == target) return
+        rootReadPending = target
+        val asked = SystemClock.uptimeMillis()
+        reads.execute {
+            val start = SystemClock.uptimeMillis()
+            val root = runCatching { readRoot(ime) }.getOrNull()
+            val frame = root?.let { r -> Rect().also { r.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }?.toBox()
+            val read = RootRead(ime.id, bounds, screenH, frame, root?.packageName?.toString())
+            val done = SystemClock.uptimeMillis()
+            postOnMain(Runnable { if (alive) onRootRead(read, root != null, asked, start, done) })
+        }
+    }
+
+    /** A root read is back: the keyboard is placed again if what it found is not what placed it. */
+    private fun onRootRead(read: RootRead, readable: Boolean, asked: Long, start: Long, done: Long) {
+        if (rootReadPending == read.windowId to read.bounds) rootReadPending = null
+        val before = rootRead?.takeIf { it.windowId == read.windowId && it.screenH == read.screenH }
+        rootRead = read
+        val found = when {
+            read.frame != null -> "frame=${read.frame.short()}"
+            readable -> "no frame"
+            else -> "unreadable"
+        }
+        trace("root read ${done - start}ms on the read thread, ${start - asked}ms after it was asked for: $found ${read.packageName ?: ""}".trimEnd())
+        if (before?.frame != read.frame || before?.packageName != read.packageName) updateKeyboardState(force = true)
     }
 
     /** The package of the keyboard the system has selected; read from settings, no round trip to the keyboard. */
@@ -667,6 +756,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         touchWindow = null
         canvasWindow = null
         pill = null
+    }
+
+    /**
+     * Runs [task] on the main thread at [atMs], as an asynchronous message, the way accessibility events
+     * are delivered: ahead of a layout pass waiting for the next frame rather than behind it.
+     */
+    private fun postOnMain(task: Runnable, atMs: Long = SystemClock.uptimeMillis()) {
+        mainHandler.sendMessageAtTime(Message.obtain(mainHandler, task).apply { isAsynchronous = true }, atMs)
     }
 
     private fun trace(message: String) = KeyboardTimingLog.record(SystemClock.uptimeMillis(), message)

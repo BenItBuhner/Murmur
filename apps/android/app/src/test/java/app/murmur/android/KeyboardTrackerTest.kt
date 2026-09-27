@@ -310,6 +310,31 @@ class KeyboardTrackerTest {
     }
 
     @Test
+    fun `where any keyboard came to rest is remembered for the screen's height, and places it before its frame is read`() {
+        tracker.feed(2100f, nowMs = 0)
+        tracker.feed(REST + 15f, nowMs = 200)
+        assertEquals(15f, offsets[KEYBOARD])
+        assertEquals(REST + 15f, offsets[KeyboardTracker.restKey(KEYBOARD, H)])
+        tracker.update(null, nowMs = 1000, screenH = H)
+        // After a restart the keyboard's first report comes before its root has been read: no frame yet.
+        val restarted = KeyboardTracker(DENSITY, offsets)
+        restarted.update(ImeWindow(7, Box(0f, 2100f, W, H), null, KEYBOARD), nowMs = 0, screenH = H)
+        assertTrue(restarted.ready)
+        assertEquals((REST + 15f).toInt(), restarted.top)
+        // The frame, read a moment later, agrees: nothing moves.
+        assertFalse(restarted.feed(2000f, nowMs = 16))
+        assertEquals((REST + 15f).toInt(), restarted.top)
+    }
+
+    @Test
+    fun `a docked keyboard whose offset is not known yet is placed where it rested last time on a screen this tall`() {
+        offsets[KeyboardTracker.restKey(KEYBOARD, H)] = REST + 15f
+        tracker.feed(2100f, nowMs = 0)
+        assertTrue(tracker.ready)
+        assertEquals((REST + 15f).toInt(), tracker.top)
+    }
+
+    @Test
     fun `a zero-height keyboard window does not count`() {
         assertFalse(tracker.update(ime(reportedTop = H - 20f, frameTop = H - 20f), nowMs = 0, screenH = H))
         assertFalse(tracker.visible)

@@ -116,9 +116,10 @@ object KeyboardTimingLog {
             appendLine("resting offsets remembered (dp): ${offsets.ifEmpty { "none" }}")
             appendLine(
                 "Each line: uptime ms, +ms since the line before, what happened. ev: accessibility event " +
-                    "(age: ms since it was raised; src: ms to read its view). win: window list read (ime#id " +
-                    "L=layer a=active f=focused [left,top,right,bottom]). root: the keyboard window's root, its " +
-                    "frame. kb: what the tracker made of it. pill: the button."
+                    "(age: ms since it was raised). win: window list read (ime#id L=layer a=active f=focused " +
+                    "[left,top,right,bottom]). view read, root read: an event's view and the keyboard window's " +
+                    "root, fetched on a thread of their own, never on the one that handles the keyboard's " +
+                    "reports. kb: what the tracker made of it. pill: the button."
             )
             appendLine()
             append(text())

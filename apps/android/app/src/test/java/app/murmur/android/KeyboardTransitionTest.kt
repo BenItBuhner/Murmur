@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
@@ -41,6 +42,7 @@ import org.robolectric.shadows.ShadowSystemClock
 import org.robolectric.shadows.ShadowWindowManagerImpl
 import org.xmlpull.v1.XmlPullParser
 import java.time.Duration
+import java.util.concurrent.Executor
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -53,6 +55,7 @@ private const val FRAME_TOP = 1500
 private const val IME_ID = 7
 private const val NAV_BAR_ID = 9
 private const val IME_PACKAGE = "com.samsung.android.honeyboard"
+private const val APP_PACKAGE = "com.example.chat"
 
 /** Samsung Keyboard's slide out as the recording shows it (frames 752-767), counted in 8 ms frames. */
 private const val SLIDE_FRAMES = 16
@@ -146,6 +149,8 @@ class KeyboardTransitionTest {
         val connected = android.accessibilityservice.AccessibilityService::class.java.getDeclaredMethod("onServiceConnected")
         connected.isAccessible = true
         connected.invoke(service)
+        // Reads of other apps' views answer at once here; the tests that care where they run put in their own.
+        service.reads = Executor { it.run() }
         ShadowLooper.idleMainLooper()
         dispatch = FrameworkDispatch(declaredNotificationTimeout()) { service.onAccessibilityEvent(it) }
     }
@@ -616,22 +621,25 @@ class KeyboardTransitionTest {
         at = after(at, "pill first drawn")
         at = after(at, "== keyboard gone #1")
         at = after(at, "pill windows hidden")
-        // The second: the report, the window list read with the keyboard's window, its frame, the
-        // tracker's verdict and the pill's first frame, all in the frame the keyboard is first reported.
+        // The second: the report and the window list read with the keyboard's window, placed by the
+        // frame read last time; the tracker's verdict and the pill; and only then the root, read again
+        // off the main thread. All in the frame the keyboard is first reported.
         at = after(at, "ev WINDOWS")
         at = after(at, "win n=2")
-        assertTrue(lines[at], "ime#$IME_ID" in lines[at] && "[0,2250,1080,2400]" in lines[at])
-        at = after(at, "root ")
-        assertTrue(lines[at], "frame=[0,$FRAME_TOP,1080,2400] $IME_PACKAGE" in lines[at])
+        assertTrue(lines[at], "ime#$IME_ID" in lines[at] && "[0,2250,1080,2400] frame as last read, reading it again" in lines[at])
         at = after(at, "== keyboard up #2")
         at = after(at, "kb visible=1 ready=1 displaced=0 top=${FRAME_TOP + 90}: arriving; rest known from its frame")
         at = after(at, "arrival deadline armed for +450ms, the pill is not waiting for it")
         at = after(at, "pill shown")
         at = after(at, "pill windows made visible")
+        at = after(at, "root read")
+        assertTrue(lines[at], "on the read thread" in lines[at] && "frame=[0,$FRAME_TOP,1080,2400] $IME_PACKAGE" in lines[at])
         after(at, "pill first drawn")
         val shown = lines.indexOfFirst { "== keyboard up #2" in it }
         assertTrue("nothing waited on in the second opening:\n$log", lines.drop(shown).none { "deadline fired" in it })
     }
+
+    // ---- the pill's windows, and reads off the main thread ----------------------------------------
 
     @Test
     fun `the pill's two windows are added once, hidden, and shown and hidden again for every opening`() {
@@ -647,5 +655,34 @@ class KeyboardTransitionTest {
             assertTrue("closed ${n + 1}: hidden again, not removed", same() && overlayViews().isEmpty())
             assertTrue(attachedViews().all { it.visibility == View.INVISIBLE })
         }
+    }
+
+    @Test
+    fun `the keyboard's report is acted on in its own frame while the reads of other apps' views are still out, none of them on the main thread`() {
+        open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP)
+        closeKeyboard()
+        // A restart: nothing read yet about the keyboard's window, only where it rests is remembered.
+        restartService()
+        selectKeyboard()
+        val held = ArrayList<Runnable>()
+        val onMainThread = ArrayList<Boolean>()
+        service.reads = Executor { held += it }
+        service.readRoot = { window -> onMainThread += Looper.myLooper() == Looper.getMainLooper(); window.root }
+        service.readSource = { event -> onMainThread += Looper.myLooper() == Looper.getMainLooper(); event.source }
+        frame(null) { typingIn(APP_PACKAGE) }
+        val looks = open(firstTop = 2250, restTop = FRAME_TOP + 15, frameTop = FRAME_TOP, frames = 3)
+        assertTrue("at its final spot in the frame of the report:\n" + describe(looks, 0), looks.all { settledAt(it, FRAME_TOP + 15) })
+        assertTrue("with the field's view and the keyboard's root still to be read (${held.size} reads)", held.size >= 2 && onMainThread.isEmpty())
+        // The reads come back from a thread of their own; nothing moves.
+        Thread { held.toList().forEach { it.run() } }.apply {
+            start()
+            join()
+        }
+        held.clear()
+        val after = (1..20).map { frame(ime(FRAME_TOP + 15, FRAME_TOP)) }
+        assertTrue("unmoved once they are back:\n" + describe(after, 0), after.all { settledAt(it, FRAME_TOP + 15) })
+        assertTrue("every read was made off the main thread: $onMainThread", onMainThread.isNotEmpty() && onMainThread.none { it })
+        val log = KeyboardTimingLog.text()
+        assertTrue(log, "frame not read yet, reading it" in log && "root read" in log && "view read" in log)
     }
 }

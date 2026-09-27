@@ -24,7 +24,9 @@ data class ImeWindow(val id: Int, val bounds: Box, val frame: Box?, val packageN
  * resting edge is known the moment its window is first reported. A docked keyboard is remembered by
  * how far below its frame that is, under its [ImeWindow.key]; one its window does not place (no
  * frame, a full-screen one, or one it was found not to rest in) by how far down its window it rests,
- * under the key and the window's size (or, without a frame, the screen's height).
+ * under the key and the window's size (or, without a frame, the screen's height). Where every keyboard
+ * rests on a screen of a given height is kept as well ([KeyboardTracker.restKey]): it places a keyboard
+ * whose frame has not been read yet, and one that has not been reported yet at all.
  */
 interface KeyboardOffsets {
     operator fun get(keyboard: String): Float?
@@ -127,8 +129,11 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
             arriving = true
             arrivalDeadline = nowMs + ARRIVAL_MAX_MS
         }
-        var rest: Float? = if (docked) known?.let { frame!!.top + it } else placed?.let { anchor + it }
+        // A docked keyboard is placed by its frame and offset; one whose offset is not known yet, by where it rested last time on a screen this tall.
+        var rest: Float? = if (docked) known?.let { frame!!.top + it } ?: offsets[restKey(key, screenH)] else placed?.let { anchor + it }
         var why = ""
+        val wasArriving = arriving
+        var relearnt = false
         if (arriving) {
             when {
                 rest != null && reported <= rest + slop -> {
@@ -183,8 +188,12 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
             // Resting higher than remembered (the keyboard changed its layout): that is its edge now.
             offsets[key] = reported - frame.top
             rest = reported
+            relearnt = true
             why = "resting higher than remembered; learnt ${px(reported - frame.top)} for $key"
         }
+        // Where it came to rest is where this keyboard rests on a screen this tall: known from its
+        // first report next time, before its frame has been read.
+        if (rest != null && (relearnt || (wasArriving && !arriving))) rememberRest(key, screenH, rest)
         visible = true
         if (arriving) {
             ready = rest != null
@@ -210,16 +219,25 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
 
     private fun px(v: Float) = "${v.roundToInt()}px"
 
-    private companion object {
+    private fun rememberRest(key: String, screenH: Float, rest: Float) {
+        val restKey = restKey(key, screenH)
+        val stored = offsets[restKey]
+        if (stored == null || abs(stored - rest) > REST_SLOP_DP * density) offsets[restKey] = rest
+    }
+
+    companion object {
+        /** Where a keyboard's resting top edge on a screen [screenH] tall is remembered, measured from the screen's top. */
+        fun restKey(keyboard: String, screenH: Float): String = "$keyboard|h${screenH.roundToInt()}"
+
         /** Reported edges within this of the resting edge are at rest (rounding, the last frame of a slide). */
-        const val REST_SLOP_DP = 1.5f
+        private const val REST_SLOP_DP = 1.5f
 
         /**
          * Reported this far below its resting edge, the keyboard is on its way out. Apps that tie the
          * keyboard to a scroll dip it less than this and let it spring back (about 30 dp on a Galaxy
          * S26 Ultra); the pill sits those out where it is.
          */
-        const val DISPLACED_DP = 48f
+        private const val DISPLACED_DP = 48f
 
         /**
          * Longer than any keyboard's slide in: after it, the report is where it rests. Waited for only
@@ -228,28 +246,28 @@ class KeyboardTracker(private val density: Float, private val offsets: KeyboardO
          * below its frame); one whose window does not place it but whose resting edge is remembered
          * is shown there at once, and moved if it has come to rest somewhere else by then.
          */
-        const val ARRIVAL_MAX_MS = 450L
+        private const val ARRIVAL_MAX_MS = 450L
 
         /**
          * A keyboard's touch area may start a little below its frame. Reported no further than this
          * below it, a keyboard seen for the first time is at rest: sliding in, it is far lower.
          */
-        const val MAX_REST_OFFSET_DP = 24f
+        private const val MAX_REST_OFFSET_DP = 24f
 
         /** Past the longest slide, a keyboard may rest this far down its own window; any lower, the window is not the keyboard. */
-        const val MAX_OFFSET_FRACTION = 0.5f
+        private const val MAX_OFFSET_FRACTION = 0.5f
 
         /** Shorter than this, a keyboard window whose frame is unknown, or no taller either, is not a keyboard on screen. */
-        const val MIN_HEIGHT_PX = 80f
+        private const val MIN_HEIGHT_PX = 80f
 
         /** Lifted this far above its resting edge, the keyboard is riding a system animation. */
-        const val MAX_LIFT_DP = 24f
+        private const val MAX_LIFT_DP = 24f
 
         /** A frame starting higher than this (as a fraction of the screen) is a container, not a docked keyboard. */
-        const val MIN_DOCKED_TOP_FRACTION = 0.25f
+        private const val MIN_DOCKED_TOP_FRACTION = 0.25f
 
         /** Where a keyboard its window does not place is remembered: per window size, or without a frame per screen height. */
-        fun placeKey(key: String, frame: Box?, screenH: Float): String =
-            if (frame != null) "$key|${frame.width.roundToInt()}x${frame.height.roundToInt()}" else "$key|h${screenH.roundToInt()}"
+        private fun placeKey(key: String, frame: Box?, screenH: Float): String =
+            if (frame != null) "$key|${frame.width.roundToInt()}x${frame.height.roundToInt()}" else restKey(key, screenH)
     }
 }

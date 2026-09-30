@@ -56,6 +56,42 @@ export function sellsPro(status: { billingEnabled?: boolean } | null | undefined
   return status?.billingEnabled ?? true
 }
 
+export interface PlanCardHead {
+  /** Whether the card talks about a plan: the instance's switch once known, the site's until then. */
+  selling: boolean
+  eyebrow: string
+  title: string
+  /** The sentence under the title while the status is still on its way; null once it arrived. */
+  loading: string | null
+}
+
+/**
+ * The head of the account page's plan card. Until the status arrives the instance's switch is not
+ * known, so the site's own build-time switch (`buildSelling`) stands in: the card opens with the
+ * eyebrow it keeps, "Murmur’s models", instead of flashing "Plan" on an instance that does not sell
+ * Pro. Once the status is here its switch decides, and the private-testing states are named
+ * whatever the switch says.
+ */
+export function planCardHead(status: InferenceStatus | null, buildSelling: boolean): PlanCardHead {
+  const selling = status ? sellsPro(status) : buildSelling
+  const eyebrow = selling ? 'Plan' : 'Murmur’s models'
+  if (!status) {
+    return {
+      selling,
+      eyebrow,
+      title: '…',
+      loading: selling ? 'Waiting for your account status…' : 'Checking your account…'
+    }
+  }
+  const labelled = selling || !isMetered(status.planState)
+  return {
+    selling,
+    eyebrow,
+    title: labelled ? planLabel(status.planState) : 'Included with your account',
+    loading: null
+  }
+}
+
 /** Whole days left in the trial, never negative. */
 export function trialDaysLeft(trialEndsAt: number, now: number): number {
   return Math.max(0, Math.ceil((trialEndsAt - now) / DAY_MS))
@@ -219,7 +255,11 @@ export function meterView(meter: Meter): MeterView {
  * Account page's banners). Transcription that has stopped outranks everything: nothing is
  * inserted at all. Then the free week and day, then formatting, which never loses text.
  */
-export function exhaustedNotice(status: InferenceStatus, now: number, selling = true): string | null {
+export function exhaustedNotice(
+  status: InferenceStatus,
+  now: number,
+  selling = true
+): string | null {
   const by = (limit: LimitName): Meter | undefined => status.meters.find((m) => m.limit === limit)
   const pro = status.plan === 'pro'
   const tier = pro ? 'on Pro' : 'on the free plan'

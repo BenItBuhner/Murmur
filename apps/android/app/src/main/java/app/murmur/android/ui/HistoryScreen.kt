@@ -54,6 +54,7 @@ import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.RecordingsInfo
+import app.murmur.android.inference.Inference
 import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.EmphasizedAccelerate
@@ -439,6 +440,11 @@ private fun HistoryRow(
                         LlmOutcome.SKIPPED_CLEAN -> Tag("clean")
                         else -> Unit
                     }
+                    // The speed Murmur ran at, when worth a glance: Fast ran, or Fast fell back to Normal.
+                    entry.sttSpeed?.let { speed ->
+                        if (speed.fellBack) Tag("fast unavailable", modifier = Modifier.testTag("history-speed"))
+                        else if (speed.used == Inference.SPEED_FAST) Tag("fast", modifier = Modifier.testTag("history-speed"))
+                    }
                     // Dictated on another device: its name, as the desktop labels synced entries.
                     if (entry.remote) Tag(entry.deviceName ?: "other device", modifier = Modifier.testTag("history-device"))
                     if (entry.failed && entry.finalText.isNotEmpty()) Tag("not inserted", c.clay)
@@ -475,7 +481,7 @@ private fun HistoryRow(
                     LatencyBar(entry.timings)
                     Spacer(Modifier.height(18.dp))
                 }
-                if (entry.stages.isNotEmpty() || entry.llm != null) {
+                if (entry.stages.isNotEmpty() || entry.llm != null || entry.sttSpeed?.fellBack == true) {
                     Overline("Stages")
                     Spacer(Modifier.height(8.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -488,12 +494,16 @@ private fun HistoryRow(
                             LlmOutcome.SKIPPED_CLEAN -> Tag("already clean: model skipped")
                             null -> Unit
                         }
+                        // Spelled out here; the row above only flags it.
+                        if (entry.sttSpeed?.fellBack == true) Tag(Inference.FAST_UNAVAILABLE_NOTE, modifier = Modifier.testTag("history-speed-fallback"))
                     }
                     Spacer(Modifier.height(18.dp))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        listOf(entry.provider, entry.model).filter { it.isNotBlank() }.joinToString(" · "),
+                        listOfNotNull(entry.provider, entry.model, entry.sttSpeed?.let { Inference.speedLabel(it.used) })
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · "),
                         style = Murmur.type.labelSmall,
                         color = c.inkSoft,
                         modifier = Modifier.weight(1f),

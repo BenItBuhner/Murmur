@@ -453,7 +453,10 @@ object DictationController {
         }
         val raw = stt.text.trim()
         val sttMs = System.currentTimeMillis() - sttStarted
-        Log.i(TAG, "stt done in ${stt.latencyMs}ms: ${raw.take(80)}")
+        val speedNote = stt.speed?.let { sp ->
+            if (sp.fellBack) " speed=${sp.used} (asked ${sp.requested}, ${sp.fallback ?: "fallback"})" else " speed=${sp.used}"
+        } ?: ""
+        Log.i(TAG, "stt done in ${stt.latencyMs}ms$speedNote: ${raw.take(80)}")
         if (raw.isEmpty() ||
             (stt.noSpeechProb != null && stt.noSpeechProb > 0.85 && countWords(raw) <= 2)
         ) {
@@ -619,6 +622,7 @@ object DictationController {
             appName = if (run.insert) focusedLabel else run.previous?.appName,
             provider = resolved.provider,
             model = resolved.cfg.model,
+            sttSpeed = stt.speed,
             injected = error == null && run.insert,
             llmUsed = llm == LlmOutcome.USED,
             llm = llm,

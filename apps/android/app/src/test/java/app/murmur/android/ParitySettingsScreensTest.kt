@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
@@ -33,6 +34,8 @@ import androidx.compose.ui.test.performTextReplacement
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.DeviceDto
 import app.murmur.android.cloud.HistoryEntryDto
+import app.murmur.android.cloud.InferenceModelsDto
+import app.murmur.android.cloud.InferenceStatusDto
 import app.murmur.android.cloud.SyncPhase
 import app.murmur.android.cloud.SyncReducers
 import app.murmur.android.cloud.SyncStatus
@@ -42,11 +45,14 @@ import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
+import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouting
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
+import app.murmur.android.stt.SpeedOutcome
 import app.murmur.android.ui.AccountContent
 import app.murmur.android.ui.AppearanceScreen
 import app.murmur.android.ui.DictionaryScreen
@@ -378,6 +384,113 @@ class ParitySettingsScreensTest {
         compose.waitForIdle()
         compose.onNodeWithText("3 dictations, stored only on this phone.").assertExists()
         compose.onNodeWithText("Synced").assertDoesNotExist()
+    }
+
+    // ---- speed modes: the Speed row on Speech model and the History detail ------------------------
+
+    /** The production instance's status for an allowlisted account, with or without a fast model. */
+    private fun murmurStatus(speedModes: List<String>) = InferenceStatusDto(
+        available = true, models = InferenceModelsDto(stt = "murmur-transcribe", llm = "murmur-format"),
+        speedModes = speedModes, plan = "unlimited", planState = "unlimited", billingEnabled = false
+    )
+
+    @Test
+    fun `Speech model offers Normal and Fast for Murmur's models, Normal by default, and notes when Fast is not there yet`() {
+        val view = cloudView.copy(planState = "unlimited", plan = "unlimited", billingEnabled = false, status = murmurStatus(listOf("normal")))
+        compose.setContent {
+            val settings by store.flow.collectAsState()
+            CompositionLocalProvider(LocalInferenceView provides view) {
+                MurmurTheme(settings.copy(dynamicColor = false)) { SpeechModelScreen(store, settings, TopNav.Back {}) }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(SttSpeed.NORMAL, store.get().sttSpeed)
+        compose.onNodeWithText("Speed").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(Inference.SPEED_SETTING_DESCRIPTION).assertIsDisplayed()
+        compose.onNodeWithText("Normal").assertIsSelected()
+        compose.onNodeWithText("Fast").assertIsNotSelected()
+        // The instance has no fast model yet: the row says so, and Fast stays a choice.
+        compose.onNodeWithTag("speed-unavailable", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(Inference.FAST_UNAVAILABLE_SETTING_NOTE).assertIsDisplayed()
+        snap("android-speech-model-speed")
+
+        compose.onNodeWithText("Fast").performClick()
+        compose.waitForIdle()
+        assertEquals(SttSpeed.FAST, store.get().sttSpeed)
+        compose.onNodeWithText("Fast").assertIsSelected()
+        compose.onNodeWithText("Normal").assertIsNotSelected()
+        snap("android-speech-model-speed-fast")
+        compose.onNodeWithText("Normal").performClick()
+        assertEquals(SttSpeed.NORMAL, store.get().sttSpeed)
+    }
+
+    @Test
+    fun `the Fast note goes away once the instance offers it`() {
+        val view = cloudView.copy(planState = "unlimited", plan = "unlimited", billingEnabled = false, status = murmurStatus(listOf("normal", "fast")))
+        compose.setContent {
+            val settings by store.flow.collectAsState()
+            CompositionLocalProvider(LocalInferenceView provides view) {
+                MurmurTheme(settings.copy(dynamicColor = false)) { SpeechModelScreen(store, settings, TopNav.Back {}) }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Speed").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("speed-unavailable", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText(Inference.FAST_UNAVAILABLE_SETTING_NOTE).assertDoesNotExist()
+        compose.onNodeWithText("Normal").assertIsSelected()
+        compose.onNodeWithText("Fast").assertIsNotSelected()
+    }
+
+    @Test
+    fun `there is no Speed row for the user's own provider, even in a cloud build`() {
+        store.update { it.copy(sttSource = InferenceSource.CUSTOM, sttBaseUrl = "https://api.groq.com/openai/v1", sttModel = "whisper-large-v3-turbo") }
+        val view = cloudView.copy(routing = InferenceRouting(InferenceSource.CUSTOM, InferenceSource.CUSTOM), status = murmurStatus(listOf("normal", "fast")))
+        compose.setContent {
+            val settings by store.flow.collectAsState()
+            CompositionLocalProvider(LocalInferenceView provides view) {
+                MurmurTheme(settings.copy(dynamicColor = false)) { SpeechModelScreen(store, settings, TopNav.Back {}) }
+            }
+        }
+        compose.waitForIdle()
+        // The chooser is there (a cloud build), the user's own connection form is shown, and the
+        // Speed row, a Murmur-models thing, is not.
+        compose.onNodeWithText("Your own provider").assertIsSelected()
+        compose.onNodeWithText("Groq").assertExists()
+        compose.onNodeWithTag("speed-row", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Speed").assertDoesNotExist()
+    }
+
+    @Test
+    fun `History says which speed Murmur ran at, and that Fast was not available when it fell back`() {
+        val history = HistoryStore.get(context)
+        val recordings = RecordingStore.get(context)
+        history.clear()
+        val now = System.currentTimeMillis()
+        history.add(ownEntry("own-1", now - 9 * 60_000, "Send the deck over before lunch.").copy(model = "murmur-transcribe"))
+        history.add(
+            ownEntry("fast-1", now - 6 * 60_000, "Book the room for Thursday at ten.")
+                .copy(model = "murmur-transcribe", sttSpeed = SpeedOutcome("fast", "fast"))
+        )
+        history.add(
+            ownEntry("fell-back-1", now - 3 * 60_000, "Running ten minutes late, order without me.")
+                .copy(model = "murmur-transcribe", sttSpeed = SpeedOutcome("fast", "normal", "not_configured"))
+        )
+        show { HistoryScreen(history, store, recordings, TopNav.Back {}) }
+
+        // The rows flag Fast ran, or Fast fell back; a Normal dictation carries no speed tag.
+        compose.onNodeWithText("fast").assertIsDisplayed()
+        compose.onNodeWithText("fast unavailable").assertIsDisplayed()
+        assertEquals(2, compose.onAllNodesWithTag("history-speed", useUnmergedTree = true).fetchSemanticsNodes().size)
+        // Open the one that fell back: the note is spelled out, and the model line names the speed that ran.
+        compose.onNodeWithText("Running ten minutes late, order without me.").performClick()
+        compose.onNodeWithText(Inference.FAST_UNAVAILABLE_NOTE).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("murmur · murmur-transcribe · Normal").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Running ten minutes late, order without me.").performScrollTo()
+        snap("android-history-speed-fallback")
+        compose.onNodeWithText("Running ten minutes late, order without me.").performClick()
+        compose.onNodeWithText("Book the room for Thursday at ten.").performScrollTo().performClick()
+        compose.onNodeWithText("murmur · murmur-transcribe · Fast").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(Inference.FAST_UNAVAILABLE_NOTE).assertDoesNotExist()
     }
 
     @Test

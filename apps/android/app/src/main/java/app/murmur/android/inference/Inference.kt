@@ -6,6 +6,7 @@ import app.murmur.android.MurmurApplication
 import app.murmur.android.cloud.ClerkTokens
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
+import app.murmur.android.cloud.InferenceStatusDto
 import app.murmur.android.llm.ChatMessage
 import app.murmur.android.llm.ChatResult
 import app.murmur.android.llm.LlmClient
@@ -42,6 +43,40 @@ object Inference {
 
     /** `provider` recorded for dictations transcribed by the Murmur instance. */
     const val PROVIDER = "murmur"
+
+    /**
+     * Speed modes of the Murmur speech model (desktop `SPEED_MODES`; `SPEED_MODES` on the gateway):
+     * `normal` is the instance's model as before, `fast` a quicker one when the instance offers it
+     * (`MURMUR_INFERENCE_STT_FAST_MODEL`). Sent with every Murmur transcription as the `speed` form
+     * part; the answer says which mode ran, so a request for Fast on an instance without it still
+     * goes through, on Normal, and the app can say so.
+     */
+    const val SPEED_NORMAL = "normal"
+    const val SPEED_FAST = "fast"
+    val SPEED_MODES = listOf(SPEED_NORMAL, SPEED_FAST)
+    const val SPEED_FIELD = "speed"
+    /** Response header: the mode that transcribed the clip. */
+    const val SPEED_HEADER = "x-murmur-speed"
+    /** Response header, only when the requested mode could not be honoured: why Normal ran instead. */
+    const val SPEED_FALLBACK_HEADER = "x-murmur-speed-fallback"
+    val SPEED_FALLBACKS = listOf("not_configured", "model_not_found")
+
+    /** The one sentence the apps say when Fast was asked for and Normal answered. */
+    const val FAST_UNAVAILABLE_NOTE = "Fast isn't available yet, used Normal"
+    /** The Speed setting's explanation, the same words as the desktop's Models page. */
+    const val SPEED_SETTING_DESCRIPTION =
+        "Normal is today's model. Fast answers sooner on a quicker model when this Murmur server offers one."
+    /** Under the Speed setting when the instance reports no fast model. */
+    const val FAST_UNAVAILABLE_SETTING_NOTE = "Fast isn't available on this server yet; dictations use Normal until it is."
+
+    /** How a mode is named in the UI. */
+    fun speedLabel(mode: String): String = if (mode == SPEED_FAST) "Fast" else "Normal"
+
+    /**
+     * Does the instance offer Fast? Null before its status arrived; an instance from before speed
+     * modes (no `speedModes` in its status) offers Normal only.
+     */
+    fun fastAvailable(status: InferenceStatusDto?): Boolean? = status?.let { SPEED_FAST in it.speedModes }
 
     /** Error codes whose messages are shown to the user verbatim. */
     val ERROR_CODES = setOf(
@@ -155,7 +190,9 @@ class InferenceRouter(
                     apiKey = sessionToken(forceRefresh),
                     model = Inference.STT_MODEL,
                     language = s.language,
-                    timeoutMs = s.sttTimeoutMs
+                    timeoutMs = s.sttTimeoutMs,
+                    // Sent even for Normal, so the instance's log shows what was asked for.
+                    speed = s.sttSpeed.id
                 ),
                 fallbackModel = "",
                 provider = Inference.PROVIDER

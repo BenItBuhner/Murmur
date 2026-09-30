@@ -138,6 +138,11 @@ data class InferenceStatusDto(
     /** The instance is configured with at least a managed speech model. */
     val available: Boolean = false,
     val models: InferenceModelsDto = InferenceModelsDto(),
+    /**
+     * The speed modes the speech model takes (`["normal"]`, or `["normal", "fast"]` once the
+     * instance has a fast model). An instance from before speed modes leaves it out: Normal only.
+     */
+    val speedModes: List<String> = listOf("normal"),
     val plan: String = "free",
     val limits: InferenceLimitsDto = InferenceLimitsDto(),
     val usage: InferenceUsageDto = InferenceUsageDto(),

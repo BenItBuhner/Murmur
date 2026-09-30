@@ -40,17 +40,38 @@ private const val TAG = "MurmurUpdate"
 
 class UpdateException(message: String) : Exception(message)
 
+/** Where the updater looks and what it believes it is running; the app uses the defaults, tests point them at a fake GitHub. */
+data class UpdateSource(
+    /** `owner/name` on GitHub. */
+    val repo: String = BuildConfig.UPDATE_REPO,
+    val currentVersion: String = BuildConfig.VERSION_NAME,
+    val apiBase: String = "https://api.github.com",
+    /** Only assets served from this origin are downloaded. */
+    val downloadOrigin: String = "https://github.com",
+    /** Pauses before the second and third attempt at downloading SHA256SUMS.txt. */
+    val checksumRetryDelaysMs: List<Long> = listOf(1_000L, 3_000L)
+)
+
 /**
  * Android counterpart of apps/desktop/src/main/update/service.ts: reads the repository's GitHub
- * Releases, downloads `Murmur-<version>-android.apk`, verifies it against SHA256SUMS.txt and hands
- * it to the system package installer.
+ * Releases, downloads `Murmur-<version>-android.apk`, verifies it against the checksum the release
+ * carries for it and hands it to the system package installer.
+ *
+ * The checksum is GitHub's own digest of the uploaded asset, which arrives in the same API response
+ * as the asset list; a release whose assets carry no digest falls back to its SHA256SUMS.txt. A
+ * checksum that cannot be fetched is a check failure to retry, never a reason to download an APK
+ * that can then not be verified.
  *
  * Android never installs silently for a plain app... except when the app updates itself: with
  * UPDATE_PACKAGES_WITHOUT_USER_ACTION and a PackageInstaller session, Android 12+ lets an app
  * replace itself without a dialog once it has been the installer of its current version. The very
  * first in-app update therefore shows the system confirmation; the ones after it are unattended.
  */
-class UpdateManager private constructor(private val app: Context, private val settings: SettingsStore) {
+class UpdateManager internal constructor(
+    private val app: Context,
+    private val settings: SettingsStore,
+    private val source: UpdateSource = UpdateSource()
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val prefs = app.getSharedPreferences("murmur_updater", Context.MODE_PRIVATE)
     private val client = OkHttpClient.Builder()
@@ -60,12 +81,16 @@ class UpdateManager private constructor(private val app: Context, private val se
     private val checkMutex = Mutex()
     private var downloadJob: Job? = null
 
-    private val repo = BuildConfig.UPDATE_REPO
-    private val apiBase = "https://api.github.com"
-    private val downloadOrigin = "https://github.com"
+    private val repo = source.repo
+    private val apiBase = source.apiBase
+    private val downloadOrigin = source.downloadOrigin
+    private val currentVersion = source.currentVersion
+
+    /** Hands a verified APK to the platform; the outcome arrives through [UpdateResultReceiver]. Tests swap it. */
+    internal var commitInstall: (file: File, version: String) -> Unit = ::commitToPackageInstaller
 
     private val _state = MutableStateFlow(
-        UpdateState(currentVersion = BuildConfig.VERSION_NAME, lastCheckedAt = prefs.getLong(KEY_LAST_CHECKED, 0L))
+        UpdateState(currentVersion = currentVersion, lastCheckedAt = prefs.getLong(KEY_LAST_CHECKED, 0L))
     )
     val state: StateFlow<UpdateState> = _state
 
@@ -80,7 +105,7 @@ class UpdateManager private constructor(private val app: Context, private val se
     init {
         val pendingVersion = prefs.getString(KEY_PENDING_VERSION, null)
         if (pendingVersion != null) {
-            if (pendingVersion == BuildConfig.VERSION_NAME) {
+            if (pendingVersion == currentVersion) {
                 val from = prefs.getString(KEY_PENDING_FROM, null)
                 Log.i(TAG, "relaunched after updating from $from to $pendingVersion")
                 _state.update { it.copy(updatedFrom = from) }
@@ -132,7 +157,7 @@ class UpdateManager private constructor(private val app: Context, private val se
             prefs.edit().putLong(KEY_LAST_CHECKED, now).apply()
             val chosen = UpdateSelection.selectRelease(
                 releases,
-                BuildConfig.VERSION_NAME,
+                currentVersion,
                 prefsNow.updateIncludePrereleases,
                 if (manual) null else prefsNow.updateSkippedVersion
             )
@@ -152,14 +177,32 @@ class UpdateManager private constructor(private val app: Context, private val se
                 Log.w(TAG, "ignoring APK served from an unexpected origin: ${apk.browser_download_url}")
                 apk = null
             }
-            val sha = if (apk != null) fetchChecksum(chosen, apkName) else null
-            val info = UpdateSelection.describe(chosen, apk, sha)
-            Log.i(TAG, "update available: ${info.version} (${apk?.name ?: "no APK"}${if (sha != null) ", checksum found" else ", no checksum"})")
+            val checksum = if (apk != null) lookupChecksum(chosen, apk) else null
+            if (checksum is Checksum.Unavailable) {
+                // A network hiccup on the checksum, not a defect of the release: report it as one and
+                // leave the APK alone, so the next check (soon, see startBackgroundChecks) tries again.
+                throw UpdateException(checksum.reason)
+            }
+            val info = UpdateSelection.describe(chosen, apk, checksum)
+            Log.i(
+                TAG,
+                "update available: ${info.version} (${apk?.name ?: "no APK"}, " +
+                    when (checksum) {
+                        is Checksum.Known -> "checksum from ${checksum.source}"
+                        is Checksum.Missing -> "no checksum: ${checksum.reason}"
+                        else -> "no checksum"
+                    } + ")"
+            )
 
+            // A file downloaded earlier is only kept when it was verified against this very checksum;
+            // anything else is re-downloaded so the digest check runs on what gets installed.
+            val prevRelease = prev.release
             val sameDownload = prev.phase == UpdatePhase.READY && prev.downloadedPath != null &&
-                File(prev.downloadedPath).exists() && prev.release?.version == info.version
+                File(prev.downloadedPath).exists() && prevRelease != null && prevRelease.version == info.version &&
+                prevRelease.sha256 != null && prevRelease.sha256 == info.sha256
             if (sameDownload) {
                 _state.update { it.copy(phase = UpdatePhase.READY, release = info, lastCheckedAt = now) }
+                if (prefsNow.updateAutoInstall && _state.value.canInstall) scope.launch { autoInstall() }
                 return@withContext _state.value
             }
             discardDownload()
@@ -169,7 +212,8 @@ class UpdateManager private constructor(private val app: Context, private val se
                     progress = 0f, downloadedBytes = 0L, lastCheckedAt = now
                 )
             }
-            if (prefsNow.updateAutoInstall && apk != null) download()
+            // Without a checksum nothing could be verified, so nothing is fetched unattended.
+            if (prefsNow.updateAutoInstall && apk != null && info.sha256 != null) download()
             _state.value
         } catch (e: Exception) {
             val message = friendly(e)
@@ -190,7 +234,7 @@ class UpdateManager private constructor(private val app: Context, private val se
         val request = Request.Builder()
             .url("$apiBase/repos/$repo/releases?per_page=30")
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "Murmur-Android/${BuildConfig.VERSION_NAME}")
+            .header("User-Agent", "Murmur-Android/$currentVersion")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .build()
         client.newCall(request).execute().use { res ->
@@ -204,23 +248,40 @@ class UpdateManager private constructor(private val app: Context, private val se
         }
     }
 
-    private fun fetchChecksum(release: GithubReleaseDto, assetName: String): String? {
-        val sums = release.assets.firstOrNull { it.name == UpdateSelection.CHECKSUMS_ASSET } ?: run {
-            Log.w(TAG, "${release.tag_name} ships no ${UpdateSelection.CHECKSUMS_ASSET}; installing is disabled")
-            return null
+    /**
+     * The checksum to verify [apk] against. GitHub's digest of the upload needs no further request;
+     * only a release whose assets carry none has its SHA256SUMS.txt downloaded (a few attempts, the
+     * file is small). See [UpdateSelection.resolveChecksum] for how the outcomes are told apart.
+     */
+    private suspend fun lookupChecksum(release: GithubReleaseDto, apk: GithubAssetDto): Checksum {
+        val sums = release.assets.firstOrNull { it.name == UpdateSelection.CHECKSUMS_ASSET }
+        if (UpdateSelection.digestOf(apk) != null || sums == null) {
+            // Known from the digest, or Missing: neither needs the network.
+            return UpdateSelection.resolveChecksum(release, apk, sumsPresent = sums != null, sums = null)
         }
-        if (!UpdateSelection.isTrustedAssetUrl(sums.browser_download_url, downloadOrigin)) return null
-        return try {
-            val request = Request.Builder().url(sums.browser_download_url)
-                .header("User-Agent", "Murmur-Android/${BuildConfig.VERSION_NAME}").build()
-            client.newCall(request).execute().use { res ->
-                if (!res.isSuccessful) throw UpdateException("HTTP ${res.code}")
-                UpdateSelection.parseChecksums(res.body?.string() ?: "")[assetName]
+        if (!UpdateSelection.isTrustedAssetUrl(sums.browser_download_url, downloadOrigin)) {
+            Log.w(TAG, "ignoring ${UpdateSelection.CHECKSUMS_ASSET} served from an unexpected origin: ${sums.browser_download_url}")
+            return Checksum.Missing("${UpdateSelection.CHECKSUMS_ASSET} of this release is served from an unexpected origin, so Murmur cannot verify it.")
+        }
+        var failure: String? = null
+        for ((attempt, pause) in (listOf(0L) + source.checksumRetryDelaysMs).withIndex()) {
+            if (pause > 0) delay(pause)
+            try {
+                val request = Request.Builder().url(sums.browser_download_url)
+                    .header("User-Agent", "Murmur-Android/$currentVersion").build()
+                val text = client.newCall(request).execute().use { res ->
+                    if (!res.isSuccessful) throw UpdateException("HTTP ${res.code}")
+                    res.body?.string() ?: throw UpdateException("empty response")
+                }
+                return UpdateSelection.resolveChecksum(release, apk, sumsPresent = true, sums = text)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failure = if (e is IOException) "connection failed" else e.message ?: e.javaClass.simpleName
+                Log.w(TAG, "could not fetch ${UpdateSelection.CHECKSUMS_ASSET} (attempt ${attempt + 1}): ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "could not fetch checksums: ${e.message}")
-            null
         }
+        return UpdateSelection.resolveChecksum(release, apk, sumsPresent = true, sums = null, sumsFetchError = failure)
     }
 
     // ---- downloading ----------------------------------------------------------------------------
@@ -240,6 +301,14 @@ class UpdateManager private constructor(private val app: Context, private val se
         val apk = info.apk ?: return
         if (st.phase == UpdatePhase.DOWNLOADING || st.phase == UpdatePhase.INSTALLING) return
         if (st.phase == UpdatePhase.READY && st.downloadedPath != null && File(st.downloadedPath).exists()) return
+        val expectedSha256 = info.sha256
+        if (expectedSha256 == null) {
+            // An APK nothing can verify would only ever sit in the cache: the release page is the way.
+            _state.update {
+                it.copy(error = info.checksumProblem ?: "Murmur cannot verify this release's Android build, so it will not download it.")
+            }
+            return
+        }
         val dir = downloadDir()
         val dest = File(dir, apk.name)
         val part = File(dir, apk.name + ".part")
@@ -250,7 +319,7 @@ class UpdateManager private constructor(private val app: Context, private val se
         try {
             withContext(Dispatchers.IO) {
                 val request = Request.Builder().url(apk.browser_download_url)
-                    .header("User-Agent", "Murmur-Android/${BuildConfig.VERSION_NAME}").build()
+                    .header("User-Agent", "Murmur-Android/$currentVersion").build()
                 client.newCall(request).execute().use { res ->
                     if (!res.isSuccessful) throw UpdateException("Download failed: HTTP ${res.code}")
                     val body = res.body ?: throw UpdateException("Download failed: empty response")
@@ -281,14 +350,14 @@ class UpdateManager private constructor(private val app: Context, private val se
                         throw UpdateException("Download is $transferred bytes, expected ${apk.size}")
                     }
                     val hex = digest.digest().joinToString("") { "%02x".format(it) }
-                    if (info.sha256 != null && hex != info.sha256.lowercase()) {
+                    if (hex != expectedSha256.lowercase()) {
                         throw UpdateException("The downloaded file did not match the release checksum, so it was discarded.")
                     }
                     dest.delete()
                     if (!part.renameTo(dest)) throw UpdateException("Could not save the download")
                 }
             }
-            Log.i(TAG, "downloaded and ${if (info.sha256 != null) "verified" else "saved (unverified)"}: $dest")
+            Log.i(TAG, "downloaded and verified: $dest")
             _state.update { it.copy(phase = UpdatePhase.READY, downloadedPath = dest.absolutePath, progress = 1f) }
             if (settings.get().updateAutoInstall && _state.value.canInstall) scope.launch { autoInstall() }
         } catch (e: CancellationException) {
@@ -357,34 +426,11 @@ class UpdateManager private constructor(private val app: Context, private val se
         _state.update { it.copy(phase = UpdatePhase.INSTALLING, error = null) }
         prefs.edit()
             .putString(KEY_PENDING_VERSION, release.version)
-            .putString(KEY_PENDING_FROM, BuildConfig.VERSION_NAME)
+            .putString(KEY_PENDING_FROM, currentVersion)
             .commit()
         scope.launch(Dispatchers.IO) {
             try {
-                val installer = app.packageManager.packageInstaller
-                val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-                    setAppPackageName(app.packageName)
-                    setSize(file.length())
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        setPackageSource(PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE)
-                    }
-                }
-                val sessionId = installer.createSession(params)
-                installer.openSession(sessionId).use { session ->
-                    session.openWrite("murmur.apk", 0, file.length()).use { out ->
-                        file.inputStream().use { it.copyTo(out) }
-                        session.fsync(out)
-                    }
-                    val intent = Intent(app, UpdateResultReceiver::class.java).setAction(UpdateResultReceiver.ACTION)
-                    var flags = PendingIntent.FLAG_UPDATE_CURRENT
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags = flags or PendingIntent.FLAG_MUTABLE
-                    val pending = PendingIntent.getBroadcast(app, sessionId, intent, flags)
-                    Log.i(TAG, "committing install session $sessionId for ${release.version}")
-                    session.commit(pending.intentSender)
-                }
+                commitInstall(file, release.version)
             } catch (e: Exception) {
                 Log.e(TAG, "could not start the installer", e)
                 clearPending()
@@ -392,6 +438,34 @@ class UpdateManager private constructor(private val app: Context, private val se
             }
         }
         return true
+    }
+
+    /** Streams [file] into a PackageInstaller session and commits it; the result comes back as a broadcast. */
+    private fun commitToPackageInstaller(file: File, version: String) {
+        val installer = app.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            setAppPackageName(app.packageName)
+            setSize(file.length())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                setPackageSource(PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE)
+            }
+        }
+        val sessionId = installer.createSession(params)
+        installer.openSession(sessionId).use { session ->
+            session.openWrite("murmur.apk", 0, file.length()).use { out ->
+                file.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val intent = Intent(app, UpdateResultReceiver::class.java).setAction(UpdateResultReceiver.ACTION)
+            var flags = PendingIntent.FLAG_UPDATE_CURRENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags = flags or PendingIntent.FLAG_MUTABLE
+            val pending = PendingIntent.getBroadcast(app, sessionId, intent, flags)
+            Log.i(TAG, "committing install session $sessionId for $version")
+            session.commit(pending.intentSender)
+        }
     }
 
     /** Result of a committed session, delivered through [UpdateResultReceiver]. */
@@ -488,7 +562,8 @@ class UpdateManager private constructor(private val app: Context, private val se
 
     /**
      * Daily check while the accessibility service is alive (the only long-lived part of the app).
-     * Finds -> downloads -> installs when "install automatically" is on, otherwise notifies.
+     * Finds -> downloads -> installs when "install automatically" is on, otherwise notifies. A check
+     * that failed (GitHub unreachable, checksum not downloadable) is retried after an hour instead.
      */
     fun startBackgroundChecks(scope: CoroutineScope) {
         scope.launch {
@@ -497,7 +572,7 @@ class UpdateManager private constructor(private val app: Context, private val se
                     delay(TimeUnit.MINUTES.toMillis(30))
                     continue
                 }
-                val due = _state.value.lastCheckedAt + BACKGROUND_INTERVAL_MS - System.currentTimeMillis()
+                val due = _state.value.lastCheckedAt + nextCheckInterval(_state.value.phase) - System.currentTimeMillis()
                 if (due > 0) {
                     delay(due)
                     continue
@@ -513,7 +588,7 @@ class UpdateManager private constructor(private val app: Context, private val se
                         launchAppIntent()
                     )
                 }
-                delay(BACKGROUND_INTERVAL_MS)
+                delay(nextCheckInterval(st.phase))
             }
         }
     }
@@ -586,8 +661,13 @@ class UpdateManager private constructor(private val app: Context, private val se
         private const val NOTIFICATION_ID_UPDATE = 1292
         private val FOREGROUND_INTERVAL_MS = TimeUnit.HOURS.toMillis(1)
         private val BACKGROUND_INTERVAL_MS = TimeUnit.HOURS.toMillis(24)
+        private val RETRY_INTERVAL_MS = TimeUnit.HOURS.toMillis(1)
         private val IDLE_POLL_MS = TimeUnit.SECONDS.toMillis(20)
         private val IDLE_WAIT_MAX_MS = TimeUnit.MINUTES.toMillis(30)
+
+        /** How long the background loop waits after a check that ended in [phase]. */
+        internal fun nextCheckInterval(phase: UpdatePhase): Long =
+            if (phase == UpdatePhase.ERROR) RETRY_INTERVAL_MS else BACKGROUND_INTERVAL_MS
 
         @Volatile
         private var instance: UpdateManager? = null

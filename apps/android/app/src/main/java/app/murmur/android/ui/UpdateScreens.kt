@@ -58,9 +58,12 @@ private fun detail(s: UpdateState): String {
         UpdatePhase.CHECKING -> "Checking GitHub for new releases…"
         UpdatePhase.UP_TO_DATE, UpdatePhase.IDLE ->
             if (s.lastCheckedAt > 0) "Checked ${relative(s.lastCheckedAt)}" else "Not checked yet."
-        UpdatePhase.AVAILABLE ->
-            if (r?.apk != null) "${if (r.prerelease) "Pre-release · " else ""}${megabytes(r.apk.size)}"
-            else "This release has no Android build yet. Open the release page for details."
+        UpdatePhase.AVAILABLE -> when {
+            r?.apk == null -> "This release has no Android build yet. Open the release page for details."
+            r.sha256 == null ->
+                "${r.checksumProblem ?: "Murmur cannot verify this build."} Open the release page to install it yourself."
+            else -> "${if (r.prerelease) "Pre-release · " else ""}${megabytes(r.apk.size)}"
+        }
         UpdatePhase.DOWNLOADING -> {
             val total = r?.apk?.size ?: 0L
             if (total > 0) "${(s.progress * 100).toInt()}% · ${megabytes(s.downloadedBytes)} of ${megabytes(total)}"
@@ -68,7 +71,7 @@ private fun detail(s: UpdateState): String {
         }
         UpdatePhase.READY -> when {
             s.needsInstallPermission -> "Murmur needs permission to install its own updates."
-            !s.canInstall -> "This release ships no checksum file, so Murmur will not install it unattended."
+            !s.canInstall -> "Murmur could not verify this download, so it will not install it unattended."
             else -> "Android asks you to confirm the first update; later ones install on their own."
         }
         UpdatePhase.INSTALLING -> "The system installer is taking over; Murmur restarts when it is done."
@@ -118,7 +121,8 @@ fun UpdatesSection(store: SettingsStore, settings: MurmurSettings) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             when (state.phase) {
                 UpdatePhase.AVAILABLE -> {
-                    if (state.release?.apk != null) {
+                    // Only a build the release carries a checksum for is worth downloading: nothing else can be installed.
+                    if (state.release?.apk != null && state.release?.sha256 != null) {
                         SecondaryButton("Download", compact = true, onClick = { manager.download() })
                     } else {
                         SecondaryButton("View release", compact = true, onClick = { manager.openReleasePage(context) })

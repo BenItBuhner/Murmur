@@ -6,6 +6,8 @@ export interface GithubReleaseAsset {
   name: string
   size: number
   browser_download_url: string
+  /** `sha256:<hex>`, computed by GitHub when the asset was uploaded; absent on old assets. */
+  digest?: string | null
 }
 
 export interface GithubRelease {
@@ -127,6 +129,61 @@ export function pickAsset(
 }
 
 /**
+ * The SHA-256 GitHub computed for an asset when it was uploaded (`digest: "sha256:<hex>"`),
+ * lowercase hex, or null when the API carries none or something else.
+ */
+export function assetDigest(asset: GithubReleaseAsset): string | null {
+  const match = /^sha256:([a-fA-F0-9]{64})$/.exec(asset.digest?.trim() ?? '')
+  return match ? match[1].toLowerCase() : null
+}
+
+/**
+ * Outcome of looking up the checksum of an asset. Only `known` lets the updater install; the two
+ * failures are kept apart because they call for different reactions: a release that ships no
+ * checksum will never verify, while a checksum file that could not be downloaded right now is a
+ * plain network error to retry, and must not be reported as a defect of the release.
+ */
+export type ChecksumLookup =
+  | { kind: 'known'; sha256: string; source: string }
+  | { kind: 'missing'; reason: string }
+  | { kind: 'unavailable'; reason: string }
+
+/**
+ * Resolve the checksum of `asset` without touching the network: GitHub's own digest of the upload
+ * wins; otherwise `sums` (the body of SHA256SUMS.txt, when the release ships one and it was
+ * downloaded) is consulted. `sumsPresent` tells whether the release lists the file at all;
+ * `sumsFetchError` is the reason its download failed, when it did.
+ */
+export function resolveChecksum(
+  release: GithubRelease,
+  asset: GithubReleaseAsset,
+  opts: { sumsPresent: boolean; sums: string | null; sumsFetchError?: string | null }
+): ChecksumLookup {
+  const digest = assetDigest(asset)
+  if (digest) return { kind: 'known', sha256: digest, source: 'GitHub asset digest' }
+  const label = `Murmur ${normalizeVersion(release.tag_name)}`
+  if (!opts.sumsPresent) {
+    return {
+      kind: 'missing',
+      reason: `${label} ships no ${CHECKSUMS_ASSET}, so Murmur cannot verify ${asset.name}.`
+    }
+  }
+  if (opts.sums === null) {
+    const detail = opts.sumsFetchError ? ` (${opts.sumsFetchError})` : ''
+    return {
+      kind: 'unavailable',
+      reason: `Could not download ${CHECKSUMS_ASSET} for ${label}${detail}. Murmur will try again.`
+    }
+  }
+  const sha256 = parseChecksums(opts.sums).get(asset.name)
+  if (sha256) return { kind: 'known', sha256, source: CHECKSUMS_ASSET }
+  return {
+    kind: 'missing',
+    reason: `The ${CHECKSUMS_ASSET} of ${label} has no entry for ${asset.name}, so Murmur cannot verify it.`
+  }
+}
+
+/**
  * Parse `sha256sum` output (`<hex>  <name>`, also the `*<name>` binary-mode form) into a map of
  * file name -> lowercase hex digest.
  */
@@ -161,7 +218,7 @@ function isLoopback(hostname: string): boolean {
 export function describeRelease(
   release: GithubRelease,
   asset: GithubReleaseAsset | null,
-  sha256: string | null
+  checksum: ChecksumLookup | null
 ): UpdateRelease {
   const publishedAt = release.published_at ? Date.parse(release.published_at) : NaN
   return {
@@ -173,6 +230,7 @@ export function describeRelease(
     prerelease: release.prerelease || isPrerelease(release.tag_name),
     notes: release.body ?? '',
     asset: asset ? { name: asset.name, url: asset.browser_download_url, size: asset.size } : null,
-    sha256
+    sha256: checksum?.kind === 'known' ? checksum.sha256 : null,
+    checksumProblem: checksum && checksum.kind !== 'known' ? checksum.reason : null
   }
 }

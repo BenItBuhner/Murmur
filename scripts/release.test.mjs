@@ -229,7 +229,10 @@ test('aliases + notes with a full asset set produce no missing-file warnings', (
     }
     const aliased = run(['aliases', '0.1.0', dir])
     assert.equal(aliased.status, 0, aliased.stderr)
-    const notes = run(['notes', '0.1.0', dir])
+    // CI sets MURMUR_CLOUD_RELEASE for a cloud repository; pin it so the two modes are both covered.
+    const localEnv = { ...process.env, GITHUB_REPOSITORY: REPO }
+    delete localEnv.MURMUR_CLOUD_RELEASE
+    const notes = run(['notes', '0.1.0', dir], { env: localEnv })
     assert.equal(notes.status, 0, notes.stderr)
     assert.doesNotMatch(notes.stderr, /expected release asset is missing/)
     assert.match(notes.stdout, /## Local-only build/)
@@ -239,6 +242,13 @@ test('aliases + notes with a full asset set produce no missing-file warnings', (
     assert.match(notes.stdout, /Murmur-0\.1\.0-setup\.exe/)
     assert.match(notes.stdout, /\/releases\/latest\/download\/Murmur-setup\.exe/)
     assert.match(notes.stdout, /install\.sh/)
+    const cloud = run(['notes', '0.1.0', dir], {
+      env: { ...localEnv, MURMUR_CLOUD_RELEASE: 'true' }
+    })
+    assert.equal(cloud.status, 0, cloud.stderr)
+    assert.doesNotMatch(cloud.stderr, /expected release asset is missing/)
+    assert.doesNotMatch(cloud.stdout, /## Local-only build/)
+    assert.match(cloud.stdout, /## Downloads/)
   })
 })
 

@@ -52,11 +52,12 @@ ships the versioned names, per-platform install notes, and a `SHA256SUMS.txt`. B
 unsigned until the code-signing secrets described under [Releases](#releases) are configured, so
 Windows SmartScreen and macOS Gatekeeper will ask you to confirm the first launch.
 
-**These published builds are local-only.** There is no production Convex or Clerk instance yet, so
-the downloadable apps do not offer accounts, cloud sync or Murmur's own models — you connect a
-speech model of your own and everything stays on the device. The code for accounts and managed
-models is in the repo (`packages/backend`); it is not baked into GitHub release artifacts until the
-`MURMUR_CLOUD_RELEASE` repository variable is set to `true`.
+**Since v0.6.0 the published builds connect to Murmur's production instance.** Signing in is
+optional: without an account you connect a speech model of your own and everything stays on the
+device, as before. Signed in, your dictionary, snippets, style, per-app rules and (opt-in) dictation
+history sync across devices. The server is in private testing, so Murmur's own models answer
+invited accounts only, and nothing is billed. Releases before 0.6.0 were local-only; the
+`MURMUR_CLOUD_RELEASE` repository variable is the switch (see [Releases](#releases)).
 
 ### Updates
 
@@ -335,8 +336,8 @@ Code signing is optional and switched on by repository secrets:
 
 The repository **variable** `MURMUR_CLOUD_RELEASE` is the master switch for a production instance.
 It must be the literal `true` before `CONVEX_URL`, `CLERK_PUBLISHABLE_KEY` or `MURMUR_ACCOUNT_MODE`
-are baked into desktop/Android artifacts, and before the backend is deployed. Leave it unset
-(the current state — there is no production instance yet) for local-only CI and releases. See
+are baked into desktop/Android artifacts, and before the backend is deployed. It has been `true`
+since v0.6.0; unset it for local-only CI and releases. See
 [Accounts and sync](#accounts-and-sync-packagesbackend).
 
 Locally, `npm run android:build:release` honours the same keystore through the

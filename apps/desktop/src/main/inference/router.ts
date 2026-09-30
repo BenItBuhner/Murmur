@@ -17,7 +17,8 @@ import {
   murmurGatewayUrl,
   resolveInferenceSources,
   type InferenceRouting,
-  type InferenceSource
+  type InferenceSource,
+  type SpeedMode
 } from '@shared/inference'
 import type { Settings, SttProviderKind } from '@shared/settings'
 import { createLogger } from '../logger'
@@ -121,7 +122,11 @@ export class InferenceRouter {
     )
   }
 
-  async stt(opts: { forceRefresh?: boolean } = {}): Promise<ResolvedStt> {
+  /**
+   * `speed`: the speed this dictation runs at (a per-app rule may override the setting); the
+   * device's Speed setting when not given.
+   */
+  async stt(opts: { forceRefresh?: boolean; speed?: SpeedMode } = {}): Promise<ResolvedStt> {
     const s = this.deps.settings.get()
     if (this.routing().stt === 'murmur') {
       return {
@@ -134,7 +139,7 @@ export class InferenceRouter {
           language: s.stt.language,
           timeoutMs: s.stt.timeoutMs,
           // Sent even for Normal, so the instance's log shows what was asked for.
-          speed: s.stt.speed
+          speed: opts.speed ?? s.stt.speed
         },
         fallbackModel: '',
         provider: MURMUR_PROVIDER

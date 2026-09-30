@@ -1,4 +1,4 @@
-import type { SpeedOutcome } from './inference'
+import type { SpeedMode, SpeedOutcome } from './inference'
 import type { LimitNotice } from './limits'
 import type { InstallKind } from './updates'
 
@@ -72,6 +72,12 @@ export interface HistoryEntry {
   appName?: string
   provider: string
   model: string
+  /**
+   * The speed the dictation ran at (the per-app rule's, or the device setting), whichever provider
+   * transcribed it: Fast means the formatting model was not asked. Absent on entries from before
+   * speed modes and on failures.
+   */
+  speed?: SpeedMode
   /**
    * Murmur models only: the speed that was asked for and the one that transcribed the clip, so
    * History can say "Fast isn't available yet, used Normal" when they differ.

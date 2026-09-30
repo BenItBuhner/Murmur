@@ -3,6 +3,8 @@ import { defaultSettings, type DictionaryEntry } from '@shared/settings'
 import type { HistoryEntry } from '@shared/types'
 import {
   ackUpsert,
+  appRuleFromRemote,
+  appRuleToInput,
   appRulesSpec,
   applyRemotePreferences,
   deriveCollection,
@@ -19,6 +21,7 @@ import {
   queueHistoryPush,
   queueRemove,
   queueUpsert,
+  sameAppRule,
   sameDictionaryEntry,
   type HistoryPushEntry,
   type OutboxOp,
@@ -131,6 +134,56 @@ describe('deriveCollection', () => {
       { id: 'r1', match: 'mail', tone: 'professional' },
       { id: 'r2', match: 'slack', tone: 'casual', formatting: 'light' },
       { id: 'tmp', match: 'terminal', tone: 'neutral', trailingSpace: false }
+    ])
+  })
+
+  it('carries a rule’s speed to the server and back, and only when set', () => {
+    // The wire shape: a speed set travels, an absent one is left out (never undefined on the wire).
+    expect(appRuleToInput({ id: 'a', match: 'slack', tone: 'casual', speed: 'fast' }, 7)).toEqual({
+      match: 'slack',
+      tone: 'casual',
+      speed: 'fast',
+      createdAt: 7
+    })
+    expect(
+      appRuleToInput({ id: 'b', match: 'code', tone: 'auto', formatting: 'off' }, 7)
+    ).not.toHaveProperty('speed')
+    // A server record with a speed (a rule saved on another device) and one from before the field.
+    expect(
+      appRuleFromRemote({
+        id: 'r1',
+        match: 'slack',
+        tone: 'casual',
+        speed: 'fast',
+        createdAt: 1,
+        updatedAt: 1
+      })
+    ).toEqual({ id: 'r1', match: 'slack', tone: 'casual', speed: 'fast' })
+    expect(
+      appRuleFromRemote({
+        id: 'r2',
+        match: 'mail',
+        tone: 'auto',
+        formatting: 'light',
+        createdAt: 1,
+        updatedAt: 1
+      })
+    ).toEqual({ id: 'r2', match: 'mail', tone: 'auto', formatting: 'light' })
+    // Changing only the speed is a change worth sending.
+    const base = { id: 'a', match: 'slack', tone: 'casual' as const }
+    expect(sameAppRule(base, { ...base, speed: 'fast' })).toBe(false)
+    expect(sameAppRule({ ...base, speed: 'fast' }, { ...base, speed: 'fast' })).toBe(true)
+    // A pending upsert with a speed shows in the derived list with it.
+    const ops: OutboxOp[] = [
+      {
+        id: 'op1',
+        kind: 'appRules.upsert',
+        localId: 'tmp',
+        rule: { match: 'terminal', tone: 'auto', speed: 'normal', createdAt: 3 }
+      }
+    ]
+    expect(deriveCollection(appRulesSpec, [], [], ops)).toEqual([
+      { id: 'tmp', match: 'terminal', tone: 'auto', speed: 'normal' }
     ])
   })
 })

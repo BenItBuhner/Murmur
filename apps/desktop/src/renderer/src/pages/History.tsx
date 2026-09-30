@@ -87,9 +87,9 @@ function LlmBadge({
 }
 
 /**
- * The speed Murmur's speech model ran at, when the instance said. The row only flags what is
- * worth a glance (Fast ran, or Fast was asked for and Normal answered); the expanded view spells
- * the fallback out.
+ * The speed a dictation ran at. The row only flags what is worth a glance: Fast (the quick path,
+ * whichever provider transcribed), or Fast asked of Murmur's model and Normal answered; the
+ * expanded view spells the fallback out.
  */
 function SpeedBadge({
   entry,
@@ -98,15 +98,22 @@ function SpeedBadge({
   entry: HistoryEntry
   detailed?: boolean
 }): React.JSX.Element | null {
-  const speed = entry.sttSpeed
-  if (!speed) return null
-  if (speed.requested === 'fast' && speed.used !== 'fast')
+  const outcome = entry.sttSpeed
+  if (outcome && outcome.requested === 'fast' && outcome.used !== 'fast')
     return (
       <Badge variant="outline" title={FAST_UNAVAILABLE_NOTE} data-testid="speed-fallback">
         {detailed ? FAST_UNAVAILABLE_NOTE : 'fast unavailable'}
       </Badge>
     )
-  if (speed.used === 'fast') return <Badge variant="outline">fast</Badge>
+  if (outcome?.used === 'fast' || entry.speed === 'fast')
+    return (
+      <Badge
+        variant="outline"
+        title="Fast: the quick speech model where offered, and no AI formatting"
+      >
+        fast
+      </Badge>
+    )
   return null
 }
 
@@ -370,7 +377,7 @@ export function HistoryPage(): React.JSX.Element {
                       {settings.general.showLatencyInHistory && !e.error && !e.remote && (
                         <LatencyBar t={e.timings} nested />
                       )}
-                      {(e.stages?.length || e.llm || e.sttSpeed) && (
+                      {(e.stages?.length || e.llm || e.sttSpeed || e.speed === 'fast') && (
                         <div className="flex flex-wrap items-center gap-1 text-caption">
                           <span className="eyebrow mr-1">Stages</span>
                           {e.stages?.map((s) => (

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Loader2, Play, Plus, Sparkles, Trash2, WandSparkles } from 'lucide-react'
 import type { AppRule, FormattingMode, Tone } from '@shared/settings'
 import { LLM_INSTRUCTIONS_MAX, SETTINGS_RANGES, clampToRange } from '@shared/settings'
-import { MURMUR_LLM_MODEL } from '@shared/inference'
+import { MURMUR_LLM_MODEL, SPEED_MODES, speedLabel, type SpeedMode } from '@shared/inference'
 import type { LlmStatus, PreviewResult, ProviderTestResult } from '@shared/types'
 import { LLM_PRESETS } from '@core/stt/presets'
 import { Button } from '@renderer/components/ui/button'
@@ -365,7 +365,7 @@ export function StylePage(): React.JSX.Element {
 
       <Section
         title="Per-app rules"
-        description="Match on the window title or process name; the first matching rule wins. Anything left on “Default” follows the settings above."
+        description="Match on the window title or process name; the first matching rule wins. Anything left on “Default” follows the settings above, Speed the Models page (Fast: faster speech model and no AI formatting in that app)."
         actions={
           <Button variant="outline" size="sm" onClick={addRule}>
             <Plus /> Add rule
@@ -374,7 +374,7 @@ export function StylePage(): React.JSX.Element {
       >
         {f.appRules.length === 0 ? (
           <div className="py-2 text-note text-muted-foreground">
-            No rules. Examples: “slack” → casual; “Code.exe” → formatting off; “outlook” →
+            No rules. Examples: “slack” → casual and Fast; “Code.exe” → formatting off; “outlook” →
             professional with extra instructions.
           </div>
         ) : (
@@ -466,6 +466,14 @@ function RuleEditor({
           value={r.formatting}
           options={MODES.map(({ value, label }) => ({ value, label }))}
           onChange={(v) => onChange(r.id, { formatting: v })}
+          width="w-32"
+        />
+        {/* Murmur's speech model speed in this app; Fast also skips AI formatting there. */}
+        <RuleSelect<SpeedMode>
+          label="Speed"
+          value={r.speed}
+          options={SPEED_MODES.map((value) => ({ value, label: speedLabel(value) }))}
+          onChange={(v) => onChange(r.id, { speed: v })}
           width="w-32"
         />
         <label className="flex flex-col gap-1.5 eyebrow">

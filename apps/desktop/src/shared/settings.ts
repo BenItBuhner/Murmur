@@ -103,7 +103,12 @@ export const appRuleSchema = z.object({
   formatting: formattingModeSchema.optional(),
   trailingSpace: z.boolean().optional(),
   /** Extra guidance for the model in this app only; appended to the global instructions. */
-  instructions: z.string().max(LLM_INSTRUCTIONS_MAX).optional()
+  instructions: z.string().max(LLM_INSTRUCTIONS_MAX).optional(),
+  /**
+   * The Speed of Murmur's speech model in this app: Fast also means no AI formatting there.
+   * Absent inherits the device's `stt.speed`. Synced with the rule.
+   */
+  speed: speedModeSchema.optional()
 })
 export type AppRule = z.infer<typeof appRuleSchema>
 

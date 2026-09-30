@@ -66,6 +66,26 @@ describe('settings schema', () => {
     })
   })
 
+  it('a per-app rule may pick a speed, and a rule from before the field inherits', () => {
+    const rules = parseSettings({
+      formatting: {
+        appRules: [
+          { id: 'a', match: 'slack', speed: 'fast' },
+          { id: 'b', match: 'code', tone: 'neutral', formatting: 'off' }
+        ]
+      }
+    }).formatting.appRules
+    expect(rules[0].speed).toBe('fast')
+    expect(rules[1]).not.toHaveProperty('speed')
+    expect(rules[1].formatting).toBe('off')
+    // A rule with a speed that is not a mode drops the style section, like any bad value.
+    expect(
+      parseSettings({
+        formatting: { tone: 'casual', appRules: [{ id: 'c', match: 'x', speed: 'turbo' }] }
+      }).formatting.tone
+    ).toBe('auto')
+  })
+
   it('accepts every accent choice and repairs a broken custom colour', () => {
     expect(parseSettings({ general: { accent: 'system' } }).general.accent).toBe('system')
     expect(parseSettings({ general: { accent: 'violet' } }).general.accent).toBe('violet')

@@ -27,11 +27,13 @@ export interface AppRuleInput {
   formatting?: AppRule['formatting']
   trailingSpace?: boolean
   instructions?: string
+  /** The app's speed override; older clients and instances neither send nor keep it. */
+  speed?: AppRule['speed']
   createdAt: number
 }
 
 /** The optional per-app overrides, copied only when set so `undefined` never reaches the wire. */
-const APP_RULE_OPTIONALS = ['formatting', 'trailingSpace', 'instructions'] as const
+const APP_RULE_OPTIONALS = ['formatting', 'trailingSpace', 'instructions', 'speed'] as const
 
 /**
  * The style preferences that follow the user across devices. The wire keeps the model

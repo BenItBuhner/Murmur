@@ -243,6 +243,16 @@ describe('InferenceRouter', () => {
     expect(custom.cfg.speed).toBeUndefined()
     expect(custom.cfg).not.toHaveProperty('speed')
     expect((await harness(LOCAL, ownFast).router.stt()).cfg.speed).toBeUndefined()
+    // The dictation's own speed (a per-app rule) wins over the setting, either way.
+    const normal = harness(CLOUD, parseSettings({}), { token: () => 'jwt' })
+    expect((await normal.router.stt({ speed: 'fast' })).cfg.speed).toBe('fast')
+    expect(
+      (await harness(CLOUD, fast, { token: () => 'jwt' }).router.stt({ speed: 'normal' })).cfg.speed
+    ).toBe('normal')
+    // ...and still never reaches the user's own provider.
+    expect(
+      (await harness(CLOUD, ownFast, { token: () => 'jwt' }).router.stt({ speed: 'fast' })).cfg
+    ).not.toHaveProperty('speed')
   })
 
   it("keeps a cloud user's own provider when they chose it, or when the instance has no models", async () => {

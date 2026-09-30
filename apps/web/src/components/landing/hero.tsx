@@ -1,9 +1,18 @@
 import { ButtonLink } from '@/components/ui/button'
 import { Container } from '@/components/ui/section'
+import { billingEnabled } from '@/lib/env'
 import { formatDate } from '@/lib/format'
 import type { ReleaseManifest } from '@/lib/releases'
 import { repoUrl } from '@/lib/site'
 import { TranscriptDemo } from './transcript-demo'
+
+/**
+ * The sentence before "MIT licensed" in the note under the hero's buttons: the pricing pitch while
+ * the site sells Pro, otherwise what the app runs with. Pure, so both readings are pinned by a test.
+ */
+export function heroNote(selling: boolean): string {
+  return selling ? 'Free to start, no card.' : 'Bring your own model, or sign in for Murmur’s.'
+}
 
 export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
   return (
@@ -41,7 +50,7 @@ export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
                 {' · '}
               </>
             ) : null}
-            Free to start, no card. MIT licensed,{' '}
+            {heroNote(billingEnabled)} MIT licensed,{' '}
             <a
               href={repoUrl()}
               className="underline decoration-foreground/30 underline-offset-4 hover:text-foreground"

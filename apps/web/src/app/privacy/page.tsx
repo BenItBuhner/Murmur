@@ -23,6 +23,25 @@ export function privacySections(selling: boolean): LegalSection[] {
   return SECTIONS(selling)
 }
 
+/**
+ * The row about the account's plan in "What an account stores". While the instance sells Pro it
+ * names the lifecycle and the Stripe snapshot; off, it describes the same stored field as what it
+ * is to the account, an access state, without a trial or a Pro to mention.
+ */
+export function planFact(selling: boolean): { term: string; detail: string } {
+  return selling
+    ? {
+        term: 'Plan',
+        detail:
+          'Trial, free or Pro, when the trial ends, your Stripe customer id, and a snapshot of the subscription (status, monthly or yearly, current period end, whether it is set to cancel, whether the last payment failed).'
+      }
+    : {
+        term: 'Access',
+        detail:
+          'The access state the instance records for the account: which allowance it has on the instance’s models, and when that allowance next changes. While the instance is in private testing, whether the models are open to the account follows from its email address and is not stored separately.'
+      }
+}
+
 const SECTIONS = (selling: boolean): LegalSection[] => [
   {
     id: 'short',
@@ -106,12 +125,7 @@ const SECTIONS = (selling: boolean): LegalSection[] => [
               detail:
                 'Only if you turn on history sync: for each dictation the raw and final text, word count, speech duration, the app it was typed into, the provider and model, and which device it came from. Off by default because it contains what you said.'
             },
-            {
-              term: 'Plan',
-              detail: selling
-                ? 'Trial, free or Pro, when the trial ends, your Stripe customer id, and a snapshot of the subscription (status, monthly or yearly, current period end, whether it is set to cancel, whether the last payment failed).'
-                : 'The plan state the instance records for the account (trial, free or Pro) and when the trial ends. While the instance is in private testing, whether the models are open to the account follows from its email address and is not stored separately.'
-            },
+            planFact(selling),
             {
               term: 'Usage',
               detail:

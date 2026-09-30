@@ -17,13 +17,14 @@ import {
   formatLongDate,
   isMetered,
   meterView,
+  planCardHead,
   planLabel,
   resetPoint,
-  sellsPro,
   trialDaysLeft,
   type BillingInterval,
   type MeterView
 } from '@/lib/entitlements'
+import { billingEnabled } from '@/lib/env'
 import { formatNumber, usagePeriod } from '@/lib/format'
 import { formatPrice, PRICING, proPerMonth } from '@/lib/pricing'
 
@@ -55,7 +56,9 @@ export function PlanCard({
   className?: string
 }) {
   const state = status?.planState ?? 'free'
-  const selling = sellsPro(status)
+  // The instance's switch once the status is here; the site's own until then (no "Plan" flash).
+  const head = planCardHead(status, billingEnabled)
+  const selling = head.selling
   const metered = isMetered(state)
   const period = usagePeriod(now)
   const thisMonth = status && status.usage.period === period ? status.usage : null
@@ -69,10 +72,8 @@ export function PlanCard({
     <Surface className={cn('flex flex-col', className)}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="eyebrow">{selling ? 'Plan' : 'Murmur’s models'}</div>
-          <h2 className="serif-display mt-2 text-heading">
-            {!status ? '…' : labelled ? planLabel(state) : 'Included with your account'}
-          </h2>
+          <div className="eyebrow">{head.eyebrow}</div>
+          <h2 className="serif-display mt-2 text-heading">{head.title}</h2>
         </div>
         {status && labelled && (
           <Chip
@@ -93,7 +94,7 @@ export function PlanCard({
         {status ? (
           <PlanSummary status={status} billing={billing} now={now} selling={selling} />
         ) : (
-          'Waiting for your account status…'
+          head.loading
         )}
       </p>
 

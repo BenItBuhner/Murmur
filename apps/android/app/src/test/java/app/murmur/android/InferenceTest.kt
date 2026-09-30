@@ -228,6 +228,11 @@ class InferenceTest {
         assertNull(Harness(local, own().copy(sttSpeed = SttSpeed.FAST)).router.stt().cfg.speed)
         // The screen's helper for the user's own connection never carries one either.
         assertNull(app.murmur.android.ui.sttConfig(own().copy(sttSpeed = SttSpeed.FAST)).speed)
+        // The dictation's own speed (a per-app rule) wins over the setting, either way...
+        assertEquals("fast", Harness(cloud, blank(), tokens = listOf("jwt")).router.stt(speed = SttSpeed.FAST).cfg.speed)
+        assertEquals("normal", Harness(cloud, blank().copy(sttSpeed = SttSpeed.FAST), tokens = listOf("jwt")).router.stt(speed = SttSpeed.NORMAL).cfg.speed)
+        // ...and still never reaches the user's own provider.
+        assertNull(Harness(cloud, own(), tokens = listOf("jwt")).router.stt(speed = SttSpeed.FAST).cfg.speed)
     }
 
     @Test

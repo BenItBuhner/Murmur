@@ -12,6 +12,7 @@ import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.Snippet
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
 import java.util.UUID
 import kotlinx.serialization.SerialName
@@ -57,6 +58,8 @@ data class AppRuleDto(
     val formatting: String? = null,
     val trailingSpace: Boolean? = null,
     val instructions: String? = null,
+    /** The app's speed override (`normal` / `fast`); absent from rules saved before speed modes. */
+    val speed: String? = null,
     val lists: String? = null,
     val numbers: String? = null,
     val freedom: String? = null,
@@ -544,7 +547,9 @@ object SyncReducers {
         formatting = dto.formatting?.let { FormattingMode.from(it) },
         trailingSpace = dto.trailingSpace,
         instructions = dto.instructions,
-        createdAt = dto.createdAt.toLong()
+        createdAt = dto.createdAt.toLong(),
+        // A speed this build does not know reads as inherit rather than as Normal.
+        speed = SttSpeed.fromOrNull(dto.speed)
     )
 
     val dictionarySpec = CollectionSpec<DictionaryEntry, DictionaryEntryDto>(
@@ -634,7 +639,7 @@ object SyncReducers {
 
     fun sameAppRule(a: AppRule, b: AppRule): Boolean =
         a.match == b.match && a.tone == b.tone && a.formatting == b.formatting &&
-            a.trailingSpace == b.trailingSpace && a.instructions == b.instructions
+            a.trailingSpace == b.trailingSpace && a.instructions == b.instructions && a.speed == b.speed
 
     fun diffDictionary(previous: List<DictionaryEntry>, next: List<DictionaryEntry>): Diff<DictionaryEntry> =
         diffCollection(previous, next, { it.id }, ::sameDictionaryEntry)

@@ -440,11 +440,10 @@ private fun HistoryRow(
                         LlmOutcome.SKIPPED_CLEAN -> Tag("clean")
                         else -> Unit
                     }
-                    // The speed Murmur ran at, when worth a glance: Fast ran, or Fast fell back to Normal.
-                    entry.sttSpeed?.let { speed ->
-                        if (speed.fellBack) Tag("fast unavailable", modifier = Modifier.testTag("history-speed"))
-                        else if (speed.used == Inference.SPEED_FAST) Tag("fast", modifier = Modifier.testTag("history-speed"))
-                    }
+                    // The speed the dictation ran at, when worth a glance: Fast (the quick path, whichever
+                    // provider transcribed), or Fast asked of Murmur's model and Normal answered.
+                    if (entry.sttSpeed?.fellBack == true) Tag("fast unavailable", modifier = Modifier.testTag("history-speed"))
+                    else if (entry.sttSpeed?.used == Inference.SPEED_FAST || entry.speed == Inference.SPEED_FAST) Tag("fast", modifier = Modifier.testTag("history-speed"))
                     // Dictated on another device: its name, as the desktop labels synced entries.
                     if (entry.remote) Tag(entry.deviceName ?: "other device", modifier = Modifier.testTag("history-device"))
                     if (entry.failed && entry.finalText.isNotEmpty()) Tag("not inserted", c.clay)
@@ -501,7 +500,7 @@ private fun HistoryRow(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        listOfNotNull(entry.provider, entry.model, entry.sttSpeed?.let { Inference.speedLabel(it.used) })
+                        listOfNotNull(entry.provider, entry.model, (entry.sttSpeed?.used ?: entry.speed)?.let { Inference.speedLabel(it) })
                             .filter { it.isNotBlank() }
                             .joinToString(" · "),
                         style = Murmur.type.labelSmall,

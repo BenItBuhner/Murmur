@@ -34,6 +34,7 @@ import app.murmur.android.text.AppContext
 import app.murmur.android.text.CommandPromptInput
 import app.murmur.android.text.DictionaryTerm
 import app.murmur.android.text.Engine
+import app.murmur.android.text.FAST_SKIP_DETAIL
 import app.murmur.android.text.FormatContext
 import app.murmur.android.text.FormatInput
 import app.murmur.android.text.FormatOutcome
@@ -428,10 +429,17 @@ object DictationController {
 
     private suspend fun process(run: Run, pcm: ShortArray, s: MurmurSettings, context: Context, router: InferenceRouter) {
         val recordMs = run.recordMs
+        // The destination's style is settled before the speech request: a per-app rule may pick the
+        // speed, which the speech model is asked for and which decides whether the formatting model runs.
+        val focusedPackage = sink?.focusedPackage() ?: ""
+        val focusedLabel = appLabel(context, focusedPackage)
+        val app: AppContext = classifyPackage(focusedPackage, focusedLabel)
+        val style = resolveStyle(s, app)
+        style.rule?.let { Log.i(TAG, "per-app rule \"${it.match}\" applies to $focusedPackage") }
         // 1. STT, and make sure the transcript reaches the end of the speech. The router decides
         // whether the clip goes to the instance's model or the user's own provider.
         val sttStarted = System.currentTimeMillis()
-        val resolved = router.stt()
+        val resolved = router.stt(speed = style.speed)
         // The dictionary and the snippet triggers prime the speech model, unless the user turned
         // the bias off (then no prompt goes at all, as on the desktop).
         val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
@@ -470,11 +478,6 @@ object DictationController {
 
         // 2. Text. The engine gets the raw transcript plus everything it should know about the
         // destination; against a Murmur instance it runs on the gateway, otherwise here.
-        val focusedPackage = sink?.focusedPackage() ?: ""
-        val focusedLabel = appLabel(context, focusedPackage)
-        val app: AppContext = classifyPackage(focusedPackage, focusedLabel)
-        val style = resolveStyle(s, app)
-        style.rule?.let { Log.i(TAG, "per-app rule \"${it.match}\" applies to $focusedPackage") }
         val formatStarted = System.currentTimeMillis()
         var final: String
         var pressEnter = false
@@ -526,16 +529,19 @@ object DictationController {
             final = raw + if (style.trailingSpace) " " else ""
             llmDetail = "formatting off"
         } else {
+            // Fast is the quick path: the speech model's text gets the rule-based Light cleanup and
+            // goes in, the formatting model is never asked, and History says that is why.
+            val mode = style.effectiveMode
             val input = FormatInput(
                 transcript = raw,
-                mode = style.mode,
+                mode = mode,
                 context = FormatContext(
                     category = app.category,
                     tone = style.tone,
                     app = focusedPackage.takeIf { it.isNotBlank() && it != context.packageName },
                     language = s.language,
                     // A copy-only retry has no target field; what is focused is Murmur's own screen.
-                    precedingText = if (run.insert && style.mode == FormattingMode.SMART) runCatching { sink?.precedingText() }.getOrNull() else null,
+                    precedingText = if (run.insert && mode == FormattingMode.SMART) runCatching { sink?.precedingText() }.getOrNull() else null,
                     instructions = style.instructions.takeIf { it.isNotEmpty() },
                     dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) },
                     // Snippet triggers are expanded after the model; it must leave them alone.
@@ -544,8 +550,9 @@ object DictationController {
                 dictionary = s.dictionaryEntries
             )
             var formatted: FormatResult
-            if (style.mode != FormattingMode.SMART) {
+            if (mode != FormattingMode.SMART) {
                 formatted = Engine.formatTranscript(input, null)
+                if (style.skipsModelForSpeed) formatted = formatted.copy(status = FormatStatus(FormatOutcome.SKIPPED, FAST_SKIP_DETAIL, 0))
             } else {
                 _state.value = DictationState.Processing("Formatting…")
                 // A formatting model that cannot be reached (signed out of Murmur, no token, gateway
@@ -579,7 +586,7 @@ object DictationController {
                 FormatOutcome.REJECTED -> Log.w(TAG, "model output rejected (${formatted.status.detail}); using rule-based text")
                 FormatOutcome.FAILED -> Log.w(TAG, "model formatting failed, using rule-based text: ${formatted.status.detail}")
                 FormatOutcome.SKIPPED_CLEAN -> Log.i(TAG, "model skipped: transcript already clean, rule-based text used")
-                FormatOutcome.SKIPPED -> Unit
+                FormatOutcome.SKIPPED -> if (style.skipsModelForSpeed) Log.i(TAG, "model skipped: Fast speed, rule-based text used")
             }
         }
         val formatMs = (System.currentTimeMillis() - formatStarted - llmMs).coerceAtLeast(0)
@@ -622,6 +629,7 @@ object DictationController {
             appName = if (run.insert) focusedLabel else run.previous?.appName,
             provider = resolved.provider,
             model = resolved.cfg.model,
+            speed = style.speed.id,
             sttSpeed = stt.speed,
             injected = error == null && run.insert,
             llmUsed = llm == LlmOutcome.USED,

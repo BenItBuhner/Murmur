@@ -19,6 +19,7 @@ import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.stt.SttClient
 import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttErrorKind
@@ -65,9 +66,10 @@ object Inference {
     const val FAST_UNAVAILABLE_NOTE = "Fast isn't available yet, used Normal"
     /** The Speed setting's explanation, the same words as the desktop's Models page. */
     const val SPEED_SETTING_DESCRIPTION =
-        "Normal is today's model. Fast answers sooner on a quicker model when this Murmur server offers one."
+        "Normal: today's speech model with AI formatting. Fast: faster speech model and no AI formatting, just the instant Light cleanup. A per-app rule on the Style screen can pick a speed for one app."
     /** Under the Speed setting when the instance reports no fast model. */
-    const val FAST_UNAVAILABLE_SETTING_NOTE = "Fast isn't available on this server yet; dictations use Normal until it is."
+    const val FAST_UNAVAILABLE_SETTING_NOTE =
+        "The faster speech model isn't available on this server yet; Fast dictations use the Normal model until it is, still without AI formatting."
 
     /** How a mode is named in the UI. */
     fun speedLabel(mode: String): String = if (mode == SPEED_FAST) "Fast" else "Normal"
@@ -179,7 +181,11 @@ class InferenceRouter(
         )
     }
 
-    suspend fun stt(forceRefresh: Boolean = false): ResolvedStt {
+    /**
+     * [speed]: the speed this dictation runs at (a per-app rule may override the setting); the
+     * device's Speed setting when null.
+     */
+    suspend fun stt(forceRefresh: Boolean = false, speed: SttSpeed? = null): ResolvedStt {
         val s = settings()
         if (routing().stt == InferenceSource.MURMUR) {
             return ResolvedStt(
@@ -192,7 +198,7 @@ class InferenceRouter(
                     language = s.language,
                     timeoutMs = s.sttTimeoutMs,
                     // Sent even for Normal, so the instance's log shows what was asked for.
-                    speed = s.sttSpeed.id
+                    speed = (speed ?: s.sttSpeed).id
                 ),
                 fallbackModel = "",
                 provider = Inference.PROVIDER

@@ -68,6 +68,12 @@ data class HistoryEntry(
     val provider: String,
     val model: String,
     /**
+     * The speed the dictation ran at (`normal` / `fast`: the per-app rule's, or the device setting),
+     * whichever provider transcribed it: Fast means the formatting model was not asked. Null on
+     * entries from before speed modes and on failures.
+     */
+    val speed: String? = null,
+    /**
      * Murmur models only: the speed asked for and the one that transcribed the clip, so History
      * can say "Fast isn't available yet, used Normal" when they differ.
      */

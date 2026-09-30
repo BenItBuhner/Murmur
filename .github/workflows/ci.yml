@@ -191,6 +191,8 @@ jobs:
         working-directory: apps/web
     env:
       WRANGLER_SEND_METRICS: 'false'
+      # The same switch deploy-web.yml builds with, so the checked Worker is the shape that ships.
+      NEXT_PUBLIC_MURMUR_BILLING_ENABLED: ${{ vars.MURMUR_BILLING_ENABLED }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

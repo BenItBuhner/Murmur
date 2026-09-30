@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.0': [
+    "**Murmur connects to its own server.** This is the first release built against Murmur's production instance. Sign in from Account (an email code today; Google sign-in is on its way) and your dictionary, snippets, style, per-app rules and, if you switch it on, dictation history stay in step across your devices, and the apps can dictate through Murmur's own speech and formatting models. The server is in private testing: those models answer invited accounts only, and any other account that signs in is told so on Home and Account while its dictionary, snippets, style and stats keep syncing. Nothing needs an account: your own provider or a local model works as before, on every platform, and nothing is billed.",
+    '**The website moved to murmur.techlitnow.com.** The landing, download and account pages, the release manifest (`/api/releases/latest`) and the `/download/{windows,linux,android}` redirects now live at [murmur.techlitnow.com](https://murmur.techlitnow.com).'
+  ],
   '0.5.11': [
     '**The floating button appears the moment you tap into a text field.** It goes to the spot where your keyboard will stop as soon as a field is focused or tapped, about 80 ms before Android reports the keyboard, instead of waiting for that report. If a field brings no keyboard up (a custom keypad, say), the button disappears again within a third of a second and Murmur remembers not to do that for that field. Nothing changes in keyboard mode or with a hardware keyboard attached.',
     "**Less work between the tap and the button.** The button's windows are created once and kept ready in the background rather than rebuilt on every opening, and the reads of other apps' views that used to run on the path that shows the button (the keyboard's own window while it is busy coming up, the focused field) have moved to a thread of their own, so a slow app never delays it. The keyboard timing log records each of these steps."

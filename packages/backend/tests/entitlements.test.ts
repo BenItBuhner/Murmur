@@ -139,7 +139,8 @@ async function freeAccount(t: T, clerkId = 'user_ada'): Promise<Id<'users'>> {
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(NOW)
-  stubEnv({ ...STT_ENV, ...LLM_ENV, MURMUR_SITE_URL: SITE })
+  // Today's behaviour: an instance that sells Pro, so limit errors and statuses carry upgrade links.
+  stubEnv({ ...STT_ENV, ...LLM_ENV, MURMUR_SITE_URL: SITE, MURMUR_BILLING_ENABLED: 'true' })
 })
 
 afterEach(() => {
@@ -425,15 +426,24 @@ describe('request checks', () => {
     expect(transcriptWords('hello there  general', 'text/plain')).toBe(3)
     expect(transcriptWords('not json', 'application/json')).toBe(0)
     expect(transcriptWords('', 'text/plain')).toBe(0)
-    expect(upgradeUrlFor({ MURMUR_SITE_URL: 'https://murmur.app/' }, 'free')).toBe(
+    const selling = { MURMUR_BILLING_ENABLED: 'true' }
+    expect(upgradeUrlFor({ ...selling, MURMUR_SITE_URL: 'https://murmur.app/' }, 'free')).toBe(
       'https://murmur.app/account?upgrade=yearly'
     )
-    expect(upgradeUrlFor({ MURMUR_SITE_URL: 'https://murmur.app' }, 'trial')).toBe(
+    expect(upgradeUrlFor({ ...selling, MURMUR_SITE_URL: 'https://murmur.app' }, 'trial')).toBe(
       'https://murmur.app/account?upgrade=yearly'
     )
-    expect(upgradeUrlFor({ MURMUR_SITE_URL: 'https://murmur.app' }, 'pro')).toBeNull()
-    expect(upgradeUrlFor({}, 'free')).toBeNull()
-    expect(upgradeUrlFor({ MURMUR_SITE_URL: 'murmur.app' }, 'free')).toBeNull()
+    expect(upgradeUrlFor({ ...selling, MURMUR_SITE_URL: 'https://murmur.app' }, 'pro')).toBeNull()
+    expect(upgradeUrlFor(selling, 'free')).toBeNull()
+    expect(upgradeUrlFor({ ...selling, MURMUR_SITE_URL: 'murmur.app' }, 'free')).toBeNull()
+    // Nothing to buy lifts the private-testing states, and an instance that does not sell Pro
+    // (the switch off, the default) sends nobody anywhere.
+    expect(upgradeUrlFor({ ...selling, MURMUR_SITE_URL: 'https://murmur.app' }, 'testing')).toBeNull()
+    expect(upgradeUrlFor({ ...selling, MURMUR_SITE_URL: 'https://murmur.app' }, 'unlimited')).toBeNull()
+    expect(upgradeUrlFor({ MURMUR_SITE_URL: 'https://murmur.app' }, 'free')).toBeNull()
+    expect(
+      upgradeUrlFor({ MURMUR_BILLING_ENABLED: 'false', MURMUR_SITE_URL: 'https://murmur.app' }, 'free')
+    ).toBeNull()
     // The account page is for every plan, so Pro users can manage theirs from the apps.
     expect(accountUrlFor({ MURMUR_SITE_URL: 'https://murmur.app/' })).toBe(
       'https://murmur.app/account'
@@ -567,7 +577,7 @@ describe('gateway: free tier', () => {
     const t = setup()
     const asAda = t.withIdentity(ada)
     const userId = await freeAccount(t)
-    await seedMonth(t, userId, { sttSeconds: PLANS.free.sttSecondsPerMonth })
+    await seedMonth(t, userId, { sttSeconds: PLANS.free.sttSecondsPerMonth! })
     const month = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1)))
     expect(month.status).toBe(429)
     expect((await month.json()).error).toMatchObject({
@@ -575,7 +585,7 @@ describe('gateway: free tier', () => {
       allowed: 7200,
       resetsAt: OCTOBER
     })
-    await seedMonth(t, userId, { sttSeconds: 0, llmTokens: PLANS.free.llmTokensPerMonth })
+    await seedMonth(t, userId, { sttSeconds: 0, llmTokens: PLANS.free.llmTokensPerMonth! })
     const tokens = await asAda.fetch('/v1/format', formatRequest('hello there everyone'))
     expect(tokens.status).toBe(429)
     expect((await tokens.json()).error).toMatchObject({
@@ -674,7 +684,7 @@ describe('gateway: Pro fair use', () => {
     const t = setup()
     const asAda = t.withIdentity(ada)
     const user = await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'pro' })
-    await seedMonth(t, user.id, { sttSeconds: PLANS.pro.sttSecondsPerMonth })
+    await seedMonth(t, user.id, { sttSeconds: PLANS.pro.sttSecondsPerMonth! })
     const hard = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1)))
     expect(hard.status).toBe(429)
     expect((await hard.json()).error).toMatchObject({

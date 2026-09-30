@@ -1,6 +1,11 @@
 import { v, type Infer } from 'convex/values'
 import { meterValidator } from './entitlements'
-import { billingIntervalValidator, planStateValidator, planValidator } from './plans'
+import {
+  accessStateValidator,
+  billingIntervalValidator,
+  planStateValidator,
+  planValidator
+} from './plans'
 
 /**
  * Validators shared by the schema, the public function signatures and the tests. The wire shapes
@@ -288,10 +293,16 @@ export const inferenceStatusValidator = v.object({
     stt: v.union(v.string(), v.null()),
     llm: v.union(v.string(), v.null())
   }),
-  /** Tier whose limits apply; `pro` during the trial. */
+  /** Tier whose limits apply; `pro` during the trial; `testing` / `unlimited` during private testing. */
   plan: planValidator,
-  planState: planStateValidator,
+  /** The stored plan state, or the private-testing state laid over it (see lib/access.ts). */
+  planState: accessStateValidator,
   trialEndsAt: v.union(v.number(), v.null()),
+  /**
+   * The instance sells Pro (`MURMUR_BILLING_ENABLED`). Off, clients show no upgrade or billing
+   * affordance, no trial countdown and no plan labels; the allowances themselves still apply.
+   */
+  billingEnabled: v.boolean(),
   limits: v.object({
     sttSecondsPerMonth: v.number(),
     llmTokensPerMonth: v.number(),
@@ -338,6 +349,8 @@ export type InferenceStatus = Infer<typeof inferenceStatusValidator>
 
 /** The account's billing state as the web account page shows it. */
 export const billingStatusValidator = v.object({
+  /** The feature switch (`MURMUR_BILLING_ENABLED`); off, every other field is at its empty value. */
+  enabled: v.boolean(),
   /** Stripe keys and both prices are set on the deployment. */
   configured: v.boolean(),
   /** The account has a Stripe customer, so the Customer Portal can open. */

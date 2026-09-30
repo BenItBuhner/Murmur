@@ -339,9 +339,9 @@ describe('managed inference gateway', () => {
       await ctx.db.insert('inferenceUsage', {
         userId: user.id,
         period,
-        sttSeconds: PLANS.free.sttSecondsPerMonth - 30,
+        sttSeconds: PLANS.free.sttSecondsPerMonth! - 30,
         sttRequests: 100,
-        llmTokens: PLANS.free.llmTokensPerMonth,
+        llmTokens: PLANS.free.llmTokensPerMonth!,
         llmRequests: 5,
         updatedAt: Date.now()
       })
@@ -752,7 +752,7 @@ describe('POST /v1/format', () => {
     expect((await asAda.fetch('/v1/format', body('hello there everyone'))).status).toBe(200)
     await t.run(async (ctx) => {
       const usage = await ctx.db.query('inferenceUsage').first()
-      await ctx.db.patch('inferenceUsage', usage!._id, { llmTokens: PLANS.free.llmTokensPerMonth })
+      await ctx.db.patch('inferenceUsage', usage!._id, { llmTokens: PLANS.free.llmTokensPerMonth! })
     })
     const quota = await asAda.fetch('/v1/format', body('hello there everyone'))
     expect(quota.status).toBe(429)

@@ -13,18 +13,52 @@ import { v, type Infer } from 'convex/values'
  * with hidden guardrails scaled to the 500-word residual tier; Pro is "unlimited" behind fair use
  * (soft 30 audio-hours a month, hard 60). Everything the analysis did not override keeps the value
  * the code had before (monthly backstops, request rates, the 10-minute clip).
+ *
+ * Two more tiers exist only while the instance is in private testing (lib/access.ts): `testing`,
+ * no usage at all, and `unlimited`, no allowance at all. Whether any of this is sold is a separate
+ * switch (`billingEnabled`); off, the tiers still apply but nothing offers an upgrade.
  */
 export const planStateValidator = v.union(v.literal('trial'), v.literal('free'), v.literal('pro'))
 export type PlanState = Infer<typeof planStateValidator>
 
-export const planValidator = v.union(v.literal('free'), v.literal('pro'))
+/**
+ * What the status and the gateway report as the account's state. The three plan states are stored
+ * on the account; the other two are private testing (`MURMUR_ALLOWED_EMAILS`, see lib/access.ts)
+ * laid over them and never stored: `unlimited` for an email on the list, `testing` for every other
+ * account, which then gets no managed usage at all. Remove the list and every account is back on
+ * its stored plan state.
+ */
+export const accessStateValidator = v.union(
+  planStateValidator,
+  v.literal('testing'),
+  v.literal('unlimited')
+)
+export type AccessState = Infer<typeof accessStateValidator>
+
+export const planValidator = v.union(
+  v.literal('free'),
+  v.literal('pro'),
+  v.literal('testing'),
+  v.literal('unlimited')
+)
 export type Plan = Infer<typeof planValidator>
 
 export const DEFAULT_PLAN: Plan = 'free'
 
 /** The tier whose limits an account in `state` gets. */
-export function tierOf(state: PlanState | undefined): Plan {
+export function tierOf(state: AccessState | undefined): Plan {
+  if (state === 'testing' || state === 'unlimited') return state
   return state === 'trial' || state === 'pro' ? 'pro' : 'free'
+}
+
+/**
+ * Feature switch: the instance sells Pro. `MURMUR_BILLING_ENABLED=true` on the deployment turns on
+ * the Stripe routes, the upgrade links in statuses and limit errors, and (through the status) the
+ * billing UI in the apps and on the website. Off by default: the plan machinery keeps running
+ * (trials start and end, Pro stays Pro), but nothing offers a way to pay or mentions one.
+ */
+export function billingEnabled(env: Record<string, string | undefined>): boolean {
+  return (env.MURMUR_BILLING_ENABLED ?? '').trim().toLowerCase() === 'true'
 }
 
 export const TRIAL_DAYS = 14
@@ -34,10 +68,10 @@ export const TRIAL_MS = TRIAL_DAYS * DAY_MS
 export const WEEK_DAYS = 7
 
 export interface PlanLimits {
-  /** Seconds of audio the managed speech model transcribes per UTC month (Pro: the hard fair-use cap). */
-  sttSecondsPerMonth: number
-  /** Prompt + completion tokens the managed formatting model may use per UTC month. */
-  llmTokensPerMonth: number
+  /** Seconds of audio the managed speech model transcribes per UTC month (Pro: the hard fair-use cap); null = unlimited. */
+  sttSecondsPerMonth: number | null
+  /** Prompt + completion tokens the managed formatting model may use per UTC month; null = unlimited. */
+  llmTokensPerMonth: number | null
   /** Managed inference requests (speech and formatting together) per rolling minute. */
   requestsPerMinute: number
   /** Longest clip the speech model accepts, in seconds. */
@@ -76,6 +110,32 @@ export const PLANS: Record<Plan, PlanLimits> = {
     sttSecondsPerWeek: null,
     dictationsPerDay: null,
     fairUseSttSecondsPerMonth: 30 * 60 * 60
+  },
+  /** Private testing, not on the list: no managed usage at all (the gateway refuses before metering). */
+  testing: {
+    sttSecondsPerMonth: 0,
+    llmTokensPerMonth: 0,
+    requestsPerMinute: 0,
+    maxClipSeconds: 0,
+    wordsPerWeek: 0,
+    sttSecondsPerWeek: 0,
+    dictationsPerDay: 0,
+    fairUseSttSecondsPerMonth: null
+  },
+  /**
+   * Private testing, on the list: no allowance to run out of. What remains is about the service
+   * staying up, not about how much anyone may dictate: the request rate and the clip length, at
+   * Pro's values (the clip bound is Convex's 20 MB request body).
+   */
+  unlimited: {
+    sttSecondsPerMonth: null,
+    llmTokensPerMonth: null,
+    requestsPerMinute: 60,
+    maxClipSeconds: 600,
+    wordsPerWeek: null,
+    sttSecondsPerWeek: null,
+    dictationsPerDay: null,
+    fairUseSttSecondsPerMonth: null
   }
 }
 
@@ -84,6 +144,25 @@ export const FAIR_USE_REQUESTS_PER_MINUTE = PLANS.free.requestsPerMinute
 
 export function planLimits(plan: Plan | undefined): PlanLimits {
   return PLANS[plan ?? DEFAULT_PLAN]
+}
+
+/**
+ * The `limits` object of `inference.status`, which the v0.5 apps read as plain numbers ("12 of 60 h
+ * this month"). An unlimited allowance is printed as Pro's figure there; the current apps do not
+ * read the object for the `testing` and `unlimited` tiers.
+ */
+export function legacyLimitFigures(limits: PlanLimits): {
+  sttSecondsPerMonth: number
+  llmTokensPerMonth: number
+  requestsPerMinute: number
+  maxClipSeconds: number
+} {
+  return {
+    sttSecondsPerMonth: limits.sttSecondsPerMonth ?? PLANS.pro.sttSecondsPerMonth!,
+    llmTokensPerMonth: limits.llmTokensPerMonth ?? PLANS.pro.llmTokensPerMonth!,
+    requestsPerMinute: limits.requestsPerMinute,
+    maxClipSeconds: limits.maxClipSeconds
+  }
 }
 
 /**

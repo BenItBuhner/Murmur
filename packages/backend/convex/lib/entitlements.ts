@@ -8,9 +8,9 @@ import {
   formatResetDate,
   nextMonthStart,
   weekDays,
+  type AccessState,
   type Plan,
-  type PlanLimits,
-  type PlanState
+  type PlanLimits
 } from './plans'
 
 /**
@@ -171,12 +171,16 @@ export function metersFor(limits: PlanLimits, snapshot: UsageSnapshot): Meter[] 
       )
     )
   }
-  out.push(
-    meter('sttSecondsPerMonth', snapshot.month.sttSeconds, limits.sttSecondsPerMonth, monthReset)
-  )
-  out.push(
-    meter('llmTokensPerMonth', snapshot.month.llmTokens, limits.llmTokensPerMonth, monthReset)
-  )
+  if (limits.sttSecondsPerMonth !== null) {
+    out.push(
+      meter('sttSecondsPerMonth', snapshot.month.sttSeconds, limits.sttSecondsPerMonth, monthReset)
+    )
+  }
+  if (limits.llmTokensPerMonth !== null) {
+    out.push(
+      meter('llmTokensPerMonth', snapshot.month.llmTokens, limits.llmTokensPerMonth, monthReset)
+    )
+  }
   return out
 }
 
@@ -235,7 +239,7 @@ function refuse(m: Meter, message: string, now: number): Refusal {
 
 export interface RequestCheck {
   plan: Plan
-  state: PlanState
+  state: AccessState
   limits: PlanLimits
   snapshot: UsageSnapshot
   now: number
@@ -265,8 +269,8 @@ export function checkTranscription(check: RequestCheck, clipSeconds: number): Re
   const all = metersFor(limits, snapshot)
   const by = (name: LimitName): Meter | undefined => all.find((m) => m.limit === name)
 
-  const month = by('sttSecondsPerMonth')!
-  if (month.exceeded || month.used + clipSeconds > month.allowed) {
+  const month = by('sttSecondsPerMonth')
+  if (month && (month.exceeded || month.used + clipSeconds > month.allowed)) {
     return refuse(
       month,
       plan === 'free'
@@ -317,8 +321,9 @@ export function checkFormatting(check: RequestCheck, degradable: boolean): Forma
   const all = metersFor(limits, snapshot)
   const by = (name: LimitName): Meter | undefined => all.find((m) => m.limit === name)
 
-  const tokens = by('llmTokensPerMonth')!
-  if (tokens.exceeded) {
+  // A tier without a token cap (unlimited) has no meter to exceed.
+  const tokens = by('llmTokensPerMonth')
+  if (tokens?.exceeded) {
     return {
       ok: false,
       refusal: refuse(

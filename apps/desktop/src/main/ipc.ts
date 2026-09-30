@@ -13,6 +13,7 @@ import {
   resolveStyle,
   type FormatResult
 } from '@engine'
+import { FAST_UNAVAILABLE_NOTE, speedLabel } from '@shared/inference'
 import { IPC, type RecordingsInfo, type RetryResult, type ThemeReport } from '@shared/ipc'
 import type { Settings } from '@shared/settings'
 import { isHexColor } from '@shared/theme'
@@ -287,12 +288,18 @@ export function registerIpc(deps: IpcDeps): void {
           cfg
         )
         const ok = /country/i.test(res.text)
+        // Murmur's gateway says which speed ran; a Fast request answered on Normal is worth a word.
+        const speed = res.speed
+          ? res.speed.requested !== res.speed.used
+            ? ` (${FAST_UNAVAILABLE_NOTE})`
+            : ` on ${speedLabel(res.speed.used)}`
+          : ''
         return {
           ok,
           latencyMs: res.latencyMs,
           text: res.text,
           message: ok
-            ? `Transcribed the test clip in ${res.latencyMs} ms`
+            ? `Transcribed the test clip in ${res.latencyMs} ms${speed}`
             : `Connected, but the transcript looks wrong: "${res.text.slice(0, 80)}"`
         }
       } catch (err) {

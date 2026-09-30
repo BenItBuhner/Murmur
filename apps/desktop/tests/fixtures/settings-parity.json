@@ -17,6 +17,7 @@
     "language": "auto",
     "sttKind": "openai-compatible",
     "sttPresetId": "custom",
+    "sttSpeed": "normal",
     "llmSameAsStt": true,
     "updateAutoCheck": true,
     "updateAutoInstall": true,
@@ -130,5 +131,6 @@
   "appRule": {
     "tones": ["auto", "casual", "neutral", "professional"],
     "modes": ["off", "light", "smart"]
-  }
+  },
+  "sttSpeeds": ["normal", "fast"]
 }

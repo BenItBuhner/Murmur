@@ -6,7 +6,12 @@ import type { ChatMessage, ChatOptions, ChatResult } from '../../text-engine/src
 import {
   MAX_COMPLETION_TOKENS,
   MURMUR_MODELS,
+  SPEED_FALLBACK_HEADER,
+  SPEED_FIELD,
+  SPEED_HEADER,
+  SPEED_MODES,
   STT_PASSTHROUGH_FIELDS,
+  chooseSttModel,
   clipSeconds,
   describeUpstreamFailure,
   gatewayError,
@@ -17,14 +22,18 @@ import {
   multipartBoundary,
   parseFormatRequest,
   parseMultipart,
+  parseSpeedMode,
   privateTestingError,
   readUpstreams,
   tokensUsed,
   transcriptWords,
   upstreamModelFor,
+  upstreamRejectedModel,
   wavInfo,
   type GatewayIdentity,
   type MultipartFile,
+  type SpeedFallback,
+  type SpeedMode,
   type Upstream
 } from './lib/inference'
 
@@ -99,6 +108,11 @@ export const transcriptions = httpAction(async (ctx, request) => {
   if (!file || !file.data.length) return gatewayError(400, 'bad_request', 'No audio file in the request')
   const requested = fields.model?.[0] ?? ''
   if (requested !== MURMUR_MODELS.stt) return modelNotFound(requested, MURMUR_MODELS.stt)
+  // Absent (every client from before speed modes) means normal; a value that is neither mode is a
+  // client bug worth hearing about rather than a silent normal.
+  const speed = parseSpeedMode(fields[SPEED_FIELD]?.[0])
+  if (!speed)
+    return gatewayError(400, 'bad_request', `"${SPEED_FIELD}" must be one of: ${SPEED_MODES.join(', ')}`)
 
   const seconds = clipSeconds(file.data)
   const gate = await ctx.runMutation(internal.inference.authorize, {
@@ -108,32 +122,63 @@ export const transcriptions = httpAction(async (ctx, request) => {
   })
   if (!gate.ok) return 'denied' in gate ? privateTestingError() : limitError(gate.refusal, gate.plan, gate.planState, process.env)
 
-  const form = new FormData()
-  form.append(
-    'file',
-    new Blob([file.data as BlobPart], { type: file.type || 'audio/wav' }),
-    file.filename || 'audio.wav'
-  )
-  const upstreamModel = upstreamModelFor(upstream, gate.plan)
-  form.append('model', upstreamModel)
-  for (const [key, values] of Object.entries(fields)) {
-    if (!STT_PASSTHROUGH_FIELDS.has(key)) continue
-    // Clients speak to the Murmur alias and send the singular `language`; an OpenAI gpt-transcribe
-    // upstream takes `languages[]` instead.
-    const upstreamKey = key === 'language' ? sttLanguageField(upstreamModel) : key
-    for (const value of values) form.append(upstreamKey, value)
+  const buildForm = (upstreamModel: string): FormData => {
+    const form = new FormData()
+    form.append(
+      'file',
+      new Blob([file.data as BlobPart], { type: file.type || 'audio/wav' }),
+      file.filename || 'audio.wav'
+    )
+    form.append('model', upstreamModel)
+    for (const [key, values] of Object.entries(fields)) {
+      if (!STT_PASSTHROUGH_FIELDS.has(key)) continue
+      // Clients speak to the Murmur alias and send the singular `language`; an OpenAI gpt-transcribe
+      // upstream takes `languages[]` instead.
+      const upstreamKey = key === 'language' ? sttLanguageField(upstreamModel) : key
+      for (const value of values) form.append(upstreamKey, value)
+    }
+    return form
   }
   const headers: Record<string, string> = {}
   if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
   const started = Date.now()
-  let res: Response
-  try {
-    res = await fetch(`${upstream.baseUrl}/audio/transcriptions`, { method: 'POST', headers, body: form })
-  } catch (err) {
-    console.error('[gateway] stt upstream unreachable', err instanceof Error ? err.message : err)
-    return gatewayError(502, 'upstream_error', 'Could not reach the speech provider behind this instance')
+  const transcribe = async (upstreamModel: string): Promise<{ res: Response; text: string } | Response> => {
+    let res: Response
+    try {
+      res = await fetch(`${upstream.baseUrl}/audio/transcriptions`, {
+        method: 'POST',
+        headers,
+        body: buildForm(upstreamModel)
+      })
+    } catch (err) {
+      console.error('[gateway] stt upstream unreachable', err instanceof Error ? err.message : err)
+      return gatewayError(502, 'upstream_error', 'Could not reach the speech provider behind this instance')
+    }
+    return { res, text: await res.text() }
   }
-  const text = await res.text()
+
+  // The tier's model for normal; the fast model for fast, or the tier's model again when the
+  // instance has none, and again when the provider does not know the fast model yet. Either way
+  // the answer says which mode ran, so a client can tell the user that Fast is not there yet.
+  const choice = chooseSttModel(upstream, gate.plan, speed)
+  let ran: SpeedMode = choice.speed
+  let fallback: SpeedFallback | undefined = choice.fallback
+  let attempt = await transcribe(choice.model)
+  if (attempt instanceof Response) return attempt
+  if (
+    !attempt.res.ok &&
+    choice.normalModel !== undefined &&
+    upstreamRejectedModel(attempt.res.status, attempt.text, choice.model)
+  ) {
+    console.warn(
+      `[gateway] stt fast model "${choice.model}" rejected by the provider (HTTP ${attempt.res.status}); using the normal model`
+    )
+    ran = 'normal'
+    fallback = 'model_not_found'
+    attempt = await transcribe(choice.normalModel)
+    if (attempt instanceof Response) return attempt
+  }
+  const { res, text } = attempt
   if (!res.ok) {
     const failure = describeUpstreamFailure(res.status, text)
     console.warn(`[gateway] stt upstream ${res.status} -> ${failure.status} ${failure.code}`)
@@ -150,10 +195,13 @@ export const transcriptions = httpAction(async (ctx, request) => {
   const upstreamType = res.headers.get('content-type') ?? 'application/json'
   const words = transcriptWords(text, upstreamType)
   await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'stt', seconds: billed, words })
+  const speedNote = fallback ? `${ran} (asked ${speed}, ${fallback})` : ran
   console.log(
-    `[gateway] stt plan=${gate.plan} seconds=${billed.toFixed(1)} words=${words} upstreamMs=${Date.now() - started}`
+    `[gateway] stt plan=${gate.plan} speed=${speedNote} seconds=${billed.toFixed(1)} words=${words} upstreamMs=${Date.now() - started}`
   )
-  return new Response(text, { status: 200, headers: { 'content-type': upstreamType } })
+  const responseHeaders: Record<string, string> = { 'content-type': upstreamType, [SPEED_HEADER]: ran }
+  if (fallback) responseHeaders[SPEED_FALLBACK_HEADER] = fallback
+  return new Response(text, { status: 200, headers: responseHeaders })
 })
 
 /** Chat parameters a client may set; anything else (tools, n, streaming) is dropped. */

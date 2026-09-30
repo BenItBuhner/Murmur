@@ -21,7 +21,9 @@ interface Seen {
 }
 
 /** Fake server: records the multipart fields of each request and answers from a script. */
-function serve(responses: Array<{ status: number; body: unknown }>): Seen[] {
+function serve(
+  responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>
+): Seen[] {
   const seen: Seen[] = []
   vi.stubGlobal(
     'fetch',
@@ -35,7 +37,7 @@ function serve(responses: Array<{ status: number; body: unknown }>): Seen[] {
       const next = responses.shift() ?? { status: 500, body: { error: 'out of script' } }
       return new Response(JSON.stringify(next.body), {
         status: next.status,
-        headers: { 'content-type': 'application/json' }
+        headers: { 'content-type': 'application/json', ...next.headers }
       })
     })
   )
@@ -144,6 +146,44 @@ describe('OpenAiCompatibleStt', () => {
     expect(seen[2].fields.language).toBeUndefined()
     expect(seen[2].fields['languages[]']).toBeUndefined()
     expect(auto.language).toBeUndefined()
+  })
+
+  it('sends the speed only when the router set one, and reads back the speed that ran', async () => {
+    const seen = serve([
+      // The user's own provider: no speed field, and nothing about speed in the answer.
+      { status: 200, body: { text: 'own' } },
+      // Murmur, Fast honoured.
+      { status: 200, body: { text: 'quick' }, headers: { 'x-murmur-speed': 'fast' } },
+      // Murmur, Fast asked for but the instance has no fast model yet.
+      {
+        status: 200,
+        body: { text: 'steady' },
+        headers: { 'x-murmur-speed': 'normal', 'x-murmur-speed-fallback': 'not_configured' }
+      },
+      // Murmur, Normal asked for; an instance from before speed modes says nothing at all.
+      { status: 200, body: { text: 'plain' } }
+    ])
+    const stt = new OpenAiCompatibleStt()
+    const own = await stt.transcribe({ wav }, cfg('http://f.test/v1'))
+    expect(seen[0].fields.speed).toBeUndefined()
+    expect(own.speed).toBeUndefined()
+
+    const gateway = { ...cfg('http://g.test/v1'), model: 'murmur-transcribe' }
+    const fast = await stt.transcribe({ wav }, { ...gateway, speed: 'fast' })
+    expect(seen[1].fields.speed).toEqual(['fast'])
+    expect(fast.speed).toEqual({ requested: 'fast', used: 'fast', fallback: undefined })
+
+    const fellBack = await stt.transcribe({ wav }, { ...gateway, speed: 'fast' })
+    expect(seen[2].fields.speed).toEqual(['fast'])
+    expect(fellBack.speed).toEqual({
+      requested: 'fast',
+      used: 'normal',
+      fallback: 'not_configured'
+    })
+
+    const older = await stt.transcribe({ wav }, { ...gateway, speed: 'normal' })
+    expect(seen[3].fields.speed).toEqual(['normal'])
+    expect(older.speed).toBeUndefined()
   })
 
   it('reads the language from whisper’s field first, then gpt-transcribe’s list', () => {

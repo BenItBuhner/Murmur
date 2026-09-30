@@ -57,6 +57,9 @@ export const STT_ENV = {
   MURMUR_INFERENCE_STT_KEY: 'sk-stt-secret',
   MURMUR_INFERENCE_STT_MODEL: 'whisper-large-v3-turbo'
 }
+/** The quicker speech model behind the `fast` speed mode (`MURMUR_INFERENCE_STT_FAST_MODEL`). */
+export const FAST_MODEL = 'whisper-large-v3-fast'
+export const FAST_ENV = { MURMUR_INFERENCE_STT_FAST_MODEL: FAST_MODEL }
 export const LLM_ENV = {
   MURMUR_INFERENCE_LLM_URL: 'https://llm.example.test/v1',
   MURMUR_INFERENCE_LLM_KEY: 'sk-llm-secret',

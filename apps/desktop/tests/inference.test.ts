@@ -216,7 +216,9 @@ describe('InferenceRouter', () => {
         apiKey: 'jwt-1',
         model: MURMUR_STT_MODEL,
         language: 'auto',
-        timeoutMs: 45000
+        timeoutMs: 45000,
+        // Normal by default, and said out loud so the instance knows what was asked for.
+        speed: 'normal'
       }
     })
     const llm = await router.llm()
@@ -227,6 +229,20 @@ describe('InferenceRouter', () => {
     expect(requests).toEqual([false, false])
     expect(router.isMurmur({ baseUrl: `${GATEWAY}/` })).toBe(true)
     expect(router.isMurmur({ baseUrl: 'https://api.groq.com/openai/v1' })).toBe(false)
+  })
+
+  it('sends the chosen speed with Murmur requests and never to the user’s own provider', async () => {
+    const fast = parseSettings({ stt: { speed: 'fast' } })
+    expect(fast.stt.speed).toBe('fast')
+    const murmur = await harness(CLOUD, fast, { token: () => 'jwt' }).router.stt()
+    expect(murmur.cfg.speed).toBe('fast')
+    // The speed is a Murmur thing: the own-provider configuration has no such field, whatever the
+    // setting says (a Groq or OpenAI form must not grow a `speed` part).
+    const ownFast = parseSettings({ ...own(), stt: { ...own().stt, speed: 'fast' } })
+    const custom = await harness(CLOUD, ownFast, { token: () => 'jwt' }).router.stt()
+    expect(custom.cfg.speed).toBeUndefined()
+    expect(custom.cfg).not.toHaveProperty('speed')
+    expect((await harness(LOCAL, ownFast).router.stt()).cfg.speed).toBeUndefined()
   })
 
   it("keeps a cloud user's own provider when they chose it, or when the instance has no models", async () => {

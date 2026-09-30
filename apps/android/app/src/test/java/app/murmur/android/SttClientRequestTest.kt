@@ -1,6 +1,7 @@
 package app.murmur.android
 
 import app.murmur.android.settings.SttKind
+import app.murmur.android.stt.SpeedOutcome
 import app.murmur.android.stt.SttClient
 import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.languageFromResponse
@@ -87,6 +88,39 @@ class SttClientRequestTest {
         assertNull(sent("languages[]"))
         assertEquals("hello", out.text)
         assertNull(out.language)
+    }
+
+    @Test
+    fun `the speed goes only when the router set one, and the speed that ran is read back`() = runBlocking {
+        // The user's own provider: no speed part, and nothing about speed in the answer.
+        answer("""{"text":"own"}""")
+        val own = SttClient.transcribe(wav, null, cfg("whisper-large-v3-turbo", "auto"))
+        assertNull(sentFields()("speed"))
+        assertNull(own.speed)
+
+        // Murmur, Fast honoured.
+        server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setHeader("X-Murmur-Speed", "fast").setBody("""{"text":"quick"}"""))
+        val gateway = cfg("murmur-transcribe", "auto")
+        val fast = SttClient.transcribe(wav, null, gateway.copy(speed = "fast"))
+        assertEquals("fast", sentFields()("speed"))
+        assertEquals(SpeedOutcome("fast", "fast"), fast.speed)
+
+        // Murmur, Fast asked for but the instance has no fast model yet.
+        server.enqueue(
+            MockResponse().setHeader("Content-Type", "application/json")
+                .setHeader("X-Murmur-Speed", "normal").setHeader("X-Murmur-Speed-Fallback", "not_configured")
+                .setBody("""{"text":"steady"}""")
+        )
+        val fellBack = SttClient.transcribe(wav, null, gateway.copy(speed = "fast"))
+        assertEquals("fast", sentFields()("speed"))
+        assertEquals(SpeedOutcome("fast", "normal", "not_configured"), fellBack.speed)
+        assertEquals("steady", fellBack.text)
+
+        // Murmur, Normal asked for; an instance from before speed modes says nothing at all.
+        answer("""{"text":"plain"}""")
+        val older = SttClient.transcribe(wav, null, gateway.copy(speed = "normal"))
+        assertEquals("normal", sentFields()("speed"))
+        assertNull(older.speed)
     }
 
     @Test

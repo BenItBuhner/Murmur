@@ -3,6 +3,7 @@ package app.murmur.android.history
 import android.content.Context
 import android.util.Log
 import app.murmur.android.dictation.DictationMode
+import app.murmur.android.stt.SpeedOutcome
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +67,11 @@ data class HistoryEntry(
     val appName: String? = null,
     val provider: String,
     val model: String,
+    /**
+     * Murmur models only: the speed asked for and the one that transcribed the clip, so History
+     * can say "Fast isn't available yet, used Normal" when they differ.
+     */
+    val sttSpeed: SpeedOutcome? = null,
     val injected: Boolean,
     val llmUsed: Boolean,
     val llm: LlmOutcome? = null,

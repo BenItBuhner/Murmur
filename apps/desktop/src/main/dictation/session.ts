@@ -25,7 +25,7 @@ import {
   type FormatInput,
   type ResolvedStyle
 } from '@engine'
-import { MURMUR_ERROR_CODES } from '@shared/inference'
+import { MURMUR_ERROR_CODES, type SpeedOutcome } from '@shared/inference'
 import { isPlanLimit, type LimitNotice } from '@shared/limits'
 import { sessionDurationLimitMs, type Settings } from '@shared/settings'
 import type {
@@ -467,6 +467,10 @@ export class DictationController extends EventEmitter {
       return failure('', resolved, err)
     }
     timings.sttMs = Math.round(performance.now() - t)
+    if (stt.speed && stt.speed.used !== stt.speed.requested)
+      log.info(
+        `session ${tag}: asked for ${stt.speed.requested} speech, ${speedLogNote(stt.speed)}`
+      )
     if (stt.resumed)
       log.info(
         `session ${tag}: transcript recovered ${stt.recoveredSec.toFixed(1)}s of speech in ${stt.resumed} extra request(s)`
@@ -629,6 +633,7 @@ export class DictationController extends EventEmitter {
       appName: windowInfo.app || windowInfo.title || undefined,
       provider: resolved.provider,
       model: resolved.cfg.model,
+      sttSpeed: stt.speed,
       injected: injectResult.ok && injectResult.method !== 'clipboard',
       injectionMethod: injectResult.method,
       llmUsed,
@@ -643,7 +648,7 @@ export class DictationController extends EventEmitter {
     else this.deps.history.add(entry)
     this.updateStats(entry)
     log.info(
-      `session ${job.id.slice(0, 8)} done: ${wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : llmStatus?.outcome === 'skipped-clean' ? ' (clean, no model)' : ''}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
+      `session ${job.id.slice(0, 8)} done: ${wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : llmStatus?.outcome === 'skipped-clean' ? ' (clean, no model)' : ''}${stt.speed ? ` speed=${speedLogNote(stt.speed)}` : ''}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
     )
     if (injectResult.ok) {
       this.deps.overlay.setState({
@@ -812,6 +817,13 @@ export class DictationController extends EventEmitter {
     if (this.deps.settings.get().general.sounds) this.deps.overlay.playSound('error')
     this.deps.overlay.setState({ phase: 'error', message, retryId, limit })
   }
+}
+
+/** `fast`, or `normal (asked fast, not_configured)` when the instance could not honour the request. */
+export function speedLogNote(speed: SpeedOutcome): string {
+  return speed.used === speed.requested
+    ? speed.used
+    : `${speed.used} (asked ${speed.requested}, ${speed.fallback ?? 'fallback'})`
 }
 
 /** The plan limit behind an error, when a Murmur instance refused (or paused) on one. */

@@ -87,6 +87,12 @@ data class InferenceView(
     /** Pro past the soft fair-use cap: the formatting model is paused until the month resets. */
     val formattingPaused: Boolean get() = metered && status?.formattingPaused == true
 
+    /**
+     * Whether the instance offers the Fast speed for its speech model; null until the account status
+     * has arrived (an instance from before speed modes offers Normal only: false).
+     */
+    val fastAvailable: Boolean? get() = Inference.fastAvailable(status)
+
     /** "12 of 120 min this month" (or "1.5 of 60 h this month"), or null before the account status arrived or without a cap. */
     val minutesLabel: String?
         get() {

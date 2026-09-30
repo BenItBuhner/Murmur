@@ -11,7 +11,8 @@ import {
   llmConfigured,
   resolveInferenceSources,
   sttConfigured,
-  type InferenceRouting
+  type InferenceRouting,
+  type SpeedMode
 } from '@shared/inference'
 import {
   isMetered,
@@ -58,6 +59,11 @@ export interface InferenceView {
   accountUrl: string | null
   /** Pro past the soft fair-use cap: the formatting model is paused until the month resets. */
   formattingPaused: boolean
+  /**
+   * Whether the instance offers the Fast speed for its speech model; null until the account status
+   * has arrived (or from an instance that predates speed modes, which is Normal only: false).
+   */
+  fastAvailable: boolean | null
   /** Speech / formatting are ready to use for the resolved sources. */
   sttReady: boolean
   llmReady: boolean
@@ -102,6 +108,7 @@ export function useInference(): InferenceView {
       upgradeUrl,
       accountUrl: status?.accountUrl ?? null,
       formattingPaused: metered && (status?.formattingPaused ?? false),
+      fastAvailable: fastAvailableFrom(status),
       sttReady: sttConfigured(settings, routing, signedIn),
       llmReady: llmConfigured(settings, routing, signedIn),
       minutes:
@@ -115,6 +122,15 @@ export function useInference(): InferenceView {
 
 export function planLabel(plan: Plan): string {
   return plan === 'pro' ? 'Pro' : 'Free'
+}
+
+/** Does the instance offer Fast? Null before its status arrived; an older instance offers Normal only. */
+export function fastAvailableFrom(
+  status: Pick<InferenceStatus, 'speedModes'> | null
+): boolean | null {
+  if (!status) return null
+  const modes: SpeedMode[] = status.speedModes ?? ['normal']
+  return modes.includes('fast')
 }
 
 /** "12 of 120 min" (or "1.5 of 60 h") summary of the month's managed transcription. */

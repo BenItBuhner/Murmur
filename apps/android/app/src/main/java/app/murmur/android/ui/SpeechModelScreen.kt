@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -15,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.murmur.android.inference.Inference
@@ -24,6 +26,7 @@ import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
 import app.murmur.android.settings.SttPresets
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.stt.SttClient
 import app.murmur.android.ui.components.Chip
 import app.murmur.android.ui.components.ChipRow
@@ -37,8 +40,11 @@ import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.SecondsControl
 import app.murmur.android.ui.components.SectionGap
+import app.murmur.android.ui.components.Segment
+import app.murmur.android.ui.components.Segmented
 import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
+import app.murmur.android.ui.theme.Space
 import kotlinx.coroutines.launch
 
 @Composable
@@ -76,7 +82,7 @@ fun SpeechModelForm(store: SettingsStore, settings: MurmurSettings, showAdvanced
         Notice("This Murmur instance does not provide speech models of its own, so Murmur uses the provider you connect here.")
         SectionGap()
     }
-    if (inference.routing.murmurStt) MurmurSpeechSummary(inference) else OwnProviderForm(store, settings, showAdvanced)
+    if (inference.routing.murmurStt) MurmurSpeechSummary(store, settings, inference) else OwnProviderForm(store, settings, showAdvanced)
     if (showAdvanced) {
         SectionGap()
         RecognitionGroup(store, settings)
@@ -137,11 +143,34 @@ fun SourceChooser(
 }
 
 @Composable
-private fun MurmurSpeechSummary(inference: InferenceView) {
+private fun MurmurSpeechSummary(store: SettingsStore, settings: MurmurSettings, inference: InferenceView) {
     val c = Murmur.colors
     Group(rows = true) {
         ControlRow("Model", description = "Provided by this Murmur instance for your account. Your dictionary still biases recognition.") {
             Text(inference.status?.models?.stt ?: Inference.STT_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
+        }
+        // The instance said it has no fast model: Fast stays selectable (the instance answers on
+        // Normal and History says so), with the reason right under the control.
+        val fastMissing = inference.fastAvailable == false
+        Column(Modifier.padding(vertical = Space.row).testTag("speed-row")) {
+            Text("Speed", style = Murmur.type.title, color = c.ink)
+            Spacer(Modifier.height(4.dp))
+            Text(Inference.SPEED_SETTING_DESCRIPTION, style = Murmur.type.bodySmall, color = c.inkSoft)
+            if (fastMissing) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    Inference.FAST_UNAVAILABLE_SETTING_NOTE,
+                    style = Murmur.type.bodySmall,
+                    color = c.ink.copy(alpha = 0.8f),
+                    modifier = Modifier.testTag("speed-unavailable")
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Segmented(
+                options = SttSpeed.entries.map { Segment(it, it.label) },
+                selected = settings.sttSpeed,
+                onSelect = { speed -> store.update { s -> s.copy(sttSpeed = speed) } }
+            )
         }
         ControlRow(
             if (inference.billingEnabled) "Plan" else "Allowance",

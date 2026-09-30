@@ -7,6 +7,7 @@ import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
+import app.murmur.android.stt.SpeedOutcome
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,7 +24,13 @@ class HistoryStoreTest {
 
     private fun file() = File(folder.root, "history.json")
 
-    private fun entry(id: String, at: Long = id.hashCode().toLong(), text: String = "hello $id") = HistoryEntry(
+    private fun entry(
+        id: String,
+        at: Long = id.hashCode().toLong(),
+        text: String = "hello $id",
+        provider: String = "openai-compatible",
+        model: String = "whisper-1"
+    ) = HistoryEntry(
         id = id,
         createdAt = at,
         rawText = "um hello $id",
@@ -31,8 +38,8 @@ class HistoryStoreTest {
         wordCount = 2,
         speechMs = 1800,
         appName = "Messages",
-        provider = "openai-compatible",
-        model = "whisper-1",
+        provider = provider,
+        model = model,
         injected = true,
         llmUsed = true,
         llm = LlmOutcome.USED,
@@ -90,6 +97,29 @@ class HistoryStoreTest {
         assertTrue(store.entries.value.isEmpty())
         store.add(entry("a"))
         assertEquals(1, HistoryStore(file()).size)
+    }
+
+    @Test
+    fun `the speed Murmur ran at survives a restart, and older entries have none`() {
+        val store = HistoryStore(file())
+        store.add(entry("own"))
+        store.add(entry("fast", provider = "murmur", model = "murmur-transcribe").copy(sttSpeed = SpeedOutcome("fast", "fast")))
+        store.add(
+            entry("fell-back", provider = "murmur", model = "murmur-transcribe")
+                .copy(sttSpeed = SpeedOutcome("fast", "normal", "not_configured"))
+        )
+        val reopened = HistoryStore(file())
+        assertNull(reopened.get("own")?.sttSpeed)
+        assertEquals(SpeedOutcome("fast", "fast"), reopened.get("fast")?.sttSpeed)
+        val fellBack = reopened.get("fell-back")!!.sttSpeed!!
+        assertEquals(SpeedOutcome("fast", "normal", "not_configured"), fellBack)
+        assertTrue(fellBack.fellBack)
+        assertEquals("Fast isn't available yet, used Normal", fellBack.summary)
+        // A file written before speed modes existed: the field is simply absent.
+        file().writeText(
+            """[{"id":"old","createdAt":1,"rawText":"hi","finalText":"Hi","wordCount":1,"speechMs":900,"provider":"murmur","model":"murmur-transcribe","injected":true,"llmUsed":false}]"""
+        )
+        assertNull(HistoryStore(file()).get("old")?.sttSpeed)
     }
 
     @Test

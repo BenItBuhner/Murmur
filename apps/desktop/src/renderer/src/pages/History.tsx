@@ -12,6 +12,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { FAST_UNAVAILABLE_NOTE, speedLabel } from '@shared/inference'
 import type { HistoryEntry } from '@shared/types'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -83,6 +84,30 @@ function LlmBadge({
     default:
       return detailed ? <Badge variant="outline">model skipped: {llm.detail}</Badge> : null
   }
+}
+
+/**
+ * The speed Murmur's speech model ran at, when the instance said. The row only flags what is
+ * worth a glance (Fast ran, or Fast was asked for and Normal answered); the expanded view spells
+ * the fallback out.
+ */
+function SpeedBadge({
+  entry,
+  detailed
+}: {
+  entry: HistoryEntry
+  detailed?: boolean
+}): React.JSX.Element | null {
+  const speed = entry.sttSpeed
+  if (!speed) return null
+  if (speed.requested === 'fast' && speed.used !== 'fast')
+    return (
+      <Badge variant="outline" title={FAST_UNAVAILABLE_NOTE} data-testid="speed-fallback">
+        {detailed ? FAST_UNAVAILABLE_NOTE : 'fast unavailable'}
+      </Badge>
+    )
+  if (speed.used === 'fast') return <Badge variant="outline">fast</Badge>
+  return null
 }
 
 export function HistoryPage(): React.JSX.Element {
@@ -290,6 +315,7 @@ export function HistoryPage(): React.JSX.Element {
                           </Badge>
                         )}
                         <LlmBadge entry={e} />
+                        <SpeedBadge entry={e} />
                         {e.remote && (
                           <Badge variant="outline" title="Dictated on another device">
                             {e.deviceName ?? 'other device'}
@@ -344,7 +370,7 @@ export function HistoryPage(): React.JSX.Element {
                       {settings.general.showLatencyInHistory && !e.error && !e.remote && (
                         <LatencyBar t={e.timings} nested />
                       )}
-                      {(e.stages?.length || e.llm) && (
+                      {(e.stages?.length || e.llm || e.sttSpeed) && (
                         <div className="flex flex-wrap items-center gap-1 text-caption">
                           <span className="eyebrow mr-1">Stages</span>
                           {e.stages?.map((s) => (
@@ -353,13 +379,22 @@ export function HistoryPage(): React.JSX.Element {
                             </Badge>
                           ))}
                           {e.llm && <LlmBadge entry={e} detailed />}
+                          <SpeedBadge entry={e} detailed />
                         </div>
                       )}
                       <div className="flex items-center gap-2 text-meta text-muted-foreground">
-                        <span>
-                          {e.provider} · {e.model}
-                        </span>
-                        {e.injectionMethod && <span>· inserted via {e.injectionMethod}</span>}
+                        {/* The facts wrap as whole phrases when the speed makes the line long. */}
+                        <div className="flex min-w-0 flex-1 flex-wrap gap-x-2">
+                          <span className="whitespace-nowrap">
+                            {e.provider} · {e.model}
+                            {e.sttSpeed && ` · ${speedLabel(e.sttSpeed.used)}`}
+                          </span>
+                          {e.injectionMethod && (
+                            <span className="whitespace-nowrap">
+                              · inserted via {e.injectionMethod}
+                            </span>
+                          )}
+                        </div>
                         <span className="ml-auto flex gap-1">
                           {e.recording && (
                             <Button

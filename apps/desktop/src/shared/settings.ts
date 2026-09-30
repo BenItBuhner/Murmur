@@ -10,6 +10,13 @@ export const SETTINGS_VERSION = 5
  */
 export const inferenceSourceSchema = z.enum(['murmur', 'custom'])
 
+/**
+ * Speed of the Murmur speech model (shared/inference.ts `SPEED_MODES`): `normal` is today's
+ * model, `fast` a quicker one when the instance offers it. Only meaningful with `stt.source`
+ * `murmur`; the user's own provider has its own model field.
+ */
+export const speedModeSchema = z.enum(['normal', 'fast'])
+
 export const handsFreeTriggerSchema = z.enum(['tap', 'double-tap', 'off'])
 export type HandsFreeTrigger = z.infer<typeof handsFreeTriggerSchema>
 
@@ -176,6 +183,12 @@ export const settingsSchema = z.object({
        * in local builds. The fields below describe the user's own provider only.
        */
       source: inferenceSourceSchema.default('murmur'),
+      /**
+       * Normal or Fast for Murmur's models. Device-local like `source` (it is a choice about this
+       * device's connection); the instance falls back to Normal, and says so, when it has no fast
+       * model yet.
+       */
+      speed: speedModeSchema.default('normal'),
       kind: sttProviderKindSchema.default('openai-compatible'),
       presetId: z.string().default('custom'),
       baseUrl: z.string().default(''),

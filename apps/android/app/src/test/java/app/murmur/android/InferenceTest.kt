@@ -12,11 +12,14 @@ import app.murmur.android.llm.LlmConfig
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SttKind
+import app.murmur.android.settings.SttSpeed
+import app.murmur.android.stt.SpeedOutcome
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.SttException
 import app.murmur.android.stt.errorFromResponse
 import app.murmur.android.stt.parseErrorBody
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -197,6 +200,8 @@ class InferenceTest {
         assertEquals(Inference.STT_MODEL, stt.cfg.model)
         assertEquals("de", stt.cfg.language)
         assertEquals(30_000, stt.cfg.timeoutMs)
+        // Normal by default, and said out loud so the instance knows what was asked for.
+        assertEquals("normal", stt.cfg.speed)
         val llm = h.router.llm()
         // The same formatting timeout applies to the gateway's model.
         assertEquals(LlmConfig(gateway, "jwt-1", Inference.LLM_MODEL, 8_000), llm.cfg)
@@ -210,6 +215,64 @@ class InferenceTest {
         val none = Harness(cloud, blank(), tokens = listOf("jwt"), managed = false)
         assertEquals(InferenceSource.CUSTOM, none.router.stt().source)
         assertTrue(none.requests.isEmpty())
+    }
+
+    @Test
+    fun `the chosen speed goes with Murmur requests and never to the user's own provider`() = runBlocking {
+        val fast = Harness(cloud, blank().copy(sttSpeed = SttSpeed.FAST), tokens = listOf("jwt"))
+        assertEquals("fast", fast.router.stt().cfg.speed)
+        // The speed is a Murmur thing: the own-provider configuration has no such field, whatever the
+        // setting says (a Groq or OpenAI form must not grow a `speed` part).
+        val ownFast = Harness(cloud, own().copy(sttSpeed = SttSpeed.FAST), tokens = listOf("jwt"))
+        assertNull(ownFast.router.stt().cfg.speed)
+        assertNull(Harness(local, own().copy(sttSpeed = SttSpeed.FAST)).router.stt().cfg.speed)
+        // The screen's helper for the user's own connection never carries one either.
+        assertNull(app.murmur.android.ui.sttConfig(own().copy(sttSpeed = SttSpeed.FAST)).speed)
+    }
+
+    @Test
+    fun `the answer's speed headers are read into an outcome, or nothing for a server that says none`() {
+        fun headers(vararg pairs: Pair<String, String>): (String) -> String? = { name -> pairs.toMap()[name] }
+        assertNull(SpeedOutcome.fromHeaders(headers(), "fast"))
+        assertEquals(
+            SpeedOutcome("fast", "fast"),
+            SpeedOutcome.fromHeaders(headers("x-murmur-speed" to "fast"), "fast")
+        )
+        val fellBack = SpeedOutcome.fromHeaders(
+            headers("x-murmur-speed" to "normal", "x-murmur-speed-fallback" to "not_configured"), "fast"
+        )!!
+        assertEquals(SpeedOutcome("fast", "normal", "not_configured"), fellBack)
+        assertTrue(fellBack.fellBack)
+        assertEquals(Inference.FAST_UNAVAILABLE_NOTE, fellBack.summary)
+        assertEquals(
+            SpeedOutcome("fast", "normal", "model_not_found"),
+            SpeedOutcome.fromHeaders(headers("x-murmur-speed" to "Normal", "x-murmur-speed-fallback" to "model_not_found"), "fast")
+        )
+        // Normal asked for and answered: nothing to remark on.
+        val normal = SpeedOutcome.fromHeaders(headers("x-murmur-speed" to "normal"), "normal")!!
+        assertFalse(normal.fellBack)
+        assertEquals("Normal", normal.summary)
+        assertEquals("Fast", SpeedOutcome("fast", "fast").summary)
+        // A client that sent no speed and got an answer anyway asked for Normal; unknown words are ignored.
+        assertEquals(SpeedOutcome("normal", "fast"), SpeedOutcome.fromHeaders(headers("x-murmur-speed" to "fast"), null))
+        assertNull(SpeedOutcome.fromHeaders(headers("x-murmur-speed" to "turbo"), "fast"))
+        assertNull(SpeedOutcome.fromHeaders(headers("x-murmur-speed" to "normal", "x-murmur-speed-fallback" to "eh"), "fast")!!.fallback)
+    }
+
+    @Test
+    fun `the status says which speed modes the instance offers, Normal only from an older instance`() {
+        val json = Json { ignoreUnknownKeys = true }
+        val older = json.decodeFromString<InferenceStatusDto>("""{"available":true,"models":{"stt":"murmur-transcribe","llm":null},"plan":"free"}""")
+        assertEquals(listOf("normal"), older.speedModes)
+        assertEquals(false, Inference.fastAvailable(older))
+        val withFast = json.decodeFromString<InferenceStatusDto>(
+            """{"available":true,"models":{"stt":"murmur-transcribe","llm":null},"speedModes":["normal","fast"],"plan":"free"}"""
+        )
+        assertEquals(listOf("normal", "fast"), withFast.speedModes)
+        assertEquals(true, Inference.fastAvailable(withFast))
+        assertEquals(false, Inference.fastAvailable(json.decodeFromString<InferenceStatusDto>("""{"available":false,"speedModes":[]}""")))
+        // Before the status arrives nothing is known, so nothing is annotated.
+        assertNull(Inference.fastAvailable(null))
     }
 
     @Test

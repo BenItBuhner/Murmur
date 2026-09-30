@@ -6,8 +6,10 @@ import {
   clampToRange,
   defaultSettings,
   formattingModeSchema,
+  speedModeSchema,
   toneSchema
 } from '@shared/settings'
+import { SPEED_MODES } from '@shared/inference'
 import { STT_PRESETS } from '@core/stt/presets'
 
 /**
@@ -23,6 +25,7 @@ const contract = JSON.parse(
   sttPresets: Array<Record<string, unknown>>
   snippetPlaceholders: string[]
   appRule: { tones: string[]; modes: string[] }
+  sttSpeeds: string[]
 }
 
 describe('settings parity contract', () => {
@@ -46,6 +49,8 @@ describe('settings parity contract', () => {
       language: s.stt.language,
       sttKind: s.stt.kind,
       sttPresetId: s.stt.presetId,
+      // The speed of Murmur's speech model: Normal on both apps until a person picks Fast.
+      sttSpeed: s.stt.speed,
       llmSameAsStt: s.formatting.llm.sameAsStt,
       updateAutoCheck: s.updates.autoCheck,
       updateAutoInstall: s.updates.autoInstall,
@@ -90,6 +95,11 @@ describe('settings parity contract', () => {
   it('the style vocabularies match', () => {
     expect(toneSchema.options).toEqual(contract.appRule.tones)
     expect(formattingModeSchema.options).toEqual(contract.appRule.modes)
+  })
+
+  it('the speed modes are the ones both apps send to the gateway', () => {
+    expect(speedModeSchema.options).toEqual(contract.sttSpeeds)
+    expect([...SPEED_MODES]).toEqual(contract.sttSpeeds)
   })
 
   it('an input clamps into the range instead of handing the schema a value it would reject', () => {

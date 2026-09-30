@@ -1,11 +1,13 @@
 package app.murmur.android
 
 import android.content.Context
+import app.murmur.android.inference.Inference
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttPresets
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
 import org.json.JSONArray
 import org.json.JSONObject
@@ -61,6 +63,8 @@ class SettingsParityTest {
         assertEquals(d.getString("language"), s.language)
         assertEquals(d.getString("sttKind"), s.sttKind.id)
         assertEquals(d.getString("sttPresetId"), s.sttPresetId)
+        // The speed of Murmur's speech model: Normal on both apps until a person picks Fast.
+        assertEquals(d.getString("sttSpeed"), s.sttSpeed.id)
         assertEquals(d.getBoolean("llmSameAsStt"), s.llmSameAsStt)
         assertEquals(d.getBoolean("updateAutoCheck"), s.updateAutoCheck)
         assertEquals(d.getBoolean("updateAutoInstall"), s.updateAutoInstall)
@@ -114,6 +118,31 @@ class SettingsParityTest {
         val rule = contract.getJSONObject("appRule")
         assertEquals(rule.getJSONArray("tones").strings(), Tone.entries.map { it.id })
         assertEquals(rule.getJSONArray("modes").strings(), FormattingMode.entries.map { it.id })
+    }
+
+    @Test
+    fun `the speed modes are the ones both apps send to the gateway`() {
+        val speeds = contract.getJSONArray("sttSpeeds").strings()
+        assertEquals(speeds, SttSpeed.entries.map { it.id })
+        assertEquals(speeds, Inference.SPEED_MODES)
+        assertEquals(SttSpeed.NORMAL, SttSpeed.from("nope"))
+        assertEquals(SttSpeed.FAST, SttSpeed.from("fast"))
+    }
+
+    @Test
+    fun `the store keeps the chosen speed, and an install from before the setting is on Normal`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("murmur_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().putString("sttSource", "murmur").putString("language", "de").commit()
+        val store = SettingsStore(context)
+        assertEquals(SttSpeed.NORMAL, store.get().sttSpeed)
+        assertEquals("de", store.get().language)
+        store.update { it.copy(sttSpeed = SttSpeed.FAST) }
+        assertEquals("fast", prefs.getString("sttSpeed", null))
+        assertEquals(SttSpeed.FAST, SettingsStore(context).get().sttSpeed)
+        // A stored value that is not a mode reads as Normal rather than failing the whole store.
+        prefs.edit().putString("sttSpeed", "turbo").commit()
+        assertEquals(SttSpeed.NORMAL, SettingsStore(context).get().sttSpeed)
     }
 
     @Test

@@ -16,6 +16,7 @@ import java.io.InterruptedIOException
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import kotlinx.serialization.Serializable
 
 // ---- error model: port of apps/desktop/src/core/stt/types.ts --------------------------------
 
@@ -161,11 +162,41 @@ data class SttConfig(
     val apiKey: String,
     val model: String,
     val language: String,
-    val timeoutMs: Int
+    val timeoutMs: Int,
+    /**
+     * Speed mode for the Murmur gateway (`normal` or `fast`), sent as the `speed` form part. Null
+     * for the user's own provider, which never sees the field.
+     */
+    val speed: String? = null
 )
 
 /** A timed span of the transcript, in seconds from the start of the audio that was sent. */
 data class TimedSpan(val start: Double, val end: Double)
+
+/**
+ * What a Murmur instance said about the speed of one transcription (desktop `SpeedOutcome`):
+ * the mode asked for, the mode that ran, and, when they differ, why Normal answered
+ * (`not_configured`: the instance has no fast model; `model_not_found`: its provider does not
+ * know the fast model yet). Kept on the History entry.
+ */
+@Serializable
+data class SpeedOutcome(val requested: String, val used: String, val fallback: String? = null) {
+    /** Fast was asked for and Normal answered. */
+    val fellBack: Boolean get() = requested == Inference.SPEED_FAST && used != Inference.SPEED_FAST
+
+    /** History's one-line account of the speed: "Fast", "Normal", or the fallback note. */
+    val summary: String
+        get() = if (fellBack) Inference.FAST_UNAVAILABLE_NOTE else Inference.speedLabel(used)
+
+    companion object {
+        /** The outcome the response headers carry, or null for a server that says nothing about speed. */
+        fun fromHeaders(header: (String) -> String?, requested: String?): SpeedOutcome? {
+            val used = header(Inference.SPEED_HEADER)?.trim()?.lowercase()?.takeIf { it in Inference.SPEED_MODES } ?: return null
+            val fallback = header(Inference.SPEED_FALLBACK_HEADER)?.trim()?.lowercase()?.takeIf { it in Inference.SPEED_FALLBACKS }
+            return SpeedOutcome(requested ?: Inference.SPEED_NORMAL, used, fallback)
+        }
+    }
+}
 
 data class TranscribeOutput(
     val text: String,
@@ -178,7 +209,9 @@ data class TranscribeOutput(
      * them, otherwise segment-level. Lets the caller notice a transcript that stopped before the
      * speech did and resume from that point.
      */
-    val spans: List<TimedSpan>? = null
+    val spans: List<TimedSpan>? = null,
+    /** What a Murmur instance said about the speed mode that ran; null from any other server. */
+    val speed: SpeedOutcome? = null
 )
 
 /**
@@ -268,6 +301,8 @@ object SttClient {
             }
             if (cfg.language.isNotEmpty() && cfg.language != "auto") form.addFormDataPart(sttLanguageField(cfg.model), cfg.language)
             if (!prompt.isNullOrEmpty()) form.addFormDataPart("prompt", prompt)
+            // Murmur's gateway only; the router never sets it for the user's own provider.
+            cfg.speed?.let { form.addFormDataPart(Inference.SPEED_FIELD, it) }
             val req = Request.Builder().url(url).post(form.build()).apply {
                 if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}")
             }.build()
@@ -326,7 +361,8 @@ object SttClient {
                 durationSec = duration,
                 noSpeechProb = noSpeech,
                 latencyMs = (System.nanoTime() - started) / 1_000_000,
-                spans = spans
+                spans = spans,
+                speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed)
             )
         }
     }

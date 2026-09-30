@@ -33,6 +33,8 @@ const provider = vi.hoisted(() => ({
   wavs: [] as Uint8Array[],
   outcome: 'ok' as 'ok' | 'timeout',
   text: 'um so hello from murmur this is a test',
+  /** What a Murmur instance says about the speed that ran; the user's own provider says nothing. */
+  speed: undefined as TranscribeOutput['speed'],
   transcribe: async (req: { wav: Uint8Array }): Promise<TranscribeOutput> => {
     provider.wavs.push(req.wav)
     if (provider.outcome === 'timeout')
@@ -41,7 +43,8 @@ const provider = vi.hoisted(() => ({
       text: provider.text,
       language: 'en',
       durationSec: req.wav.byteLength / 2 / 16000,
-      latencyMs: 12
+      latencyMs: 12,
+      speed: provider.speed
     }
   }
 }))
@@ -188,6 +191,7 @@ describe('a dictation fed by MURMUR_TEST_AUDIO_FILE', () => {
     provider.wavs.length = 0
     provider.outcome = 'ok'
     provider.text = 'um so hello from murmur this is a test'
+    provider.speed = undefined
     hook = {
       waitForKeysUp: async () => true,
       beginSynthetic: () => undefined,
@@ -216,6 +220,8 @@ describe('a dictation fed by MURMUR_TEST_AUDIO_FILE', () => {
     const [entry] = history.list().entries as HistoryEntry[]
     expect(entry.finalText).toBe('So hello from murmur this is a test')
     expect(entry.error).toBeUndefined()
+    // The user's own provider knows nothing of speed modes; the entry says nothing either.
+    expect(entry.sttSpeed).toBeUndefined()
     expect(inject.calls).toEqual([
       { text: 'So hello from murmur this is a test ', method: 'auto', pressEnter: false }
     ])
@@ -265,6 +271,38 @@ describe('a dictation fed by MURMUR_TEST_AUDIO_FILE', () => {
     expect(entry.mode).toBe('hands-free')
     expect(entry.speechMs).toBe(500)
     expect(heard(provider.wavs[0])).toEqual(Array.from(short))
+  })
+
+  it('speed: History keeps which speed Murmur ran at, and says when Fast was not available', async () => {
+    provider.speed = { requested: 'fast', used: 'normal', fallback: 'not_configured' }
+    controller.handle({ type: 'start', mode: 'hold' })
+    await sleep(400)
+    controller.handle({ type: 'stop' })
+    await untilIdle()
+
+    const [fellBack] = history.list().entries as HistoryEntry[]
+    expect(fellBack.finalText).toBe('So hello from murmur this is a test')
+    expect(fellBack.sttSpeed).toEqual({
+      requested: 'fast',
+      used: 'normal',
+      fallback: 'not_configured'
+    })
+    expect(logLines).toContainEqual(
+      expect.stringMatching(/asked for fast speech, normal \(asked fast, not_configured\)/)
+    )
+    expect(logLines).toContainEqual(
+      expect.stringMatching(/speed=normal \(asked fast, not_configured\)/)
+    )
+
+    provider.speed = { requested: 'fast', used: 'fast' }
+    controller.handle({ type: 'start', mode: 'hold' })
+    await sleep(400)
+    controller.handle({ type: 'stop' })
+    await untilIdle()
+    const [ranFast] = history.list().entries as HistoryEntry[]
+    expect(ranFast.id).not.toBe(fellBack.id)
+    expect(ranFast.sttSpeed).toEqual({ requested: 'fast', used: 'fast' })
+    expect(logLines).toContainEqual(expect.stringMatching(/ speed=fast/))
   })
 
   it('press enter: a clip ending in "press enter" types the text and presses Enter', async () => {

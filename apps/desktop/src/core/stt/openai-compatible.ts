@@ -1,3 +1,4 @@
+import { MURMUR_SPEED_FIELD, readSpeedOutcome } from '@shared/inference'
 import { sttLanguageField } from '@shared/languages'
 import {
   SttError,
@@ -83,6 +84,8 @@ export class OpenAiCompatibleStt implements SttProvider {
       if (cfg.language && cfg.language !== 'auto')
         form.append(sttLanguageField(cfg.model), cfg.language)
       if (input.prompt) form.append('prompt', input.prompt)
+      // Murmur's gateway only; the router never sets it for the user's own provider.
+      if (cfg.speed) form.append(MURMUR_SPEED_FIELD, cfg.speed)
       const headers: Record<string, string> = {}
       if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`
       return fetch(url, {
@@ -133,6 +136,7 @@ export class OpenAiCompatibleStt implements SttProvider {
         noSpeechProb: noSpeech,
         latencyMs: Math.round(performance.now() - started),
         spans: spansFromVerbose(json),
+        speed: readSpeedOutcome(res.headers, cfg.speed),
         raw: json
       }
     } catch (err) {

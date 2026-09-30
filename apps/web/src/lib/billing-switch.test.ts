@@ -15,6 +15,7 @@ function status(partial: Partial<InferenceStatus> = {}): InferenceStatus {
   return {
     available: true,
     models: { stt: 'murmur-transcribe', llm: 'murmur-format' },
+    speedModes: ['normal'],
     plan: 'free',
     planState: 'free',
     trialEndsAt: null,

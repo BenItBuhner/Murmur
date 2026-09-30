@@ -285,6 +285,9 @@ export type UserDto = Infer<typeof userDtoValidator>
 
 export const inferenceKindValidator = v.union(v.literal('stt'), v.literal('llm'))
 
+/** A speech speed mode (`SPEED_MODES` in lib/inference.ts). */
+export const speedModeValidator = v.union(v.literal('normal'), v.literal('fast'))
+
 /** What a client needs to know about the instance's managed models and this account's allowance. */
 export const inferenceStatusValidator = v.object({
   /** The instance offers at least the managed speech model. */
@@ -293,6 +296,13 @@ export const inferenceStatusValidator = v.object({
     stt: v.union(v.string(), v.null()),
     llm: v.union(v.string(), v.null())
   }),
+  /**
+   * The speed modes the managed speech model takes: `["normal"]`, or `["normal", "fast"]` once the
+   * instance has `MURMUR_INFERENCE_STT_FAST_MODEL`; empty without a speech model. Clients annotate
+   * or disable the Fast option from this. A request for `fast` on an instance without it still
+   * works, on the normal model, and says so in its response.
+   */
+  speedModes: v.array(speedModeValidator),
   /** Tier whose limits apply; `pro` during the trial; `testing` / `unlimited` during private testing. */
   plan: planValidator,
   /** The stored plan state, or the private-testing state laid over it (see lib/access.ts). */

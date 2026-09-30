@@ -37,6 +37,20 @@ enum class InferenceSource(val id: String) {
     }
 }
 
+/**
+ * Speed of the Murmur speech model (desktop `speedModeSchema`; `SPEED_MODES` on the gateway):
+ * NORMAL is today's model, FAST a quicker one when the instance offers it. Only meaningful with
+ * [InferenceSource.MURMUR]; the user's own provider has its own model field.
+ */
+enum class SttSpeed(val id: String, val label: String) {
+    NORMAL("normal", "Normal"),
+    FAST("fast", "Fast");
+
+    companion object {
+        fun from(id: String?): SttSpeed = entries.firstOrNull { it.id == id } ?: NORMAL
+    }
+}
+
 /** Serialized by id ("off", "light", "smart") so a stored or synced rule reads like the desktop's. */
 @Serializable
 enum class FormattingMode(val id: String) {
@@ -131,6 +145,11 @@ data class MurmurSettings(
      */
     val sttSource: InferenceSource = if (BuildConfig.DEFAULT_BASE_URL.isBlank()) InferenceSource.MURMUR else InferenceSource.CUSTOM,
     val llmSource: InferenceSource = if (BuildConfig.DEFAULT_BASE_URL.isBlank()) InferenceSource.MURMUR else InferenceSource.CUSTOM,
+    /**
+     * Normal or Fast for Murmur's speech model (desktop: `stt.speed`). Device-local like [sttSource];
+     * the instance falls back to Normal, and says so, when it has no fast model yet.
+     */
+    val sttSpeed: SttSpeed = SttSpeed.NORMAL,
     val sttKind: SttKind = SttKind.OPENAI_COMPATIBLE,
     val sttBaseUrl: String = BuildConfig.DEFAULT_BASE_URL,
     val sttApiKey: String = BuildConfig.DEFAULT_API_KEY,
@@ -416,6 +435,7 @@ class SettingsStore(context: Context) {
         return MurmurSettings(
             sttSource = InferenceSource.from(prefs.getString("sttSource", d.sttSource.id)),
             llmSource = InferenceSource.from(prefs.getString("llmSource", d.llmSource.id)),
+            sttSpeed = SttSpeed.from(prefs.getString("sttSpeed", d.sttSpeed.id)),
             sttKind = SttKind.from(prefs.getString("sttKind", d.sttKind.id)),
             sttBaseUrl = prefs.getString("sttBaseUrl", d.sttBaseUrl) ?: d.sttBaseUrl,
             sttApiKey = prefs.getString("sttApiKey", d.sttApiKey) ?: d.sttApiKey,
@@ -477,6 +497,7 @@ class SettingsStore(context: Context) {
         prefs.edit()
             .putString("sttSource", s.sttSource.id)
             .putString("llmSource", s.llmSource.id)
+            .putString("sttSpeed", s.sttSpeed.id)
             .putString("sttKind", s.sttKind.id)
             .putString("sttBaseUrl", s.sttBaseUrl)
             .putString("sttApiKey", s.sttApiKey)

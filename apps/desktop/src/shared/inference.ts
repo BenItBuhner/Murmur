@@ -22,6 +22,82 @@ export const MURMUR_LLM_MODEL = 'murmur-format'
 /** `provider` recorded in history entries for dictations transcribed by the Murmur instance. */
 export const MURMUR_PROVIDER = 'murmur'
 
+/**
+ * How quickly the Murmur speech model should answer: `normal` is the instance's model as before,
+ * `fast` a quicker model when the instance offers one (`MURMUR_INFERENCE_STT_FAST_MODEL`). Sent
+ * with every Murmur transcription as the `speed` form field; the instance answers with the mode
+ * that actually ran, so a request for Fast on an instance without it still goes through, on
+ * Normal, and the app can say so. Must match SPEED_MODES in packages/backend/convex/lib/inference.ts.
+ */
+export const SPEED_MODES = ['normal', 'fast'] as const
+export type SpeedMode = (typeof SPEED_MODES)[number]
+
+/** The `/v1/audio/transcriptions` form field that carries the mode. */
+export const MURMUR_SPEED_FIELD = 'speed'
+/** Response header: the mode that transcribed the clip. */
+export const MURMUR_SPEED_HEADER = 'x-murmur-speed'
+/** Response header, only when the requested mode could not be honoured: why Normal ran instead. */
+export const MURMUR_SPEED_FALLBACK_HEADER = 'x-murmur-speed-fallback'
+
+/**
+ * Why a Fast request ran on Normal: the instance has no fast model (`not_configured`), or its
+ * provider does not know the fast model yet (`model_not_found`).
+ */
+export type SpeedFallback = 'not_configured' | 'model_not_found'
+
+/** What the instance reported about the speed of one transcription. */
+export interface SpeedOutcome {
+  requested: SpeedMode
+  /** The mode that transcribed the clip. */
+  used: SpeedMode
+  fallback?: SpeedFallback
+}
+
+function isSpeedMode(value: string | null | undefined): value is SpeedMode {
+  return (SPEED_MODES as readonly string[]).includes(value ?? '')
+}
+
+/**
+ * The speed outcome a transcription response carries, or undefined for a server that says
+ * nothing about speed (the user's own provider, or an instance from before speed modes).
+ */
+export function readSpeedOutcome(
+  headers: { get(name: string): string | null },
+  requested: SpeedMode | undefined
+): SpeedOutcome | undefined {
+  const used = headers.get(MURMUR_SPEED_HEADER)?.trim().toLowerCase()
+  if (!isSpeedMode(used)) return undefined
+  const fallback = headers.get(MURMUR_SPEED_FALLBACK_HEADER)?.trim().toLowerCase()
+  return {
+    requested: requested ?? 'normal',
+    used,
+    fallback: fallback === 'not_configured' || fallback === 'model_not_found' ? fallback : undefined
+  }
+}
+
+/** The one sentence the apps say when Fast was asked for and Normal answered. */
+export const FAST_UNAVAILABLE_NOTE = "Fast isn't available yet, used Normal"
+
+/** The Speed setting's explanation, the same words on desktop and Android. */
+export const SPEED_SETTING_DESCRIPTION =
+  "Normal is today's model. Fast answers sooner on a quicker model when this Murmur server offers one."
+
+/** Under the Speed setting when the instance reports no fast model. */
+export const FAST_UNAVAILABLE_SETTING_NOTE =
+  "Fast isn't available on this server yet; dictations use Normal until it is."
+
+/** How a mode is named in the UI. */
+export function speedLabel(mode: SpeedMode): string {
+  return mode === 'fast' ? 'Fast' : 'Normal'
+}
+
+/** History's one-line account of the speed a dictation ran at; empty for a mode never reported. */
+export function speedSummary(outcome: SpeedOutcome | undefined): string {
+  if (!outcome) return ''
+  if (outcome.requested === 'fast' && outcome.used !== 'fast') return FAST_UNAVAILABLE_NOTE
+  return speedLabel(outcome.used)
+}
+
 export interface InferenceRouting {
   stt: InferenceSource
   llm: InferenceSource

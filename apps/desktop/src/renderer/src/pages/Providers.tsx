@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Check, Cloud, ExternalLink, KeyRound, Loader2, Play } from 'lucide-react'
 import type { ProviderTestResult } from '@shared/types'
-import type { InferenceSource } from '@shared/inference'
+import {
+  FAST_UNAVAILABLE_SETTING_NOTE,
+  SPEED_SETTING_DESCRIPTION,
+  speedLabel,
+  type InferenceSource,
+  type SpeedMode
+} from '@shared/inference'
 import { SETTINGS_RANGES, clampToRange } from '@shared/settings'
 import { STT_PRESETS, findPreset } from '@core/stt/presets'
 import { Button } from '@renderer/components/ui/button'
@@ -14,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@renderer/components/ui/select'
-import { Badge, Banner } from '@renderer/components/ui/misc'
+import { Badge, Banner, Segmented } from '@renderer/components/ui/misc'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { ModelField, SecretInput, TestResult } from '@renderer/components/ProviderForm'
 import { LanguageSelect } from '@renderer/components/LanguageSelect'
@@ -117,6 +123,7 @@ export function ProvidersPage({
               {inference.status?.models.stt && (
                 <Badge variant="outline">{inference.status.models.stt}</Badge>
               )}
+              {stt.speed === 'fast' && <Badge variant="outline">fast</Badge>}
               {(inference.billingEnabled || !inference.metered) && (
                 <Badge variant="success">{sourceCaption(inference)}</Badge>
               )}
@@ -207,6 +214,7 @@ function MurmurSpeechSection({
   inference: InferenceView
   onReady?: (ok: boolean) => void
 }): React.JSX.Element {
+  const { settings, patch } = useSettings()
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<ProviderTestResult | null>(null)
   const test = async (): Promise<void> => {
@@ -219,6 +227,9 @@ function MurmurSpeechSection({
   }
   const minutes = inference.minutes
   const share = minutes && minutes.limit > 0 ? Math.min(1, minutes.used / minutes.limit) : 0
+  // The instance said it has no fast model: Fast stays selectable (the instance answers on Normal
+  // and History says so), with the reason right under the control.
+  const fastMissing = inference.fastAvailable === false
   return (
     <Section title="Speech to text">
       <SettingRow
@@ -228,6 +239,32 @@ function MurmurSpeechSection({
         <Badge variant="outline" className="font-mono">
           {inference.status?.models.stt ?? 'murmur-transcribe'}
         </Badge>
+      </SettingRow>
+      <SettingRow
+        title="Speed"
+        description={
+          <>
+            {SPEED_SETTING_DESCRIPTION}
+            {fastMissing && (
+              <span className="mt-1 block text-foreground/80" data-testid="speed-unavailable">
+                {FAST_UNAVAILABLE_SETTING_NOTE}
+              </span>
+            )}
+          </>
+        }
+      >
+        <Segmented<SpeedMode>
+          value={settings.stt.speed}
+          onChange={(speed) => void patch({ stt: { speed } })}
+          options={[
+            { value: 'normal', label: speedLabel('normal') },
+            {
+              value: 'fast',
+              label: speedLabel('fast'),
+              hint: fastMissing ? FAST_UNAVAILABLE_SETTING_NOTE : undefined
+            }
+          ]}
+        />
       </SettingRow>
       <SettingRow
         title={inference.billingEnabled ? 'Plan' : 'Allowance'}

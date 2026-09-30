@@ -209,6 +209,7 @@ describe('DictationController and plan limits', () => {
       history,
       recorder: {
         pcm: speech(1.5),
+        on: vi.fn(),
         start: vi.fn(),
         cancel: vi.fn(),
         stop: vi.fn(async () => speech(1.5))

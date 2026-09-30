@@ -10,6 +10,12 @@ import {
 } from '@shared/ipc'
 import type { OverlayWindow } from '../windows/overlay'
 import { createLogger } from '../logger'
+import {
+  SAMPLE_RATE,
+  TestAudioStream,
+  type TestAudioClip,
+  type TestAudioSource
+} from './test-audio'
 
 const log = createLogger('recorder')
 
@@ -18,12 +24,19 @@ interface Capture {
   samples: number
   stopped: (() => void) | null
   timer: NodeJS.Timeout | null
+  /** Set when a clip on disk stands in for the microphone (`MURMUR_TEST_AUDIO_FILE`). */
+  fixture: TestAudioStream | null
 }
 
 /**
  * Main-process side of microphone capture. The overlay renderer streams 16 kHz Int16 PCM chunks
  * over IPC (about 32 KB/s) and we accumulate them per session so a renderer hiccup never loses
  * audio. An optional duration cap, if the user enabled it, is enforced by the session controller.
+ *
+ * With a test-audio source (development builds only), a clip on disk is streamed into the
+ * capture from this process at the microphone's pace instead: the renderer is not asked for
+ * audio, no device is opened, and nothing is played. `ended` is emitted for the session when
+ * the clip is spent.
  */
 export class Recorder extends EventEmitter {
   private captures = new Map<string, Capture>()
@@ -31,7 +44,10 @@ export class Recorder extends EventEmitter {
   status: AudioStatusMessage = { ready: false, warm: false }
   lastLevel = 0
 
-  constructor(private overlay: OverlayWindow) {
+  constructor(
+    private overlay: OverlayWindow,
+    private readonly testAudio: TestAudioSource | null = null
+  ) {
     super()
     ipcMain.on(IPC.audioChunk, (_e, msg: AudioChunkMessage) => this.onChunk(msg))
     ipcMain.on(IPC.audioStopped, (_e, msg: AudioStoppedMessage) => this.onStopped(msg))
@@ -67,13 +83,48 @@ export class Recorder extends EventEmitter {
   }
 
   start(sessionId: string, includePreBuffer: boolean): void {
-    this.captures.set(sessionId, { chunks: [], samples: 0, stopped: null, timer: null })
+    const cap: Capture = { chunks: [], samples: 0, stopped: null, timer: null, fixture: null }
+    this.captures.set(sessionId, cap)
+    if (this.testAudio) {
+      this.startFixture(this.testAudio, sessionId, cap)
+      return
+    }
     this.overlay.send(IPC.audioStart, { sessionId, includePreBuffer })
+  }
+
+  /**
+   * The stand-in microphone: the clip streams into this capture at real time, from this process
+   * straight into the path the renderer's chunks take, so no renderer, input device or output is
+   * involved. A clip that cannot be read leaves the capture empty (the dictation is "too short").
+   */
+  private startFixture(source: TestAudioSource, sessionId: string, cap: Capture): void {
+    const tag = sessionId.slice(0, 8)
+    let clip: TestAudioClip
+    try {
+      clip = source.next()
+    } catch (err) {
+      log.warn(`session ${tag}: fixture audio could not be read; the dictation gets no audio`, err)
+      return
+    }
+    log.info(
+      `session ${tag}: fixture audio ${clip.name} (${(clip.pcm.length / SAMPLE_RATE).toFixed(1)} s) stands in for the microphone`
+    )
+    cap.fixture = new TestAudioStream(clip.pcm, {
+      chunk: (pcm, level) => this.push(sessionId, cap, pcm, level),
+      ended: () => this.emit('ended', sessionId)
+    })
+    cap.fixture.start()
   }
 
   /** Ask the renderer to flush; resolves with all PCM (even if the renderer never answers). */
   stop(sessionId: string, graceMs = 1200): Promise<Int16Array> {
     const cap = this.captures.get(sessionId)
+    if (cap?.fixture) {
+      // The clip lives in this process: what is due up to now lands at once, no renderer to wait for.
+      cap.fixture.stop()
+      this.captures.delete(sessionId)
+      return Promise.resolve(concatInt16(cap.chunks))
+    }
     this.overlay.send(IPC.audioStop, { sessionId })
     if (!cap) return Promise.resolve(new Int16Array(0))
     return new Promise((resolve) => {
@@ -93,8 +144,9 @@ export class Recorder extends EventEmitter {
   }
 
   cancel(sessionId: string): void {
-    this.overlay.send(IPC.audioStop, { sessionId })
     const cap = this.captures.get(sessionId)
+    if (cap?.fixture) cap.fixture.stop()
+    else this.overlay.send(IPC.audioStop, { sessionId })
     if (cap?.timer) clearTimeout(cap.timer)
     this.captures.delete(sessionId)
   }
@@ -105,12 +157,16 @@ export class Recorder extends EventEmitter {
 
   private onChunk(msg: AudioChunkMessage): void {
     const cap = this.captures.get(msg.sessionId)
-    if (!cap) return
-    const pcm = new Int16Array(msg.pcm)
+    // A capture fed from a clip takes nothing from the renderer.
+    if (!cap || cap.fixture) return
+    this.push(msg.sessionId, cap, new Int16Array(msg.pcm), msg.level)
+  }
+
+  private push(sessionId: string, cap: Capture, pcm: Int16Array, level: number): void {
     cap.chunks.push(pcm)
     cap.samples += pcm.length
-    this.lastLevel = msg.level
-    this.emit('chunk', msg.sessionId, cap.samples, msg.level)
+    this.lastLevel = level
+    this.emit('chunk', sessionId, cap.samples, level)
   }
 
   private onStopped(msg: AudioStoppedMessage): void {

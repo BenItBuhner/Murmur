@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   compareVersions,
@@ -7,10 +8,12 @@ import {
 } from '../src/core/update/version'
 import {
   assetCandidates,
+  assetDigest,
   describeRelease,
   isTrustedAssetUrl,
   parseChecksums,
   pickAsset,
+  resolveChecksum,
   selectRelease,
   toUpdateArch,
   type GithubRelease
@@ -232,9 +235,162 @@ describe('checksums and trust', () => {
       tag: 'v0.2.0',
       name: 'v0.2.0',
       notes: '',
-      asset: null
+      asset: null,
+      sha256: null,
+      checksumProblem: null
     })
     expect(d.publishedAt).toBe(Date.parse('2026-09-01T10:00:00Z'))
+    const a = { name: 'x.AppImage', size: 1, browser_download_url: 'https://github.com/x' }
+    expect(
+      describeRelease(r, a, { kind: 'known', sha256: 'ab'.repeat(32), source: 'd' })
+    ).toMatchObject({ sha256: 'ab'.repeat(32), checksumProblem: null })
+    expect(describeRelease(r, a, { kind: 'missing', reason: 'no line' })).toMatchObject({
+      sha256: null,
+      checksumProblem: 'no line'
+    })
+  })
+
+  it('reads the digest GitHub attaches to an asset, and nothing that only looks like one', () => {
+    const a = (digest: string | null | undefined): Parameters<typeof assetDigest>[0] => ({
+      name: 'x',
+      size: 1,
+      browser_download_url: 'https://github.com/x',
+      digest
+    })
+    expect(assetDigest(a(`sha256:${'AB'.repeat(32)}`))).toBe('ab'.repeat(32))
+    expect(assetDigest(a(` sha256:${'ab'.repeat(32)} `))).toBe('ab'.repeat(32))
+    expect(assetDigest(a(`sha512:${'ab'.repeat(64)}`))).toBeNull()
+    expect(assetDigest(a('sha256:short'))).toBeNull()
+    expect(assetDigest(a(null))).toBeNull()
+    expect(assetDigest(a(undefined))).toBeNull()
+  })
+
+  it('tells a release without a checksum apart from a checksum it could not fetch', () => {
+    const r = release('v0.6.0')
+    const a = {
+      name: 'Murmur-0.6.0-x64-setup.exe',
+      size: 1,
+      browser_download_url: 'https://github.com/x'
+    }
+    const sums = `${'ab'.repeat(32)}  Murmur-0.6.0-x64-setup.exe\n`
+    expect(
+      resolveChecksum(
+        r,
+        { ...a, digest: `sha256:${'cd'.repeat(32)}` },
+        { sumsPresent: false, sums: null }
+      )
+    ).toEqual({
+      kind: 'known',
+      sha256: 'cd'.repeat(32),
+      source: 'GitHub asset digest'
+    })
+    expect(resolveChecksum(r, a, { sumsPresent: true, sums })).toEqual({
+      kind: 'known',
+      sha256: 'ab'.repeat(32),
+      source: 'SHA256SUMS.txt'
+    })
+    expect(resolveChecksum(r, a, { sumsPresent: false, sums: null })).toEqual({
+      kind: 'missing',
+      reason:
+        'Murmur 0.6.0 ships no SHA256SUMS.txt, so Murmur cannot verify Murmur-0.6.0-x64-setup.exe.'
+    })
+    expect(resolveChecksum(r, a, { sumsPresent: true, sums: 'nothing useful' })).toEqual({
+      kind: 'missing',
+      reason:
+        'The SHA256SUMS.txt of Murmur 0.6.0 has no entry for Murmur-0.6.0-x64-setup.exe, so Murmur cannot verify it.'
+    })
+    expect(
+      resolveChecksum(r, a, { sumsPresent: true, sums: null, sumsFetchError: 'HTTP 503' })
+    ).toEqual({
+      kind: 'unavailable',
+      reason:
+        'Could not download SHA256SUMS.txt for Murmur 0.6.0 (HTTP 503). Murmur will try again.'
+    })
+    expect(resolveChecksum(r, a, { sumsPresent: true, sums: null })).toMatchObject({
+      kind: 'unavailable',
+      reason: 'Could not download SHA256SUMS.txt for Murmur 0.6.0. Murmur will try again.'
+    })
+  })
+})
+
+/**
+ * The API responses GitHub really gave for v0.6.0 and v0.5.11 (tests/fixtures/updates, fetched
+ * anonymously on 2026-09-30) and the SHA256SUMS.txt those releases ship.
+ */
+describe('the real v0.6.0 and v0.5.11 releases', () => {
+  const fixture = (name: string): string =>
+    readFileSync(new URL(`./fixtures/updates/${name}`, import.meta.url), 'utf8')
+  const releases = ['v0.6.0', 'v0.5.11'].map((tag) => ({
+    tag,
+    release: JSON.parse(fixture(`github-release-${tag}.json`)) as GithubRelease,
+    sums: parseChecksums(fixture(`SHA256SUMS-${tag}.txt`))
+  }))
+
+  it('carry a digest on every asset that agrees with SHA256SUMS.txt', () => {
+    for (const { tag, release, sums } of releases) {
+      expect(release.tag_name).toBe(tag)
+      expect(release.draft).toBe(false)
+      expect(release.assets).toHaveLength(29)
+      expect(sums.size).toBe(28)
+      for (const asset of release.assets) {
+        expect(
+          isTrustedAssetUrl(asset.browser_download_url, 'https://github.com'),
+          asset.name
+        ).toBe(true)
+        if (asset.name === 'SHA256SUMS.txt') continue
+        expect(assetDigest(asset), `${tag} ${asset.name}`).toBe(sums.get(asset.name))
+      }
+    }
+  })
+
+  it('offer a verifiable file to every install kind the updater can apply', () => {
+    for (const { tag, release, sums } of releases) {
+      const v = normalizeVersion(tag)
+      const cases: Array<
+        [Parameters<typeof assetCandidates>[0], NodeJS.Platform, 'x64' | 'arm64', string]
+      > = [
+        ['nsis', 'win32', 'x64', `Murmur-${v}-x64-setup.exe`],
+        ['nsis', 'win32', 'arm64', `Murmur-${v}-arm64-setup.exe`],
+        ['appimage', 'linux', 'x64', `Murmur-${v}-x86_64.AppImage`],
+        ['appimage', 'linux', 'arm64', `Murmur-${v}-arm64.AppImage`],
+        ['deb', 'linux', 'x64', `murmur_${v}_amd64.deb`],
+        ['deb', 'linux', 'arm64', `murmur_${v}_arm64.deb`],
+        ['mac', 'darwin', 'x64', `Murmur-${v}-x64.zip`],
+        ['mac', 'darwin', 'arm64', `Murmur-${v}-arm64.zip`]
+      ]
+      for (const [kind, platform, arch, expected] of cases) {
+        const picked = pickAsset(release, assetCandidates(kind, platform, arch, tag))
+        expect(picked?.asset.name, `${tag} ${kind}/${arch}`).toBe(expected)
+        expect(picked?.installable).toBe(true)
+        const checksum = resolveChecksum(release, picked!.asset, { sumsPresent: true, sums: null })
+        expect(checksum).toEqual({
+          kind: 'known',
+          sha256: sums.get(expected),
+          source: 'GitHub asset digest'
+        })
+        const fallback = resolveChecksum(
+          release,
+          { ...picked!.asset, digest: null },
+          { sumsPresent: true, sums: fixture(`SHA256SUMS-${tag}.txt`) }
+        )
+        expect(fallback).toEqual({
+          kind: 'known',
+          sha256: sums.get(expected),
+          source: 'SHA256SUMS.txt'
+        })
+      }
+    }
+  })
+
+  it('are offered in the right order', () => {
+    const feed = releases.map((r) => r.release)
+    expect(
+      selectRelease(feed, { currentVersion: '0.5.11', includePrereleases: false })?.tag_name
+    ).toBe('v0.6.0')
+    expect(
+      selectRelease(feed, { currentVersion: '0.5.10', includePrereleases: false })?.tag_name
+    ).toBe('v0.6.0')
+    expect(selectRelease(feed, { currentVersion: '0.6.0', includePrereleases: false })).toBeNull()
   })
 })
 

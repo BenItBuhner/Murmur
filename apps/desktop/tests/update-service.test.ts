@@ -52,7 +52,12 @@ class FakeGitHub {
   status = 200
   headers: Record<string, string> = {}
   requests: string[] = []
+  /** The release lists a SHA256SUMS.txt asset. */
   withChecksums = true
+  /** Assets carry GitHub's `digest`, as they do on github.com today. */
+  withDigests = true
+  /** HTTP status the SHA256SUMS.txt download answers with. */
+  sumsStatus = 200
 
   fetch = async (url: string): Promise<Response> => {
     this.requests.push(url)
@@ -67,6 +72,7 @@ class FakeGitHub {
       const rel = this.releases.find((r) => r.tag === match[2])
       const name = decodeURIComponent(match[3])
       if (rel && name === 'SHA256SUMS.txt' && this.withChecksums) {
+        if (this.sumsStatus !== 200) return new Response('later', { status: this.sumsStatus })
         return new Response(this.checksums(rel), { status: 200 })
       }
       const asset = rel?.assets.find((a) => a.name === name)
@@ -87,7 +93,8 @@ class FakeGitHub {
     const assets = r.assets.map((a) => ({
       name: a.name,
       size: a.body.byteLength,
-      browser_download_url: `${base}/${a.name}`
+      browser_download_url: `${base}/${a.name}`,
+      ...(this.withDigests ? { digest: `sha256:${sha256(a.body)}` } : {})
     }))
     if (this.withChecksums) {
       assets.push({
@@ -109,14 +116,68 @@ class FakeGitHub {
   }
 
   private checksums(r: FakeGitHub['releases'][number]): string {
-    return r.assets
-      .map((a) => `${createHash('sha256').update(a.body).digest('hex')}  ${a.name}`)
-      .join('\n')
+    return r.assets.map((a) => `${sha256(a.body)}  ${a.name}`).join('\n')
   }
+}
+
+function sha256(body: Buffer): string {
+  return createHash('sha256').update(body).digest('hex')
 }
 
 function asset(name: string, content = `contents of ${name}`): FakeAsset {
   return { name, body: Buffer.from(content) }
+}
+
+/**
+ * GitHub as it answered for a real release (tests/fixtures/updates, fetched anonymously on
+ * 2026-09-30), with every github.com link pointing at the fake origin and the asset for this
+ * install standing for `payload`: its `size` and `digest` are rewritten to describe those bytes,
+ * every other field of the response is the real one. SHA256SUMS.txt is the real file with the
+ * lines for that asset rewritten the same way.
+ */
+function realRelease(
+  tag: string,
+  assetName: string,
+  payload: Buffer,
+  opts: { digests?: boolean; sumsStatus?: number } = {}
+): { fetch: (url: string) => Promise<Response>; requests: string[]; realSha256: string } {
+  const fixture = (name: string): string =>
+    readFileSync(new URL(`./fixtures/updates/${name}`, import.meta.url), 'utf8')
+  const release = JSON.parse(fixture(`github-release-${tag}.json`))
+  const realAsset = release.assets.find((a: { name: string }) => a.name === assetName)
+  const realSha256 = String(realAsset.digest).replace('sha256:', '')
+  for (const a of release.assets) {
+    if (a.name === assetName) {
+      a.size = payload.byteLength
+      a.digest = `sha256:${sha256(payload)}`
+    }
+    if (opts.digests === false) delete a.digest
+  }
+  const sums = fixture(`SHA256SUMS-${tag}.txt`).replaceAll(realSha256, sha256(payload))
+  const body = JSON.stringify([release]).replaceAll('https://github.com/', `${ORIGIN}/`)
+  const requests: string[] = []
+  return {
+    requests,
+    realSha256,
+    fetch: async (url: string): Promise<Response> => {
+      requests.push(url)
+      const u = new URL(url)
+      if (u.pathname === `/repos/${REPO}/releases`) {
+        return new Response(body, { headers: { 'content-type': 'application/json' } })
+      }
+      if (u.pathname.endsWith('/SHA256SUMS.txt')) {
+        return opts.sumsStatus && opts.sumsStatus !== 200
+          ? new Response('later', { status: opts.sumsStatus })
+          : new Response(sums)
+      }
+      if (u.pathname.endsWith(`/${assetName}`)) {
+        return new Response(new Uint8Array(payload), {
+          headers: { 'content-length': String(payload.byteLength) }
+        })
+      }
+      return new Response('not found', { status: 404 })
+    }
+  }
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -220,8 +281,11 @@ describe('UpdateService', () => {
       asset: { name: 'Murmur-0.2.0-x86_64.AppImage' }
     })
     expect(found.release?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(found.release?.checksumProblem).toBeNull()
     expect(found.canInstall).toBe(true)
     expect(found.lastCheckedAt).toBeGreaterThan(0)
+    // The digest came with the release JSON: the checksum file was never needed.
+    expect(gh.requests.some((u) => u.endsWith('/SHA256SUMS.txt'))).toBe(false)
 
     const ready = await service.download()
     expect(ready.phase).toBe('ready')
@@ -302,15 +366,166 @@ describe('UpdateService', () => {
   it('refuses to install when the release ships no checksums', async () => {
     settings.patch({ updates: { autoInstall: false } })
     gh.withChecksums = false
+    gh.withDigests = false
     const service = make()
     const found = await service.check({ manual: true })
     expect(found.release?.sha256).toBeNull()
+    expect(found.release?.checksumProblem).toBe(
+      'Murmur 0.2.0 ships no SHA256SUMS.txt, so Murmur cannot verify Murmur-0.2.0-x86_64.AppImage.'
+    )
     expect(found.canInstall).toBe(false)
     const ready = await service.download()
     expect(ready.phase).toBe('ready')
     await service.install()
     expect(applied).toEqual([])
     expect(service.getStatus().error).toMatch(/cannot update itself/)
+  })
+
+  it('falls back to SHA256SUMS.txt when the assets carry no digest', async () => {
+    settings.patch({ updates: { autoInstall: false } })
+    gh.withDigests = false
+    const service = make()
+    const found = await service.check({ manual: true })
+    expect(found.release?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(found.canInstall).toBe(true)
+    expect(gh.requests.filter((u) => u.endsWith('/SHA256SUMS.txt'))).toHaveLength(1)
+    const ready = await service.download()
+    expect(ready.phase).toBe('ready')
+    await service.install()
+    expect(applied).toHaveLength(1)
+  })
+
+  it('refuses when SHA256SUMS.txt has no line for the file', async () => {
+    settings.patch({ updates: { autoInstall: false } })
+    gh.withDigests = false
+    const withoutLine = gh.fetch
+    const service = make({
+      fetch: async (url) => {
+        const res = await withoutLine(url)
+        if (!url.endsWith('/SHA256SUMS.txt')) return res
+        const text = (await res.text())
+          .split('\n')
+          .filter((l) => !l.endsWith('x86_64.AppImage'))
+          .join('\n')
+        return new Response(text)
+      }
+    })
+    const found = await service.check({ manual: true })
+    expect(found.phase).toBe('available')
+    expect(found.release?.sha256).toBeNull()
+    expect(found.release?.checksumProblem).toBe(
+      'The SHA256SUMS.txt of Murmur 0.2.0 has no entry for Murmur-0.2.0-x86_64.AppImage, so Murmur cannot verify it.'
+    )
+    expect(found.canInstall).toBe(false)
+  })
+
+  it('reports a checksum file that cannot be downloaded as an error to retry, not as a release without checksums', async () => {
+    gh.withDigests = false
+    gh.sumsStatus = 503
+    const service = make({ checksumRetryDelaysMs: [5, 5] })
+    const failed = await service.check({ manual: false })
+    expect(failed.phase).toBe('error')
+    expect(failed.error).toBe(
+      'Could not download SHA256SUMS.txt for Murmur 0.2.0 (HTTP 503). Murmur will try again.'
+    )
+    expect(failed.error).not.toMatch(/ships no/)
+    expect(failed.release).toBeNull()
+    // Three attempts at the small file, and no asset: nothing could have verified it.
+    expect(gh.requests.filter((u) => u.endsWith('/SHA256SUMS.txt'))).toHaveLength(3)
+    await sleep(30)
+    expect(gh.requests.some((u) => u.endsWith('.AppImage'))).toBe(false)
+    expect(applied).toEqual([])
+
+    // GitHub is back: the next check picks the update up and installs it.
+    gh.sumsStatus = 200
+    const found = await service.check({ manual: false })
+    // The check kicks the download off before it returns.
+    expect(['available', 'downloading', 'ready']).toContain(found.phase)
+    expect(found.release?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    await vi.waitFor(() => expect(quit).toHaveBeenCalled())
+    expect(applied).toHaveLength(1)
+  })
+
+  it('re-downloads a kept file when the release now carries another checksum', async () => {
+    settings.patch({ updates: { autoInstall: false } })
+    const service = make()
+    await service.check({ manual: true })
+    const ready = await service.download()
+    expect(ready.phase).toBe('ready')
+    const downloads = (): number => gh.requests.filter((u) => u.endsWith('.AppImage')).length
+    expect(downloads()).toBe(1)
+
+    expect((await service.check({ manual: true })).phase).toBe('ready')
+    expect(downloads()).toBe(1)
+
+    // The asset was re-uploaded: what is on disk was verified against the old digest and goes.
+    gh.releases[1].assets[0].body = Buffer.from('rebuilt Murmur-0.2.0-x86_64.AppImage')
+    const changed = await service.check({ manual: true })
+    expect(changed.phase).toBe('available')
+    expect(changed.downloadedPath).toBeNull()
+    expect(existsSync(ready.downloadedPath!)).toBe(false)
+    expect(changed.release?.sha256).toBe(sha256(gh.releases[1].assets[0].body))
+  })
+
+  describe('against the real v0.6.0 and v0.5.11 releases', () => {
+    const payload = Buffer.alloc(120_000, 42)
+
+    async function installs(tag: string, from: string): Promise<void> {
+      const v = tag.replace(/^v/, '')
+      const real = realRelease(tag, `Murmur-${v}-x86_64.AppImage`, payload)
+      const service = make({ fetch: real.fetch, currentVersion: from })
+      const found = await service.check({ manual: false })
+      expect(['available', 'downloading', 'ready'], found.error ?? '').toContain(found.phase)
+      expect(found.release).toMatchObject({
+        version: v,
+        tag,
+        asset: { name: `Murmur-${v}-x86_64.AppImage` },
+        sha256: sha256(payload),
+        checksumProblem: null
+      })
+      expect(found.canInstall).toBe(true)
+      await vi.waitFor(() => expect(quit).toHaveBeenCalled())
+      expect(applied[0].file).toBe(join(dir, 'updates', `Murmur-${v}-x86_64.AppImage`))
+      expect(sha256(readFileSync(applied[0].file))).toBe(sha256(payload))
+      expect(real.requests.some((u) => u.endsWith('/SHA256SUMS.txt'))).toBe(false)
+      expect(real.realSha256).toMatch(/^[0-9a-f]{64}$/)
+    }
+
+    it('installs v0.6.0 on a 0.5.11 AppImage from the asset digest', () =>
+      installs('v0.6.0', '0.5.11'))
+
+    it('installs v0.5.11 on a 0.5.10 AppImage the same way', () => installs('v0.5.11', '0.5.10'))
+
+    it('verifies v0.6.0 against its SHA256SUMS.txt when the digests are gone', async () => {
+      const real = realRelease('v0.6.0', 'Murmur-0.6.0-x86_64.AppImage', payload, {
+        digests: false
+      })
+      const service = make({ fetch: real.fetch, currentVersion: '0.5.11' })
+      const found = await service.check({ manual: false })
+      expect(found.release?.sha256).toBe(sha256(payload))
+      expect(real.requests.filter((u) => u.endsWith('/SHA256SUMS.txt'))).toHaveLength(1)
+      await vi.waitFor(() => expect(quit).toHaveBeenCalled())
+    })
+
+    it('does not mistake a failed SHA256SUMS.txt download for a release without checksums', async () => {
+      const real = realRelease('v0.6.0', 'Murmur-0.6.0-x86_64.AppImage', payload, {
+        digests: false,
+        sumsStatus: 502
+      })
+      const service = make({
+        fetch: real.fetch,
+        currentVersion: '0.5.11',
+        checksumRetryDelaysMs: [5, 5]
+      })
+      const failed = await service.check({ manual: false })
+      expect(failed.phase).toBe('error')
+      expect(failed.error).toBe(
+        'Could not download SHA256SUMS.txt for Murmur 0.6.0 (HTTP 502). Murmur will try again.'
+      )
+      await sleep(30)
+      expect(real.requests.some((u) => u.endsWith('.AppImage'))).toBe(false)
+      expect(applied).toEqual([])
+    })
   })
 
   it('only downloads for installs that cannot replace themselves', async () => {

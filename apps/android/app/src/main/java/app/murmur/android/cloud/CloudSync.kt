@@ -24,9 +24,7 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -632,6 +630,15 @@ class CloudSync internal constructor(
         scope.launch { flush() }
     }
 
+    /**
+     * Cloud work threw outside every catch (the scope's exception handler brings it here): shown
+     * as a sync issue on the Account screen instead of ending the process.
+     */
+    fun reportFailure(e: Throwable) {
+        error = CloudBootstrap.describe(e)
+        publish()
+    }
+
     suspend fun signOut() {
         client?.logout(app)
     }
@@ -799,16 +806,22 @@ class CloudSync internal constructor(
                 .filter { it.first }
                 .map { it.second }
 
-        fun init(context: Context, config: CloudConfig, settings: SettingsStore, history: HistoryStore): CloudSync =
+        /**
+         * The app's engine, on the Convex [client] and [scope] the bootstrap made (see
+         * [CloudBootstrap]: the client's construction and this call each run behind its catch).
+         */
+        fun init(
+            context: Context,
+            config: CloudConfig,
+            settings: SettingsStore,
+            history: HistoryStore,
+            client: ConvexClientWithAuth<ClerkCredentials>,
+            scope: CoroutineScope
+        ): CloudSync =
             instance ?: synchronized(this) {
-                instance ?: run {
-                    val app = context.applicationContext
-                    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-                    val client = if (config.enabled) ConvexClientWithAuth(config.convexUrl, ClerkAuthProvider(), scope) else null
-                    CloudSync(app, config, settings, history, clerkAccount(), scope, client).also {
-                        instance = it
-                        it.start()
-                    }
+                instance ?: CloudSync(context.applicationContext, config, settings, history, clerkAccount(), scope, client).also {
+                    instance = it
+                    it.start()
                 }
             }
 

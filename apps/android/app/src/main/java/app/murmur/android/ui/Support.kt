@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import app.murmur.android.MurmurApplication
+import app.murmur.android.cloud.CloudBootstrap
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.InferenceStatusDto
@@ -106,8 +107,11 @@ fun rememberInferenceView(settings: MurmurSettings): InferenceView {
     val app = LocalContext.current.applicationContext
     val config = (app as? MurmurApplication)?.cloudConfig ?: CloudConfig.OFF
     val syncStatus = CloudSync.get()?.status?.collectAsState()?.value
-    val clerkUser by (if (config.enabled) Clerk.userFlow else remember { MutableStateFlow(null) }).collectAsState()
-    val signedIn = config.enabled && clerkUser != null
+    // Clerk is read only once the cloud came up; a failed cloud may not even have its classes.
+    val cloud by CloudBootstrap.state.collectAsState()
+    val cloudUsable = config.enabled && cloud.usable
+    val clerkUser by (if (cloudUsable) Clerk.userFlow else remember { MutableStateFlow(null) }).collectAsState()
+    val signedIn = cloudUsable && clerkUser != null
     val status = syncStatus?.inference
     val managedAvailable = status?.available ?: true
     val routing = Inference.resolveSources(settings, config.managedModels, managedAvailable)

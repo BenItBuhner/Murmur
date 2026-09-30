@@ -4,20 +4,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, internal } from '../convex/_generated/api'
 import {
   MAX_TRANSCRIPT_CHARS,
+  SPEED_FALLBACK_HEADER,
+  SPEED_HEADER,
+  chooseSttModel,
   clipSeconds,
   describeUpstreamFailure,
   modelsPayload,
   multipartBoundary,
   parseFormatRequest,
   parseMultipart,
+  parseSpeedMode,
   readUpstreams,
+  speedModesFor,
   subjectOf,
   tokensUsed,
   upstreamModelFor,
+  upstreamRejectedModel,
   wavInfo
 } from '../convex/lib/inference'
 import { MAX_CLIP_SECONDS, PLANS, TRIAL_MS, usagePeriod } from '../convex/lib/plans'
 import {
+  FAST_ENV,
+  FAST_MODEL,
   LLM_ENV,
   STT_ENV,
   ada,
@@ -45,7 +53,8 @@ describe('inference helpers', () => {
       baseUrl: 'https://stt.example.test/v1',
       apiKey: 'sk-stt-secret',
       model: 'whisper-large-v3-turbo',
-      proModel: undefined
+      proModel: undefined,
+      fastModel: undefined
     })
     expect(both.llm?.proModel).toBe('openai/gpt-oss-120b')
     expect(upstreamModelFor(both.llm!, 'free')).toBe('openai/gpt-oss-20b')
@@ -53,6 +62,90 @@ describe('inference helpers', () => {
     expect(upstreamModelFor(both.stt!, 'pro')).toBe('whisper-large-v3-turbo')
     expect(modelsPayload(both).data.map((m) => m.id)).toEqual(['murmur-transcribe', 'murmur-format'])
     expect(modelsPayload(readUpstreams(STT_ENV)).data.map((m) => m.id)).toEqual(['murmur-transcribe'])
+  })
+
+  it('reads the fast speech model and tells which speed modes the instance offers', () => {
+    const plain = readUpstreams(STT_ENV).stt!
+    expect(plain.fastModel).toBeUndefined()
+    expect(speedModesFor(plain)).toEqual(['normal'])
+    expect(speedModesFor(null)).toEqual([])
+    expect(readUpstreams({ ...STT_ENV, MURMUR_INFERENCE_STT_FAST_MODEL: '   ' }).stt!.fastModel).toBeUndefined()
+    const fast = readUpstreams({ ...STT_ENV, ...FAST_ENV }).stt!
+    expect(fast.fastModel).toBe(FAST_MODEL)
+    expect(speedModesFor(fast)).toEqual(['normal', 'fast'])
+    // The variable exists for speech only; a formatting model never has a fast twin.
+    expect(readUpstreams({ ...LLM_ENV, MURMUR_INFERENCE_LLM_FAST_MODEL: 'x' }).llm!.fastModel).toBeUndefined()
+    expect(modelsPayload(readUpstreams({ ...STT_ENV, ...FAST_ENV })).data[0].speed_modes).toEqual(['normal', 'fast'])
+    expect(modelsPayload(readUpstreams({ ...STT_ENV, ...LLM_ENV })).data).toMatchObject([
+      { id: 'murmur-transcribe', speed_modes: ['normal'] },
+      { id: 'murmur-format' }
+    ])
+    expect(modelsPayload(readUpstreams({ ...STT_ENV, ...LLM_ENV })).data[1]).not.toHaveProperty('speed_modes')
+  })
+
+  it('parses the speed field: absent is normal, anything but a mode is refused', () => {
+    expect(parseSpeedMode(undefined)).toBe('normal')
+    expect(parseSpeedMode('')).toBe('normal')
+    expect(parseSpeedMode('normal')).toBe('normal')
+    expect(parseSpeedMode('fast')).toBe('fast')
+    expect(parseSpeedMode(' Fast ')).toBe('fast')
+    expect(parseSpeedMode('turbo')).toBeNull()
+    expect(parseSpeedMode('fastest')).toBeNull()
+  })
+
+  it('picks the model for a speed within the tier, and marks a fast request the instance cannot serve', () => {
+    const plain = readUpstreams({ ...STT_ENV, MURMUR_INFERENCE_STT_PRO_MODEL: 'whisper-pro' }).stt!
+    const fast = readUpstreams({ ...STT_ENV, ...FAST_ENV, MURMUR_INFERENCE_STT_PRO_MODEL: 'whisper-pro' }).stt!
+    // Normal: exactly what the tier got before speed modes existed.
+    expect(chooseSttModel(plain, 'free', 'normal')).toEqual({ model: 'whisper-large-v3-turbo', speed: 'normal' })
+    expect(chooseSttModel(plain, 'pro', 'normal')).toEqual({ model: 'whisper-pro', speed: 'normal' })
+    expect(chooseSttModel(fast, 'unlimited', 'normal')).toEqual({ model: 'whisper-pro', speed: 'normal' })
+    // Fast: the one fast model for every tier, with the tier's model at hand for the fallback.
+    expect(chooseSttModel(fast, 'free', 'fast')).toEqual({
+      model: FAST_MODEL,
+      speed: 'fast',
+      normalModel: 'whisper-large-v3-turbo'
+    })
+    expect(chooseSttModel(fast, 'pro', 'fast')).toEqual({ model: FAST_MODEL, speed: 'fast', normalModel: 'whisper-pro' })
+    // Fast without a fast model: the tier's model, reported as a fallback.
+    expect(chooseSttModel(plain, 'free', 'fast')).toEqual({
+      model: 'whisper-large-v3-turbo',
+      speed: 'normal',
+      fallback: 'not_configured'
+    })
+    expect(chooseSttModel(plain, 'pro', 'fast')).toEqual({ model: 'whisper-pro', speed: 'normal', fallback: 'not_configured' })
+  })
+
+  it('tells a provider that does not know the fast model from every other failure', () => {
+    const m = 'transcribe-1-fast'
+    // OpenAI and Groq: a 400/404 with the model_not_found code, or the model named as missing.
+    expect(
+      upstreamRejectedModel(
+        404,
+        `{"error":{"message":"The model \`${m}\` does not exist or you do not have access to it.","type":"invalid_request_error","param":null,"code":"model_not_found"}}`,
+        m
+      )
+    ).toBe(true)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"nope","code":"model_not_found"}}`, m)).toBe(true)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"Unknown value","param":"model"}}`, m)).toBe(true)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"The model \`${m}\` does not exist."}}`, m)).toBe(true)
+    expect(upstreamRejectedModel(422, `{"detail":"Model '${m}' is not found","message":"Model '${m}' is not found"}`, m)).toBe(true)
+    expect(upstreamRejectedModel(400, `model ${m} has been retired`, m)).toBe(true)
+    expect(upstreamRejectedModel(400, `{"error":"unknown model: ${m}"}`, m)).toBe(true)
+    // vLLM, LocalAI, Speaches: a 404 whatever the body.
+    expect(upstreamRejectedModel(404, `{"object":"error","message":"The model \`${m}\` does not exist.","type":"NotFoundError"}`, m)).toBe(true)
+    expect(upstreamRejectedModel(404, 'Not Found', m)).toBe(true)
+    // Real answers: credentials, rate limits, outages, and a parameter the model rejects.
+    expect(upstreamRejectedModel(401, `{"error":{"message":"Invalid API key"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(429, `{"error":{"message":"model ${m} is not available right now, slow down"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(500, `{"error":{"message":"model ${m} does not exist"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(503, 'model unavailable', m)).toBe(false)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"timestamp_granularities is not supported for model ${m}"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"response_format verbose_json is not available for ${m}"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"Unsupported language 'xx' for model ${m}"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"Invalid file format. Supported formats: wav, mp3"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(400, `{"error":{"message":"Audio file is too long"}}`, m)).toBe(false)
+    expect(upstreamRejectedModel(400, 'Bad Request', m)).toBe(false)
   })
 
   it('parses multipart bodies produced by the Fetch API, binary parts intact', async () => {
@@ -500,6 +593,235 @@ describe('managed inference gateway', () => {
     await t.run(async (ctx) => {
       expect(await ctx.db.query('inferenceUsage').collect()).toHaveLength(0)
     })
+  })
+})
+
+describe('speed modes on /v1/audio/transcriptions', () => {
+  const NORMAL = 'whisper-large-v3-turbo'
+  const PRO = 'whisper-large-v3-pro'
+  /** The models the provider was asked for, in order, plus whether the `speed` field leaked. */
+  const sent = (calls: Array<{ init: RequestInit }>): Array<{ model: string | null; speed: string | null }> =>
+    calls.map((c) => {
+      const form = c.init.body as FormData
+      return { model: form.get('model') as string | null, speed: form.get('speed') as string | null }
+    })
+  const modelNotFound = (model: string): Response =>
+    jsonResponse(
+      {
+        error: {
+          message: `The model \`${model}\` does not exist or you do not have access to it.`,
+          type: 'invalid_request_error',
+          param: null,
+          code: 'model_not_found'
+        }
+      },
+      404
+    )
+
+  it('a client that sends no speed (every client before speed modes) gets the normal model, unchanged', async () => {
+    stubEnv({ ...STT_ENV, ...FAST_ENV })
+    const calls = stubFetch(() => jsonResponse({ text: 'as before', duration: 2 }))
+    const t = setup()
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(2), { language: 'en' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ text: 'as before', duration: 2 })
+    expect(sent(calls)).toEqual([{ model: NORMAL, speed: null }])
+    expect(res.headers.get(SPEED_HEADER)).toBe('normal')
+    expect(res.headers.get(SPEED_FALLBACK_HEADER)).toBeNull()
+  })
+
+  it('normal asks for the tier model as before, on every tier; the speed field never reaches the provider', async () => {
+    stubEnv({ ...STT_ENV, ...FAST_ENV, MURMUR_INFERENCE_STT_PRO_MODEL: PRO })
+    const calls = stubFetch(() => jsonResponse({ text: 'ok' }))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    const free = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'normal' }))
+    expect(free.status).toBe(200)
+    expect(free.headers.get(SPEED_HEADER)).toBe('normal')
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'pro' })
+    const pro = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'normal' }))
+    expect(pro.status).toBe(200)
+    expect(sent(calls)).toEqual([
+      { model: NORMAL, speed: null },
+      { model: PRO, speed: null }
+    ])
+  })
+
+  it('fast uses the fast model when the instance has one, whatever the tier, and says so', async () => {
+    stubEnv({ ...STT_ENV, ...FAST_ENV, MURMUR_INFERENCE_STT_PRO_MODEL: PRO })
+    const calls = stubFetch(() => jsonResponse({ text: 'quick', duration: 3 }))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    const free = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(3), { speed: 'fast', language: 'en' }))
+    expect(free.status).toBe(200)
+    expect(await free.json()).toEqual({ text: 'quick', duration: 3 })
+    expect(free.headers.get(SPEED_HEADER)).toBe('fast')
+    expect(free.headers.get(SPEED_FALLBACK_HEADER)).toBeNull()
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'pro' })
+    const pro = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(3), { speed: 'fast' }))
+    expect(pro.headers.get(SPEED_HEADER)).toBe('fast')
+    expect(sent(calls)).toEqual([
+      { model: FAST_MODEL, speed: null },
+      { model: FAST_MODEL, speed: null }
+    ])
+    // The other passthrough fields travel as before.
+    expect((calls[0].init.body as FormData).get('language')).toBe('en')
+    // Metering is unchanged: two speech requests, the clip lengths, no matter the speed.
+    const status = await asAda.query(api.inference.status, {})
+    expect(status.usage.sttRequests).toBe(2)
+    expect(status.usage.sttSeconds).toBeCloseTo(6, 2)
+  })
+
+  it('fast on an instance without a fast model runs the normal model and reports the fallback', async () => {
+    stubEnv({ ...STT_ENV, MURMUR_INFERENCE_STT_PRO_MODEL: PRO })
+    const calls = stubFetch(() => jsonResponse({ text: 'steady' }))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    const free = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
+    expect(free.status).toBe(200)
+    expect(await free.json()).toEqual({ text: 'steady' })
+    expect(free.headers.get(SPEED_HEADER)).toBe('normal')
+    expect(free.headers.get(SPEED_FALLBACK_HEADER)).toBe('not_configured')
+    // Within the tier: a Pro account falls back to its Pro model.
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'pro' })
+    const pro = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
+    expect(pro.headers.get(SPEED_HEADER)).toBe('normal')
+    expect(pro.headers.get(SPEED_FALLBACK_HEADER)).toBe('not_configured')
+    // One provider call each: nothing to try before the normal model.
+    expect(sent(calls)).toEqual([
+      { model: NORMAL, speed: null },
+      { model: PRO, speed: null }
+    ])
+    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(2)
+  })
+
+  it('fast that the provider does not know yet is repeated on the normal model, billed once, and reported', async () => {
+    stubEnv({ ...STT_ENV, ...FAST_ENV })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const calls = stubFetch((_url, init) => {
+      const model = (init.body as FormData).get('model')
+      return model === FAST_MODEL ? modelNotFound(FAST_MODEL) : jsonResponse({ text: 'from the normal model', duration: 4 })
+    })
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const wav = makeWav(4)
+    const res = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(wav, { speed: 'fast', prompt: 'Murmur.' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ text: 'from the normal model', duration: 4 })
+    expect(res.headers.get(SPEED_HEADER)).toBe('normal')
+    expect(res.headers.get(SPEED_FALLBACK_HEADER)).toBe('model_not_found')
+    expect(sent(calls)).toEqual([
+      { model: FAST_MODEL, speed: null },
+      { model: NORMAL, speed: null }
+    ])
+    // The second request carries the same clip and fields.
+    for (const call of calls) {
+      const form = call.init.body as FormData
+      expect((form.get('file') as File).size).toBe(wav.length)
+      expect(form.get('prompt')).toBe('Murmur.')
+    }
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/fast model "whisper-large-v3-fast" rejected by the provider \(HTTP 404\)/))
+    warn.mockRestore()
+    const status = await asAda.query(api.inference.status, {})
+    expect(status.usage.sttRequests).toBe(1)
+    expect(status.usage.sttSeconds).toBeCloseTo(4, 2)
+
+    // A 400 with the provider's model_not_found code is the same story.
+    const second = stubFetch((_url, init) =>
+      (init.body as FormData).get('model') === FAST_MODEL
+        ? jsonResponse({ error: { message: 'Unknown model', code: 'model_not_found' } }, 400)
+        : jsonResponse({ text: 'again' })
+    )
+    const again = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
+    expect(again.status).toBe(200)
+    expect(again.headers.get(SPEED_FALLBACK_HEADER)).toBe('model_not_found')
+    expect(sent(second).map((c) => c.model)).toEqual([FAST_MODEL, NORMAL])
+  })
+
+  it('a real failure of the fast model is reported as it is, never masked by the normal model', async () => {
+    stubEnv({ ...STT_ENV, ...FAST_ENV })
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    let upstream: Response = jsonResponse({ error: { message: 'timestamp_granularities is not supported for this model' } }, 400)
+    const calls = stubFetch(() => upstream)
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    // A parameter the fast model rejects: passed through, so the client can adapt as it does today.
+    const param = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
+    expect(param.status).toBe(400)
+    expect((await param.json()).error).toMatchObject({ code: 'bad_request', message: /timestamp_granularities/ })
+    upstream = new Response('Invalid API key', { status: 401 })
+    expect((await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))).status).toBe(502)
+    upstream = new Response('slow down', { status: 429 })
+    expect((await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))).status).toBe(503)
+    upstream = new Response('boom', { status: 500 })
+    const down = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
+    expect(down.status).toBe(502)
+    expect((await down.json()).error.code).toBe('upstream_error')
+    // One provider call per request: the normal model was never tried.
+    expect(sent(calls)).toEqual(Array(4).fill({ model: FAST_MODEL, speed: null }))
+    for (const status of [param, down]) expect(status.headers.get(SPEED_HEADER)).toBeNull()
+    // Nothing billed for requests the provider never answered.
+    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(0)
+
+    // When the normal model fails too, its error is the answer.
+    const second = stubFetch((_url, init) =>
+      (init.body as FormData).get('model') === FAST_MODEL ? modelNotFound(FAST_MODEL) : new Response('boom', { status: 500 })
+    )
+    const both = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
+    expect(both.status).toBe(502)
+    expect((await both.json()).error.code).toBe('upstream_error')
+    expect(sent(second).map((c) => c.model)).toEqual([FAST_MODEL, NORMAL])
+    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(0)
+    vi.restoreAllMocks()
+  })
+
+  it('refuses a speed that is not a mode before touching the provider', async () => {
+    stubEnv({ ...STT_ENV, ...FAST_ENV })
+    const calls = stubFetch(() => jsonResponse({ text: 'x' }))
+    const t = setup()
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'turbo' }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toEqual({
+      message: '"speed" must be one of: normal, fast',
+      type: 'murmur_gateway_error',
+      code: 'bad_request'
+    })
+    expect(calls).toHaveLength(0)
+    expect((await t.withIdentity(ada).query(api.inference.status, {})).usage.sttRequests).toBe(0)
+  })
+
+  it('takes the speed as a query parameter on the raw-audio form', async () => {
+    stubEnv({ ...STT_ENV, ...FAST_ENV })
+    const calls = stubFetch(() => jsonResponse({ text: 'raw' }))
+    const t = setup()
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions?model=murmur-transcribe&speed=fast', {
+      method: 'POST',
+      headers: { 'content-type': 'audio/wav' },
+      body: makeWav(1) as BodyInit
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get(SPEED_HEADER)).toBe('fast')
+    expect(sent(calls)).toEqual([{ model: FAST_MODEL, speed: null }])
+  })
+
+  it('inference.status and /v1/models say which speed modes the instance offers', async () => {
+    stubEnv({ ...STT_ENV, ...LLM_ENV })
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    expect((await asAda.query(api.inference.status, {})).speedModes).toEqual(['normal'])
+    expect((await (await asAda.fetch('/v1/models')).json()).data[0]).toMatchObject({ id: 'murmur-transcribe', speed_modes: ['normal'] })
+    stubEnv(FAST_ENV)
+    expect((await asAda.query(api.inference.status, {})).speedModes).toEqual(['normal', 'fast'])
+    expect((await (await asAda.fetch('/v1/models')).json()).data[0].speed_modes).toEqual(['normal', 'fast'])
+    // Without a speech model there is nothing to be quick or slow about.
+    vi.unstubAllEnvs()
+    stubEnv(LLM_ENV)
+    const none = await asAda.query(api.inference.status, {})
+    expect(none.available).toBe(false)
+    expect(none.speedModes).toEqual([])
   })
 })
 

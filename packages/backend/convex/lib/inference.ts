@@ -35,6 +35,11 @@ export interface Upstream {
   model: string
   /** Optional better model for paid accounts. */
   proModel?: string
+  /**
+   * Optional quicker model behind the `fast` speed mode (speech only). Whatever the tier: fast is
+   * a trade the account makes within its own tier, not a tier of its own.
+   */
+  fastModel?: string
 }
 
 export interface Upstreams {
@@ -47,32 +52,160 @@ export type Env = Record<string, string | undefined>
 /**
  * Operator configuration, read from the deployment's environment variables:
  *
- *   MURMUR_INFERENCE_STT_URL / _KEY / _MODEL / _PRO_MODEL   speech to text
- *   MURMUR_INFERENCE_LLM_URL / _KEY / _MODEL / _PRO_MODEL   smart formatting
+ *   MURMUR_INFERENCE_STT_URL / _KEY / _MODEL / _PRO_MODEL / _FAST_MODEL   speech to text
+ *   MURMUR_INFERENCE_LLM_URL / _KEY / _MODEL / _PRO_MODEL                 smart formatting
  *
  * A kind is offered only when its URL and model are both set; the key is optional for upstreams
- * that do not need one.
+ * that do not need one. `_FAST_MODEL` exists for speech only.
  */
 export function readUpstreams(env: Env): Upstreams {
-  const read = (prefix: string): Upstream | null => {
+  const read = (prefix: string, speedModes: boolean): Upstream | null => {
     const baseUrl = (env[`${prefix}_URL`] ?? '').trim().replace(/\/+$/, '')
     const model = (env[`${prefix}_MODEL`] ?? '').trim()
     if (!baseUrl || !model || !/^https?:\/\//i.test(baseUrl)) return null
     const proModel = (env[`${prefix}_PRO_MODEL`] ?? '').trim()
+    const fastModel = speedModes ? (env[`${prefix}_FAST_MODEL`] ?? '').trim() : ''
     return {
       baseUrl,
       apiKey: (env[`${prefix}_KEY`] ?? '').trim(),
       model,
-      proModel: proModel || undefined
+      proModel: proModel || undefined,
+      fastModel: fastModel || undefined
     }
   }
-  return { stt: read('MURMUR_INFERENCE_STT'), llm: read('MURMUR_INFERENCE_LLM') }
+  return { stt: read('MURMUR_INFERENCE_STT', true), llm: read('MURMUR_INFERENCE_LLM', false) }
 }
 
 export function upstreamModelFor(upstream: Upstream, plan: Plan): string {
   return (plan === 'pro' || plan === 'unlimited') && upstream.proModel
     ? upstream.proModel
     : upstream.model
+}
+
+// ---- speed modes -----------------------------------------------------------------------------
+
+/**
+ * How quickly the managed speech model should answer. `normal` is the instance's model as before
+ * (`_MODEL`, or `_PRO_MODEL` for the tiers that get it); `fast` asks for the quicker model behind
+ * `MURMUR_INFERENCE_STT_FAST_MODEL`, when the instance has one.
+ */
+export const SPEED_MODES = ['normal', 'fast'] as const
+export type SpeedMode = (typeof SPEED_MODES)[number]
+
+/**
+ * The request field that carries the mode: a `speed` form part on `/v1/audio/transcriptions`
+ * (or a query parameter on the raw-audio form). Absent means `normal`, so clients that predate
+ * speed modes are unaffected.
+ */
+export const SPEED_FIELD = 'speed'
+
+/** Response header: the mode that actually transcribed the clip. */
+export const SPEED_HEADER = 'x-murmur-speed'
+
+/**
+ * Response header, present only when the requested mode could not be honoured and the normal
+ * model answered instead: why (`not_configured`: the instance has no fast model; `model_not_found`:
+ * the provider does not know the fast model yet).
+ */
+export const SPEED_FALLBACK_HEADER = 'x-murmur-speed-fallback'
+
+export type SpeedFallback = 'not_configured' | 'model_not_found'
+
+/** The mode a request asked for; null for a value that is not a speed mode. */
+export function parseSpeedMode(value: string | undefined): SpeedMode | null {
+  const v = (value ?? '').trim().toLowerCase()
+  if (!v) return 'normal'
+  return (SPEED_MODES as readonly string[]).includes(v) ? (v as SpeedMode) : null
+}
+
+/** The speed modes the instance's speech model offers; empty without a speech model. */
+export function speedModesFor(upstream: Upstream | null): SpeedMode[] {
+  if (!upstream) return []
+  return upstream.fastModel ? ['normal', 'fast'] : ['normal']
+}
+
+/** Which upstream model a speech request goes to, and how that will be reported. */
+export interface SttModelChoice {
+  /** The model to try first. */
+  model: string
+  /** The mode `model` stands for. */
+  speed: SpeedMode
+  /**
+   * The normal model, kept at hand when `model` is the fast one, for when the provider does not
+   * know it. Absent when `model` already is the normal model.
+   */
+  normalModel?: string
+  /** Set when the request asked for `fast` and the instance has no fast model. */
+  fallback?: SpeedFallback
+}
+
+/**
+ * The model for a speech request: the tier's model for `normal`; the fast model for `fast`, or,
+ * without one, the tier's model again, marked as a fallback so the client learns that Fast is not
+ * available here yet. The tier logic is untouched: fast applies within whatever tier the account
+ * has, and Pro accounts asking for `normal` still get `_PRO_MODEL`.
+ */
+export function chooseSttModel(upstream: Upstream, plan: Plan, speed: SpeedMode): SttModelChoice {
+  const normal = upstreamModelFor(upstream, plan)
+  if (speed !== 'fast') return { model: normal, speed: 'normal' }
+  if (!upstream.fastModel) return { model: normal, speed: 'normal', fallback: 'not_configured' }
+  return { model: upstream.fastModel, speed: 'fast', normalModel: normal }
+}
+
+/** Codes OpenAI-compatible providers put on `error.code` when the model itself is the problem. */
+const MODEL_ERROR_CODES =
+  /^(model_not_found|model_not_available|model_unavailable|unknown_model|invalid_model|no_such_model|model_decommissioned|model_terminated)$/i
+
+/** What providers say when they do not know a model, as distinct from any other 4xx. */
+const MODEL_MISSING_PHRASES =
+  /\bnot found\b|\bdoes not exist\b|\bdoesn't exist\b|\bdo not exist\b|\bno such model\b|\bunknown model\b|\bnot available\b|\bunavailable\b|\bno access\b|\bdecommissioned\b|\bhas been (?:removed|retired|deprecated)\b|\binvalid model\b|\bnot a (?:valid|supported|known) model\b|\bunsupported model\b|\bis not (?:a )?(?:valid|supported|available|known)\b/i
+
+/**
+ * Words that name another request parameter: a 400 about one of these is about the request, not
+ * about whether the model exists, even when the message quotes the model id.
+ */
+const OTHER_PARAMETERS =
+  /timestamp_granularit|response_format|\blanguages?\b|\bprompt\b|\btemperature\b|\bfile\b/i
+
+/**
+ * Did the provider turn a request down because it does not know (or does not serve) `model`?
+ * Only then is a fast request worth repeating with the normal model; anything else (bad
+ * credentials, a rate limit, a parameter the model rejects, an outage) is a real answer that the
+ * normal model would only mask, so it is reported as it is.
+ *
+ * A 404 counts whatever the body says: OpenAI-compatible servers (vLLM, LocalAI, Speaches) answer
+ * an unknown model with one, and a 404 on the route itself fails the normal model the same way,
+ * which is then the error the client sees.
+ */
+export function upstreamRejectedModel(status: number, body: string, model: string): boolean {
+  if (status === 404) return true
+  if (status !== 400 && status !== 422) return false
+  let code = ''
+  let param = ''
+  let message = body.trim().slice(0, 1000)
+  try {
+    const json = JSON.parse(body) as {
+      error?: { message?: string; code?: unknown; param?: unknown; type?: unknown } | string
+      message?: string
+      code?: unknown
+      param?: unknown
+    }
+    const error = typeof json.error === 'object' && json.error ? json.error : undefined
+    if (typeof json.error === 'string') message = json.error
+    else if (error?.message) message = error.message
+    else if (typeof json.message === 'string') message = json.message
+    const c = error?.code ?? json.code
+    if (typeof c === 'string') code = c
+    const p = error?.param ?? json.param
+    if (typeof p === 'string') param = p
+  } catch {
+    // plain text
+  }
+  if (MODEL_ERROR_CODES.test(code)) return true
+  if (param === 'model') return true
+  const text = message.toLowerCase()
+  const aboutTheModel = model ? text.includes(model.toLowerCase()) || /\bmodel\b/.test(text) : /\bmodel\b/.test(text)
+  return aboutTheModel && !OTHER_PARAMETERS.test(text) && MODEL_MISSING_PHRASES.test(text)
 }
 
 /**
@@ -156,16 +289,30 @@ export async function subjectOf(auth: {
 /** Which managed models an account can currently ask for, in `/v1/models` shape. */
 export function modelsPayload(upstreams: Upstreams): {
   object: 'list'
-  data: Array<{ id: string; object: 'model'; owned_by: 'murmur'; capability: InferenceKind }>
+  data: Array<{
+    id: string
+    object: 'model'
+    owned_by: 'murmur'
+    capability: InferenceKind
+    /** Speech only: the `speed` values the model takes. */
+    speed_modes?: SpeedMode[]
+  }>
 } {
   const data: Array<{
     id: string
     object: 'model'
     owned_by: 'murmur'
     capability: InferenceKind
+    speed_modes?: SpeedMode[]
   }> = []
   if (upstreams.stt)
-    data.push({ id: MURMUR_MODELS.stt, object: 'model', owned_by: 'murmur', capability: 'stt' })
+    data.push({
+      id: MURMUR_MODELS.stt,
+      object: 'model',
+      owned_by: 'murmur',
+      capability: 'stt',
+      speed_modes: speedModesFor(upstreams.stt)
+    })
   if (upstreams.llm)
     data.push({ id: MURMUR_MODELS.llm, object: 'model', owned_by: 'murmur', capability: 'llm' })
   return { object: 'list', data }

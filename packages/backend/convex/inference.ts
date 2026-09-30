@@ -25,7 +25,13 @@ import {
 } from './lib/entitlements'
 import { accessStateOf } from './lib/access'
 import { authedQuery } from './lib/functions'
-import { MURMUR_MODELS, accountUrlFor, readUpstreams, upgradeUrlFor } from './lib/inference'
+import {
+  MURMUR_MODELS,
+  accountUrlFor,
+  readUpstreams,
+  speedModesFor,
+  upgradeUrlFor
+} from './lib/inference'
 import {
   DAY_MS,
   RATE_WINDOW_MS,
@@ -147,6 +153,7 @@ export const status = authedQuery({
         stt: upstreams.stt ? MURMUR_MODELS.stt : null,
         llm: upstreams.llm ? MURMUR_MODELS.llm : null
       },
+      speedModes: speedModesFor(upstreams.stt),
       plan,
       planState,
       trialEndsAt: ctx.user?.trialEndsAt ?? null,

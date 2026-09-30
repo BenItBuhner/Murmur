@@ -91,6 +91,8 @@ export const MURMUR_ERROR_CODES = new Set([
   'clip_too_long',
   'quota_exceeded',
   'rate_limited',
+  // Private testing: the instance's models are not open to this account (a zero allowance).
+  'private_testing',
   'upstream_error',
   'upstream_auth',
   'upstream_busy',

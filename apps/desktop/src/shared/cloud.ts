@@ -11,14 +11,20 @@
  */
 export type AccountMode = 'off' | 'optional' | 'required'
 
-export type Plan = 'free' | 'pro'
+/**
+ * The tier whose limits apply. `free` and `pro` are the plans; `testing` and `unlimited` exist only
+ * while the instance is in private testing (packages/backend/convex/lib/access.ts): an account on
+ * the instance's list has no allowance to run out of, every other account has none at all.
+ */
+export type Plan = 'free' | 'pro' | 'testing' | 'unlimited'
 
 /**
  * Where the account stands: the 14-day Pro trial every account starts with, the residual free tier
  * after it, or a paid (or operator-granted) Pro subscription. `plan` is the tier whose limits apply,
  * so a trial account is `pro` on `plan`. See internal/entitlements-contract.md in the Project store.
+ * During private testing the instance reports `testing` or `unlimited` instead of the stored state.
  */
-export type PlanState = 'trial' | 'free' | 'pro'
+export type PlanState = 'trial' | 'free' | 'pro' | 'testing' | 'unlimited'
 
 /** The limits the gateway meters; the `limit` field of a usage meter and of a limit error. */
 export type LimitName =
@@ -140,6 +146,11 @@ export interface InferenceStatus {
   }
   planState?: PlanState
   trialEndsAt?: number | null
+  /**
+   * The instance sells Pro (its `MURMUR_BILLING_ENABLED`). False hides every plan label, trial
+   * countdown, Upgrade and Manage plan button and billing link; absent (an older instance) means true.
+   */
+  billingEnabled?: boolean
   /** Pro past the soft fair-use cap: `/v1/format` answers with rule-based text until the month resets. */
   formattingPaused?: boolean
   /** The web account page that starts an upgrade; null when the instance has no site URL. */

@@ -27,6 +27,26 @@ export interface PlanLinks {
   planState: PlanState
   upgradeUrl: string | null
   accountUrl: string | null
+  /** The instance sells Pro; false hides both buttons whatever the links say. */
+  billingEnabled?: boolean
+}
+
+/**
+ * Whether the instance sells Pro, as its status says (`billingEnabled`). An instance from before
+ * the switch existed did, so a status without the field reads as selling. Off, the apps show no
+ * plan label, no trial countdown, no Upgrade or Manage plan button and no billing link; the
+ * allowances that apply are still shown.
+ */
+export function sellsPro(status: { billingEnabled?: boolean } | null | undefined): boolean {
+  return status?.billingEnabled ?? true
+}
+
+/**
+ * The plan states with allowances to meter. The private-testing states have none: `testing` has
+ * no usage at all, `unlimited` has no cap to fill.
+ */
+export function isMetered(state: PlanState): boolean {
+  return state !== 'testing' && state !== 'unlimited'
 }
 
 /**
@@ -57,9 +77,12 @@ export function legalLinks(
  * page; an instance without a site URL sends null and gets no button.
  */
 export function planActions(links: PlanLinks): { upgrade: string | null; manage: string | null } {
+  if (!sellsPro(links)) return { upgrade: null, manage: null }
   return {
-    upgrade: links.planState !== 'pro' ? links.upgradeUrl || null : null,
-    manage: links.planState !== 'free' ? links.accountUrl || null : null
+    upgrade:
+      isMetered(links.planState) && links.planState !== 'pro' ? links.upgradeUrl || null : null,
+    manage:
+      isMetered(links.planState) && links.planState !== 'free' ? links.accountUrl || null : null
   }
 }
 
@@ -86,9 +109,9 @@ export function parseLimitNotice(source: unknown, message?: string): LimitNotice
   if (!source || typeof source !== 'object') return null
   const o = source as Record<string, unknown>
   if (!isLimitName(o.limit)) return null
-  const plan: Plan = o.plan === 'pro' ? 'pro' : 'free'
-  const planState: PlanState =
-    o.planState === 'trial' || o.planState === 'pro' || o.planState === 'free' ? o.planState : plan
+  const plan: Plan =
+    o.plan === 'pro' || o.plan === 'testing' || o.plan === 'unlimited' ? o.plan : 'free'
+  const planState: PlanState = isPlanState(o.planState) ? o.planState : plan
   return {
     limit: o.limit,
     plan,
@@ -110,12 +133,28 @@ export function isPlanLimit(limit: LimitName): boolean {
   return limit !== 'requestsPerMinute'
 }
 
+const PLAN_STATES: ReadonlySet<string> = new Set<PlanState>([
+  'trial',
+  'free',
+  'pro',
+  'testing',
+  'unlimited'
+])
+
+export function isPlanState(value: unknown): value is PlanState {
+  return typeof value === 'string' && PLAN_STATES.has(value)
+}
+
 export function planStateLabel(state: PlanState): string {
   switch (state) {
     case 'trial':
       return 'Pro trial'
     case 'pro':
       return 'Pro'
+    case 'testing':
+      return 'Private testing'
+    case 'unlimited':
+      return 'Unlimited'
     default:
       return 'Free'
   }
@@ -126,10 +165,10 @@ export function planStateOf(
   status: { planState?: PlanState; plan: Plan } | null | undefined,
   user?: { planState?: PlanState; plan: Plan } | null
 ): PlanState {
-  if (status?.planState) return status.planState
-  if (user?.planState) return user.planState
+  if (status?.planState && isPlanState(status.planState)) return status.planState
+  if (user?.planState && isPlanState(user.planState)) return user.planState
   const plan = status?.plan ?? user?.plan ?? 'free'
-  return plan === 'pro' ? 'pro' : 'free'
+  return plan === 'pro' || plan === 'testing' || plan === 'unlimited' ? plan : 'free'
 }
 
 /** Whole days left on the trial, never negative: `ceil((trialEndsAt - now) / 24 h)`. */
@@ -275,8 +314,15 @@ export interface LimitCopy {
   upgradeHelps: boolean
 }
 
+/** " on Pro", " on the free plan"; nothing for an unlimited account, which has no plan to name. */
 function tierPhrase(notice: LimitNotice): string {
-  return notice.plan === 'pro' ? 'on Pro' : 'on the free plan'
+  if (notice.plan === 'unlimited') return ''
+  return notice.plan === 'pro' ? ' on Pro' : ' on the free plan'
+}
+
+/** Pro-like wording: the account has Pro's allowances or more. */
+function proLike(notice: LimitNotice): boolean {
+  return notice.plan === 'pro' || notice.plan === 'unlimited'
 }
 
 /**
@@ -305,24 +351,24 @@ export function describeLimit(
 /** What ran out and the allowance behind it, without the reset (added by the caller). */
 function describeStop(notice: LimitNotice): LimitCopy {
   const tier = tierPhrase(notice)
-  const pro = notice.plan === 'pro'
+  const pro = proLike(notice)
   switch (notice.limit) {
     case 'wordsPerWeek':
       return {
         title: "This week's free words are used up",
-        detail: `${formatCount(notice.allowed)} words a week ${tier}`,
+        detail: `${formatCount(notice.allowed)} words a week${tier}`,
         upgradeHelps: true
       }
     case 'sttSecondsPerWeek':
       return {
         title: "This week's free minutes are used up",
-        detail: `${formatAudioSeconds(notice.allowed)} of speech a week ${tier}`,
+        detail: `${formatAudioSeconds(notice.allowed)} of speech a week${tier}`,
         upgradeHelps: true
       }
     case 'dictationsPerDay':
       return {
         title: "Today's free dictations are used up",
-        detail: `${formatCount(notice.allowed)} dictations a day ${tier}`,
+        detail: `${formatCount(notice.allowed)} dictations a day${tier}`,
         upgradeHelps: true
       }
     case 'maxClipSeconds':
@@ -330,7 +376,7 @@ function describeStop(notice: LimitNotice): LimitCopy {
         title: pro ? 'That recording is too long' : 'That recording is too long for the free plan',
         detail: pro
           ? `Clips can be up to ${formatAudioSeconds(notice.allowed)}`
-          : `Clips up to ${formatAudioSeconds(notice.allowed)} ${tier}; up to 10 min on Pro`,
+          : `Clips up to ${formatAudioSeconds(notice.allowed)}${tier}; up to 10 min on Pro`,
         upgradeHelps: !pro
       }
     case 'sttSecondsPerMonth':
@@ -338,7 +384,7 @@ function describeStop(notice: LimitNotice): LimitCopy {
         title: pro
           ? "This month's fair-use cap is reached"
           : "This month's free transcription is used up",
-        detail: `${formatAudioSeconds(notice.allowed)} a month ${tier}`,
+        detail: `${formatAudioSeconds(notice.allowed)} a month${tier}`,
         upgradeHelps: !pro
       }
     case 'fairUseSttSecondsPerMonth':
@@ -350,13 +396,13 @@ function describeStop(notice: LimitNotice): LimitCopy {
     case 'llmTokensPerMonth':
       return {
         title: "This month's formatting allowance is used up",
-        detail: `${compactCount(notice.allowed)} tokens a month ${tier}`,
+        detail: `${compactCount(notice.allowed)} tokens a month${tier}`,
         upgradeHelps: !pro
       }
     default:
       return {
         title: 'Too many requests at once',
-        detail: `Up to ${formatCount(notice.allowed)} requests a minute ${tier}`,
+        detail: `Up to ${formatCount(notice.allowed)} requests a minute${tier}`,
         upgradeHelps: !pro
       }
   }

@@ -18,7 +18,8 @@ import {
 import { Badge, Segmented } from '@renderer/components/ui/misc'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { ModelField, SecretInput, TestResult } from '@renderer/components/ProviderForm'
-import { planTitle, useInference } from '@renderer/hooks/useInference'
+import { useInference } from '@renderer/hooks/useInference'
+import { sourceCaption } from '@renderer/lib/plan-copy'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, uid } from '@renderer/lib/utils'
 
@@ -259,7 +260,11 @@ export function StylePage(): React.JSX.Element {
             title="Model"
             description={
               inference.signedIn
-                ? `Provided by this Murmur instance on your ${planTitle(inference.planState)}.`
+                ? inference.billingEnabled && inference.metered
+                  ? `Provided by this Murmur instance on your ${sourceCaption(inference)}.`
+                  : inference.planState === 'testing'
+                    ? 'Provided by this Murmur instance; not open to this account while the server is in private testing.'
+                    : 'Provided by this Murmur instance.'
                 : 'Sign in to use Murmur models.'
             }
           >

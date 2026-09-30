@@ -39,12 +39,8 @@ import {
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { SyncBadge, syncLabel } from '@renderer/components/SyncBadge'
 import { useCloud } from '@renderer/hooks/useCloud'
-import {
-  minutesLabel,
-  planTitle,
-  useInference,
-  type InferenceView
-} from '@renderer/hooks/useInference'
+import { minutesLabel, useInference, type InferenceView } from '@renderer/hooks/useInference'
+import { planDescription, sourceCaption } from '@renderer/lib/plan-copy'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, formatNumber, formatRelative } from '@renderer/lib/utils'
 
@@ -350,31 +346,12 @@ function SignedInAccount({
   )
 }
 
-/** What the plan means for the account right now, in one sentence. */
-function planDescription(inference: InferenceView): string {
-  if (!inference.managedAvailable)
-    return 'This Murmur instance does not provide models of its own; connect your provider under Models.'
-  if (!inference.status) return 'Waiting for your account status…'
-  const stopped = transcriptionPaused(inference.meters)
-  switch (inference.planState) {
-    case 'trial':
-      return `${inference.trialDaysLeft === 1 ? '1 day' : `${inference.trialDaysLeft} days`} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one.`
-    case 'pro':
-      if (stopped)
-        return `Unlimited dictation within fair use. This month's ${formatAudioSeconds(stopped.allowed)} are used up, so Murmur's speech model rests until ${formatResetTime(stopped.resetsAt).replace(/^on /, '')}; your own provider under Models keeps dictating meanwhile.`
-      return inference.formattingPaused
-        ? 'Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules.'
-        : 'Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page.'
-    default:
-      return 'A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Models.'
-  }
-}
-
 /**
- * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
- * when it comes back, and the actions on it: Upgrade (the instance's upgrade page, sent only while
- * an upgrade applies) and Manage plan (the web account page, for Pro and the trial). An instance
- * without a site URL sends neither link and gets neither button.
+ * The account's plan: where it stands (trial, free, Pro; on the list or not during private
+ * testing), how much of each allowance is used and when it comes back, and the actions on it:
+ * Upgrade (the instance's upgrade page, sent only while an upgrade applies) and Manage plan (the
+ * web account page, for Pro and the trial). An instance without a site URL sends neither link and
+ * gets neither button; an instance that does not sell Pro shows neither button nor a plan label.
  */
 function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Element {
   const open = (url: string | null): void => {
@@ -384,29 +361,33 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
   const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
   // Transcription that has stopped outranks a paused formatting model: nothing is inserted at all.
   const stopped = transcriptionPaused(inference.meters)
+  // A plan label is a billing thing; the private-testing states are about the server, so they show.
+  const labelled = inference.billingEnabled || !inference.metered
   return (
     <Section
-      title="Plan"
+      title={inference.billingEnabled ? 'Plan' : 'Murmur models'}
       description={
         inference.managedAvailable
           ? 'The speech and formatting models that come with your account. Choose your own provider instead under Models and Style; keys for those stay on this device.'
           : undefined
       }
     >
-      <SettingRow title={planTitle(inference.planState)} description={planDescription(inference)}>
-        <Badge
-          variant={
-            inference.planState === 'pro'
-              ? 'success'
-              : inference.planState === 'trial'
-                ? 'default'
-                : 'secondary'
-          }
-        >
-          {inference.planState === 'trial' && inference.trialDaysLeft > 0
-            ? `${inference.trialDaysLeft}d left`
-            : planStateLabel(inference.planState)}
-        </Badge>
+      <SettingRow title={sourceCaption(inference)} description={planDescription(inference)}>
+        {labelled && (
+          <Badge
+            variant={
+              inference.planState === 'pro' || inference.planState === 'unlimited'
+                ? 'success'
+                : inference.planState === 'trial'
+                  ? 'default'
+                  : 'secondary'
+            }
+          >
+            {inference.planState === 'trial' && inference.trialDaysLeft > 0
+              ? `${inference.trialDaysLeft}d left`
+              : planStateLabel(inference.planState)}
+          </Badge>
+        )}
         {upgrade && (
           <Button size="sm" onClick={() => open(upgrade)}>
             <Sparkles /> Upgrade
@@ -424,7 +405,7 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
             Transcription paused until {formatResetTime(stopped.resetsAt).replace(/^on /, '')}
           </div>
           <div className="text-note text-muted-foreground">
-            {`This month's ${formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up${inference.plan === 'pro' ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Models to keep dictating${inference.plan === 'pro' ? '.' : ', or upgrade for unlimited dictation.'}`}
+            {`This month's ${formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up${inference.plan === 'pro' ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Models to keep dictating${inference.plan === 'pro' || !inference.billingEnabled ? '.' : ', or upgrade for unlimited dictation.'}`}
           </div>
         </Banner>
       ) : (
@@ -444,6 +425,7 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
       {inference.meters.length > 0
         ? inference.meters.map((m) => <MeterRow key={m.limit} meter={m} />)
         : inference.status &&
+          inference.metered &&
           inference.minutes && (
             <SettingRow
               title="Used this month"

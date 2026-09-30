@@ -109,6 +109,47 @@ describe('appRules', () => {
     ).rejects.toThrow(/instructions/)
   })
 
+  it('carries a per-app speed override, optional and backward compatible', async () => {
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    // Set, read back, changed, cleared: the same life as every other override.
+    const id = await asAda.mutation(api.appRules.upsert, { match: 'Slack', speed: 'fast' })
+    expect((await asAda.query(api.appRules.list, {}))[0]).toMatchObject({ match: 'Slack', speed: 'fast' })
+    await asAda.mutation(api.appRules.upsert, { id, match: 'Slack', speed: 'normal', formatting: 'light' })
+    expect((await asAda.query(api.appRules.list, {}))[0]).toMatchObject({ speed: 'normal', formatting: 'light' })
+    // A client from before speed modes re-saves the rule without the field: like the other
+    // overrides, the rule is what that client sent, and the speed is back to inheriting.
+    await asAda.mutation(api.appRules.upsert, { id, match: 'Slack', formatting: 'light' })
+    const [cleared] = await asAda.query(api.appRules.list, {})
+    expect(cleared.formatting).toBe('light')
+    expect(cleared.speed).toBeUndefined()
+    // Only the two modes are speeds.
+    await expect(
+      asAda.mutation(api.appRules.upsert, { match: 'x', speed: 'turbo' as never })
+    ).rejects.toThrow(/Validator error|ArgumentValidationError/)
+    // Imports carry it too.
+    await asAda.mutation(api.appRules.importMany, { rules: [{ match: 'Code.exe', speed: 'fast' }, { match: 'mail' }] })
+    const list = await asAda.query(api.appRules.list, {})
+    expect(list.find((r) => r.match === 'Code.exe')?.speed).toBe('fast')
+    expect(list.find((r) => r.match === 'mail')?.speed).toBeUndefined()
+    // A rule stored before the field existed reads back without it, and still validates.
+    const user = await asAda.mutation(api.users.ensure, {})
+    await t.run(async (ctx) => {
+      await ctx.db.insert('appRules', {
+        userId: user.id,
+        match: 'older',
+        matchKey: 'older',
+        tone: 'casual',
+        formatting: 'off',
+        createdAt: 5,
+        updatedAt: 5
+      })
+    })
+    const older = (await asAda.query(api.appRules.list, {})).find((r) => r.match === 'older')
+    expect(older).toMatchObject({ tone: 'casual', formatting: 'off' })
+    expect(older).not.toHaveProperty('speed')
+  })
+
   it('defaults tone to auto, lists oldest first, isolates and imports', async () => {
     const t = setup()
     const asAda = t.withIdentity(ada)

@@ -383,11 +383,18 @@ export function HistoryPage(): React.JSX.Element {
                         </div>
                       )}
                       <div className="flex items-center gap-2 text-meta text-muted-foreground">
-                        <span>
-                          {e.provider} · {e.model}
-                          {e.sttSpeed && ` · ${speedLabel(e.sttSpeed.used)}`}
-                        </span>
-                        {e.injectionMethod && <span>· inserted via {e.injectionMethod}</span>}
+                        {/* The facts wrap as whole phrases when the speed makes the line long. */}
+                        <div className="flex min-w-0 flex-1 flex-wrap gap-x-2">
+                          <span className="whitespace-nowrap">
+                            {e.provider} · {e.model}
+                            {e.sttSpeed && ` · ${speedLabel(e.sttSpeed.used)}`}
+                          </span>
+                          {e.injectionMethod && (
+                            <span className="whitespace-nowrap">
+                              · inserted via {e.injectionMethod}
+                            </span>
+                          )}
+                        </div>
                         <span className="ml-auto flex gap-1">
                           {e.recording && (
                             <Button

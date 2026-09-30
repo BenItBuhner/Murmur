@@ -3,8 +3,9 @@
  *
  * Updates come straight from the GitHub Releases of the repository this build was made from: the
  * app lists the releases, picks the newest one that is newer than itself, downloads the asset the
- * release workflow published for this exact install flavour, verifies it against the release's
- * SHA256SUMS.txt and then either applies it itself or hands the file to the user.
+ * release workflow published for this exact install flavour, verifies it against the checksum the
+ * release carries for it (GitHub's digest of the upload, else the release's SHA256SUMS.txt) and
+ * then either applies it itself or hands the file to the user.
  */
 
 /**
@@ -76,8 +77,10 @@ export interface UpdateRelease {
   notes: string
   /** The file for this install flavour, or null when the release does not ship one. */
   asset: UpdateAsset | null
-  /** SHA-256 of `asset` from the release's SHA256SUMS.txt, when the release ships one. */
+  /** SHA-256 of `asset` (GitHub's digest of the upload, else the release's SHA256SUMS.txt); null when the release has none. */
   sha256: string | null
+  /** Why `sha256` is null although the release ships `asset`: the release itself lacks a checksum for it. */
+  checksumProblem: string | null
 }
 
 export interface UpdateProgress {

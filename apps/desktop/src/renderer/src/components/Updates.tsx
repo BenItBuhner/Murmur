@@ -55,7 +55,9 @@ function manualReason(status: UpdateStatus): string {
     return `This ${describeInstallKind(kind)} copy cannot replace itself; run the downloaded file to update.`
   }
   if (status.release && !status.release.sha256) {
-    return 'This release ships no SHA256SUMS.txt, so Murmur will not install it unattended. Check it and run it yourself.'
+    const problem =
+      status.release.checksumProblem ?? 'This release carries no checksum for this file.'
+    return `${problem} Murmur will not install it unattended: check it and run it yourself.`
   }
   return 'Run the downloaded file to update.'
 }

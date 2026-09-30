@@ -13,7 +13,9 @@ import kotlinx.serialization.json.Json
 data class GithubAssetDto(
     val name: String,
     val size: Long = 0,
-    val browser_download_url: String
+    val browser_download_url: String,
+    /** `sha256:<hex>`, computed by GitHub when the asset was uploaded; null on old assets. */
+    val digest: String? = null
 )
 
 @Serializable
@@ -38,9 +40,27 @@ data class ReleaseInfo(
     val prerelease: Boolean,
     val notes: String,
     val apk: GithubAssetDto?,
-    /** SHA-256 from the release's SHA256SUMS.txt, when available. */
-    val sha256: String?
+    /** SHA-256 of [apk] (GitHub's asset digest, else the release's SHA256SUMS.txt); null when the release has none. */
+    val sha256: String?,
+    /** Why [sha256] is null although the release ships an APK: the release itself lacks a checksum for it. */
+    val checksumProblem: String? = null
 )
+
+/**
+ * Outcome of looking up the checksum of an asset. Only [Known] lets the updater install; the two
+ * failures are kept apart because they call for different reactions: a release that ships no
+ * checksum will never verify, while a checksum file that could not be downloaded right now is a
+ * plain network error to retry, and must not be reported as a defect of the release.
+ */
+sealed class Checksum {
+    data class Known(val sha256: String, val source: String) : Checksum()
+
+    /** The release does not carry a checksum for this asset. */
+    data class Missing(val reason: String) : Checksum()
+
+    /** The checksum exists but could not be fetched this time. */
+    data class Unavailable(val reason: String) : Checksum()
+}
 
 enum class UpdatePhase { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, DOWNLOADING, READY, INSTALLING, ERROR }
 
@@ -102,6 +122,15 @@ object UpdateSelection {
 
     fun normalizeVersion(tag: String): String = tag.trim().removePrefix("v")
 
+    /**
+     * The SHA-256 GitHub computed for the asset when it was uploaded (`digest: "sha256:<hex>"` in
+     * the release JSON), lowercase hex, or null when the API carries none or something else.
+     */
+    fun digestOf(asset: GithubAssetDto): String? {
+        val m = Regex("""^sha256:([a-fA-F0-9]{64})$""").matchEntire(asset.digest?.trim() ?: return null) ?: return null
+        return m.groupValues[1].lowercase()
+    }
+
     /** `sha256sum` output (`<hex>  <name>` or `<hex> *<name>`) -> name to lowercase digest. */
     fun parseChecksums(text: String): Map<String, String> {
         val out = HashMap<String, String>()
@@ -127,7 +156,34 @@ object UpdateSelection {
         return u.scheme.equals("https", ignoreCase = true) || loopback
     }
 
-    fun describe(release: GithubReleaseDto, apk: GithubAssetDto?, sha256: String?): ReleaseInfo {
+    /**
+     * Resolve the checksum of [asset] without touching the network: GitHub's own digest of the
+     * upload wins; otherwise [sums] (the body of SHA256SUMS.txt, when the release ships one and
+     * it was downloaded) is consulted. [sumsPresent] tells whether the release lists the file at
+     * all; [sumsFetchError] is the reason its download failed, when it did.
+     */
+    fun resolveChecksum(
+        release: GithubReleaseDto,
+        asset: GithubAssetDto,
+        sumsPresent: Boolean,
+        sums: String?,
+        sumsFetchError: String? = null
+    ): Checksum {
+        digestOf(asset)?.let { return Checksum.Known(it, "GitHub asset digest") }
+        val label = "Murmur ${normalizeVersion(release.tag_name)}"
+        if (!sumsPresent) {
+            return Checksum.Missing("$label ships no $CHECKSUMS_ASSET, so Murmur cannot verify its Android build.")
+        }
+        if (sums == null) {
+            return Checksum.Unavailable(
+                "Could not download $CHECKSUMS_ASSET for $label${if (sumsFetchError.isNullOrBlank()) "" else " ($sumsFetchError)"}. Murmur will try again."
+            )
+        }
+        return parseChecksums(sums)[asset.name]?.let { Checksum.Known(it, CHECKSUMS_ASSET) }
+            ?: Checksum.Missing("The $CHECKSUMS_ASSET of $label has no entry for ${asset.name}, so Murmur cannot verify it.")
+    }
+
+    fun describe(release: GithubReleaseDto, apk: GithubAssetDto?, checksum: Checksum?): ReleaseInfo {
         val v = Semver.parse(release.tag_name)
         return ReleaseInfo(
             version = normalizeVersion(release.tag_name),
@@ -137,7 +193,12 @@ object UpdateSelection {
             prerelease = release.prerelease || (v?.isPrerelease == true),
             notes = release.body ?: "",
             apk = apk,
-            sha256 = sha256
+            sha256 = (checksum as? Checksum.Known)?.sha256,
+            checksumProblem = when (checksum) {
+                is Checksum.Missing -> checksum.reason
+                is Checksum.Unavailable -> checksum.reason
+                else -> null
+            }
         )
     }
 }

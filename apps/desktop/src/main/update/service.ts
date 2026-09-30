@@ -5,14 +5,17 @@ import type { Settings } from '@shared/settings'
 import type { InstallKind, UpdateStatus } from '@shared/updates'
 import {
   assetCandidates,
+  assetDigest,
   CHECKSUMS_ASSET,
   describeRelease,
   isTrustedAssetUrl,
-  parseChecksums,
   pickAsset,
+  resolveChecksum,
   selectRelease,
   toUpdateArch,
-  type GithubRelease
+  type ChecksumLookup,
+  type GithubRelease,
+  type GithubReleaseAsset
 } from '@core/update/releases'
 import type { Logger } from '../logger'
 import { JsonStore } from '../store/json-store'
@@ -64,11 +67,14 @@ export interface UpdateServiceDeps {
   initialDelayMs?: number
   /** Grace period between a finished download and an automatic restart. */
   autoInstallDelayMs?: number
+  /** Pauses before the second and third attempt at downloading SHA256SUMS.txt. */
+  checksumRetryDelaysMs?: number[]
 }
 
 export const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 export const DEFAULT_INITIAL_DELAY_MS = 20_000
 export const DEFAULT_AUTO_INSTALL_DELAY_MS = 4_000
+export const DEFAULT_CHECKSUM_RETRY_DELAYS_MS = [1_000, 3_000]
 
 /**
  * Keeps this install current from the repository's GitHub Releases.
@@ -77,8 +83,13 @@ export const DEFAULT_AUTO_INSTALL_DELAY_MS = 4_000
  *
  * Checks run shortly after start and every few hours when `updates.autoCheck` is on, and whenever
  * the user asks. With `updates.autoInstall` the asset is downloaded in the background and, once
- * verified against the release's SHA256SUMS.txt, installed as soon as no dictation is running.
- * Installs that cannot replace themselves stop at `ready` and hand the file to the user.
+ * verified against the checksum the release carries for it, installed as soon as no dictation is
+ * running. Installs that cannot replace themselves stop at `ready` and hand the file to the user.
+ *
+ * The checksum is GitHub's own digest of the uploaded asset, which arrives in the same API response
+ * as the asset list; a release whose assets carry no digest falls back to its SHA256SUMS.txt. A
+ * checksum that cannot be fetched fails the check (to be retried), it does not turn the release
+ * into one "without checksums".
  */
 export class UpdateService extends EventEmitter {
   private status: UpdateStatus
@@ -223,21 +234,36 @@ export class UpdateService extends EventEmitter {
         )
         asset = null
       }
-      const sha256 = asset ? await this.fetchChecksum(chosen, asset.name) : null
-      const release = describeRelease(chosen, asset, sha256)
+      const checksum = asset ? await this.lookupChecksum(chosen, asset) : null
+      if (checksum?.kind === 'unavailable') {
+        // A network hiccup on the checksum, not a defect of the release: report it as one and
+        // leave the asset alone, so the next check tries again.
+        throw new Error(checksum.reason)
+      }
+      const release = describeRelease(chosen, asset, checksum)
       this.installable = !!asset && !!picked?.installable
       this.deps.log.info(
-        `update available: ${release.version} (${asset?.name ?? 'no file for this platform'}${sha256 ? ', checksum found' : ', no checksum'})`
+        `update available: ${release.version} (${asset?.name ?? 'no file for this platform'}, ${
+          checksum?.kind === 'known'
+            ? `checksum from ${checksum.source}`
+            : checksum
+              ? `no checksum: ${checksum.reason}`
+              : 'no checksum'
+        })`
       )
 
+      // A file downloaded earlier is only kept when it was verified against this very checksum;
+      // anything else is re-downloaded so the digest check runs on what gets installed.
       const sameDownload =
         prev.phase === 'ready' &&
         !!prev.downloadedPath &&
         existsSync(prev.downloadedPath) &&
         prev.release?.version === release.version &&
-        prev.release?.asset?.name === release.asset?.name
+        prev.release?.asset?.name === release.asset?.name &&
+        prev.release?.sha256 === release.sha256
       if (sameDownload) {
         this.set({ phase: 'ready', release, lastCheckedAt: checkedAt })
+        if (prefs.autoInstall && !this.autoTimer) this.armAutoInstall()
         return this.status
       }
 
@@ -299,26 +325,48 @@ export class UpdateService extends EventEmitter {
     )
   }
 
-  /** SHA-256 for `assetName` from the release's SHA256SUMS.txt, or null when unavailable. */
-  private async fetchChecksum(release: GithubRelease, assetName: string): Promise<string | null> {
+  /**
+   * The checksum to verify `asset` against. GitHub's digest of the upload needs no further
+   * request; only a release whose assets carry none has its SHA256SUMS.txt downloaded (a few
+   * attempts, the file is small). See `resolveChecksum` for how the outcomes are told apart.
+   */
+  private async lookupChecksum(
+    release: GithubRelease,
+    asset: GithubReleaseAsset
+  ): Promise<ChecksumLookup> {
     const sums = release.assets.find((a) => a.name === CHECKSUMS_ASSET)
-    if (!sums) {
-      this.deps.log.warn(`${release.tag_name} ships no ${CHECKSUMS_ASSET}; installing is disabled`)
-      return null
+    if (assetDigest(asset) || !sums) {
+      return resolveChecksum(release, asset, { sumsPresent: !!sums, sums: null })
     }
-    if (!isTrustedAssetUrl(sums.browser_download_url, this.deps.source.downloadOrigin)) return null
-    try {
-      const res = await this.deps.fetch(sums.browser_download_url, {
-        headers: { 'User-Agent': `Murmur/${this.deps.currentVersion}` }
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const digest = parseChecksums(await res.text()).get(assetName)
-      if (!digest) this.deps.log.warn(`${CHECKSUMS_ASSET} has no entry for ${assetName}`)
-      return digest ?? null
-    } catch (err) {
-      this.deps.log.warn(`could not fetch ${CHECKSUMS_ASSET}`, err)
-      return null
+    if (!isTrustedAssetUrl(sums.browser_download_url, this.deps.source.downloadOrigin)) {
+      this.deps.log.warn(
+        `ignoring ${CHECKSUMS_ASSET} served from an unexpected origin: ${sums.browser_download_url}`
+      )
+      return {
+        kind: 'missing',
+        reason: `${CHECKSUMS_ASSET} of this release is served from an unexpected origin, so Murmur cannot verify ${asset.name}.`
+      }
     }
+    let failure: string | null = null
+    const pauses = [0, ...(this.deps.checksumRetryDelaysMs ?? DEFAULT_CHECKSUM_RETRY_DELAYS_MS)]
+    for (const [attempt, pause] of pauses.entries()) {
+      if (pause > 0) await new Promise((r) => setTimeout(r, pause))
+      try {
+        const res = await this.deps.fetch(sums.browser_download_url, {
+          headers: { 'User-Agent': `Murmur/${this.deps.currentVersion}` }
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return resolveChecksum(release, asset, { sumsPresent: true, sums: await res.text() })
+      } catch (err) {
+        failure = friendlyUpdateError(err)
+        this.deps.log.warn(`could not fetch ${CHECKSUMS_ASSET} (attempt ${attempt + 1})`, err)
+      }
+    }
+    return resolveChecksum(release, asset, {
+      sumsPresent: true,
+      sums: null,
+      sumsFetchError: failure
+    })
   }
 
   // ---- downloading ----------------------------------------------------------------------------

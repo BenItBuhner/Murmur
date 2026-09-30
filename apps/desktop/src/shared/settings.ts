@@ -98,7 +98,12 @@ export type Snippet = z.infer<typeof snippetSchema>
  */
 export const appRuleSchema = z.object({
   id: z.string(),
-  match: z.string().min(1),
+  /**
+   * May be blank while the user is still typing it: the Style page adds an empty rule first, then
+   * fills it in. A blank match never applies (`findRule`) and is never synced; refusing it here
+   * would drop the whole style section to its defaults the moment "Add rule" is pressed.
+   */
+  match: z.string(),
   tone: toneSchema.default('auto'),
   formatting: formattingModeSchema.optional(),
   trailingSpace: z.boolean().optional(),

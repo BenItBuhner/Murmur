@@ -66,6 +66,33 @@ describe('settings schema', () => {
     })
   })
 
+  it('a rule being typed in (blank match) keeps the rest of the style section intact', () => {
+    // "Add rule" creates a rule with an empty match and fills it in afterwards; the section must
+    // survive that instead of dropping to its defaults (which would also wipe the own-model connection).
+    const before = parseSettings({
+      formatting: {
+        mode: 'light',
+        tone: 'casual',
+        instructions: 'be brief',
+        llm: { source: 'custom', baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama' }
+      }
+    })
+    const after = parseSettings({
+      ...before,
+      formatting: { ...before.formatting, appRules: [{ id: 'new', match: '', tone: 'auto' }] }
+    })
+    expect(after.formatting).toMatchObject({
+      mode: 'light',
+      tone: 'casual',
+      instructions: 'be brief'
+    })
+    expect(after.formatting.llm).toMatchObject({
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'llama'
+    })
+    expect(after.formatting.appRules).toEqual([{ id: 'new', match: '', tone: 'auto' }])
+  })
+
   it('a per-app rule may pick a speed, and a rule from before the field inherits', () => {
     const rules = parseSettings({
       formatting: {

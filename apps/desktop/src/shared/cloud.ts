@@ -1,3 +1,5 @@
+import type { SpeedMode } from './inference'
+
 /**
  * Types shared between the main process (which owns the Convex connection and the offline mirror),
  * the preload bridge and the renderer (which owns the Clerk session and the UI).
@@ -129,6 +131,11 @@ export interface InferenceStatus {
   /** The instance is configured with at least a managed speech model. */
   available: boolean
   models: { stt: string | null; llm: string | null }
+  /**
+   * The speed modes the speech model takes (`['normal']`, or `['normal', 'fast']` once the
+   * instance has a fast model). Absent from an instance that predates speed modes: Normal only.
+   */
+  speedModes?: SpeedMode[]
   plan: Plan
   limits: {
     sttSecondsPerMonth: number

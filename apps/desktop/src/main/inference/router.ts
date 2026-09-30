@@ -132,7 +132,9 @@ export class InferenceRouter {
           apiKey: await this.sessionToken(!!opts.forceRefresh),
           model: MURMUR_STT_MODEL,
           language: s.stt.language,
-          timeoutMs: s.stt.timeoutMs
+          timeoutMs: s.stt.timeoutMs,
+          // Sent even for Normal, so the instance's log shows what was asked for.
+          speed: s.stt.speed
         },
         fallbackModel: '',
         provider: MURMUR_PROVIDER

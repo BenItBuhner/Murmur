@@ -1,3 +1,4 @@
+import type { SpeedMode, SpeedOutcome } from '@shared/inference'
 import { parseLimitNotice, type LimitNotice } from '@shared/limits'
 import type { SttProviderKind } from '@shared/settings'
 
@@ -9,6 +10,11 @@ export interface SttConfig {
   /** ISO-639-1 code or 'auto'. */
   language: string
   timeoutMs: number
+  /**
+   * Speed mode for the Murmur gateway, sent as the `speed` form field. Unset for the user's own
+   * provider, which never sees the field.
+   */
+  speed?: SpeedMode
 }
 
 export interface TranscribeInput {
@@ -37,6 +43,8 @@ export interface TranscribeOutput {
    * speech did and resume from that point.
    */
   spans?: TimedSpan[]
+  /** What a Murmur instance said about the speed mode that ran; absent from any other server. */
+  speed?: SpeedOutcome
   raw?: unknown
 }
 

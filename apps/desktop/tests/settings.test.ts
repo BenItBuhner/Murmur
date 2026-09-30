@@ -46,6 +46,26 @@ describe('settings schema', () => {
     expect(broken.stats.totalWords).toBe(7)
   })
 
+  it('starts the Murmur speech model on Normal and keeps a chosen Fast, with no migration in between', () => {
+    expect(parseSettings({}).stt.speed).toBe('normal')
+    expect(parseSettings({ stt: { speed: 'fast' } }).stt.speed).toBe('fast')
+    // A file from before the setting existed: Normal, nothing else in the speech section moves.
+    const older = {
+      version: SETTINGS_VERSION,
+      stt: { source: 'murmur', language: 'de', useDictionaryPrompt: false }
+    }
+    expect(migrateSettings(older)).toBe(older)
+    const s = parseSettings(older)
+    expect(s.stt.speed).toBe('normal')
+    expect(s.stt.language).toBe('de')
+    expect(s.stt.useDictionaryPrompt).toBe(false)
+    // A value that is not a mode drops the speech section to its defaults, as any bad value does.
+    expect(parseSettings({ stt: { speed: 'turbo', language: 'de' } }).stt).toMatchObject({
+      speed: 'normal',
+      language: 'auto'
+    })
+  })
+
   it('accepts every accent choice and repairs a broken custom colour', () => {
     expect(parseSettings({ general: { accent: 'system' } }).general.accent).toBe('system')
     expect(parseSettings({ general: { accent: 'violet' } }).general.accent).toBe('violet')

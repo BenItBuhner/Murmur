@@ -1,3 +1,4 @@
+import type { SpeedOutcome } from './inference'
 import type { LimitNotice } from './limits'
 import type { InstallKind } from './updates'
 
@@ -71,6 +72,11 @@ export interface HistoryEntry {
   appName?: string
   provider: string
   model: string
+  /**
+   * Murmur models only: the speed that was asked for and the one that transcribed the clip, so
+   * History can say "Fast isn't available yet, used Normal" when they differ.
+   */
+  sttSpeed?: SpeedOutcome
   injected: boolean
   injectionMethod?: string
   llmUsed: boolean

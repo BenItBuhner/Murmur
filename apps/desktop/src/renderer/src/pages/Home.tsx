@@ -12,8 +12,7 @@ import { useCloud } from '@renderer/hooks/useCloud'
 import { useInference, type InferenceView } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
-import type { UsageMeter } from '@shared/cloud'
-import { formatResetTime, meterValue, transcriptionPaused } from '@shared/limits'
+import { planLine } from '@renderer/lib/plan-copy'
 import type { Route } from '@renderer/components/Shell'
 
 const TYPING_WPM = 40
@@ -266,10 +265,6 @@ export function HomePage({
   )
 }
 
-/**
- * Where the account stands, in one quiet line under the greeting: the trial's days, the free week's
- * words, a paused formatting model. Nothing when there is nothing to say; never a banner.
- */
 function PlanLine({
   inference,
   onOpen
@@ -277,28 +272,7 @@ function PlanLine({
   inference: InferenceView
   onOpen: () => void
 }): React.JSX.Element | null {
-  if (!inference.offersMurmur || !inference.signedIn || !inference.status) return null
-  if (inference.routing.stt !== 'murmur' && inference.planState !== 'trial') return null
-  let text: string | null = null
-  if (inference.planState === 'trial') {
-    const days = inference.trialDaysLeft
-    text = `Pro trial · ${days === 1 ? 'last day' : `${days} days left`}`
-  } else if (inference.planState === 'free') {
-    const words = inference.meters.find((m) => m.limit === 'wordsPerWeek')
-    const stopped = transcriptionPaused(inference.meters)
-    if (stopped)
-      text = `Free plan · this month's transcription is used up · more ${formatResetTime(stopped.resetsAt)}`
-    else if (words)
-      text = words.exceeded
-        ? `Free plan · this week's words are used up · more ${formatResetTime(words.resetsAt)}`
-        : `Free plan · ${meterValue(words)} this week`
-  } else if (transcriptionPaused(inference.meters)) {
-    const stopped = transcriptionPaused(inference.meters) as UsageMeter
-    text = `Pro · transcription paused until ${formatResetTime(stopped.resetsAt).replace(/^on /, '')} (fair use)`
-  } else if (inference.formattingPaused) {
-    const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
-    text = `Pro · formatting paused${paused ? ` until ${formatResetTime(paused.resetsAt).replace(/^on /, '')}` : ''} (fair use)`
-  }
+  const text = planLine(inference)
   if (!text) return null
   return (
     <button

@@ -214,28 +214,45 @@ fun AccountContent(
     }
 }
 
-/** What the plan means for the account right now, in one sentence. */
+/**
+ * What the plan means for the account right now, in one sentence. Without a way to buy Pro
+ * (`billingEnabled` off) the sentence never sells one; during private testing it says whether the
+ * models are open to this account.
+ */
 fun planDescription(inference: InferenceView): String {
     if (!inference.managedAvailable) return "This Murmur instance does not provide models of its own; connect your provider under Speech model."
     if (inference.status == null) return "Waiting for your account status…"
+    val selling = inference.billingEnabled
     val stopped = Limits.transcriptionPaused(inference.meters)
     return when (inference.planState) {
-        "trial" -> "${if (inference.trialDaysLeft == 1) "1 day" else "${inference.trialDaysLeft} days"} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one."
+        "testing" -> "This Murmur server is in private testing: its speech and formatting models are not open to this account yet. Connect your own provider under Speech model to dictate meanwhile; your dictionary, snippets, style and stats keep syncing."
+        "unlimited" -> "This account is on the server's list: Murmur's speech and formatting models without an allowance to run out of."
+        "trial" -> if (selling)
+            "${if (inference.trialDaysLeft == 1) "1 day" else "${inference.trialDaysLeft} days"} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one."
+        else
+            "Unlimited dictation within fair use: the meters below show how far this month has come."
         "pro" -> if (stopped != null)
             "Unlimited dictation within fair use. This month's ${Limits.formatAudioSeconds(stopped.allowed)} are used up, so Murmur's speech model rests until ${Limits.formatResetTime(stopped.resetsAt.toLong()).removePrefix("on ")}; your own provider under Speech model keeps dictating meanwhile."
         else if (inference.formattingPaused)
             "Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules."
-        else
+        else if (selling)
             "Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page."
-        else -> "A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Speech model."
+        else
+            "Unlimited dictation within fair use: the meters below show how far this month has come."
+        else -> if (selling)
+            "A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Speech model."
+        else
+            "A weekly allowance of words and speech, a handful of dictations a day, clips up to a minute. Connect your own provider under Speech model to dictate without them."
     }
 }
 
 /**
- * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
- * when it comes back, and the actions on it: Upgrade (the instance's upgrade page, sent only while
- * an upgrade applies) and Manage plan (the web account page, for Pro and the trial), both opened in
- * the browser. An instance without a site URL sends neither link and gets neither button.
+ * The account's plan: where it stands (trial, free, Pro; on the list or not during private
+ * testing), how much of each allowance is used and when it comes back, and the actions on it:
+ * Upgrade (the instance's upgrade page, sent only while an upgrade applies) and Manage plan (the
+ * web account page, for Pro and the trial), both opened in the browser. An instance without a site
+ * URL sends neither link and gets neither button; an instance that does not sell Pro shows neither
+ * button nor a plan label.
  */
 @Composable
 fun PlanGroup(inference: InferenceView) {
@@ -249,15 +266,17 @@ fun PlanGroup(inference: InferenceView) {
     // Transcription that has stopped outranks a paused formatting model: nothing is inserted at all.
     val stopped = Limits.transcriptionPaused(inference.meters)
     Group(rows = true) {
-        ControlRow(inference.planTitle, description = planDescription(inference)) {
-            Tag(
-                if (inference.planState == "trial" && inference.trialDaysLeft > 0) "${inference.trialDaysLeft}d left" else inference.planLabel,
-                color = when (inference.planState) {
-                    "pro" -> c.sage
-                    "trial" -> c.emberText
-                    else -> c.inkSoft
-                }
-            )
+        ControlRow(inference.sourceCaption, description = planDescription(inference)) {
+            if (inference.labelled) {
+                Tag(
+                    if (inference.planState == "trial" && inference.trialDaysLeft > 0) "${inference.trialDaysLeft}d left" else inference.planLabel,
+                    color = when (inference.planState) {
+                        "pro", "unlimited" -> c.sage
+                        "trial" -> c.emberText
+                        else -> c.inkSoft
+                    }
+                )
+            }
         }
         if (stopped != null) {
             PlanNotice(
@@ -265,7 +284,7 @@ fun PlanGroup(inference: InferenceView) {
                 detail = "This month's ${Limits.formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up" +
                     (if (inference.plan == "pro") " (fair use)" else "") +
                     "; dictations are refused until then. Connect your own provider under Speech model to keep dictating" +
-                    (if (inference.plan == "pro") "." else ", or upgrade for unlimited dictation.")
+                    (if (inference.plan == "pro" || !inference.billingEnabled) "." else ", or upgrade for unlimited dictation.")
             )
         } else if (inference.formattingPaused && paused != null) {
             PlanNotice(
@@ -283,7 +302,7 @@ fun PlanGroup(inference: InferenceView) {
                     modifier = Modifier.padding(bottom = Space.row)
                 )
             }
-        } else if (inference.status != null && inference.minutesLabel != null) {
+        } else if (inference.status != null && inference.metered && inference.minutesLabel != null) {
             ControlRow(
                 "Used this month",
                 description = if (inference.routing.murmurStt) "Murmur's speech model is in use on this phone." else "This phone uses your own provider; the allowance is untouched by it."

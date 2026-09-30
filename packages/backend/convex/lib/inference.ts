@@ -6,8 +6,9 @@ import type {
   FormatContext,
   ResolvedTone
 } from '../../../text-engine/src/types'
+import { PRIVATE_TESTING_CODE, PRIVATE_TESTING_MESSAGE } from './access'
 import type { Meter, Refusal } from './entitlements'
-import type { Plan, PlanState } from './plans'
+import { billingEnabled, type AccessState, type Plan } from './plans'
 
 /**
  * Pure helpers behind the managed-inference gateway (convex/gateway.ts). Nothing here touches the
@@ -69,7 +70,9 @@ export function readUpstreams(env: Env): Upstreams {
 }
 
 export function upstreamModelFor(upstream: Upstream, plan: Plan): string {
-  return plan === 'pro' && upstream.proModel ? upstream.proModel : upstream.model
+  return (plan === 'pro' || plan === 'unlimited') && upstream.proModel
+    ? upstream.proModel
+    : upstream.model
 }
 
 /**
@@ -87,10 +90,17 @@ export function accountUrlFor(env: Env): string | null {
   return site ? `${site}/account` : null
 }
 
-/** Where an account that hit a limit goes to pay; null for paying accounts and instances without a site. */
-export function upgradeUrlFor(env: Env, state: PlanState): string | null {
+/**
+ * Where an account that hit a limit goes to pay. Null when the instance does not sell Pro
+ * (`MURMUR_BILLING_ENABLED` off), for paying accounts, for the private-testing states (nothing to
+ * buy lifts them) and for instances without a site.
+ */
+export function upgradeUrlFor(env: Env, state: AccessState): string | null {
+  if (!billingEnabled(env)) return null
   const site = readSiteUrl(env)
-  return site && state !== 'pro' ? `${site}/account?upgrade=yearly` : null
+  return site && state !== 'pro' && state !== 'testing' && state !== 'unlimited'
+    ? `${site}/account?upgrade=yearly`
+    : null
 }
 
 /**
@@ -107,20 +117,40 @@ export function transcriptWords(body: string, contentType: string | null): numbe
   }
 }
 
+/** What the gateway needs to know about the session behind a request. */
+export interface GatewayIdentity {
+  subject: string
+  /** The token's `email` claim, for the private-testing list; absent when the JWT template omits it. */
+  email?: string
+  emailVerified?: boolean
+}
+
 /**
- * The Clerk subject behind a request, or null when there is no usable session. Convex throws on a
+ * The Clerk identity behind a request, or null when there is no usable session. Convex throws on a
  * bearer token that is not even a JWT; to the gateway that is simply "not signed in", never a 500.
  */
-export async function subjectOf(auth: {
-  getUserIdentity(): Promise<{ subject: string } | null>
-}): Promise<string | null> {
+export async function identityOf(auth: {
+  getUserIdentity(): Promise<{ subject: string; email?: string; emailVerified?: boolean } | null>
+}): Promise<GatewayIdentity | null> {
   try {
     const identity = await auth.getUserIdentity()
-    return identity?.subject ?? null
+    if (!identity) return null
+    return {
+      subject: identity.subject,
+      email: typeof identity.email === 'string' ? identity.email : undefined,
+      emailVerified: typeof identity.emailVerified === 'boolean' ? identity.emailVerified : undefined
+    }
   } catch (err) {
     console.warn('[gateway] rejected bearer token:', err instanceof Error ? err.message : err)
     return null
   }
+}
+
+/** The Clerk subject behind a request, or null when there is no usable session. */
+export async function subjectOf(auth: {
+  getUserIdentity(): Promise<{ subject: string } | null>
+}): Promise<string | null> {
+  return (await identityOf(auth))?.subject ?? null
 }
 
 /** Which managed models an account can currently ask for, in `/v1/models` shape. */
@@ -149,6 +179,7 @@ export type GatewayErrorCode =
   | 'clip_too_long'
   | 'quota_exceeded'
   | 'rate_limited'
+  | 'private_testing'
   | 'upstream_error'
   | 'upstream_auth'
   | 'upstream_busy'
@@ -167,11 +198,20 @@ export function gatewayError(
   )
 }
 
+/**
+ * A `testing` account asked for a managed model: the allowance is zero, so the answer is the shape
+ * of a used-up quota (429) with its own code, which the apps show verbatim. No `limit` fields: it is
+ * not a meter that will come back, and a client of any age then falls back to the sentence.
+ */
+export function privateTestingError(): Response {
+  return gatewayError(429, PRIVATE_TESTING_CODE, PRIVATE_TESTING_MESSAGE)
+}
+
 /** The structured part of a limit, shared by limit errors and the paused /v1/format answer. */
 export interface LimitDetail {
   limit: Meter['limit']
   plan: Plan
-  planState: PlanState
+  planState: AccessState
   used: number
   allowed: number
   resetsAt: number | null
@@ -184,7 +224,7 @@ export interface LimitDetail {
 export function limitDetail(
   meter: Pick<Meter, 'limit' | 'used' | 'allowed'> & { resetsAt: number | null },
   plan: Plan,
-  planState: PlanState,
+  planState: AccessState,
   env: Env
 ): LimitDetail {
   return {
@@ -203,7 +243,12 @@ export function limitDetail(
  * A refused request as the clients render it: the existing `code`s (so current apps show the
  * message verbatim), plus which limit, where it stands, when it resets and where to upgrade.
  */
-export function limitError(refusal: Refusal, plan: Plan, planState: PlanState, env: Env): Response {
+export function limitError(
+  refusal: Refusal,
+  plan: Plan,
+  planState: AccessState,
+  env: Env
+): Response {
   const headers: Record<string, string> = {}
   if (refusal.retryAfterSec) headers['retry-after'] = String(refusal.retryAfterSec)
   return gatewayError(

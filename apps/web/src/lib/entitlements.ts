@@ -25,7 +25,35 @@ export function usageDayUtc(now: number): string {
 }
 
 export function planLabel(state: PlanState): string {
-  return state === 'trial' ? 'Pro trial' : state === 'pro' ? 'Pro' : 'Free'
+  switch (state) {
+    case 'trial':
+      return 'Pro trial'
+    case 'pro':
+      return 'Pro'
+    case 'testing':
+      return 'Private testing'
+    case 'unlimited':
+      return 'Unlimited'
+    default:
+      return 'Free'
+  }
+}
+
+/**
+ * The plan states with allowances to meter. The private-testing states have none: `testing` has
+ * no usage at all, `unlimited` has no cap to fill.
+ */
+export function isMetered(state: PlanState): boolean {
+  return state !== 'testing' && state !== 'unlimited'
+}
+
+/**
+ * Whether the instance sells Pro, as its status says (`MURMUR_BILLING_ENABLED`). An instance from
+ * before the switch existed did, so a status without the field reads as selling. Off, the account
+ * page shows no plan label, no trial countdown, no upgrade panel and no billing.
+ */
+export function sellsPro(status: { billingEnabled?: boolean } | null | undefined): boolean {
+  return status?.billingEnabled ?? true
 }
 
 /** Whole days left in the trial, never negative. */
@@ -191,14 +219,14 @@ export function meterView(meter: Meter): MeterView {
  * Account page's banners). Transcription that has stopped outranks everything: nothing is
  * inserted at all. Then the free week and day, then formatting, which never loses text.
  */
-export function exhaustedNotice(status: InferenceStatus, now: number): string | null {
+export function exhaustedNotice(status: InferenceStatus, now: number, selling = true): string | null {
   const by = (limit: LimitName): Meter | undefined => status.meters.find((m) => m.limit === limit)
   const pro = status.plan === 'pro'
   const tier = pro ? 'on Pro' : 'on the free plan'
 
   const month = by('sttSecondsPerMonth')
   if (month?.exceeded)
-    return `Transcription is paused until ${resetPoint(month.resetsAt, now)}: this month's ${formatAudioSeconds(month.allowed)} of Murmur transcription are used up${pro ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Models to keep dictating${pro ? '.' : ', or upgrade for unlimited dictation.'}`
+    return `Transcription is paused until ${resetPoint(month.resetsAt, now)}: this month's ${formatAudioSeconds(month.allowed)} of Murmur transcription are used up${pro ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Models to keep dictating${pro || !selling ? '.' : ', or upgrade for unlimited dictation.'}`
   const words = by('wordsPerWeek')
   if (words?.exceeded)
     return `This week's free words are used up (${formatNumber(words.allowed)} words a week ${tier}); more ${describeReset(words.resetsAt, now)}.`

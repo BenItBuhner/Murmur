@@ -1,5 +1,5 @@
 import { internal } from './_generated/api'
-import { httpAction, type ActionCtx } from './_generated/server'
+import { httpAction } from './_generated/server'
 import { formatTranscript } from '../../text-engine/src/format'
 import { sttLanguageField } from '../../text-engine/src/languages'
 import type { ChatMessage, ChatOptions, ChatResult } from '../../text-engine/src/types'
@@ -10,18 +10,20 @@ import {
   clipSeconds,
   describeUpstreamFailure,
   gatewayError,
+  identityOf,
   limitDetail,
   limitError,
   modelsPayload,
   multipartBoundary,
   parseFormatRequest,
   parseMultipart,
+  privateTestingError,
   readUpstreams,
-  subjectOf,
   tokensUsed,
   transcriptWords,
   upstreamModelFor,
   wavInfo,
+  type GatewayIdentity,
   type MultipartFile,
   type Upstream
 } from './lib/inference'
@@ -30,16 +32,21 @@ import {
  * Managed inference: an OpenAI-compatible facade in front of the model providers the operator
  * configured for this instance. Clients authenticate with their Clerk session JWT (as the bearer
  * token, exactly where an API key would go), the account's tier decides the allowance, and the
- * provider credentials never leave the deployment's environment variables.
+ * provider credentials never leave the deployment's environment variables. During private testing
+ * (lib/access.ts) only the accounts on the list get past `authorize`.
  *
  * Mounted in convex/http.ts at /v1/models, /v1/audio/transcriptions and /v1/chat/completions.
  */
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
 
-async function identityOf(ctx: ActionCtx): Promise<{ subject: string } | null> {
-  const subject = await subjectOf(ctx.auth)
-  return subject ? { subject } : null
+/** The `authorize` arguments that name the caller. */
+function callerArgs(identity: GatewayIdentity): {
+  clerkId: string
+  email?: string
+  emailVerified?: boolean
+} {
+  return { clerkId: identity.subject, email: identity.email, emailVerified: identity.emailVerified }
 }
 
 function modelNotFound(requested: string, available: string): Response {
@@ -51,7 +58,10 @@ function modelNotFound(requested: string, available: string): Response {
 }
 
 export const models = httpAction(async (ctx) => {
-  if (!(await identityOf(ctx))) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  const identity = await identityOf(ctx.auth)
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  if ((await ctx.runQuery(internal.inference.access, callerArgs(identity))) === 'testing')
+    return privateTestingError()
   return new Response(JSON.stringify(modelsPayload(readUpstreams(process.env))), {
     status: 200,
     headers: JSON_HEADERS
@@ -59,7 +69,7 @@ export const models = httpAction(async (ctx) => {
 })
 
 export const transcriptions = httpAction(async (ctx, request) => {
-  const identity = await identityOf(ctx)
+  const identity = await identityOf(ctx.auth)
   if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
   const upstream = readUpstreams(process.env).stt
   if (!upstream)
@@ -92,11 +102,11 @@ export const transcriptions = httpAction(async (ctx, request) => {
 
   const seconds = clipSeconds(file.data)
   const gate = await ctx.runMutation(internal.inference.authorize, {
-    clerkId: identity.subject,
+    ...callerArgs(identity),
     kind: 'stt',
     seconds
   })
-  if (!gate.ok) return limitError(gate.refusal, gate.plan, gate.planState, process.env)
+  if (!gate.ok) return 'denied' in gate ? privateTestingError() : limitError(gate.refusal, gate.plan, gate.planState, process.env)
 
   const form = new FormData()
   form.append(
@@ -159,7 +169,7 @@ const CHAT_PASSTHROUGH = [
 ] as const
 
 export const chatCompletions = httpAction(async (ctx, request) => {
-  const identity = await identityOf(ctx)
+  const identity = await identityOf(ctx.auth)
   if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
   const upstream = readUpstreams(process.env).llm
   if (!upstream)
@@ -177,8 +187,8 @@ export const chatCompletions = httpAction(async (ctx, request) => {
   if (!Array.isArray(input.messages) || input.messages.length === 0)
     return gatewayError(400, 'bad_request', '"messages" must be a non-empty array')
 
-  const gate = await ctx.runMutation(internal.inference.authorize, { clerkId: identity.subject, kind: 'llm' })
-  if (!gate.ok) return limitError(gate.refusal, gate.plan, gate.planState, process.env)
+  const gate = await ctx.runMutation(internal.inference.authorize, { ...callerArgs(identity), kind: 'llm' })
+  if (!gate.ok) return 'denied' in gate ? privateTestingError() : limitError(gate.refusal, gate.plan, gate.planState, process.env)
 
   const outbound: Record<string, unknown> = { model: upstreamModelFor(upstream, gate.plan), stream: false }
   for (const key of CHAT_PASSTHROUGH) if (input[key] !== undefined) outbound[key] = input[key]
@@ -230,7 +240,7 @@ export const chatCompletions = httpAction(async (ctx, request) => {
  *   -> { text, pressEnter, status, modelText?, llmMs, stages, model }
  */
 export const format = httpAction(async (ctx, request) => {
-  const identity = await identityOf(ctx)
+  const identity = await identityOf(ctx.auth)
   if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
   const upstream = readUpstreams(process.env).llm
   if (!upstream)
@@ -246,11 +256,11 @@ export const format = httpAction(async (ctx, request) => {
   if (!parsed.ok) return gatewayError(400, 'bad_request', parsed.message)
 
   const gate = await ctx.runMutation(internal.inference.authorize, {
-    clerkId: identity.subject,
+    ...callerArgs(identity),
     kind: 'llm',
     degradable: true
   })
-  if (!gate.ok) return limitError(gate.refusal, gate.plan, gate.planState, process.env)
+  if (!gate.ok) return 'denied' in gate ? privateTestingError() : limitError(gate.refusal, gate.plan, gate.planState, process.env)
 
   const model = upstreamModelFor(upstream, gate.plan)
   let tokens = 0

@@ -34,24 +34,45 @@ data class InferenceView(
     val signedIn: Boolean,
     val status: InferenceStatusDto?,
     val plan: String,
-    /** Trial, free or Pro: the plan the account is on, as distinct from the tier whose limits apply. */
+    /**
+     * Trial, free or Pro: the plan the account is on, as distinct from the tier whose limits apply;
+     * `testing` or `unlimited` while the instance is in private testing.
+     */
     val planState: String,
     /** Whole days left on the Pro trial; 0 outside of one. */
     val trialDaysLeft: Int,
     val sttReady: Boolean,
-    val llmReady: Boolean
+    val llmReady: Boolean,
+    /**
+     * The instance sells Pro. False (its `MURMUR_BILLING_ENABLED` is off) hides plan labels, the
+     * trial countdown, Upgrade and Manage plan and billing links everywhere in the app.
+     */
+    val billingEnabled: Boolean = true
 ) {
     /** Murmur models can be offered in the UI. */
     val offersMurmur: Boolean get() = cloudEnabled && managedAvailable
 
-    /** "Pro trial", "Free", "Pro". */
+    /** The account has allowances to show: not `testing` (none at all), not `unlimited` (no cap). */
+    val metered: Boolean get() = Limits.isMetered(planState)
+
+    /** "Pro trial", "Free", "Pro"; "Private testing", "Unlimited". */
     val planLabel: String get() = Limits.planStateLabel(planState)
 
-    /** "Pro trial", "Free plan", "Pro plan". */
+    /** "Pro trial", "Free plan", "Pro plan"; "Private testing", "Unlimited". */
     val planTitle: String get() = Limits.planTitle(planState)
 
+    /**
+     * How the Murmur source is captioned where a plan would be named: the plan while the instance
+     * sells Pro, the private-testing state when there is one, otherwise nothing plan-shaped.
+     */
+    val sourceCaption: String
+        get() = if (!metered) planTitle else if (billingEnabled) planTitle else "Included with your account"
+
+    /** A plan label is a billing thing; the private-testing states are about the server, so they show. */
+    val labelled: Boolean get() = billingEnabled || !metered
+
     /** The rolling and monthly allowances of the tier, with what is used and when each resets. */
-    val meters: List<UsageMeterDto> get() = Limits.usageMeters(status?.meters ?: emptyList())
+    val meters: List<UsageMeterDto> get() = if (metered) Limits.usageMeters(status?.meters ?: emptyList()) else emptyList()
 
     /** The web page that starts an upgrade, or null when the instance offers none (hide the button). */
     val upgradeUrl: String? get() = status?.upgradeUrl
@@ -60,15 +81,16 @@ data class InferenceView(
     val accountUrl: String? get() = status?.accountUrl
 
     /** Which of Upgrade and Manage plan the account gets, with the page each opens. */
-    val planActions: PlanActions get() = Limits.planActions(planState, upgradeUrl, accountUrl)
+    val planActions: PlanActions get() = Limits.planActions(planState, upgradeUrl, accountUrl, billingEnabled)
 
     /** Pro past the soft fair-use cap: the formatting model is paused until the month resets. */
-    val formattingPaused: Boolean get() = status?.formattingPaused == true
+    val formattingPaused: Boolean get() = metered && status?.formattingPaused == true
 
-    /** "12 of 120 min this month" (or "1.5 of 60 h this month"), or null before the account status arrived. */
+    /** "12 of 120 min this month" (or "1.5 of 60 h this month"), or null before the account status arrived or without a cap. */
     val minutesLabel: String?
         get() {
             val s = status ?: return null
+            if (!metered) return null
             val used = s.sttSecondsIn(InferenceStatusDto.currentPeriod())
             return "${Limits.meterValue("sttSecondsPerMonth", used, s.limits.sttSecondsPerMonth)} this month"
         }
@@ -99,7 +121,8 @@ fun rememberInferenceView(settings: MurmurSettings): InferenceView {
         planState = Limits.planStateOf(status, syncStatus?.user),
         trialDaysLeft = Limits.trialDaysLeft(status?.trialEndsAt ?: syncStatus?.user?.trialEndsAt),
         sttReady = Inference.sttReady(settings, routing, signedIn),
-        llmReady = Inference.llmReady(settings, routing, signedIn)
+        llmReady = Inference.llmReady(settings, routing, signedIn),
+        billingEnabled = Limits.sellsPro(status)
     )
 }
 

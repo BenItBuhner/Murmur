@@ -17,7 +17,10 @@ import { ada, jsonResponse, setup, stubEnv, stubFetch } from './helpers'
 
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0)
 const SITE = 'https://murmur.test'
+/** The feature switch (lib/plans.ts `billingEnabled`); off by default, on for everything below. */
+const SELLING = { MURMUR_BILLING_ENABLED: 'true' }
 const STRIPE_ENV = {
+  ...SELLING,
   STRIPE_SECRET_KEY: 'sk_test_123',
   STRIPE_WEBHOOK_SECRET: 'whsec_test_secret',
   STRIPE_PRICE_MONTHLY: 'price_month',
@@ -323,12 +326,88 @@ describe('stripe helpers', () => {
   })
 })
 
+describe('billing switched off (the default)', () => {
+  const OFF = {
+    enabled: false,
+    configured: false,
+    portalAvailable: false,
+    upgradeUrl: null,
+    subscription: null
+  }
+
+  it('hides billing even with Stripe fully configured: status is empty, the actions and the webhook refuse', async () => {
+    // Every Stripe variable set, the switch not: the switch wins.
+    const { MURMUR_BILLING_ENABLED: _on, ...stripeOnly } = STRIPE_ENV
+    stubEnv(stripeOnly)
+    const calls = stubFetch(() => jsonResponse({ id: 'cs_1', url: 'https://checkout.stripe.com/c/pay/cs_1' }))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await asAda.mutation(api.users.ensure, {})
+    expect(await asAda.query(api.billing.status, {})).toEqual(OFF)
+    await expect(
+      asAda.action(api.billing.createCheckoutSession, { interval: 'year' })
+    ).rejects.toThrow(/switched off/)
+    await expect(asAda.action(api.billing.createPortalSession, {})).rejects.toThrow(/switched off/)
+    expect(calls).toHaveLength(0)
+    // A signed, well-formed delivery is refused without being read; Stripe would retry a 503.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const delivery = await deliver(t, stripeEvent('customer.subscription.updated', stripeSubscription()))
+    expect(delivery.status).toBe(503)
+    expect(await delivery.text()).toMatch(/switched off/)
+    warn.mockRestore()
+    await t.run(async (ctx) => {
+      const [user] = await ctx.db.query('users').collect()
+      expect(user.subscription).toBeUndefined()
+      expect(user.plan).toBe('trial')
+    })
+    // The value has to be the literal true; anything else keeps billing off.
+    stubEnv({ ...stripeOnly, MURMUR_BILLING_ENABLED: 'yes' })
+    expect(await asAda.query(api.billing.status, {})).toEqual(OFF)
+    stubEnv({ ...stripeOnly, MURMUR_BILLING_ENABLED: 'TRUE' })
+    expect((await asAda.query(api.billing.status, {})).enabled).toBe(true)
+  })
+
+  it('keeps a Pro subscription an account already has out of sight while off, and shows it again when on', async () => {
+    stubEnv(STRIPE_ENV)
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await asAda.mutation(api.users.ensure, {})
+    await t.mutation(internal.billing.applySubscription, {
+      subscription: {
+        id: 'sub_1',
+        status: 'active',
+        priceId: 'price_year',
+        interval: 'year',
+        currentPeriodEnd: PERIOD_END * 1000,
+        cancelAtPeriodEnd: false,
+        customerId: 'cus_ada',
+        clerkId: 'user_ada'
+      },
+      eventAt: NOW
+    })
+    expect((await asAda.query(api.billing.status, {})).subscription?.status).toBe('active')
+    // Off: the account stays Pro (the plan machinery is untouched), the page just has nothing to show.
+    stubEnv({ ...STRIPE_ENV, MURMUR_BILLING_ENABLED: '' })
+    expect(await asAda.query(api.billing.status, {})).toEqual(OFF)
+    expect(await asAda.query(api.users.me, {})).toMatchObject({ plan: 'pro', planState: 'pro' })
+    stubEnv(STRIPE_ENV)
+    expect(await asAda.query(api.billing.status, {})).toMatchObject({
+      enabled: true,
+      portalAvailable: true,
+      subscription: { status: 'active', interval: 'year' }
+    })
+  })
+})
+
 describe('billing without Stripe configured', () => {
+  beforeEach(() => stubEnv(SELLING))
+
   it('degrades: status says so, the actions refuse readably, the webhook is off', async () => {
     const t = setup()
     const asAda = t.withIdentity(ada)
     await asAda.mutation(api.users.ensure, {})
     expect(await asAda.query(api.billing.status, {})).toEqual({
+      enabled: true,
       configured: false,
       portalAvailable: false,
       upgradeUrl: null,
@@ -362,6 +441,7 @@ describe('billing with Stripe configured', () => {
     const asAda = t.withIdentity(ada)
     await asAda.mutation(api.users.ensure, {})
     expect(await asAda.query(api.billing.status, {})).toEqual({
+      enabled: true,
       configured: true,
       portalAvailable: false,
       upgradeUrl: `${SITE}/account?upgrade=yearly`,
@@ -417,6 +497,7 @@ describe('billing with Stripe configured', () => {
     expect(calls[0].url).toBe('https://api.stripe.com/v1/subscriptions/sub_1')
     expect(await asAda.query(api.users.me, {})).toMatchObject({ plan: 'pro', planState: 'pro' })
     expect(await asAda.query(api.billing.status, {})).toEqual({
+      enabled: true,
       configured: true,
       portalAvailable: true,
       upgradeUrl: null,

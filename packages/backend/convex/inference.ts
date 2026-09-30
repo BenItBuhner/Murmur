@@ -1,6 +1,11 @@
 import { v } from 'convex/values'
 import type { Doc, Id } from './_generated/dataModel'
-import { internalMutation, type MutationCtx, type QueryCtx } from './_generated/server'
+import {
+  internalMutation,
+  internalQuery,
+  type MutationCtx,
+  type QueryCtx
+} from './_generated/server'
 import {
   ZERO_MONTH,
   checkFormatting,
@@ -18,16 +23,19 @@ import {
   type MonthUsage,
   type UsageSnapshot
 } from './lib/entitlements'
+import { accessStateOf } from './lib/access'
 import { authedQuery } from './lib/functions'
 import { MURMUR_MODELS, accountUrlFor, readUpstreams, upgradeUrlFor } from './lib/inference'
 import {
   DAY_MS,
   RATE_WINDOW_MS,
+  accessStateValidator,
+  billingEnabled,
   dayStart,
   isUsageDay,
+  legacyLimitFigures,
   nextMonthStart,
   planLimits,
-  planStateValidator,
   planValidator,
   shiftDay,
   tierOf,
@@ -35,7 +43,7 @@ import {
   usagePeriod,
   WEEK_DAYS
 } from './lib/plans'
-import { planStateOf, upsertUser } from './lib/users'
+import { findUserByClerkId, planStateOf, upsertUser } from './lib/users'
 import {
   inferenceKindValidator,
   inferenceStatusValidator,
@@ -107,6 +115,7 @@ async function snapshotFor(
  * The instance's managed models and this account's allowance and usage. Pass `day`, the client's
  * current UTC calendar day (`YYYY-MM-DD`), to get the rolling-week and per-day meters; the query
  * takes the day rather than reading the clock so its result is stable and cacheable within a day.
+ * During private testing the state is `testing` or `unlimited` and there are no meters to show.
  */
 export const status = authedQuery({
   args: { day: v.optional(v.string()) },
@@ -115,9 +124,15 @@ export const status = authedQuery({
     if (args.day !== undefined && !isUsageDay(args.day))
       throw new Error('"day" must be a UTC calendar day as YYYY-MM-DD')
     const upstreams = readUpstreams(process.env)
-    const planState = ctx.user ? planStateOf(ctx.user) : 'free'
+    const planState = accessStateOf(
+      process.env,
+      ctx.user ? planStateOf(ctx.user) : 'free',
+      ctx.identity,
+      ctx.user?.email
+    )
     const plan = tierOf(planState)
     const limits = planLimits(plan)
+    const metered = plan !== 'testing' && plan !== 'unlimited'
     // Newest month with any usage; `period` sorts lexicographically, so the index order is enough.
     const latest = ctx.user
       ? await ctx.db
@@ -135,12 +150,8 @@ export const status = authedQuery({
       plan,
       planState,
       trialEndsAt: ctx.user?.trialEndsAt ?? null,
-      limits: {
-        sttSecondsPerMonth: limits.sttSecondsPerMonth,
-        llmTokensPerMonth: limits.llmTokensPerMonth,
-        requestsPerMinute: limits.requestsPerMinute,
-        maxClipSeconds: limits.maxClipSeconds
-      },
+      billingEnabled: billingEnabled(process.env),
+      limits: legacyLimitFigures(limits),
       usage: latest
         ? {
             period: latest.period,
@@ -166,7 +177,7 @@ export const status = authedQuery({
     const today = buckets[buckets.length - 1]
     return {
       ...base,
-      formattingPaused: formattingPaused(limits, snapshot.month),
+      formattingPaused: metered && formattingPaused(limits, snapshot.month),
       window: {
         day,
         weekStart: buckets[0].day,
@@ -174,7 +185,8 @@ export const status = authedQuery({
         sttSeconds: buckets.reduce((acc, b) => acc + b.sttSeconds, 0),
         dictationsToday: Math.max(today.dictations, today.formats)
       },
-      meters: metersFor(limits, snapshot),
+      // No quota to show for a `testing` account (zero everywhere) or an `unlimited` one.
+      meters: metered ? metersFor(limits, snapshot) : [],
       resets: {
         day: dayStart(day) + DAY_MS,
         week: weekRollsAt(buckets),
@@ -189,28 +201,55 @@ const authorizeResultValidator = v.union(
     ok: v.literal(true),
     userId: v.id('users'),
     plan: planValidator,
-    planState: planStateValidator,
+    planState: accessStateValidator,
     /** Set when the caller may proceed without the model (Pro past its soft fair-use cap). */
     paused: v.union(meterValidator, v.null())
   }),
   v.object({
     ok: v.literal(false),
     plan: planValidator,
-    planState: planStateValidator,
+    planState: accessStateValidator,
     refusal: refusalValidator
+  }),
+  /** Private testing and the account is not on the list: no allowance, nothing to meter. */
+  v.object({
+    ok: v.literal(false),
+    plan: v.literal('testing'),
+    planState: v.literal('testing'),
+    denied: v.literal('private_testing')
   })
 )
 
+/** The session claims the gateway forwards so the private-testing list can judge the account. */
+const identityArgs = {
+  clerkId: v.string(),
+  email: v.optional(v.string()),
+  emailVerified: v.optional(v.boolean())
+}
+
+/**
+ * Where the account stands for `/v1/models`, which lists models without gating a request: the
+ * same answer `authorize` would give, without provisioning or counting anything.
+ */
+export const access = internalQuery({
+  args: identityArgs,
+  returns: accessStateValidator,
+  handler: async (ctx, args) => {
+    const user = await findUserByClerkId(ctx, args.clerkId)
+    return accessStateOf(process.env, user ? planStateOf(user) : 'free', args, user?.email)
+  }
+})
+
 /**
  * Gate one managed request. Provisions the account row if the Clerk webhook has not created it yet
- * (which also starts its trial), settles a trial that has run out, refuses when a limit of the
- * tier is reached or the account is asking too fast, and otherwise counts the request against the
- * rate window. Usage itself is added by `record` once the upstream answered, so a failed request
- * never costs allowance.
+ * (which also starts its trial), settles a trial that has run out, refuses a `testing` account
+ * outright, refuses when a limit of the tier is reached or the account is asking too fast, and
+ * otherwise counts the request against the rate window. Usage itself is added by `record` once the
+ * upstream answered, so a failed request never costs allowance.
  */
 export const authorize = internalMutation({
   args: {
-    clerkId: v.string(),
+    ...identityArgs,
     kind: inferenceKindValidator,
     /** Clip length for speech requests, so a request that cannot fit is refused up front. */
     seconds: v.optional(v.number()),
@@ -220,8 +259,12 @@ export const authorize = internalMutation({
   returns: authorizeResultValidator,
   handler: async (ctx, args) => {
     const now = Date.now()
-    const user = await upsertUser(ctx, args.clerkId, {}, now)
-    const planState = planStateOf(user)
+    // The token's email travels with the request so an account the gateway provisions first (before
+    // `users.ensure` ran) is judged by it, not by an empty row.
+    const user = await upsertUser(ctx, args.clerkId, { email: args.email }, now)
+    const planState = accessStateOf(process.env, planStateOf(user), args, user.email)
+    if (planState === 'testing')
+      return { ok: false as const, plan: 'testing' as const, planState, denied: 'private_testing' as const }
     const plan = tierOf(planState)
     const limits = planLimits(plan)
     const day = usageDay(now)

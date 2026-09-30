@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { ButtonLink } from '@/components/ui/button'
 import { Section, SectionHeading } from '@/components/ui/section'
 import { Surface } from '@/components/ui/surface'
+import { billingEnabled } from '@/lib/env'
 
 const OWN = [
   'Any OpenAI-compatible speech endpoint: OpenAI, Groq, Mistral Voxtral, a local whisper server',
@@ -38,9 +39,19 @@ export function Models() {
         />
         <Plan
           title="Murmur's models"
-          subtitle="With an account. Free tier, 14-day Pro trial, Pro from $6 a month."
+          subtitle={
+            billingEnabled
+              ? 'With an account. Free tier, 14-day Pro trial, Pro from $6 a month.'
+              : 'With an account, while the server is open to it.'
+          }
           items={MURMUR}
-          action={<ButtonLink href="/pricing">See pricing</ButtonLink>}
+          action={
+            billingEnabled ? (
+              <ButtonLink href="/pricing">See pricing</ButtonLink>
+            ) : (
+              <ButtonLink href="/account">Sign in or create an account</ButtonLink>
+            )
+          }
         />
       </div>
     </Section>

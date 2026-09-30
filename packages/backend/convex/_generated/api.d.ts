@@ -17,6 +17,7 @@ import type * as gateway from "../gateway.js";
 import type * as history from "../history.js";
 import type * as http from "../http.js";
 import type * as inference from "../inference.js";
+import type * as lib_access from "../lib/access.js";
 import type * as lib_clerkWebhook from "../lib/clerkWebhook.js";
 import type * as lib_entitlements from "../lib/entitlements.js";
 import type * as lib_functions from "../lib/functions.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   history: typeof history;
   http: typeof http;
   inference: typeof inference;
+  "lib/access": typeof lib_access;
   "lib/clerkWebhook": typeof lib_clerkWebhook;
   "lib/entitlements": typeof lib_entitlements;
   "lib/functions": typeof lib_functions;

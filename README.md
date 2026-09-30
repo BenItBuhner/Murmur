@@ -205,9 +205,11 @@ quota, whatever a retry costs in tokens.
 | --- | --- |
 | `MURMUR_INFERENCE_STT_URL`, `MURMUR_INFERENCE_STT_KEY`, `MURMUR_INFERENCE_STT_MODEL` | OpenAI-compatible speech-to-text upstream (e.g. `https://api.groq.com/openai/v1`, a key, `whisper-large-v3-turbo`). |
 | `MURMUR_INFERENCE_LLM_URL`, `MURMUR_INFERENCE_LLM_KEY`, `MURMUR_INFERENCE_LLM_MODEL` | OpenAI-compatible chat upstream for smart formatting (e.g. the same Groq URL, a key, `openai/gpt-oss-20b`; Groq retired `llama-3.1-8b-instant` and `llama-3.3-70b-versatile` on 2026-08-16). |
-| `MURMUR_INFERENCE_STT_PRO_MODEL`, `MURMUR_INFERENCE_LLM_PRO_MODEL` | Optional better models for `pro` accounts. |
-| `MURMUR_SITE_URL` | Origin of the website (`https://…`): where limit errors send people to upgrade and where Stripe returns them after Checkout. |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Pro billing (see below). Without them billing is off and the account page says so. |
+| `MURMUR_INFERENCE_STT_PRO_MODEL`, `MURMUR_INFERENCE_LLM_PRO_MODEL` | Optional better models for `pro` accounts (and for `unlimited` ones during private testing). |
+| `MURMUR_ALLOWED_EMAILS` | **Private testing.** Comma-separated emails. While set, only these accounts get the managed models (an `unlimited` tier: no allowance, just the 60 req/min rate and the 10-minute clip); every other signed-in account is `testing` and every `/v1/*` request answers 429 `private_testing`. Sign-in, sync and the account page stay open. Unset: every account is on its plan state. |
+| `MURMUR_BILLING_ENABLED` | **Feature switch, off by default.** The literal `true` sells Pro: the Stripe actions and webhook work, statuses and limit errors carry upgrade links, the apps and the website show plans, the trial countdown and billing. Off, none of that shows; the plan machinery keeps running underneath. The website has the same switch at build time as `NEXT_PUBLIC_MURMUR_BILLING_ENABLED`. |
+| `MURMUR_SITE_URL` | Origin of the website (`https://…`): the account page and the privacy/terms links the apps show; where limit errors send people to upgrade and where Stripe returns them after Checkout when billing is on. |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Pro billing (see below), read only while `MURMUR_BILLING_ENABLED` is `true`. Without them billing is off and the account page says so. |
 
 A kind is offered only when its URL and model are set; an instance without them tells the apps so,
 and they fall back to the user's own provider. Every account starts a **14-day Pro trial** with no
@@ -227,13 +229,24 @@ client's UTC `day` and returns the meters and reset times. After deploying the t
 time run `npx convex run entitlements:backfillTrials` once: existing accounts get their 14 days
 from that moment.
 
-**Billing.** `billing.createCheckoutSession` and `billing.createPortalSession` (authed actions)
-return Stripe URLs the website opens; the webhook at `https://<deployment>.convex.site/stripe/webhook`
-(events `checkout.session.completed`, `customer.subscription.updated`,
-`customer.subscription.deleted`, `invoice.payment_failed`) is the only writer of the plan. Create two
-recurring prices in Stripe ($7.50/month and $72/year, no Stripe trial: the trial happens in-product),
-switch on the Customer Portal, and set the four `STRIPE_*` variables plus `MURMUR_SITE_URL` on the
-deployment.
+**Billing.** Behind `MURMUR_BILLING_ENABLED` (off by default: the actions refuse in one sentence,
+the webhook answers 503, the apps and the site show nothing to buy). On, `billing.createCheckoutSession`
+and `billing.createPortalSession` (authed actions) return Stripe URLs the website opens; the webhook
+at `https://<deployment>.convex.site/stripe/webhook` (events `checkout.session.completed`,
+`customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`) is the
+only writer of the plan. Create two recurring prices in Stripe ($7.50/month and $72/year, no Stripe
+trial: the trial happens in-product), switch on the Customer Portal, and set the four `STRIPE_*`
+variables plus `MURMUR_SITE_URL` on the deployment. Everything Stripe-specific is
+[`packages/backend/convex/lib/stripe.ts`](packages/backend/convex/lib/stripe.ts) and the three
+functions in `convex/billing.ts` that call it; the plan itself is written through provider-neutral
+snapshots (`applySubscription`), which is where another provider would plug in.
+
+**Private testing.** With `MURMUR_ALLOWED_EMAILS` set, the instance's models are open only to the
+accounts on the list, which get everything without an allowance; every other account keeps its
+sign-in, sync and account page but every gateway request is refused with
+`This Murmur server is in private testing…` (HTTP 429, `error.code: private_testing`), and the apps
+show no meters for it. The stored plan states (trial, free, Pro) keep running underneath; unsetting
+the list puts everyone back on them.
 
 ### Setting up an instance
 

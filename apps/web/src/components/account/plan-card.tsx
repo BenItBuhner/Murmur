@@ -15,9 +15,11 @@ import {
   exhaustedNotice,
   formatLocalDate,
   formatLongDate,
+  isMetered,
   meterView,
   planLabel,
   resetPoint,
+  sellsPro,
   trialDaysLeft,
   type BillingInterval,
   type MeterView
@@ -32,9 +34,12 @@ function messageOf(err: unknown, fallback: string): string {
 }
 
 /*
- * The plan card: where the account stands (trial, free tier or Pro), every meter that applies,
- * and the way up or out. Checkout and the billing portal are Stripe pages the backend hands us a
- * URL for; without billing configured the upgrade panel says so instead of pretending.
+ * The plan card: where the account stands (trial, free tier or Pro; during private testing, on the
+ * list or not), every meter that applies, and the way up or out. Checkout and the billing portal
+ * are Stripe pages the backend hands us a URL for; without billing configured the upgrade panel
+ * says so instead of pretending. While the instance does not sell Pro (`billingEnabled` false in
+ * the status) the card is about the models, not the plan: no labels, no countdown, no upgrade, no
+ * billing, while the allowances that apply are still shown.
  */
 export function PlanCard({
   status,
@@ -50,21 +55,35 @@ export function PlanCard({
   className?: string
 }) {
   const state = status?.planState ?? 'free'
+  const selling = sellsPro(status)
+  const metered = isMetered(state)
   const period = usagePeriod(now)
   const thisMonth = status && status.usage.period === period ? status.usage : null
   const requests = (thisMonth?.sttRequests ?? 0) + (thisMonth?.llmRequests ?? 0)
-  const meters = status ? displayedMeters(status).map(meterView) : []
-  const notice = status ? exhaustedNotice(status, now) : null
+  const meters = status && metered ? displayedMeters(status).map(meterView) : []
+  const notice = status && metered ? exhaustedNotice(status, now, selling) : null
+  // A plan label is a billing thing; the private-testing states are about the server, so they show.
+  const labelled = selling || !metered
 
   return (
     <Surface className={cn('flex flex-col', className)}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="eyebrow">Plan</div>
-          <h2 className="serif-display mt-2 text-heading">{status ? planLabel(state) : '…'}</h2>
+          <div className="eyebrow">{selling ? 'Plan' : 'Murmur’s models'}</div>
+          <h2 className="serif-display mt-2 text-heading">
+            {!status ? '…' : labelled ? planLabel(state) : 'Included with your account'}
+          </h2>
         </div>
-        {status && (
-          <Chip tone={state === 'pro' ? 'success' : state === 'trial' ? 'card' : 'well'}>
+        {status && labelled && (
+          <Chip
+            tone={
+              state === 'pro' || state === 'unlimited'
+                ? 'success'
+                : state === 'trial'
+                  ? 'card'
+                  : 'well'
+            }
+          >
             {planLabel(state)}
           </Chip>
         )}
@@ -72,14 +91,15 @@ export function PlanCard({
 
       <p className="mt-2 text-body text-muted-foreground">
         {status ? (
-          <PlanSummary status={status} billing={billing} now={now} />
+          <PlanSummary status={status} billing={billing} now={now} selling={selling} />
         ) : (
           'Waiting for your account status…'
         )}
       </p>
 
       {notice && <Notice tone={status?.plan === 'free' ? 'record' : 'warning'}>{notice}</Notice>}
-      {billing?.subscription?.paymentFailedAt != null &&
+      {selling &&
+        billing?.subscription?.paymentFailedAt != null &&
         billing.subscription.status !== 'canceled' && (
           <Notice tone="record">
             The last payment did not go through. Update the card under Manage billing; Stripe
@@ -87,7 +107,7 @@ export function PlanCard({
           </Notice>
         )}
 
-      {status && status.available && (
+      {status && status.available && state !== 'testing' && (
         <div className="mt-card grid gap-2">
           {meters.map((meter) => (
             <MeterBar key={meter.limit} meter={meter} now={now} />
@@ -99,10 +119,10 @@ export function PlanCard({
         </div>
       )}
 
-      {status && state !== 'pro' && (
+      {status && selling && (state === 'trial' || state === 'free') && (
         <UpgradePanel billing={billing} initial={upgrade ?? 'year'} state={state} />
       )}
-      {status && state === 'pro' && billing && <BillingPanel billing={billing} />}
+      {status && selling && state === 'pro' && billing && <BillingPanel billing={billing} />}
     </Surface>
   )
 }
@@ -110,11 +130,13 @@ export function PlanCard({
 function PlanSummary({
   status,
   billing,
-  now
+  now,
+  selling
 }: {
   status: InferenceStatus
   billing: BillingStatus | null
   now: number
+  selling: boolean
 }) {
   if (!status.available)
     return (
@@ -123,16 +145,40 @@ function PlanSummary({
         connect under Models.
       </>
     )
+  const clip = Math.round(status.limits.maxClipSeconds / 60)
+  if (status.planState === 'testing')
+    return (
+      <>
+        This Murmur server is in private testing: its speech and formatting models are not open to
+        this account yet. The apps work with a provider of your own under Models, and your
+        dictionary, snippets, style and stats keep syncing.
+      </>
+    )
+  if (status.planState === 'unlimited')
+    return (
+      <>
+        This account is on the server’s list: Murmur’s speech and formatting models without an
+        allowance to run out of. Clips up to {clip} minutes, {status.limits.requestsPerMinute}{' '}
+        requests a minute.
+      </>
+    )
   if (status.planState === 'trial') {
     const days = status.trialEndsAt ? trialDaysLeft(status.trialEndsAt, now) : 0
+    // The countdown is a sales pitch for what comes after; without a way to buy it says nothing.
+    if (!selling)
+      return (
+        <>
+          Unlimited words within fair use, clips up to {clip} minutes,{' '}
+          {status.limits.requestsPerMinute} requests a minute.
+        </>
+      )
     return (
       <>
         {days === 0 ? 'Ends today' : days === 1 ? 'One day left' : `${days} days left`}
         {status.trialEndsAt ? `, until ${formatLocalDate(status.trialEndsAt)}` : ''}. Everything Pro
-        has: unlimited words within fair use, clips up to{' '}
-        {Math.round(status.limits.maxClipSeconds / 60)} minutes, {status.limits.requestsPerMinute}{' '}
-        requests a minute. Then the free tier: {PRICING.freeWordsPerWeek} words a week, unless you
-        upgrade.
+        has: unlimited words within fair use, clips up to {clip} minutes,{' '}
+        {status.limits.requestsPerMinute} requests a minute. Then the free tier:{' '}
+        {PRICING.freeWordsPerWeek} words a week, unless you upgrade.
       </>
     )
   }
@@ -149,13 +195,16 @@ function PlanSummary({
   return (
     <>
       Unlimited words within fair use: {PRICING.proFairUseHours} hours of audio a month, clips up to{' '}
-      {Math.round(status.limits.maxClipSeconds / 60)} minutes, {status.limits.requestsPerMinute}{' '}
-      requests a minute.{' '}
-      {sub
-        ? sub.cancelAtPeriodEnd
-          ? `Cancelled: Pro stays on until ${formatLongDate(sub.currentPeriodEnd)}, then the free tier.`
-          : `Renews ${formatLongDate(sub.currentPeriodEnd)}, ${sub.interval === 'year' ? `${formatPrice(PRICING.proYearly)} a year` : `${formatPrice(PRICING.proMonthly)} a month`}.`
-        : 'Granted by the operator; nothing to pay.'}
+      {clip} minutes, {status.limits.requestsPerMinute} requests a minute.
+      {selling
+        ? ` ${
+            sub
+              ? sub.cancelAtPeriodEnd
+                ? `Cancelled: Pro stays on until ${formatLongDate(sub.currentPeriodEnd)}, then the free tier.`
+                : `Renews ${formatLongDate(sub.currentPeriodEnd)}, ${sub.interval === 'year' ? `${formatPrice(PRICING.proYearly)} a year` : `${formatPrice(PRICING.proMonthly)} a month`}.`
+              : 'Granted by the operator; nothing to pay.'
+          }`
+        : ''}
     </>
   )
 }

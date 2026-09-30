@@ -1,5 +1,6 @@
 import { ButtonLink } from '@/components/ui/button'
 import { Section } from '@/components/ui/section'
+import { billingEnabled } from '@/lib/env'
 
 export default function NotFound() {
   return (
@@ -10,7 +11,8 @@ export default function NotFound() {
           That page did not make it into the transcript.
         </h1>
         <p className="mt-5 text-lead text-muted-foreground">
-          The address may have changed. The downloads, pricing and your account are one step away.
+          The address may have changed. The downloads{billingEnabled ? ', pricing' : ''} and your
+          account are one step away.
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <ButtonLink href="/">Back to the start</ButtonLink>

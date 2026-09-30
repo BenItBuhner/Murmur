@@ -42,7 +42,7 @@ data class LimitNotice(
             if (source == null) return null
             val limit = source.optString("limit", "")
             if (limit !in Limits.NAMES) return null
-            val plan = if (source.optString("plan") == "pro") "pro" else "free"
+            val plan = source.optString("plan").takeIf { it in Limits.PLANS } ?: "free"
             val planState = source.optString("planState").takeIf { it in Limits.PLAN_STATES } ?: plan
             return LimitNotice(
                 limit = limit,
@@ -73,7 +73,19 @@ object Limits {
         "wordsPerWeek", "sttSecondsPerWeek", "dictationsPerDay", "maxClipSeconds",
         "sttSecondsPerMonth", "fairUseSttSecondsPerMonth", "llmTokensPerMonth", "requestsPerMinute"
     )
-    val PLAN_STATES = setOf("trial", "free", "pro")
+    /** The tiers whose limits apply; `testing` and `unlimited` exist only during private testing. */
+    val PLANS = setOf("free", "pro", "testing", "unlimited")
+    val PLAN_STATES = setOf("trial", "free", "pro", "testing", "unlimited")
+
+    /** The states with allowances to meter: `testing` has no usage at all, `unlimited` no cap to fill. */
+    fun isMetered(state: String): Boolean = state != "testing" && state != "unlimited"
+
+    /**
+     * Whether the instance sells Pro, as its status says (`billingEnabled`); an instance from before
+     * the switch existed did. Off, the app shows no plan label, trial countdown, Upgrade or Manage
+     * plan button or billing link; the allowances that apply are still shown.
+     */
+    fun sellsPro(status: InferenceStatusDto?): Boolean = status?.billingEnabled ?: true
 
     private const val MINUTE = 60_000L
     private const val HOUR = 3_600_000L
@@ -86,28 +98,35 @@ object Limits {
     fun planStateLabel(state: String): String = when (state) {
         "trial" -> "Pro trial"
         "pro" -> "Pro"
+        "testing" -> "Private testing"
+        "unlimited" -> "Unlimited"
         else -> "Free"
     }
 
-    /** "Pro trial", "Free plan", "Pro plan": the plan as a title. */
-    fun planTitle(state: String): String = if (state == "trial") "Pro trial" else "${planStateLabel(state)} plan"
+    /** "Pro trial", "Free plan", "Pro plan"; "Private testing", "Unlimited": the plan as a title. */
+    fun planTitle(state: String): String =
+        if (state == "trial" || !isMetered(state)) planStateLabel(state) else "${planStateLabel(state)} plan"
 
     /**
      * Upgrade for anyone who could, Manage plan for anyone who has a plan to manage (Pro, and a
      * trial that will become one). Each only when the instance sent its page; an instance without
-     * a site URL sends null and gets no button.
+     * a site URL sends null and gets no button, an instance that does not sell Pro shows neither,
+     * and the private-testing states have nothing to buy or manage.
      */
-    fun planActions(planState: String, upgradeUrl: String?, accountUrl: String?): PlanActions = PlanActions(
-        upgrade = if (planState != "pro") upgradeUrl?.takeIf { it.isNotBlank() } else null,
-        manage = if (planState != "free") accountUrl?.takeIf { it.isNotBlank() } else null
-    )
+    fun planActions(planState: String, upgradeUrl: String?, accountUrl: String?, billingEnabled: Boolean = true): PlanActions {
+        if (!billingEnabled || !isMetered(planState)) return PlanActions(null, null)
+        return PlanActions(
+            upgrade = if (planState != "pro") upgradeUrl?.takeIf { it.isNotBlank() } else null,
+            manage = if (planState != "free") accountUrl?.takeIf { it.isNotBlank() } else null
+        )
+    }
 
     /** The account's plan state, from an instance that reports one or, failing that, from its tier. */
     fun planStateOf(status: InferenceStatusDto?, user: UserDto?): String {
         status?.planState?.takeIf { it in PLAN_STATES }?.let { return it }
         user?.planState?.takeIf { it in PLAN_STATES }?.let { return it }
         val plan = status?.plan ?: user?.plan ?: "free"
-        return if (plan == "pro") "pro" else "free"
+        return if (plan in PLANS) plan else "free"
     }
 
     /** Whole days left on the trial, never negative: `ceil((trialEndsAt - now) / 24 h)`. */
@@ -242,23 +261,30 @@ object Limits {
         return stop.copy(detail = "${stop.detail}$resets")
     }
 
-    /** What ran out and the allowance behind it, without the reset (added by the caller). */
+    /**
+     * What ran out and the allowance behind it, without the reset (added by the caller). An
+     * unlimited account (private testing, on the list) has Pro's wording and no plan to name.
+     */
     private fun describeStop(notice: LimitNotice): LimitCopy {
-        val pro = notice.plan == "pro"
-        val tier = if (pro) "on Pro" else "on the free plan"
+        val pro = notice.plan == "pro" || notice.plan == "unlimited"
+        val tier = when (notice.plan) {
+            "unlimited" -> ""
+            "pro" -> " on Pro"
+            else -> " on the free plan"
+        }
         return when (notice.limit) {
-            "wordsPerWeek" -> LimitCopy("This week's free words are used up", "${formatCount(notice.allowed)} words a week $tier", true)
-            "sttSecondsPerWeek" -> LimitCopy("This week's free minutes are used up", "${formatAudioSeconds(notice.allowed)} of speech a week $tier", true)
-            "dictationsPerDay" -> LimitCopy("Today's free dictations are used up", "${formatCount(notice.allowed)} dictations a day $tier", true)
+            "wordsPerWeek" -> LimitCopy("This week's free words are used up", "${formatCount(notice.allowed)} words a week$tier", true)
+            "sttSecondsPerWeek" -> LimitCopy("This week's free minutes are used up", "${formatAudioSeconds(notice.allowed)} of speech a week$tier", true)
+            "dictationsPerDay" -> LimitCopy("Today's free dictations are used up", "${formatCount(notice.allowed)} dictations a day$tier", true)
             "maxClipSeconds" -> LimitCopy(
                 if (pro) "That recording is too long" else "That recording is too long for the free plan",
                 if (pro) "Clips can be up to ${formatAudioSeconds(notice.allowed)}"
-                else "Clips up to ${formatAudioSeconds(notice.allowed)} $tier; up to 10 min on Pro",
+                else "Clips up to ${formatAudioSeconds(notice.allowed)}$tier; up to 10 min on Pro",
                 !pro
             )
             "sttSecondsPerMonth" -> LimitCopy(
                 if (pro) "This month's fair-use cap is reached" else "This month's free transcription is used up",
-                "${formatAudioSeconds(notice.allowed)} a month $tier",
+                "${formatAudioSeconds(notice.allowed)} a month$tier",
                 !pro
             )
             "fairUseSttSecondsPerMonth" -> LimitCopy(
@@ -266,8 +292,8 @@ object Limits {
                 "Past ${formatAudioSeconds(notice.allowed)} of transcription a month the text is tidied by rules only",
                 false
             )
-            "llmTokensPerMonth" -> LimitCopy("This month's formatting allowance is used up", "${compactCount(notice.allowed)} tokens a month $tier", !pro)
-            else -> LimitCopy("Too many requests at once", "Up to ${formatCount(notice.allowed)} requests a minute $tier", !pro)
+            "llmTokensPerMonth" -> LimitCopy("This month's formatting allowance is used up", "${compactCount(notice.allowed)} tokens a month$tier", !pro)
+            else -> LimitCopy("Too many requests at once", "Up to ${formatCount(notice.allowed)} requests a minute$tier", !pro)
         }
     }
 }

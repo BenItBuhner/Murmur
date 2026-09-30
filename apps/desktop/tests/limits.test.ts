@@ -8,11 +8,13 @@ import {
   isPlanLimit,
   meterLabel,
   meterValue,
+  isMetered,
   parseLimitNotice,
   planActions,
   planStateLabel,
   legalLinks,
   planStateOf,
+  sellsPro,
   siteOrigin,
   transcriptionPaused,
   trialDaysLeft,
@@ -298,6 +300,54 @@ describe('plan state', () => {
     expect(planStateLabel('trial')).toBe('Pro trial')
     expect(planStateLabel('pro')).toBe('Pro')
     expect(planStateLabel('free')).toBe('Free')
+  })
+
+  it('knows the private-testing states the instance reports over the stored plan', () => {
+    expect(planStateOf({ plan: 'testing', planState: 'testing' })).toBe('testing')
+    expect(
+      planStateOf(
+        { plan: 'unlimited', planState: 'unlimited' },
+        { plan: 'pro', planState: 'trial' }
+      )
+    ).toBe('unlimited')
+    expect(planStateOf({ plan: 'unlimited' })).toBe('unlimited')
+    // A state this build does not know falls back to the tier, never crashes.
+    expect(planStateOf({ plan: 'pro', planState: 'vip' as never })).toBe('pro')
+    expect(planStateLabel('testing')).toBe('Private testing')
+    expect(planStateLabel('unlimited')).toBe('Unlimited')
+    expect(isMetered('testing')).toBe(false)
+    expect(isMetered('unlimited')).toBe(false)
+    for (const state of ['trial', 'free', 'pro'] as const) expect(isMetered(state)).toBe(true)
+  })
+
+  it('reads the billing switch off the status; an instance from before it sells Pro', () => {
+    expect(sellsPro({ billingEnabled: false })).toBe(false)
+    expect(sellsPro({ billingEnabled: true })).toBe(true)
+    expect(sellsPro({})).toBe(true)
+    expect(sellsPro(null)).toBe(true)
+    expect(sellsPro(undefined)).toBe(true)
+  })
+
+  it('hides Upgrade and Manage plan while the instance does not sell Pro, and for the testing states', () => {
+    for (const planState of ['trial', 'free', 'pro'] as const) {
+      expect(
+        planActions({ planState, upgradeUrl: UPGRADE, accountUrl: ACCOUNT, billingEnabled: false })
+      ).toEqual({ upgrade: null, manage: null })
+    }
+    for (const planState of ['testing', 'unlimited'] as const) {
+      expect(
+        planActions({ planState, upgradeUrl: UPGRADE, accountUrl: ACCOUNT, billingEnabled: true })
+      ).toEqual({ upgrade: null, manage: null })
+    }
+    // On, today's behaviour.
+    expect(
+      planActions({
+        planState: 'trial',
+        upgradeUrl: UPGRADE,
+        accountUrl: ACCOUNT,
+        billingEnabled: true
+      })
+    ).toEqual({ upgrade: UPGRADE, manage: ACCOUNT })
   })
 
   it('offers Upgrade and Manage plan only to whom they apply, and only with a page to open', () => {

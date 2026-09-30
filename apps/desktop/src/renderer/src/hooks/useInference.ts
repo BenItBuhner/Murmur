@@ -13,7 +13,14 @@ import {
   sttConfigured,
   type InferenceRouting
 } from '@shared/inference'
-import { meterValue, planStateLabel, planStateOf, trialDaysLeft, usageMeters } from '@shared/limits'
+import {
+  isMetered,
+  meterValue,
+  planStateOf,
+  sellsPro,
+  trialDaysLeft,
+  usageMeters
+} from '@shared/limits'
 import { useCloud } from './useCloud'
 import { useSettings } from './useSettings'
 
@@ -28,8 +35,18 @@ export interface InferenceView {
   signedIn: boolean
   status: InferenceStatus | null
   plan: Plan
-  /** Trial, free or Pro: the plan the account is on, as distinct from the tier whose limits apply. */
+  /**
+   * Trial, free or Pro: the plan the account is on, as distinct from the tier whose limits apply;
+   * `testing` or `unlimited` while the instance is in private testing.
+   */
   planState: PlanState
+  /**
+   * The instance sells Pro. False (the instance's `MURMUR_BILLING_ENABLED` is off) hides plan
+   * labels, the trial countdown, Upgrade and Manage plan and billing links everywhere in the app.
+   */
+  billingEnabled: boolean
+  /** The account has allowances to show: not `testing` (none at all), not `unlimited` (no cap). */
+  metered: boolean
   /** Whole days left on the Pro trial; 0 outside of one. */
   trialDaysLeft: number
   /** The rolling and monthly allowances of the tier, with what is used and when each resets. */
@@ -66,6 +83,8 @@ export function useInference(): InferenceView {
     const usedSeconds = thisMonth?.sttSeconds ?? 0
     const upgradeUrl = status?.upgradeUrl ?? null
     const trialEndsAt = status?.trialEndsAt ?? user?.trialEndsAt ?? null
+    const planState = planStateOf(status, user)
+    const metered = isMetered(planState)
     return {
       cloudEnabled,
       managedAvailable,
@@ -74,18 +93,21 @@ export function useInference(): InferenceView {
       signedIn,
       status,
       plan: status?.plan ?? user?.plan ?? 'free',
-      planState: planStateOf(status, user),
+      planState,
+      billingEnabled: sellsPro(status),
+      metered,
       trialDaysLeft: trialDaysLeft(trialEndsAt),
-      meters: usageMeters(status?.meters),
+      meters: metered ? usageMeters(status?.meters) : [],
       resets: status?.resets ?? null,
       upgradeUrl,
       accountUrl: status?.accountUrl ?? null,
-      formattingPaused: status?.formattingPaused ?? false,
+      formattingPaused: metered && (status?.formattingPaused ?? false),
       sttReady: sttConfigured(settings, routing, signedIn),
       llmReady: llmConfigured(settings, routing, signedIn),
-      minutes: status
-        ? { used: usedSeconds / 60, limit: status.limits.sttSecondsPerMonth / 60 }
-        : null,
+      minutes:
+        status && metered
+          ? { used: usedSeconds / 60, limit: status.limits.sttSecondsPerMonth / 60 }
+          : null,
       tokensUsed: thisMonth?.llmTokens ?? 0
     }
   }, [settings, cloud.enabled, cloud.config?.convexSiteUrl, user, status, signedIn])
@@ -93,11 +115,6 @@ export function useInference(): InferenceView {
 
 export function planLabel(plan: Plan): string {
   return plan === 'pro' ? 'Pro' : 'Free'
-}
-
-/** "Pro trial", "Free plan", "Pro plan": the plan as a title. */
-export function planTitle(state: PlanState): string {
-  return state === 'trial' ? 'Pro trial' : `${planStateLabel(state)} plan`
 }
 
 /** "12 of 120 min" (or "1.5 of 60 h") summary of the month's managed transcription. */

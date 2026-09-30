@@ -4,7 +4,7 @@ import type { Doc } from './_generated/dataModel'
 import { action, httpAction, internalMutation, type MutationCtx } from './_generated/server'
 import { authedQuery } from './lib/functions'
 import { subjectOf, upgradeUrlFor } from './lib/inference'
-import { billingIntervalValidator, planStateValidator } from './lib/plans'
+import { billingEnabled, billingIntervalValidator, planStateValidator } from './lib/plans'
 import {
   StripeApiError,
   StripeSignatureError,
@@ -31,15 +31,38 @@ import {
  * two actions; Stripe reports back to `/stripe/webhook`, and the internal mutations here are the
  * only code that turns a subscription into a plan state. Without keys everything degrades: the
  * status says `configured: false`, the actions throw a readable error, the webhook answers 500.
+ *
+ * The whole feature sits behind `MURMUR_BILLING_ENABLED` (lib/plans.ts `billingEnabled`). Off,
+ * the status says `enabled: false` and nothing else, the actions refuse with one sentence and the
+ * webhook answers 503 without reading its body; the code and the data stay as they are.
+ *
+ * Billing provider seam: everything Stripe-specific is `lib/stripe.ts` plus the three functions
+ * below that call it (`createCheckoutSession`, `createPortalSession`, `stripeWebhook`). The plan
+ * state itself is written only by `applySubscription`, `markPaymentFailed` and `attachCustomer`,
+ * which take a provider-neutral snapshot; a provider such as Clerk Billing would replace the
+ * former group and feed the latter.
  */
+
+const BILLING_OFF_MESSAGE = 'Billing is switched off on this Murmur server'
+
+/** The status of an instance that does not sell Pro: nothing to show, nothing to open. */
+const BILLING_OFF: BillingStatus = {
+  enabled: false,
+  configured: false,
+  portalAvailable: false,
+  upgradeUrl: null,
+  subscription: null
+}
 
 /** What the account page shows about billing. */
 export const status = authedQuery({
   args: {},
   returns: billingStatusValidator,
   handler: async (ctx): Promise<BillingStatus> => {
+    if (!billingEnabled(process.env)) return BILLING_OFF
     const sub = ctx.user?.subscription
     return {
+      enabled: true,
       configured: billingConfigured(process.env),
       portalAvailable: Boolean(ctx.user?.stripeCustomerId),
       upgradeUrl: upgradeUrlFor(process.env, ctx.user ? planStateOf(ctx.user) : 'free'),
@@ -70,6 +93,7 @@ export const createCheckoutSession = action({
   returns: v.object({ url: v.string() }),
   handler: async (ctx, args) => {
     const clerkId = await requireSubject(ctx)
+    if (!billingEnabled(process.env)) throw new ConvexError(BILLING_OFF_MESSAGE)
     const config = readStripeConfig(process.env)
     if (!config || !config.siteUrl)
       throw new ConvexError('Billing is not switched on for this Murmur instance yet')
@@ -107,6 +131,7 @@ export const createPortalSession = action({
   returns: v.object({ url: v.string() }),
   handler: async (ctx) => {
     const clerkId = await requireSubject(ctx)
+    if (!billingEnabled(process.env)) throw new ConvexError(BILLING_OFF_MESSAGE)
     const config = readStripeConfig(process.env)
     if (!config || !config.siteUrl)
       throw new ConvexError('Billing is not switched on for this Murmur instance yet')
@@ -268,6 +293,10 @@ export const attachCustomer = internalMutation({
  * and invoice.payment_failed, and set STRIPE_WEBHOOK_SECRET on the deployment.
  */
 export const stripeWebhook = httpAction(async (ctx, request) => {
+  if (!billingEnabled(process.env)) {
+    console.warn('[billing] webhook delivery refused: MURMUR_BILLING_ENABLED is off')
+    return new Response(BILLING_OFF_MESSAGE, { status: 503 })
+  }
   const config = readStripeConfig(process.env)
   if (!config?.webhookSecret) {
     console.error('STRIPE_WEBHOOK_SECRET (or the Stripe keys) is not set; refusing webhook')

@@ -10,6 +10,7 @@ import app.murmur.android.inference.Limits
 import app.murmur.android.inference.PlanActions
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.ui.InferenceView
+import app.murmur.android.ui.planDescription
 import app.murmur.android.ui.planLine
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.errorFromResponse
@@ -242,6 +243,77 @@ class LimitsTest {
         )
         assertEquals(PlanActions(null, null), view.planActions)
         assertEquals(PlanActions(null, ACCOUNT), view.copy(status = view.status?.copy(accountUrl = ACCOUNT)).planActions)
+    }
+
+    @Test
+    fun `the private-testing states are known, and the billing switch hides the plan`() {
+        // The instance reports them over the stored plan state (packages/backend/convex/lib/access.ts).
+        assertEquals("testing", Limits.planStateOf(InferenceStatusDto(plan = "testing", planState = "testing"), UserDto("u", "c", plan = "pro", planState = "trial")))
+        assertEquals("unlimited", Limits.planStateOf(InferenceStatusDto(plan = "unlimited"), null))
+        // A state this build does not know falls back to the tier, never crashes.
+        assertEquals("pro", Limits.planStateOf(InferenceStatusDto(plan = "pro", planState = "vip"), null))
+        assertEquals("Private testing", Limits.planStateLabel("testing"))
+        assertEquals("Unlimited", Limits.planStateLabel("unlimited"))
+        assertEquals("Private testing", Limits.planTitle("testing"))
+        assertEquals("Unlimited", Limits.planTitle("unlimited"))
+        assertFalse(Limits.isMetered("testing"))
+        assertFalse(Limits.isMetered("unlimited"))
+        for (state in listOf("trial", "free", "pro")) assertTrue(Limits.isMetered(state))
+        // The switch, read off the status; an instance from before it sells Pro.
+        assertFalse(Limits.sellsPro(InferenceStatusDto(billingEnabled = false)))
+        assertTrue(Limits.sellsPro(InferenceStatusDto()))
+        assertTrue(Limits.sellsPro(null))
+        // Off: no Upgrade, no Manage plan, whatever the links; the testing states never have either.
+        for (state in listOf("trial", "free", "pro")) assertEquals(PlanActions(null, null), Limits.planActions(state, UPGRADE, ACCOUNT, billingEnabled = false))
+        for (state in listOf("testing", "unlimited")) assertEquals(PlanActions(null, null), Limits.planActions(state, UPGRADE, ACCOUNT, billingEnabled = true))
+        assertEquals(PlanActions(UPGRADE, ACCOUNT), Limits.planActions("trial", UPGRADE, ACCOUNT, billingEnabled = true))
+
+        val view = InferenceView(
+            cloudEnabled = true, managedAvailable = true, routing = InferenceRouting(InferenceSource.MURMUR, InferenceSource.MURMUR),
+            signedIn = true, status = InferenceStatusDto(plan = "pro", planState = "trial", billingEnabled = false, upgradeUrl = UPGRADE, accountUrl = ACCOUNT, trialEndsAt = (NOW + 9 * DAY).toDouble()),
+            plan = "pro", planState = "trial", trialDaysLeft = 9, sttReady = true, llmReady = true, billingEnabled = false
+        )
+        assertEquals(PlanActions(null, null), view.planActions)
+        assertFalse(view.labelled)
+        assertEquals("Included with your account", view.sourceCaption)
+        assertEquals("Unlimited dictation within fair use: the meters below show how far this month has come.", planDescription(view))
+        assertNull(planLine(view, NOW))
+        val selling = view.copy(status = view.status?.copy(billingEnabled = true), billingEnabled = true)
+        assertTrue(selling.labelled)
+        assertEquals("Pro trial", selling.sourceCaption)
+        assertTrue(planDescription(selling).startsWith("9 days left with everything Pro offers"))
+        assertEquals("Pro trial · 9 days left", planLine(selling, NOW))
+
+        val testing = view.copy(status = InferenceStatusDto(plan = "testing", planState = "testing", billingEnabled = false), plan = "testing", planState = "testing")
+        assertTrue(testing.labelled)
+        assertEquals("Private testing", testing.sourceCaption)
+        assertNull(testing.minutesLabel)
+        assertTrue(testing.meters.isEmpty())
+        assertTrue(planDescription(testing).startsWith("This Murmur server is in private testing: its speech and formatting models are not open to this account yet."))
+        assertEquals("Murmur's models are in private testing · connect your own under Speech model", planLine(testing, NOW))
+        assertNull(planLine(testing.copy(routing = InferenceRouting(InferenceSource.CUSTOM, InferenceSource.CUSTOM)), NOW))
+
+        val unlimited = view.copy(status = InferenceStatusDto(plan = "unlimited", planState = "unlimited", billingEnabled = false), plan = "unlimited", planState = "unlimited")
+        assertEquals("Unlimited", unlimited.sourceCaption)
+        assertNull(unlimited.minutesLabel)
+        assertTrue(planDescription(unlimited).contains("without an allowance to run out of"))
+        assertNull(planLine(unlimited, NOW))
+
+        // Off, the free tier's line and sentence name no plan and sell nothing.
+        val words = UsageMeterDto("wordsPerWeek", 312.0, 500.0, resetsAt = (NOW + 2 * DAY).toDouble())
+        val free = view.copy(status = InferenceStatusDto(plan = "free", planState = "free", billingEnabled = false, meters = listOf(words)), plan = "free", planState = "free")
+        assertEquals("312 of 500 words this week", planLine(free, NOW))
+        assertFalse(planDescription(free).contains("Upgrade"))
+        // An unlimited account's refusals (only the clip and the rate remain) name no plan.
+        val clip = LimitNotice.fromJson(JSONObject(refusal("limit" to "maxClipSeconds", "plan" to "unlimited", "planState" to "unlimited", "allowed" to 600, "used" to 700, "resetsAt" to null, "upgradeUrl" to null)).getJSONObject("error"))!!
+        assertEquals("unlimited", clip.plan)
+        assertEquals("unlimited", clip.planState)
+        val copy = Limits.describe(clip, NOW)
+        assertEquals("That recording is too long", copy.title)
+        assertEquals("Clips can be up to 10 min", copy.detail)
+        assertFalse(copy.upgradeHelps)
+        val rate = LimitNotice.fromJson(JSONObject(refusal("limit" to "requestsPerMinute", "plan" to "unlimited", "planState" to "unlimited", "allowed" to 60, "used" to 60)).getJSONObject("error"))!!
+        assertEquals("Up to 60 requests a minute", Limits.describe(rate, NOW).detail.substringBefore(" · "))
     }
 
     @Test

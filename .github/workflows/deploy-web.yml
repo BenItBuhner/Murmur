@@ -16,8 +16,10 @@ name: Deploy web
 #                          so the release manifest reads GitHub at 5,000 requests an hour instead of
 #                          the 60 shared by every unauthenticated Worker
 # Repository variables: MURMUR_SITE_URL (the public origin once known, for absolute URLs in
-# metadata and the sitemap) and, gated by MURMUR_CLOUD_RELEASE=true like the apps, CONVEX_URL and
-# CLERK_PUBLISHABLE_KEY, which the build inlines as NEXT_PUBLIC_* values for the account page.
+# metadata and the sitemap); gated by MURMUR_CLOUD_RELEASE=true like the apps, CONVEX_URL and
+# CLERK_PUBLISHABLE_KEY, which the build inlines as NEXT_PUBLIC_* values for the account page; and
+# MURMUR_BILLING_ENABLED, the same switch the Convex deployment carries: only the literal "true"
+# makes the site sell Pro (pricing page, trial and billing copy). Unset, nothing on the site does.
 on:
   push:
     branches: [main]
@@ -37,6 +39,7 @@ env:
   NEXT_PUBLIC_SITE_URL: ${{ vars.MURMUR_SITE_URL }}
   NEXT_PUBLIC_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
+  NEXT_PUBLIC_MURMUR_BILLING_ENABLED: ${{ vars.MURMUR_BILLING_ENABLED }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   WRANGLER_SEND_METRICS: 'false'

@@ -2,7 +2,9 @@ package app.murmur.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -88,7 +90,9 @@ fun AccountGateScreen(config: CloudConfig, onSkip: () -> Unit) {
  * (`Size(w x 2147483647) is out of range`), taking the app down the moment Clerk is ready. So the
  * form gets a fixed height: what is left of the window below the intro and above the skip link,
  * never less than [MinFormHeight]. On a tall phone everything fits without scrolling; on a short
- * one the page scrolls, and the keyboard scrolls the focused field into view.
+ * one the page scrolls, and the keyboard scrolls the focused field into view. The gate lays out in
+ * any parent, bounded (the activity's window) or not (a scroller): AccountGateWithClerkTest
+ * composes the real form in both.
  *
  * @param ready Clerk has its environment and client; the form can be shown.
  * @param error why Clerk could not get ready, when it gave up; shown with a retry.
@@ -115,73 +119,96 @@ fun AccountGate(
     }
     val stuck = !ready && (error != null || timedOut)
     val formHeight = signInFormHeight(skip = config.accountMode == AccountMode.OPTIONAL)
+    val scrollState = rememberScrollState()
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(c.paper)
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .imePadding()
-            .padding(horizontal = PageMargin)
-    ) {
-        Spacer(Modifier.height(18.dp))
-        Wordmark()
-        Spacer(Modifier.height(if (ready) 20.dp else 40.dp))
-        Text("Speak.", style = Murmur.type.displayLarge, color = c.ink)
-        Text("It types.", style = Murmur.type.displayLarge.copy(fontStyle = FontStyle.Italic), color = c.inkSoft)
-        if (!ready) {
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "Tap the button beside your keyboard, say what you mean, and finished text lands where your cursor is. " +
-                    "Your account keeps one dictionary and one set of style rules across your phone and your desktop.",
-                style = Murmur.type.body,
-                color = c.inkSoft
-            )
-            Spacer(Modifier.height(20.dp))
-            Column {
-                FeatureRow("One dictionary for every device you sign in on")
-                FeatureRow("Style and tone preferences follow you")
-                FeatureRow("Speech-model keys never leave this phone")
-            }
-            Spacer(Modifier.height(32.dp))
+    // The gate scrolls itself only when its parent bounds its height (the window, normally). In a
+    // parent that does not, another scroller is already at work, and Compose refuses a vertical
+    // scroller measured with no height bound; so the page is left to the parent. Either way the form
+    // keeps its fixed height, so Clerk's Scaffold is never measured against infinity.
+    BoxWithConstraints(Modifier.fillMaxSize().background(c.paper)) {
+        val scroll = if (constraints.hasBoundedHeight) Modifier.verticalScroll(scrollState) else Modifier
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .then(scroll)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = PageMargin)
+        ) {
+            GateContent(config, ready, stuck, error, formHeight, onRetry, onSkip, signIn)
         }
-        when {
-            ready -> Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(formHeight)
-                    .testTag("account-gate-form")
-            ) { signIn() }
-            stuck -> CloudTrouble(
-                detail = error,
-                onRetry = onRetry,
-                modifier = Modifier.testTag("account-gate-trouble")
-            )
-            else -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("account-gate-connecting")) {
-                CircularProgressIndicator(Modifier.size(16.dp), color = c.inkSoft, strokeWidth = 1.5.dp)
-                Spacer(Modifier.width(12.dp))
-                Text("Connecting to Murmur…", style = Murmur.type.bodySmall, color = c.inkSoft)
-            }
-        }
-        // Skipping is the build's choice in optional mode, and everyone's way out when the sign-in
-        // service is unreachable: the app must keep working without it.
-        if (config.accountMode == AccountMode.OPTIONAL || stuck) {
-            Spacer(Modifier.height(24.dp))
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                TextLink("Continue without an account", onClick = onSkip, color = c.ink)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    if (stuck) "Everything stays on this phone. You can sign in later from Account, once Murmur's server can be reached."
-                    else "Everything stays on this phone. You can sign in later from Account.",
-                    style = Murmur.type.bodySmall,
-                    color = c.inkMuted
-                )
-            }
+    }
+}
+
+/** The page itself: intro, then the form, the spinner or the trouble state, then the way past it. */
+@Composable
+private fun ColumnScope.GateContent(
+    config: CloudConfig,
+    ready: Boolean,
+    stuck: Boolean,
+    error: String?,
+    formHeight: Dp,
+    onRetry: () -> Unit,
+    onSkip: () -> Unit,
+    signIn: @Composable () -> Unit
+) {
+    val c = Murmur.colors
+    Spacer(Modifier.height(18.dp))
+    Wordmark()
+    Spacer(Modifier.height(if (ready) 20.dp else 40.dp))
+    Text("Speak.", style = Murmur.type.displayLarge, color = c.ink)
+    Text("It types.", style = Murmur.type.displayLarge.copy(fontStyle = FontStyle.Italic), color = c.inkSoft)
+    if (!ready) {
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Tap the button beside your keyboard, say what you mean, and finished text lands where your cursor is. " +
+                "Your account keeps one dictionary and one set of style rules across your phone and your desktop.",
+            style = Murmur.type.body,
+            color = c.inkSoft
+        )
+        Spacer(Modifier.height(20.dp))
+        Column {
+            FeatureRow("One dictionary for every device you sign in on")
+            FeatureRow("Style and tone preferences follow you")
+            FeatureRow("Speech-model keys never leave this phone")
         }
         Spacer(Modifier.height(32.dp))
     }
+    when {
+        ready -> Box(
+            Modifier
+                .fillMaxWidth()
+                .height(formHeight)
+                .testTag("account-gate-form")
+        ) { signIn() }
+        stuck -> CloudTrouble(
+            detail = error,
+            onRetry = onRetry,
+            modifier = Modifier.testTag("account-gate-trouble")
+        )
+        else -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("account-gate-connecting")) {
+            CircularProgressIndicator(Modifier.size(16.dp), color = c.inkSoft, strokeWidth = 1.5.dp)
+            Spacer(Modifier.width(12.dp))
+            Text("Connecting to Murmur…", style = Murmur.type.bodySmall, color = c.inkSoft)
+        }
+    }
+    // Skipping is the build's choice in optional mode, and everyone's way out when the sign-in
+    // service is unreachable: the app must keep working without it.
+    if (config.accountMode == AccountMode.OPTIONAL || stuck) {
+        Spacer(Modifier.height(24.dp))
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            TextLink("Continue without an account", onClick = onSkip, color = c.ink)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (stuck) "Everything stays on this phone. You can sign in later from Account, once Murmur's server can be reached."
+                else "Everything stays on this phone. You can sign in later from Account.",
+                style = Murmur.type.bodySmall,
+                color = c.inkMuted
+            )
+        }
+    }
+    Spacer(Modifier.height(32.dp))
 }
 
 /** The height the sign-in form gets: the window minus the system bars, the intro and the skip link, at least [MinFormHeight]. */

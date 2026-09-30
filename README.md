@@ -293,7 +293,12 @@ issuer (see the header of that file). A development deployment trusts one when
 such a deployment a dev build of the desktop app signs in through `MURMUR_TEST_AUTH_TOKEN_FILE`
 (a file holding one of those tokens; packaged builds ignore it), and the Android
 `LiveGatewayTest` dictates through the real gateway with `MURMUR_GATEWAY_ORIGIN` and
-`MURMUR_TEST_JWT_FILE`.
+`MURMUR_TEST_JWT_FILE`. A dev build of the desktop app also dictates from a clip on disk instead of
+the microphone when `MURMUR_TEST_AUDIO_FILE` names a 16-bit WAV or raw 16 kHz PCM file (or a
+directory of them, cycled through one per dictation): the clip streams in real time while the key
+is held and a hands-free session ends with it, nothing is played through the speakers, and packaged
+builds ignore the variable — the desktop counterpart of Android's debug-only *Dictate the sample
+clip instead* switch, for driving the whole in-app flow on a machine that must stay silent.
 
 ## Releases
 

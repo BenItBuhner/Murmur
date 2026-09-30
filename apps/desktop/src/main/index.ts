@@ -6,6 +6,7 @@ import type { ClerkBridge } from '@clerk/electron'
 import { chordLabel } from '@core/hotkey/keys'
 import type { Settings } from '@shared/settings'
 import { Recorder } from './audio/recorder'
+import { resolveTestAudio, TEST_AUDIO_FILE } from './audio/test-audio'
 import { applyLaunchAtLogin } from './autostart'
 import { buildTimeCloudConfig, resolveCloudConfig } from './cloud/config'
 import {
@@ -191,7 +192,14 @@ async function main(): Promise<void> {
   )
 
   const overlay = new OverlayWindow()
-  const recorder = new Recorder(overlay)
+  // A dev build may dictate from a clip on disk instead of the microphone (silent end-to-end runs
+  // on machines that must neither record nor play audio). Packaged builds ignore the variable.
+  const testAudio = resolveTestAudio(process.env, !app.isPackaged)
+  if (testAudio)
+    log.warn(
+      `FIXTURE AUDIO: ${TEST_AUDIO_FILE}=${testAudio.path} (${testAudio.kind}) stands in for the microphone for every dictation; the clip streams in real time while the key is held and a hands-free session ends with it. Nothing is played through the speakers.`
+    )
+  const recorder = new Recorder(overlay, testAudio)
   const hook = new HookService(settings.get())
   const tokenBridge = new TokenBridge(() => getMainWindow()?.webContents ?? null)
   // Session tokens: the renderer's Clerk session, or the test token file in a dev build.

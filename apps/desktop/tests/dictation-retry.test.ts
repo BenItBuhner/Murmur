@@ -89,7 +89,7 @@ class FakeSettings extends EventEmitter {
   }
 }
 
-class FakeRecorder {
+class FakeRecorder extends EventEmitter {
   pcm = speech(1.5)
   start = vi.fn()
   cancel = vi.fn()

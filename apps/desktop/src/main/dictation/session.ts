@@ -58,6 +58,8 @@ interface ActiveSession {
   windowInfo: Promise<ActiveWindowInfo>
   elapsedTimer: NodeJS.Timeout | null
   maxTimer: NodeJS.Timeout | null
+  /** The stand-in clip (MURMUR_TEST_AUDIO_FILE) is spent; a microphone never says so. */
+  inputEnded: boolean
 }
 
 /** One run of the pipeline: a dictation that was just spoken, or a stored one sent again. */
@@ -108,6 +110,8 @@ export class DictationController extends EventEmitter {
 
   constructor(private deps: SessionDeps) {
     super()
+    // A clip standing in for the microphone (MURMUR_TEST_AUDIO_FILE) says when it is spent.
+    this.deps.recorder.on('ended', (id: string) => this.onInputEnded(id))
   }
 
   get isListening(): boolean {
@@ -172,7 +176,8 @@ export class DictationController extends EventEmitter {
       locked: mode === 'hands-free',
       windowInfo: this.deps.getActiveWindow().catch(() => ({ title: '', app: '' })),
       elapsedTimer: null,
-      maxTimer: null
+      maxTimer: null,
+      inputEnded: false
     }
     this.active = session
     // Audio first: every millisecond before capture starts is a clipped first word.
@@ -206,6 +211,12 @@ export class DictationController extends EventEmitter {
     if (!this.active) return
     this.active.locked = true
     if (this.active.mode === 'hold') this.active.mode = 'hands-free'
+    if (this.active.inputEnded) {
+      // Locking a session whose stand-in microphone is already spent: nothing left to wait for.
+      this.deps.hook.notifySessionEnded()
+      void this.stop()
+      return
+    }
     this.deps.overlay.setState({
       phase: 'listening',
       mode: 'hands-free',
@@ -213,6 +224,21 @@ export class DictationController extends EventEmitter {
       elapsedSec: Math.round((performance.now() - this.active.startedAt) / 1000)
     })
     if (this.deps.settings.get().general.sounds) this.deps.overlay.playSound('lock')
+  }
+
+  /**
+   * The audio source ran dry; a microphone never does, a fixture clip does. A held key keeps the
+   * session open until it is released, as with a microphone in a room gone quiet; a hands-free
+   * session has nothing left to wait for and stops as if the user had stopped it.
+   */
+  private onInputEnded(id: string): void {
+    const session = this.active
+    if (!session || session.id !== id) return
+    session.inputEnded = true
+    if (!session.locked) return
+    log.info(`session ${id.slice(0, 8)}: fixture audio finished; stopping the hands-free session`)
+    this.deps.hook.notifySessionEnded()
+    void this.stop()
   }
 
   private cancel(): void {

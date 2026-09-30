@@ -244,8 +244,12 @@ jobs:
         if: env.ANDROID_KEYSTORE_BASE64 == ''
         run: echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; the release APK is signed with the debug key."
 
-      - name: Test and build release APK
-        run: ./gradlew :app:testDebugUnitTest :app:assembleRelease
+      # verifyReleaseApk refuses an APK that could not run the cloud path (native libraries, classes,
+      # the baked instance: production values when MURMUR_CLOUD_RELEASE is true, nothing else that
+      # looks like a Clerk key or a Convex deployment), so a bad cloud build fails here, before the
+      # publish job can ship it. The unit tests compose the real account gate with the real Clerk SDK.
+      - name: Test, build and check the release APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleRelease :app:verifyReleaseApk
       - name: Collect APK
         env:
           VERSION: ${{ needs.verify.outputs.version }}

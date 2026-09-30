@@ -165,7 +165,13 @@ jobs:
       # component that requires accepting Gradle's Terms of Use.
       - uses: gradle/actions/setup-gradle@v5
       # assembleRelease exercises the release signing config (debug-key fallback without secrets).
-      - run: ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
+      # verifyReleaseApk opens the release APK and fails the job if it could not run the cloud path:
+      # Convex and JNA native libraries for arm64-v8a, the classes JNA and the SDKs need by name, the
+      # cloud values this workflow baked (production-shaped when MURMUR_CLOUD_RELEASE is true) and
+      # nothing else that looks like a Clerk key or a Convex deployment. The unit tests compose the
+      # real account gate with the real Clerk SDK (AccountGateWithClerkTest), the frame that took the
+      # 0.6.0 release down on every phone.
+      - run: ./gradlew :app:assembleDebug :app:assembleRelease :app:verifyReleaseApk :app:testDebugUnitTest
       # The JUnit XML and HTML reports, so a failing test can be read in full after the run.
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -174,6 +180,7 @@ jobs:
           path: |
             apps/android/app/build/test-results/testDebugUnitTest
             apps/android/app/build/reports/tests/testDebugUnitTest
+            apps/android/app/build/reports/apk
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v7

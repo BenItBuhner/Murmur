@@ -1,3 +1,9 @@
+import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.variant.BuiltArtifactsLoader
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -187,4 +193,182 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     // Must match the OkHttp the Clerk/Convex SDKs pull in (5.x), or MockWebServer fails to load.
     testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
+}
+
+// ---- Release APK check --------------------------------------------------------------------------
+// `verifyReleaseApk` opens the release APK and refuses one that could not run the cloud path: the
+// Convex client is Rust behind UniFFI, loaded through JNA, so its native library and JNA's must be in
+// the APK for arm64-v8a, and the classes JNA and the SDKs reach by name must be in the dex (R8 would
+// strip or rename them without keep rules). The baked cloud values must be exactly the ones the
+// build was given, production-shaped for a cloud release (MURMUR_CLOUD_RELEASE=true), and nothing
+// else that looks like a Clerk key or a Convex deployment may be in the dex (a test fixture, a dev
+// instance). CI and the release workflow run it right after assembleRelease, before anything ships.
+// The gate and the SDKs themselves are exercised by the unit tests (AccountGateWithClerkTest).
+abstract class VerifyReleaseApk : DefaultTask() {
+    @get:InputFiles
+    abstract val apkDir: DirectoryProperty
+
+    @get:Internal
+    abstract val builtArtifactsLoader: Property<BuiltArtifactsLoader>
+
+    /** The values the build baked into BuildConfig (raw, as given). */
+    @get:Input
+    abstract val convexUrl: Property<String>
+
+    @get:Input
+    abstract val convexSiteUrl: Property<String>
+
+    @get:Input
+    abstract val clerkPublishableKey: Property<String>
+
+    @get:Input
+    abstract val accountMode: Property<String>
+
+    /** MURMUR_CLOUD_RELEASE was "true": the APK must carry a production instance. */
+    @get:Input
+    abstract val cloudRelease: Property<Boolean>
+
+    @get:OutputFile
+    abstract val report: RegularFileProperty
+
+    @TaskAction
+    fun verify() {
+        val built = builtArtifactsLoader.get().load(apkDir.get())
+            ?: throw GradleException("No release APK to check in ${apkDir.get().asFile}")
+        val lines = mutableListOf<String>()
+        val problems = mutableListOf<String>()
+        for (artifact in built.elements) {
+            val apk = File(artifact.outputFile)
+            lines += "${apk.name} (${apk.length() / 1024} KiB, versionCode ${artifact.versionCode}, versionName ${artifact.versionName})"
+            checkApk(apk, lines, problems)
+        }
+        val text = lines.joinToString("\n") + (if (problems.isEmpty()) "\n\nOK" else "\n\nPROBLEMS:\n - " + problems.joinToString("\n - ")) + "\n"
+        report.get().asFile.also { it.parentFile.mkdirs() }.writeText(text)
+        if (problems.isNotEmpty()) throw GradleException("The release APK would not run the cloud path:\n - " + problems.joinToString("\n - ") + "\n\n$text")
+        logger.lifecycle(text)
+    }
+
+    private fun checkApk(apk: File, lines: MutableList<String>, problems: MutableList<String>) {
+        ZipFile(apk).use { zip ->
+            for (lib in NATIVE_LIBS) {
+                val entry = zip.getEntry("lib/$ABI/$lib")
+                if (entry == null || entry.size <= 0) problems += "lib/$ABI/$lib is missing"
+                else lines += "  lib/$ABI/$lib: ${entry.size} bytes"
+            }
+            val dexEntries = zip.entries().asSequence().filter { DEX_NAME.matches(it.name) }.sortedBy { it.name }.toList()
+            if (dexEntries.isEmpty()) problems += "no classes.dex"
+            val classes = HashSet<String>()
+            val strings = HashSet<String>()
+            for (entry in dexEntries) {
+                val dex = zip.getInputStream(entry).use { it.readBytes() }
+                val (dexStrings, dexClasses) = readDex(dex)
+                strings += dexStrings
+                classes += dexClasses
+                lines += "  ${entry.name}: ${dexClasses.size} classes, ${dexStrings.size} strings"
+            }
+            for (descriptor in REQUIRED_CLASSES) {
+                if (descriptor !in classes) problems += "class $descriptor is not defined in the dex (stripped or renamed?)"
+            }
+            checkBakedValues(strings, lines, problems)
+        }
+    }
+
+    private fun checkBakedValues(strings: Set<String>, lines: MutableList<String>, problems: MutableList<String>) {
+        val url = convexUrl.get()
+        val site = convexSiteUrl.get()
+        val key = clerkPublishableKey.get()
+        val cloud = url.isNotBlank() || key.isNotBlank()
+        lines += if (cloud) "  cloud: $url (site: ${site.ifBlank { "derived" }}), $key, accounts ${accountMode.get().ifBlank { "required" }}"
+        else "  cloud: none (local-only build)"
+        if (cloudRelease.get()) {
+            if (url.isBlank() || key.isBlank()) problems += "MURMUR_CLOUD_RELEASE is true but MURMUR_CONVEX_URL / MURMUR_CLERK_PUBLISHABLE_KEY are not both set: this would ship as a local-only build"
+            if (key.isNotBlank() && !key.startsWith("pk_live_")) problems += "a cloud release needs a production Clerk key (pk_live_…), got ${key.take(8)}…"
+            if (url.isNotBlank() && !PRODUCTION_URL.matches(url.trim())) problems += "a cloud release needs a public https Convex URL, got $url"
+        }
+        if (url.isNotBlank() && url !in strings) problems += "MURMUR_CONVEX_URL ($url) is not baked into the dex"
+        if (key.isNotBlank() && key !in strings) problems += "MURMUR_CLERK_PUBLISHABLE_KEY is not baked into the dex"
+        if (site.isNotBlank() && site !in strings) problems += "MURMUR_CONVEX_SITE_URL ($site) is not baked into the dex"
+        // On Convex Cloud the client URL and the HTTP-actions URL name the same deployment.
+        val cloudDeployment = CONVEX_CLOUD_HOST.find(url.trim())?.groupValues?.get(1)
+        val siteDeployment = CONVEX_SITE_HOST.find(site.trim())?.groupValues?.get(1)
+        if (cloudDeployment != null && siteDeployment != null && cloudDeployment != siteDeployment) {
+            problems += "MURMUR_CONVEX_SITE_URL names deployment $siteDeployment but MURMUR_CONVEX_URL names $cloudDeployment"
+        }
+        val allowedUrls = setOf(url, site).filter { it.isNotBlank() }
+        for (s in strings) {
+            if (CLERK_KEY.matches(s) && s != key) problems += "a Clerk key other than the build's is in the dex: ${s.take(12)}…"
+            if (CONVEX_URL.containsMatchIn(s) && s !in allowedUrls) problems += "a Convex deployment other than the build's is in the dex: $s"
+        }
+    }
+
+    /** The string table and the defined class descriptors of one dex file (format: source.android.com/docs/core/runtime/dex-format). */
+    private fun readDex(dex: ByteArray): Pair<List<String>, Set<String>> {
+        val buf = ByteBuffer.wrap(dex).order(ByteOrder.LITTLE_ENDIAN)
+        require(dex.size > 0x70 && dex[0] == 'd'.code.toByte() && dex[1] == 'e'.code.toByte() && dex[2] == 'x'.code.toByte()) { "not a dex file" }
+        val stringIdsSize = buf.getInt(0x38)
+        val stringIdsOff = buf.getInt(0x3C)
+        val typeIdsOff = buf.getInt(0x44)
+        val classDefsSize = buf.getInt(0x60)
+        val classDefsOff = buf.getInt(0x64)
+        val strings = ArrayList<String>(stringIdsSize)
+        for (i in 0 until stringIdsSize) {
+            var p = buf.getInt(stringIdsOff + i * 4)
+            // string_data_item: uleb128 utf16 length, then MUTF-8 bytes ending in NUL.
+            while (dex[p].toInt() and 0x80 != 0) p++
+            p++
+            val start = p
+            while (dex[p] != 0.toByte()) p++
+            strings += String(dex, start, p - start, Charsets.UTF_8)
+        }
+        val classes = HashSet<String>(classDefsSize)
+        for (i in 0 until classDefsSize) {
+            val typeIdx = buf.getInt(classDefsOff + i * 32)
+            classes += strings[buf.getInt(typeIdsOff + typeIdx * 4)]
+        }
+        return strings to classes
+    }
+
+    companion object {
+        const val ABI = "arm64-v8a"
+        val NATIVE_LIBS = listOf("libconvexmobile.so", "libjnidispatch.so")
+        val DEX_NAME = Regex("""classes\d*\.dex""")
+        /** What JNA, UniFFI and the SDKs reach by name or by reflection, plus the app's own cloud path. */
+        val REQUIRED_CLASSES = listOf(
+            "Lcom/sun/jna/Native;",
+            "Lcom/sun/jna/Structure;",
+            "Ldev/convex/android/UniffiLib;",
+            "Ldev/convex/android/MobileConvexClient;",
+            "Ldev/convex/android/ConvexClientWithAuth;",
+            "Lcom/clerk/api/Clerk;",
+            "Lcom/clerk/ui/auth/AuthViewKt;",
+            "Lkotlinx/serialization/json/Json;",
+            "Lapp/murmur/android/MurmurApplication;",
+            "Lapp/murmur/android/cloud/CloudBootstrap;",
+            "Lapp/murmur/android/cloud/CloudSync;",
+            "Lapp/murmur/android/ui/AccountGateScreenKt;"
+        )
+        val CLERK_KEY = Regex("""pk_(live|test)_[A-Za-z0-9+/=]{8,}""")
+        val CONVEX_URL = Regex("""^https?://[^/\s]+\.convex\.(cloud|site)(/|$)""")
+        val CONVEX_CLOUD_HOST = Regex("""^https://([a-z0-9-]+)\.convex\.cloud/?$""")
+        val CONVEX_SITE_HOST = Regex("""^https://([a-z0-9-]+)\.convex\.site/?$""")
+        /** Public https, no loopback or emulator host: what a production deployment looks like. */
+        val PRODUCTION_URL = Regex("""^https://(?!(127\.0\.0\.1|localhost|0\.0\.0\.0|10\.0\.2\.2|\[::1\])(:|/|$))[A-Za-z0-9.-]+(:\d+)?/?$""")
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        tasks.register<VerifyReleaseApk>("verify${variant.name.replaceFirstChar { it.uppercase() }}Apk") {
+            group = "verification"
+            description = "Checks that the ${variant.name} APK carries what the cloud path needs (native libs, classes, baked instance)."
+            apkDir.set(variant.artifacts.get(SingleArtifact.APK))
+            builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
+            convexUrl.set(envOrProp("MURMUR_CONVEX_URL"))
+            convexSiteUrl.set(envOrProp("MURMUR_CONVEX_SITE_URL"))
+            clerkPublishableKey.set(envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY"))
+            accountMode.set(envOrProp("MURMUR_ACCOUNT_MODE"))
+            cloudRelease.set(envOrProp("MURMUR_CLOUD_RELEASE").trim().equals("true", ignoreCase = true))
+            report.set(layout.buildDirectory.file("reports/apk/${variant.name}-apk-check.txt"))
+        }
+    }
 }

@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.2': [
+    "**A Speed setting for Murmur's speech model.** Models → Speech to text on desktop and the Speech model screen on Android gain a Speed row, shown when the speech source is Murmur's models: **Normal** (today's model, the default) or **Fast**, a quicker model the server may offer. Fast is a device setting, so a phone and a laptop can differ. Your own provider has no Speed row; nothing changes there.",
+    '**Fast falls back to Normal, and says so, until the fast model is available.** While the server has no fast model yet, or its provider does not know the model, a Fast dictation runs on Normal and the Speed row carries a note ("Fast isn\'t available on this server yet; dictations use Normal until it is"). History shows which ran: a `fast` or `fast unavailable` tag on the row, "Fast isn\'t available yet, used Normal" in the detail, and the model line ends in Normal or Fast. Every other error from the server is reported as before, never hidden behind the fallback.'
+  ],
   '0.6.1': [
     "**Android 0.6.0 crashed at launch; fixed.** The sign-in screen that 0.6.0 opens with crashed the moment it appeared (Clerk's form was given no height to fit in), and once Clerk had cached its state the app died on every launch after that. The form now has a finite height, so tall phones fit everything and short ones scroll.",
     '**A server problem can no longer stop the app from starting.** Clerk, the Convex client and the sync engine each come up behind a guard: whatever fails, Murmur runs in local mode, with your own provider, settings and history all working, and the Account screen says "Couldn\'t connect to Murmur\'s server" with the cause and a Try again. The sign-in screen offers Continue without an account after 20 seconds or on a Clerk error, and a launch that dies while the cloud is coming up makes the next launch skip the cloud.',

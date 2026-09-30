@@ -68,7 +68,7 @@ fun SpeechModelForm(store: SettingsStore, settings: MurmurSettings, showAdvanced
         SourceChooser(
             title = "Speech model",
             selected = settings.sttSource,
-            murmurMeta = listOfNotNull(inference.planTitle, inference.minutesLabel).joinToString(" · "),
+            murmurMeta = listOfNotNull(inference.sourceCaption, inference.minutesLabel).joinToString(" · "),
             onSelect = { source -> store.update { s -> s.copy(sttSource = source) } }
         )
         SectionGap()
@@ -144,15 +144,17 @@ private fun MurmurSpeechSummary(inference: InferenceView) {
             Text(inference.status?.models?.stt ?: Inference.STT_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
         }
         ControlRow(
-            "Plan",
+            if (inference.billingEnabled) "Plan" else "Allowance",
             description = when {
                 !inference.signedIn -> "Sign in to use Murmur models."
                 inference.minutesLabel != null -> "Transcription minutes reset at the start of every month."
+                inference.planState == "testing" -> "Not open to this account while the server is in private testing; your own provider still works."
+                inference.planState == "unlimited" -> "No allowance to run out of."
                 else -> "Waiting for your account status…"
             }
         ) {
             Text(
-                listOfNotNull(inference.planLabel, inference.minutesLabel).joinToString(" · "),
+                listOfNotNull(if (inference.labelled) inference.planLabel else null, inference.minutesLabel).joinToString(" · "),
                 style = Murmur.type.labelSmall,
                 color = c.inkSoft
             )

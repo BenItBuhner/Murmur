@@ -141,8 +141,15 @@ data class InferenceStatusDto(
     val plan: String = "free",
     val limits: InferenceLimitsDto = InferenceLimitsDto(),
     val usage: InferenceUsageDto = InferenceUsageDto(),
+    /** The stored plan state, or `testing` / `unlimited` while the instance is in private testing. */
     val planState: String? = null,
     val trialEndsAt: Double? = null,
+    /**
+     * The instance sells Pro (its `MURMUR_BILLING_ENABLED`). False hides every plan label, trial
+     * countdown, Upgrade and Manage plan button and billing link; an older instance that never sent
+     * the field did sell it.
+     */
+    val billingEnabled: Boolean = true,
     /** Pro past the soft fair-use cap: `/v1/format` answers with rule-based text until the month resets. */
     val formattingPaused: Boolean = false,
     /** The web account page that starts an upgrade; null when the instance has no site URL. */

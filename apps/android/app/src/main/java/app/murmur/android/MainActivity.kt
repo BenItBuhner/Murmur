@@ -28,6 +28,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.murmur.android.cloud.AccountMode
+import app.murmur.android.cloud.CloudBoot
+import app.murmur.android.cloud.CloudBootstrap
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.SyncStatus
@@ -124,6 +126,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         // Never leave the full-screen drag surface behind when the user leaves the app.
         OverlayEditor.stop()
+        // Leaving normally is not a start-up crash: the cloud boot guard stands down.
+        CloudBootstrap.onUiStopped()
         super.onStop()
     }
 
@@ -142,6 +146,9 @@ class MainActivity : ComponentActivity() {
 /**
  * Cloud builds: account gate -> onboarding -> settings. Local builds: onboarding -> settings.
  * A device that signed in before keeps working from its local mirror when Clerk cannot be reached.
+ * A cloud build whose cloud failed to come up ([CloudBoot.Failed]) runs like a local build, with
+ * the Account screen explaining; Clerk is not touched at all then, since its classes may be the
+ * very thing that failed.
  */
 @Composable
 private fun Root(
@@ -151,14 +158,18 @@ private fun Root(
     requestedRoute: StateFlow<Route?>,
     onRouteShown: () -> Unit
 ) {
-    val clerkReady by (if (config.enabled) Clerk.isInitialized else remember { MutableStateFlow(true) }).collectAsState()
-    val clerkUser by (if (config.enabled) Clerk.userFlow else remember { MutableStateFlow(null) }).collectAsState()
+    val cloud by CloudBootstrap.state.collectAsState()
+    val cloudUsable = config.enabled && cloud.usable
+    val clerkReady by (if (cloudUsable) Clerk.isInitialized else remember { MutableStateFlow(true) }).collectAsState()
+    val clerkUser by (if (cloudUsable) Clerk.userFlow else remember { MutableStateFlow(null) }).collectAsState()
     val syncStatus = CloudSync.get()?.status?.collectAsState()?.value
-    val signedIn = config.enabled && clerkUser != null
+    val signedIn = cloudUsable && clerkUser != null
     val firstName = clerkUser?.firstName ?: syncStatus?.user?.name?.substringBefore(' ')
 
-    val accountWanted = config.accountMode == AccountMode.REQUIRED ||
-        (config.accountMode == AccountMode.OPTIONAL && !settings.accountSkipped)
+    val accountWanted = cloudUsable && (
+        config.accountMode == AccountMode.REQUIRED ||
+            (config.accountMode == AccountMode.OPTIONAL && !settings.accountSkipped)
+        )
     if (accountWanted && !signedIn) {
         val offlineFallback = clerkReady && settings.lastSignedInUserId.isNotEmpty()
         if (!offlineFallback) {
@@ -181,7 +192,7 @@ private fun Root(
         return
     }
 
-    Main(config, store, settings, signedIn, firstName, syncStatus, requestedRoute, onRouteShown)
+    Main(config, cloud, store, settings, signedIn, firstName, syncStatus, requestedRoute, onRouteShown)
 }
 
 /**
@@ -192,6 +203,7 @@ private fun Root(
 @Composable
 private fun Main(
     config: CloudConfig,
+    cloud: CloudBoot,
     store: SettingsStore,
     settings: MurmurSettings,
     signedIn: Boolean,
@@ -230,11 +242,13 @@ private fun Main(
     }
     // Murmur models only need a signed-in account; the user's own provider needs the model screen.
     val modelRoute = if (inference.routing.murmurStt) Route.ACCOUNT else Route.MODEL
+    val cloudDown = config.enabled && !cloud.usable
     val sections = sections(
         cloud = config.enabled,
         modelReady = modelReady,
         permissionsGranted = permissions.allGranted,
-        updateReady = updateState.phase == UpdatePhase.READY
+        updateReady = updateState.phase == UpdatePhase.READY,
+        cloudDown = cloudDown
     )
 
     AppShell(
@@ -264,12 +278,18 @@ private fun Main(
                 val name = syncStatus?.user?.name?.takeIf { it.isNotBlank() } ?: firstName
                 val email = syncStatus?.user?.email
                 DrawerRow(
-                    label = if (signedIn) name ?: email ?: "Your account" else "Not signed in",
-                    hint = if (signedIn && syncStatus != null) {
-                        listOfNotNull(if (name != null) email else null, syncLabel(syncStatus)).joinToString(" · ")
-                    } else {
-                        "sign in to sync your dictionary and style"
+                    label = when {
+                        cloudDown -> "Not connected"
+                        signedIn -> name ?: email ?: "Your account"
+                        else -> "Not signed in"
                     },
+                    hint = when {
+                        cloudDown -> "couldn't connect to Murmur's server"
+                        signedIn && syncStatus != null ->
+                            listOfNotNull(if (name != null) email else null, syncLabel(syncStatus)).joinToString(" · ")
+                        else -> "sign in to sync your dictionary and style"
+                    },
+                    dot = if (cloudDown) c.ember else null,
                     leading = { Avatar((name ?: email ?: "?").first().uppercaseChar(), signedIn) },
                     onClick = { select(Route.ACCOUNT) }
                 )
@@ -297,7 +317,7 @@ private fun Main(
             Route.UPDATES -> UpdatesScreen(store, settings, nav)
             Route.TRY_IT -> TryItScreen(store, settings, nav)
             Route.ACCOUNT -> AccountScreen(
-                config, store, nav,
+                config, cloud, store, nav,
                 onSignIn = { store.update { it.copy(accountSkipped = false) } }
             )
         }
@@ -307,7 +327,13 @@ private fun Main(
 private data class StatusRow(val label: String, val hint: String, val dot: Color, val pulsing: Boolean)
 
 /** The drawer's sections, grouped like the desktop sidebar; the ember dots mark unfinished setup. */
-private fun sections(cloud: Boolean, modelReady: Boolean, permissionsGranted: Boolean, updateReady: Boolean): List<Section> = buildList {
+private fun sections(
+    cloud: Boolean,
+    modelReady: Boolean,
+    permissionsGranted: Boolean,
+    updateReady: Boolean,
+    cloudDown: Boolean = false
+): List<Section> = buildList {
     add(Section(Route.HOME, "Home", Glyph.HOME))
     add(Section(Route.HISTORY, "History", Glyph.HISTORY))
     add(Section(Route.DICTIONARY, "Dictionary", Glyph.DICTIONARY, group = "Personalize"))
@@ -320,7 +346,7 @@ private fun sections(cloud: Boolean, modelReady: Boolean, permissionsGranted: Bo
     add(Section(Route.PERMISSIONS, "Permissions", Glyph.PERMISSIONS, attention = !permissionsGranted))
     add(Section(Route.UPDATES, "Updates", Glyph.UPDATES, attention = updateReady))
     add(Section(Route.TRY_IT, "Try it", Glyph.TRY_IT))
-    if (cloud) add(Section(Route.ACCOUNT, "Account", Glyph.ACCOUNT, group = "Cloud"))
+    if (cloud) add(Section(Route.ACCOUNT, "Account", Glyph.ACCOUNT, group = "Cloud", attention = cloudDown))
 }
 
 /** The account's initial in a small disc; hollow when nobody is signed in. */

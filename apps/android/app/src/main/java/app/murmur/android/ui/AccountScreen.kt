@@ -28,9 +28,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import app.murmur.android.cloud.CloudBoot
+import app.murmur.android.cloud.CloudBootstrap
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.SyncPhase
@@ -77,9 +80,30 @@ fun syncColor(status: SyncStatus, c: Paper = Murmur.colors): Color = when (statu
 }
 
 @Composable
-fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSignIn: () -> Unit) {
+fun AccountScreen(config: CloudConfig, cloud: CloudBoot, store: SettingsStore, nav: TopNav, onSignIn: () -> Unit) {
+    val context = LocalContext.current
     val sync = CloudSync.get()
-    val status by (sync?.status ?: return).collectAsState()
+    // The cloud never came up (or its engine is missing): say so, offer a retry, touch nothing of
+    // Clerk's. Sign-in itself failing to reach Clerk is the same screen with Clerk's own retry.
+    if (cloud !is CloudBoot.Ready || sync == null) {
+        AccountTroubleScreen(
+            detail = (cloud as? CloudBoot.Failed)?.let { CloudBootstrap.explain(it) },
+            nav = nav,
+            onRetry = { CloudBootstrap.retry(context) }
+        )
+        return
+    }
+    val clerkReady by Clerk.isInitialized.collectAsState()
+    val clerkError by Clerk.initializationError.collectAsState()
+    if (!clerkReady && clerkError != null) {
+        AccountTroubleScreen(
+            detail = clerkError?.let { "The sign-in service did not answer: ${CloudBootstrap.describe(it)}" },
+            nav = nav,
+            onRetry = { runCatching { Clerk.reinitialize() } }
+        )
+        return
+    }
+    val status by sync.status.collectAsState()
     val user by Clerk.userFlow.collectAsState()
     val settings by store.flow.collectAsState()
     val scope = rememberCoroutineScope()
@@ -127,6 +151,22 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
         ) {
             UserProfileView(clerkTheme = theme, onDismiss = { profileOpen = false })
         }
+    }
+}
+
+/**
+ * The Account screen when Murmur's server cannot be reached or the cloud failed to start: the
+ * app runs without the account (own provider, local settings and history), and here is why, and
+ * a retry. The words match the gate's [CloudTrouble].
+ */
+@Composable
+fun AccountTroubleScreen(detail: String?, nav: TopNav, onRetry: () -> Unit) {
+    Screen(
+        title = "Account",
+        description = "You are using Murmur without an account. Everything stays on this phone.",
+        nav = nav
+    ) {
+        CloudTrouble(detail = detail, onRetry = onRetry, modifier = Modifier.testTag("account-trouble"))
     }
 }
 

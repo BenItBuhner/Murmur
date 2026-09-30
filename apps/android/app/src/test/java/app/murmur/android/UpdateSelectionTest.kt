@@ -1,5 +1,6 @@
 package app.murmur.android
 
+import app.murmur.android.update.Checksum
 import app.murmur.android.update.GithubAssetDto
 import app.murmur.android.update.GithubReleaseDto
 import app.murmur.android.update.Semver
@@ -97,10 +98,61 @@ class UpdateSelectionTest {
         assertEquals("ab".repeat(32), sums["Murmur-0.2.0-android.apk"])
         assertEquals("cd".repeat(32), sums["Murmur-0.2.0-setup.exe"])
         assertEquals(2, sums.size)
-        val info = UpdateSelection.describe(r, apk, sums["Murmur-0.2.0-android.apk"])
+        val info = UpdateSelection.describe(r, apk, Checksum.Known(sums.getValue("Murmur-0.2.0-android.apk"), UpdateSelection.CHECKSUMS_ASSET))
         assertEquals("0.2.0", info.version)
         assertFalse(info.prerelease)
         assertEquals(apk, info.apk)
+        assertEquals("ab".repeat(32), info.sha256)
+        assertNull(info.checksumProblem)
+        val unverifiable = UpdateSelection.describe(r, apk, Checksum.Missing("no line"))
+        assertNull(unverifiable.sha256)
+        assertEquals("no line", unverifiable.checksumProblem)
+    }
+
+    /**
+     * The API responses GitHub really gave for v0.6.0 and v0.5.11 (fixtures/updates): the APK is
+     * found by its versioned name, its digest comes with the release JSON and agrees with the line
+     * SHA256SUMS.txt carries for it, so both paths verify the same bytes.
+     */
+    @Test
+    fun `resolves the APK checksum from the real v0-6-0 and v0-5-11 API responses`() {
+        for ((tag, sha) in UpdateFixtures.realApkSha256) {
+            val r = UpdateSelection.parseReleases("[${UpdateFixtures.releaseJson(tag)}]").single()
+            assertEquals(tag, r.tag_name)
+            assertFalse(r.draft || r.prerelease)
+            assertEquals(29, r.assets.size)
+            val apkName = UpdateSelection.apkAssetName(r.tag_name)
+            val apk = r.assets.single { it.name == apkName }
+            assertTrue(apk.size > 30_000_000)
+            assertTrue(UpdateSelection.isTrustedAssetUrl(apk.browser_download_url, "https://github.com"))
+            assertEquals(sha, UpdateSelection.digestOf(apk))
+
+            val sums = r.assets.single { it.name == UpdateSelection.CHECKSUMS_ASSET }
+            assertTrue(UpdateSelection.isTrustedAssetUrl(sums.browser_download_url, "https://github.com"))
+            val parsed = UpdateSelection.parseChecksums(UpdateFixtures.checksums(tag))
+            assertEquals(28, parsed.size)
+            assertEquals(sha, parsed[apkName])
+            assertEquals(sha, parsed["Murmur-android.apk"])
+
+            assertEquals(Checksum.Known(sha, "GitHub asset digest"), UpdateSelection.resolveChecksum(r, apk, sumsPresent = true, sums = null))
+            val noDigest = apk.copy(digest = null)
+            assertEquals(
+                Checksum.Known(sha, UpdateSelection.CHECKSUMS_ASSET),
+                UpdateSelection.resolveChecksum(r, noDigest, sumsPresent = true, sums = UpdateFixtures.checksums(tag))
+            )
+            assertEquals(
+                Checksum.Unavailable("Could not download SHA256SUMS.txt for Murmur ${tag.removePrefix("v")} (HTTP 503). Murmur will try again."),
+                UpdateSelection.resolveChecksum(r, noDigest, sumsPresent = true, sums = null, sumsFetchError = "HTTP 503")
+            )
+            assertTrue(UpdateSelection.resolveChecksum(r, noDigest, sumsPresent = false, sums = null) is Checksum.Missing)
+            assertTrue(UpdateSelection.resolveChecksum(r, noDigest, sumsPresent = true, sums = "not a checksum file") is Checksum.Missing)
+            assertNull(UpdateSelection.digestOf(apk.copy(digest = "sha512:" + "0".repeat(128))))
+            assertNull(UpdateSelection.digestOf(apk.copy(digest = "sha256:short")))
+        }
+        // Both real releases in one feed: a 0.5.11 phone is offered v0.6.0, a 0.6.0 phone nothing.
+        val feed = UpdateSelection.parseReleases("[${UpdateFixtures.releaseJson("v0.6.0")},${UpdateFixtures.releaseJson("v0.5.11")}]")
+        assertEquals("v0.6.0", UpdateSelection.selectRelease(feed, "0.5.11", false)?.tag_name)
+        assertNull(UpdateSelection.selectRelease(feed, "0.6.0", false))
     }
 
     @Test

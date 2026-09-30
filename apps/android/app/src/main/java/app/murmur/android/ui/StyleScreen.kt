@@ -27,6 +27,7 @@ import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
 import app.murmur.android.ui.components.ChipRow
 import app.murmur.android.ui.components.ControlRow
@@ -266,7 +267,7 @@ private fun AppRulesGroup(store: SettingsStore, settings: MurmurSettings) {
     val c = Murmur.colors
     Group(
         "Per-app rules",
-        description = "Match on the app's name or package; the first matching rule wins. Anything left on Default follows the settings above."
+        description = "Match on the app's name or package; the first matching rule wins. Anything left on Default follows the settings above, Speed the Speech model screen (Fast: faster speech model and no AI formatting in that app)."
     ) {
         if (settings.appRules.isEmpty()) {
             Text(
@@ -326,6 +327,14 @@ private fun RuleEditor(rule: AppRule, onChange: (AppRule) -> Unit, onRemove: () 
     val modes = listOf(DEFAULT_CHOICE) + FormattingMode.entries.map { it.displayName }
     ChipRow(modes, rule.formatting?.displayName ?: DEFAULT_CHOICE, Modifier.testTag("rule-mode")) { label ->
         onChange(rule.copy(formatting = FormattingMode.entries.firstOrNull { it.displayName == label }))
+    }
+    Spacer(Modifier.height(14.dp))
+    // Murmur's speech model speed in this app; Fast also skips AI formatting there.
+    Overline("Speed")
+    Spacer(Modifier.height(8.dp))
+    val speeds = listOf(DEFAULT_CHOICE) + SttSpeed.entries.map { it.label }
+    ChipRow(speeds, rule.speed?.label ?: DEFAULT_CHOICE, Modifier.testTag("rule-speed")) { label ->
+        onChange(rule.copy(speed = SttSpeed.entries.firstOrNull { it.label == label }))
     }
     Spacer(Modifier.height(14.dp))
     Overline("Trailing space")

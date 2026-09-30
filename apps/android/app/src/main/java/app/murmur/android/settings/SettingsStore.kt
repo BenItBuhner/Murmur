@@ -38,16 +38,21 @@ enum class InferenceSource(val id: String) {
 }
 
 /**
- * Speed of the Murmur speech model (desktop `speedModeSchema`; `SPEED_MODES` on the gateway):
- * NORMAL is today's model, FAST a quicker one when the instance offers it. Only meaningful with
- * [InferenceSource.MURMUR]; the user's own provider has its own model field.
+ * Speed of a dictation (desktop `speedModeSchema`; `SPEED_MODES` on the gateway): NORMAL is
+ * today's speech model with AI formatting, FAST a quicker speech model when the instance offers
+ * one and no AI formatting (the rule-based Light cleanup instead), whichever provider transcribes.
+ * Serialized by id so a per-app rule reads like the desktop's and the backend's.
  */
+@Serializable
 enum class SttSpeed(val id: String, val label: String) {
-    NORMAL("normal", "Normal"),
-    FAST("fast", "Fast");
+    @SerialName("normal") NORMAL("normal", "Normal"),
+    @SerialName("fast") FAST("fast", "Fast");
 
     companion object {
         fun from(id: String?): SttSpeed = entries.firstOrNull { it.id == id } ?: NORMAL
+
+        /** A rule's override: null for anything that is not a speed (inherit), unlike [from]. */
+        fun fromOrNull(id: String?): SttSpeed? = entries.firstOrNull { it.id == id }
     }
 }
 

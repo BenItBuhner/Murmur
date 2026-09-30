@@ -25,7 +25,13 @@ import {
   type FormatInput,
   type ResolvedStyle
 } from '@engine'
-import { MURMUR_ERROR_CODES, type SpeedOutcome } from '@shared/inference'
+import {
+  FAST_SKIP_DETAIL,
+  MURMUR_ERROR_CODES,
+  effectiveSpeed,
+  formattingModeAt,
+  type SpeedOutcome
+} from '@shared/inference'
 import { isPlanLimit, type LimitNotice } from '@shared/limits'
 import { sessionDurationLimitMs, type Settings } from '@shared/settings'
 import type {
@@ -429,12 +435,17 @@ export class DictationController extends EventEmitter {
     }
     timings.vadMs = Math.round(performance.now() - t)
 
+    // The destination's style is settled before the speech request: a per-app rule may pick the
+    // speed, which the speech model is asked for and which decides whether the formatting model runs.
+    const style = resolveStyle(s.formatting, s.formatting.appRules, app)
+    const speed = effectiveSpeed(s.stt.speed, style.rule)
+
     // 2. STT
     t = performance.now()
     const tag = job.id.slice(0, 8)
     let resolved: ResolvedStt
     try {
-      resolved = await this.deps.inference.stt()
+      resolved = await this.deps.inference.stt({ speed })
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
       return failure('', null, err)
@@ -488,7 +499,6 @@ export class DictationController extends EventEmitter {
     }
 
     // 3. Text
-    const style = resolveStyle(s.formatting, s.formatting.appRules, app)
     let finalText = ''
     let stages: string[] = []
     let llmUsed = false
@@ -554,14 +564,19 @@ export class DictationController extends EventEmitter {
       finalText = raw + (style.trailingSpace ? ' ' : '')
     } else {
       t = performance.now()
+      // Fast is the quick path: the speech model's text gets the rule-based Light cleanup and goes
+      // in, the formatting model is never asked, and History says that is why.
+      const mode = formattingModeAt(style.mode, speed)
       const input: FormatInput = {
         transcript: raw,
-        mode: style.mode,
+        mode,
         context: this.formatContext(s, style, app)
       }
       let formatted: FormatOutcome
-      if (style.mode !== 'smart') {
+      if (mode !== 'smart') {
         formatted = await formatTranscript(input, null)
+        if (mode !== style.mode)
+          formatted.status = { outcome: 'skipped', detail: FAST_SKIP_DETAIL, attempts: 0 }
       } else {
         // A formatting model that cannot be reached (signed out of Murmur, no token, gateway
         // down) or refused on a plan limit is not an error for the dictation: the rule-based text
@@ -633,6 +648,7 @@ export class DictationController extends EventEmitter {
       appName: windowInfo.app || windowInfo.title || undefined,
       provider: resolved.provider,
       model: resolved.cfg.model,
+      speed,
       sttSpeed: stt.speed,
       injected: injectResult.ok && injectResult.method !== 'clipboard',
       injectionMethod: injectResult.method,
@@ -648,7 +664,7 @@ export class DictationController extends EventEmitter {
     else this.deps.history.add(entry)
     this.updateStats(entry)
     log.info(
-      `session ${job.id.slice(0, 8)} done: ${wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : llmStatus?.outcome === 'skipped-clean' ? ' (clean, no model)' : ''}${stt.speed ? ` speed=${speedLogNote(stt.speed)}` : ''}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
+      `session ${job.id.slice(0, 8)} done: ${wordCount} words, stt=${timings.sttMs}ms llm=${timings.llmMs}ms inject=${timings.injectMs}ms total=${timings.totalMs}ms via ${injectResult.method}${llmUsed ? ' (smart)' : llmStatus?.outcome === 'skipped-clean' ? ' (clean, no model)' : llmStatus?.detail === FAST_SKIP_DETAIL ? ' (fast, no model)' : ''} speed=${stt.speed ? speedLogNote(stt.speed) : speed}${job.attempts > 1 ? ` (attempt ${job.attempts})` : ''}`
     )
     if (injectResult.ok) {
       this.deps.overlay.setState({

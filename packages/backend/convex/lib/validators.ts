@@ -155,11 +155,20 @@ export const snippetInputValidator = v.object({
 })
 export type SnippetInput = Infer<typeof snippetInputValidator>
 
+/** A speech speed mode (`SPEED_MODES` in lib/inference.ts). */
+export const speedModeValidator = v.union(v.literal('normal'), v.literal('fast'))
+
 /** Per-app overrides; every field optional so a rule only carries what the user set. */
 export const appRuleOverrides = {
   formatting: v.optional(formattingModeValidator),
   trailingSpace: v.optional(v.boolean()),
   instructions: v.optional(v.string()),
+  /**
+   * The speed of Murmur's speech model in this app (and, with `fast`, no AI formatting there);
+   * absent inherits the device's Speed setting. Clients from before speed modes never send it and
+   * ignore it on the way in.
+   */
+  speed: v.optional(speedModeValidator),
   ...legacyAppRuleFields
 }
 
@@ -284,9 +293,6 @@ export const userDtoValidator = v.object({
 export type UserDto = Infer<typeof userDtoValidator>
 
 export const inferenceKindValidator = v.union(v.literal('stt'), v.literal('llm'))
-
-/** A speech speed mode (`SPEED_MODES` in lib/inference.ts). */
-export const speedModeValidator = v.union(v.literal('normal'), v.literal('fast'))
 
 /** What a client needs to know about the instance's managed models and this account's allowance. */
 export const inferenceStatusValidator = v.object({

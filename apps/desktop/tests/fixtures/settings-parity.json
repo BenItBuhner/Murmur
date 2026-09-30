@@ -130,7 +130,8 @@
   "snippetPlaceholders": ["date", "time", "day", "datetime", "clipboard"],
   "appRule": {
     "tones": ["auto", "casual", "neutral", "professional"],
-    "modes": ["off", "light", "smart"]
+    "modes": ["off", "light", "smart"],
+    "speeds": ["normal", "fast"]
   },
   "sttSpeeds": ["normal", "fast"]
 }

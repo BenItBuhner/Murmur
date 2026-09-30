@@ -6,6 +6,7 @@ import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.Snippet
 import app.murmur.android.settings.SnippetCodec
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
 import app.murmur.android.text.AppCategory
 import app.murmur.android.text.AppContext
@@ -17,6 +18,7 @@ import app.murmur.android.text.findRule
 import app.murmur.android.text.finish
 import app.murmur.android.text.resolveStyle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -163,5 +165,49 @@ class SnippetsAndRulesTest {
         assertTrue(AppRuleCodec.encode(rules).contains("\"tone\":\"casual\""))
         assertEquals(emptyList<AppRule>(), AppRuleCodec.decode("nope"))
         assertEquals("", AppRuleCodec.newRule().match)
+    }
+
+    @Test
+    fun `a rule's speed wins over the device's, decides the formatting step, and inherits when left on Default`() {
+        val chat = classifyPackage("com.whatsapp", "WhatsApp")
+        val fastRule = base.copy(appRules = listOf(rule("whatsapp").copy(speed = SttSpeed.FAST)))
+        // The device says Normal, the rule says Fast: Fast, and smart formatting becomes the Light cleanup.
+        val fast = resolveStyle(fastRule, chat)
+        assertEquals(SttSpeed.FAST, fast.speed)
+        assertEquals(FormattingMode.SMART, fast.mode)
+        assertEquals(FormattingMode.LIGHT, fast.effectiveMode)
+        assertTrue(fast.skipsModelForSpeed)
+        // The other way round: the device says Fast, the rule for this app says Normal, so the model runs.
+        val normalRule = base.copy(sttSpeed = SttSpeed.FAST, appRules = listOf(rule("whatsapp").copy(speed = SttSpeed.NORMAL)))
+        val normal = resolveStyle(normalRule, chat)
+        assertEquals(SttSpeed.NORMAL, normal.speed)
+        assertEquals(FormattingMode.SMART, normal.effectiveMode)
+        assertFalse(normal.skipsModelForSpeed)
+        // A rule that leaves the speed on Default inherits the device's; a rule for another app does not apply.
+        assertEquals(SttSpeed.FAST, resolveStyle(base.copy(sttSpeed = SttSpeed.FAST, appRules = listOf(rule("whatsapp", Tone.CASUAL))), chat).speed)
+        assertEquals(SttSpeed.NORMAL, resolveStyle(base.copy(appRules = listOf(rule("gmail").copy(speed = SttSpeed.FAST))), chat).speed)
+        // Fast never turns formatting on: Off stays Off, and Light stays Light with nothing "skipped for speed".
+        val off = resolveStyle(fastRule.copy(formattingMode = FormattingMode.OFF), chat)
+        assertEquals(FormattingMode.OFF, off.effectiveMode)
+        assertFalse(off.skipsModelForSpeed)
+        val light = resolveStyle(fastRule.copy(formattingMode = FormattingMode.LIGHT), chat)
+        assertEquals(FormattingMode.LIGHT, light.effectiveMode)
+        assertFalse(light.skipsModelForSpeed)
+    }
+
+    @Test
+    fun `a rule's speed survives the codec, and a rule stored before the field inherits`() {
+        val rules = listOf(rule("slack", Tone.CASUAL).copy(speed = SttSpeed.FAST), rule("Code", formatting = FormattingMode.OFF))
+        val encoded = AppRuleCodec.encode(rules)
+        assertTrue(encoded, encoded.contains("\"speed\":\"fast\""))
+        val decoded = AppRuleCodec.decode(encoded)
+        assertEquals(rules, decoded)
+        assertEquals(SttSpeed.FAST, decoded[0].speed)
+        assertNull(decoded[1].speed)
+        // What a build before speed modes wrote: no `speed` at all.
+        val older = AppRuleCodec.decode("""[{"id":"r-old","match":"slack","tone":"casual","formatting":"light","createdAt":1}]""")
+        assertEquals(1, older.size)
+        assertNull(older[0].speed)
+        assertEquals(FormattingMode.LIGHT, older[0].formatting)
     }
 }

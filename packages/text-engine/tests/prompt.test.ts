@@ -109,6 +109,22 @@ describe('resolveStyle', () => {
     expect(styled.instructions).toBe('be brief\n\nno emoji')
     expect(styled.rule?.match).toBe('slack')
   })
+  it('lets a rule override the formatting mode and the trailing space under the apps’ field names', () => {
+    const code = classifyApp('Code.exe')
+    // The apps and the backend store a rule's mode as `formatting`; a rule that sets it wins over
+    // the global mode, and one that leaves it out inherits.
+    const off = resolveStyle(prefs, [{ match: 'code', formatting: 'off', trailingSpace: false }], code)
+    expect(off.mode).toBe('off')
+    expect(off.trailingSpace).toBe(false)
+    const inherit = resolveStyle(prefs, [{ match: 'code', tone: 'neutral' }], code)
+    expect(inherit.mode).toBe('smart')
+    expect(inherit.trailingSpace).toBe(true)
+    // The matched rule comes back as the caller's own object, extra fields included.
+    const rules = [{ match: 'code', formatting: 'light' as const, speed: 'fast' as const }]
+    const typed = resolveStyle(prefs, rules, code)
+    expect(typed.rule?.speed).toBe('fast')
+    expect(typed.mode).toBe('light')
+  })
   it('classifies browser tabs by title', () => {
     expect(classifyApp('chrome', 'Inbox - Gmail').category).toBe('email')
     expect(classifyApp('Code.exe').category).toBe('code')

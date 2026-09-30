@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LLM_INSTRUCTIONS_MAX,
   SETTINGS_RANGES,
+  appRuleSchema,
   clampToRange,
   defaultSettings,
   formattingModeSchema,
@@ -24,7 +25,7 @@ const contract = JSON.parse(
   ranges: Record<string, { min: number; max: number }>
   sttPresets: Array<Record<string, unknown>>
   snippetPlaceholders: string[]
-  appRule: { tones: string[]; modes: string[] }
+  appRule: { tones: string[]; modes: string[]; speeds: string[] }
   sttSpeeds: string[]
 }
 
@@ -100,6 +101,12 @@ describe('settings parity contract', () => {
   it('the speed modes are the ones both apps send to the gateway', () => {
     expect(speedModeSchema.options).toEqual(contract.sttSpeeds)
     expect([...SPEED_MODES]).toEqual(contract.sttSpeeds)
+    // A per-app rule may pick one of the same speeds (absent inherits the setting).
+    expect(contract.appRule.speeds).toEqual(contract.sttSpeeds)
+    const rule = appRuleSchema.shape.speed
+    expect(rule.safeParse(undefined).success).toBe(true)
+    for (const speed of contract.appRule.speeds) expect(rule.safeParse(speed).success).toBe(true)
+    expect(rule.safeParse('turbo').success).toBe(false)
   })
 
   it('an input clamps into the range instead of handing the schema a value it would reject', () => {

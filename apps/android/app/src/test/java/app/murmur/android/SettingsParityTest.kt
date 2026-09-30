@@ -127,6 +127,11 @@ class SettingsParityTest {
         assertEquals(speeds, Inference.SPEED_MODES)
         assertEquals(SttSpeed.NORMAL, SttSpeed.from("nope"))
         assertEquals(SttSpeed.FAST, SttSpeed.from("fast"))
+        // A per-app rule may pick one of the same speeds (absent inherits the setting).
+        assertEquals(speeds, contract.getJSONObject("appRule").getJSONArray("speeds").strings())
+        assertEquals(SttSpeed.FAST, SttSpeed.fromOrNull("fast"))
+        assertNull("a rule's unknown speed inherits", SttSpeed.fromOrNull("turbo"))
+        assertNull(SttSpeed.fromOrNull(null))
     }
 
     @Test

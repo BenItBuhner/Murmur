@@ -3,6 +3,7 @@ package app.murmur.android.text
 import app.murmur.android.settings.AppRule
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
 
 /**
@@ -77,8 +78,27 @@ data class FormatStyle(
     val instructions: String,
     val trailingSpace: Boolean,
     /** The per-app rule that applied, if any. */
-    val rule: AppRule? = null
-)
+    val rule: AppRule? = null,
+    /**
+     * The speed the dictation runs at: the rule's when it set one, else the device's Speed setting
+     * (desktop: `effectiveSpeed`). Asked of Murmur's speech model and, with FAST, the formatting
+     * model is not asked at all (see [effectiveMode]).
+     */
+    val speed: SttSpeed = SttSpeed.NORMAL
+) {
+    /**
+     * The formatting mode the dictation actually runs with: Fast never asks the model, so SMART
+     * becomes the rule-based LIGHT; OFF stays off and Normal keeps [mode] (desktop: `formattingModeAt`).
+     */
+    val effectiveMode: FormattingMode
+        get() = if (speed == SttSpeed.FAST && mode == FormattingMode.SMART) FormattingMode.LIGHT else mode
+
+    /** The formatting model was not asked because of Fast (History's "model skipped: fast speed"). */
+    val skipsModelForSpeed: Boolean get() = effectiveMode != mode
+}
+
+/** `LlmStatus.detail` of a formatting step skipped because of Fast; the desktop's `FAST_SKIP_DETAIL`. */
+const val FAST_SKIP_DETAIL = "fast speed"
 
 /**
  * Precedence, as on the desktop: the matching per-app rule, then the global settings, then the
@@ -99,7 +119,8 @@ fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
         mode = rule?.formatting ?: s.formattingMode,
         instructions = instructions,
         trailingSpace = rule?.trailingSpace ?: s.trailingSpace,
-        rule = rule
+        rule = rule,
+        speed = rule?.speed ?: s.sttSpeed
     )
 }
 

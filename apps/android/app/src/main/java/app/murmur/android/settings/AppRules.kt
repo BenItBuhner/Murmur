@@ -23,7 +23,13 @@ data class AppRule(
     val trailingSpace: Boolean? = null,
     /** Extra guidance for the model in this app only; appended to the global instructions. */
     val instructions: String? = null,
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    /**
+     * The Speed of a dictation in this app (desktop: the rule's `speed`): FAST also means no AI
+     * formatting there. Null inherits the device's [MurmurSettings.sttSpeed]. Last so stored and
+     * synced rules from before the field, and code that builds one positionally, read as before.
+     */
+    val speed: SttSpeed? = null
 )
 
 object AppRuleCodec {

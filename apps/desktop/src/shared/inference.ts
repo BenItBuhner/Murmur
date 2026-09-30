@@ -1,4 +1,4 @@
-import type { Settings } from './settings'
+import type { FormattingMode, Settings } from './settings'
 
 /**
  * Where speech-to-text and smart formatting run.
@@ -80,11 +80,38 @@ export const FAST_UNAVAILABLE_NOTE = "Fast isn't available yet, used Normal"
 
 /** The Speed setting's explanation, the same words on desktop and Android. */
 export const SPEED_SETTING_DESCRIPTION =
-  "Normal is today's model. Fast answers sooner on a quicker model when this Murmur server offers one."
+  "Normal: today's speech model with AI formatting. Fast: faster speech model and no AI formatting, just the instant Light cleanup. A per-app rule on the Style page can pick a speed for one app."
 
 /** Under the Speed setting when the instance reports no fast model. */
 export const FAST_UNAVAILABLE_SETTING_NOTE =
-  "Fast isn't available on this server yet; dictations use Normal until it is."
+  "The faster speech model isn't available on this server yet; Fast dictations use the Normal model until it is, still without AI formatting."
+
+/**
+ * Why the formatting model was not asked for a Fast dictation (`LlmStatus.detail` with outcome
+ * `skipped`), so History can say the AI step was skipped because of Fast.
+ */
+export const FAST_SKIP_DETAIL = 'fast speed'
+
+/**
+ * The speed a dictation runs at: the matching per-app rule's speed when it set one, otherwise the
+ * device's Speed setting. Decides the `speed` sent to Murmur's speech model and, with `fast`,
+ * that the formatting model is not asked (the rule-based Light cleanup runs instead), on the
+ * managed and the user's own formatting path alike.
+ */
+export function effectiveSpeed(
+  setting: SpeedMode,
+  rule: { speed?: SpeedMode } | undefined
+): SpeedMode {
+  return rule?.speed ?? setting
+}
+
+/**
+ * The formatting mode a dictation actually runs with: Fast never asks the model, so `smart`
+ * becomes the rule-based `light`; `off` stays off, and Normal keeps the mode as chosen.
+ */
+export function formattingModeAt(mode: FormattingMode, speed: SpeedMode): FormattingMode {
+  return speed === 'fast' && mode === 'smart' ? 'light' : mode
+}
 
 /** How a mode is named in the UI. */
 export function speedLabel(mode: SpeedMode): string {

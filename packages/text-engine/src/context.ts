@@ -69,19 +69,27 @@ export interface StylePrefs {
   trailingSpace: boolean
 }
 
-/** A per-app override; every field but `match` optional so a rule only carries what the user set. */
+/**
+ * A per-app override; every field but `match` optional so a rule only carries what the user set.
+ * The field names are the ones the apps and the backend store (`formatting`, not `mode`), so a
+ * rule drops in from any of them without translation.
+ */
 export interface StyleRule {
   match: string
   tone?: Tone
-  mode?: FormattingMode
+  /** Overrides the global formatting mode in this app. */
+  formatting?: FormattingMode
   trailingSpace?: boolean
   instructions?: string
 }
 
-/** Everything the text stages need to know about the destination, already merged. */
-export interface ResolvedStyle {
+/**
+ * Everything the text stages need to know about the destination, already merged. `rule` is the
+ * caller's own rule object, so fields the engine does not know (an app's speed) ride along typed.
+ */
+export interface ResolvedStyle<R extends StyleRule = StyleRule> {
   tone: ResolvedTone
-  rule?: StyleRule
+  rule?: R
   mode: FormattingMode
   instructions: string
   trailingSpace: boolean
@@ -93,11 +101,11 @@ export function findRule<R extends StyleRule>(rules: readonly R[], ctx: AppConte
 }
 
 /** Precedence: the matching per-app rule, then the global settings, then the destination's defaults. */
-export function resolveStyle(
+export function resolveStyle<R extends StyleRule>(
   prefs: StylePrefs,
-  rules: readonly StyleRule[],
+  rules: readonly R[],
   ctx: AppContext
-): ResolvedStyle {
+): ResolvedStyle<R> {
   const rule = findRule(rules, ctx)
   const tone =
     rule?.tone && rule.tone !== 'auto'
@@ -111,7 +119,7 @@ export function resolveStyle(
   return {
     tone,
     rule,
-    mode: rule?.mode ?? prefs.mode,
+    mode: rule?.formatting ?? prefs.mode,
     instructions,
     trailingSpace: rule?.trailingSpace ?? prefs.trailingSpace
   }

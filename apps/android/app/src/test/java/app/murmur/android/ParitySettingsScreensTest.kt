@@ -218,6 +218,12 @@ class ParitySettingsScreensTest {
         ruleChip("rule-tone", "Professional").performScrollTo().performClick()
         ruleChip("rule-mode", "Off").performScrollTo().performClick()
         ruleChip("rule-trailing", "Default").assertIsSelected()
+        // A rule's Speed starts on Default (inherit) and takes either mode.
+        ruleChip("rule-speed", "Default").performScrollTo().assertIsSelected()
+        assertNull(store.get().appRules.single().speed)
+        ruleChip("rule-speed", "Fast").performScrollTo().performClick()
+        assertEquals(SttSpeed.FAST, store.get().appRules.single().speed)
+        ruleChip("rule-speed", "Fast").assertIsSelected()
         compose.onNodeWithText("PER-APP RULES").performScrollTo()
         snap("android-style-per-app-rules")
         val rule = store.get().appRules.single()
@@ -225,6 +231,10 @@ class ParitySettingsScreensTest {
         assertEquals(Tone.PROFESSIONAL, rule.tone)
         assertEquals(FormattingMode.OFF, rule.formatting)
         assertNull("trailing space left on Default", rule.trailingSpace)
+        ruleChip("rule-speed", "Normal").performScrollTo().performClick()
+        assertEquals(SttSpeed.NORMAL, store.get().appRules.single().speed)
+        ruleChip("rule-speed", "Default").performScrollTo().performClick()
+        assertNull("back to inheriting the device's speed", store.get().appRules.single().speed)
         compose.onNodeWithText("Remove").performScrollTo().performClick()
         assertTrue(store.get().appRules.isEmpty())
     }
@@ -491,6 +501,28 @@ class ParitySettingsScreensTest {
         compose.onNodeWithText("Book the room for Thursday at ten.").performScrollTo().performClick()
         compose.onNodeWithText("murmur · murmur-transcribe · Fast").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(Inference.FAST_UNAVAILABLE_NOTE).assertDoesNotExist()
+    }
+
+    @Test
+    fun `History shows a Fast dictation skipped the formatting model, on the user's own provider too`() {
+        val history = HistoryStore.get(context)
+        val recordings = RecordingStore.get(context)
+        history.clear()
+        val now = System.currentTimeMillis()
+        // A Fast dictation on Groq: no server outcome, but the speed and the skipped model are on the entry.
+        history.add(
+            ownEntry("fast-own", now - 2 * 60_000, "Ship the release notes before the standup.")
+                .copy(provider = "openai-compatible", model = "whisper-large-v3-turbo", speed = "fast", llmUsed = false, llm = LlmOutcome.SKIPPED, llmDetail = "fast speed")
+        )
+        history.add(ownEntry("normal-own", now - 5 * 60_000, "Send the deck over before lunch.").copy(provider = "openai-compatible", model = "whisper-large-v3-turbo", speed = "normal"))
+        show { HistoryScreen(history, store, recordings, TopNav.Back {}) }
+        compose.onNodeWithText("fast").assertIsDisplayed()
+        assertEquals(1, compose.onAllNodesWithTag("history-speed", useUnmergedTree = true).fetchSemanticsNodes().size)
+        compose.onNodeWithText("Ship the release notes before the standup.").performClick()
+        compose.onNodeWithText("model skipped: fast speed").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("openai-compatible · whisper-large-v3-turbo · Fast").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Ship the release notes before the standup.").performScrollTo()
+        snap("android-history-speed-fast-skipped-model")
     }
 
     @Test

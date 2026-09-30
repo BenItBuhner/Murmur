@@ -10,6 +10,7 @@ import app.murmur.android.dictation.DictationState
 import app.murmur.android.dictation.TextSink
 import app.murmur.android.history.HistoryEntry
 import app.murmur.android.history.HistoryStore
+import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.service.InsertOutcome
 import app.murmur.android.service.TextInserter
@@ -18,6 +19,8 @@ import app.murmur.android.settings.DictionaryCodec
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SnippetCodec
+import app.murmur.android.settings.SttSpeed
+import app.murmur.android.text.FAST_SKIP_DETAIL
 import app.murmur.android.text.basicCleanup
 import app.murmur.android.text.prepareTranscript
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +78,9 @@ class DictationFlowTest {
     /** The `prompt` field of every transcription request, or null when none was sent. */
     private val sttPrompts = CopyOnWriteArrayList<String?>()
 
+    /** The `speed` field of every transcription request; always null for the user's own provider. */
+    private val sttSpeedFields = CopyOnWriteArrayList<String?>()
+
     @Before
     fun startMockStt() {
         server.dispatcher = object : Dispatcher() {
@@ -87,9 +93,12 @@ class DictationFlowTest {
                     return MockResponse().setHeader("Content-Type", "application/json").setBody(completion)
                 }
                 if (request.path != "/v1/audio/transcriptions") return MockResponse().setResponseCode(404)
+                val multipart = request.body.readUtf8()
                 sttPrompts.add(
-                    Regex("name=\"prompt\"\\r\\n(?:[^\\r\\n]+\\r\\n)*\\r\\n([^\\r\\n]*)\\r\\n")
-                        .find(request.body.readUtf8())?.groupValues?.get(1)
+                    Regex("name=\"prompt\"\\r\\n(?:[^\\r\\n]+\\r\\n)*\\r\\n([^\\r\\n]*)\\r\\n").find(multipart)?.groupValues?.get(1)
+                )
+                sttSpeedFields.add(
+                    Regex("name=\"speed\"\\r\\n(?:[^\\r\\n]+\\r\\n)*\\r\\n([^\\r\\n]*)\\r\\n").find(multipart)?.groupValues?.get(1)
                 )
                 if (failures > 0) {
                     failures--
@@ -145,7 +154,8 @@ class DictationFlowTest {
                 useDictionaryPrompt = true,
                 dictionaryEntries = emptyList(),
                 snippets = emptyList(),
-                appRules = emptyList()
+                appRules = emptyList(),
+                sttSpeed = SttSpeed.NORMAL
             )
         }
 
@@ -388,6 +398,74 @@ class DictationFlowTest {
         field.setText("")
         assertEquals(DictationState.Success("Inserted"), dictate(activity))
         assertEquals(lightText(), field.text.toString())
+    }
+
+    @Test
+    fun `Fast skips the formatting model on the user's own provider too, and History says why`() {
+        // Smart formatting with a model named: on Normal the model is asked (it answers the captured completion).
+        llmBody = LiveFixtures.raw("complete.what-are-you-referring-to.json")
+        val (activity, field) = setUpField(FormattingMode.SMART, llmModel = "mock-llm")
+        val history = HistoryStore.get(activity)
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        // The model is asked (the canned answer is for another transcript, so the verifier's strict
+        // retry may ask again); what matters here is that it was asked at all.
+        assertTrue("the formatting model was asked: $requests", requests.any { "/v1/chat/completions" in it })
+        val normal = history.entries.value.first()
+        assertTrue(normal.llm == LlmOutcome.USED || normal.llm == LlmOutcome.REJECTED)
+        assertEquals("normal", normal.speed)
+
+        // Fast: the same settings, but no formatting request at all; the Light cleanup goes in and the
+        // entry says the model was skipped for speed. The user's own speech provider never sees `speed`.
+        SettingsStore.get(activity).update { it.copy(sttSpeed = SttSpeed.FAST) }
+        field.setText("")
+        requests.clear()
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertTrue("no chat completion was requested: $requests", requests.none { "/v1/chat/completions" in it })
+        assertEquals(lightText(), field.text.toString())
+        val fast = history.entries.value.first()
+        assertFalse(fast.llmUsed)
+        assertEquals(LlmOutcome.SKIPPED, fast.llm)
+        assertEquals(FAST_SKIP_DETAIL, fast.llmDetail)
+        assertEquals("fast", fast.speed)
+        assertNull("the user's own provider says nothing about speed", fast.sttSpeed)
+        assertTrue("the speed field never reaches the user's own provider: $sttSpeedFields", sttSpeedFields.all { it == null })
+    }
+
+    @Test
+    fun `a per-app rule's speed decides the formatting step for that app`() {
+        llmBody = LiveFixtures.raw("complete.what-are-you-referring-to.json")
+        val (activity, field) = setUpField(FormattingMode.SMART, llmModel = "mock-llm")
+        val history = HistoryStore.get(activity)
+        // The device says Normal; the rule for Murmur's own package (what the sink reports) says Fast.
+        SettingsStore.get(activity).update {
+            it.copy(appRules = listOf(AppRuleCodec.newRule("murmur").copy(speed = SttSpeed.FAST)))
+        }
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertTrue("no chat completion was requested: $requests", requests.none { "/v1/chat/completions" in it })
+        assertEquals(lightText(), field.text.toString())
+        assertEquals("fast", history.entries.value.first().speed)
+        assertEquals(FAST_SKIP_DETAIL, history.entries.value.first().llmDetail)
+
+        // The other way round: the device says Fast, the rule for this app says Normal, so the model runs.
+        SettingsStore.get(activity).update {
+            it.copy(sttSpeed = SttSpeed.FAST, appRules = listOf(AppRuleCodec.newRule("murmur").copy(speed = SttSpeed.NORMAL)))
+        }
+        field.setText("")
+        requests.clear()
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertTrue("the formatting model was asked: $requests", requests.any { "/v1/chat/completions" in it })
+        assertEquals("normal", history.entries.value.first().speed)
+        assertTrue(history.entries.value.first().llm == LlmOutcome.USED || history.entries.value.first().llm == LlmOutcome.REJECTED)
+
+        // A rule for another app leaves this one on the device's Fast.
+        SettingsStore.get(activity).update {
+            it.copy(appRules = listOf(AppRuleCodec.newRule("whatsapp").copy(speed = SttSpeed.NORMAL)))
+        }
+        field.setText("")
+        requests.clear()
+        assertEquals(DictationState.Success("Inserted"), dictate(activity))
+        assertTrue(requests.none { "/v1/chat/completions" in it })
+        assertEquals("fast", history.entries.value.first().speed)
     }
 
     /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */

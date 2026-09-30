@@ -25,6 +25,7 @@ import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.Snippet
+import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -350,6 +351,38 @@ class CloudSyncTest {
         // A record from the server: legacy knobs older clients wrote are read past and dropped.
         val fromServer = SyncReducers.fromRemote(AppRuleDto("r2", "slack", "casual", formatting = "light", lists = "auto", numbers = "all", freedom = "strict", createdAt = 4.0, updatedAt = 4.0))
         assertEquals(AppRule("r2", "slack", Tone.CASUAL, FormattingMode.LIGHT, createdAt = 4L), fromServer)
+    }
+
+    @Test
+    fun `a rule's speed goes to the server and comes back, and only when set`() {
+        val json = Json { ignoreUnknownKeys = true }
+        // To the server: the id the desktop and the gateway use; nothing when the rule inherits.
+        assertEquals(
+            mapOf("match" to "slack", "tone" to "casual", "speed" to "fast"),
+            CloudSync.appRuleArgs(AppRule("r", "slack", Tone.CASUAL, speed = SttSpeed.FAST))
+        )
+        assertFalse(CloudSync.appRuleArgs(AppRule("r", "slack", Tone.CASUAL)).containsKey("speed"))
+        // From the server: a rule saved with a speed on another device, one from before the field, and
+        // one with a speed this build does not know (inherit, not Normal).
+        assertEquals(
+            SttSpeed.FAST,
+            SyncReducers.fromRemote(json.decodeFromString<AppRuleDto>("""{"id":"r1","match":"slack","tone":"casual","speed":"fast","createdAt":1,"updatedAt":1}""")).speed
+        )
+        assertNull(SyncReducers.fromRemote(json.decodeFromString<AppRuleDto>("""{"id":"r2","match":"mail","tone":"auto","formatting":"light","createdAt":1,"updatedAt":1}""")).speed)
+        assertNull(SyncReducers.fromRemote(AppRuleDto("r3", "code", speed = "turbo")).speed)
+        // Changing only the speed is a change worth sending; the outbox keeps it.
+        val r1 = rule("r", "slack", Tone.CASUAL)
+        assertFalse(SyncReducers.sameAppRule(r1, r1.copy(speed = SttSpeed.NORMAL)))
+        assertTrue(SyncReducers.sameAppRule(r1.copy(speed = SttSpeed.FAST), r1.copy(speed = SttSpeed.FAST, createdAt = 9L)))
+        val outbox = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val op: SyncOp = SyncOp.AppRuleUpsert("op9", "r", rule = r1.copy(speed = SttSpeed.FAST))
+        val back = outbox.decodeFromString<SyncOp>(outbox.encodeToString(op)) as SyncOp.AppRuleUpsert
+        assertEquals(SttSpeed.FAST, back.rule.speed)
+        // An outbox entry written before the field decodes with the rule inheriting.
+        val older = outbox.decodeFromString<SyncOp>(
+            """{"type":"appRules.upsert","id":"op8","localId":"r","remoteId":null,"acked":false,"rule":{"id":"r","match":"slack","tone":"casual","createdAt":1}}"""
+        ) as SyncOp.AppRuleUpsert
+        assertNull(older.rule.speed)
     }
 
     @Test

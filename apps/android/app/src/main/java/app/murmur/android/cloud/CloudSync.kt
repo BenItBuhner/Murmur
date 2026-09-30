@@ -797,6 +797,7 @@ class CloudSync internal constructor(
             r.formatting?.let { put("formatting", it.id) }
             r.trailingSpace?.let { put("trailingSpace", it) }
             r.instructions?.takeIf { it.isNotBlank() }?.let { put("instructions", it) }
+            r.speed?.let { put("speed", it.id) }
             if (r.createdAt > 0) put("createdAt", r.createdAt.toDouble())
         }
 

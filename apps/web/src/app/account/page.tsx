@@ -6,12 +6,13 @@ import { AccountProviders } from '@/components/account/providers'
 import { AccountUnavailable } from '@/components/account/unavailable'
 import { PageHeader, Section } from '@/components/ui/section'
 import { Surface } from '@/components/ui/surface'
-import { accountsSetup, clerkPublishableKey, convexUrl } from '@/lib/env'
+import { accountsSetup, billingEnabled, clerkPublishableKey, convexUrl } from '@/lib/env'
 
 export const metadata: Metadata = {
   title: 'Account',
-  description:
-    'Sign in to Murmur to see your plan, the days left in your trial, your usage against each limit, and to upgrade to Pro or manage billing.',
+  description: billingEnabled
+    ? 'Sign in to Murmur to see your plan, the days left in your trial, your usage against each limit, and to upgrade to Pro or manage billing.'
+    : 'Sign in to Murmur to see your account, your use of Murmur’s models, your stats and the devices that have signed in.',
   robots: { index: false }
 }
 
@@ -28,7 +29,11 @@ export default function AccountPage() {
       <PageHeader
         eyebrow="Account"
         title="One account, every device."
-        lede="Your plan and trial, your usage of Murmur’s models against each limit, billing, your stats and the devices that have signed in. Dictionary, snippets and style are edited in the apps and kept in step here."
+        lede={
+          billingEnabled
+            ? 'Your plan and trial, your usage of Murmur’s models against each limit, billing, your stats and the devices that have signed in. Dictionary, snippets and style are edited in the apps and kept in step here.'
+            : 'Your use of Murmur’s models, your stats and the devices that have signed in. Dictionary, snippets and style are edited in the apps and kept in step here.'
+        }
       />
       <div className="mt-section">
         {setup.configured ? (

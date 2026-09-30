@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Bullets, Facts, LegalDocument, type LegalSection } from '@/components/legal/legal-document'
+import { billingEnabled } from '@/lib/env'
 import { repoUrl } from '@/lib/site'
 
 export const metadata: Metadata = {
@@ -9,14 +10,20 @@ export const metadata: Metadata = {
     'What Murmur sends where, what an account stores, how long it is kept, and how to delete it. Written from the code, not from a template.'
 }
 
-const UPDATED = '13 September 2026'
+const UPDATED = '30 September 2026'
 
 /*
  * Every statement below describes what the code in the repository does today: the apps
  * (apps/desktop, apps/android), the backend (packages/backend/convex) and this site. Where the
- * behaviour depends on how an instance is configured, it says so.
+ * behaviour depends on how an instance is configured, it says so. `selling` is the billing switch
+ * (`NEXT_PUBLIC_MURMUR_BILLING_ENABLED`): off, nothing is paid for, so the payment section and the
+ * Stripe mentions go. Exported so a test pins both shapes.
  */
-const SECTIONS: LegalSection[] = [
+export function privacySections(selling: boolean): LegalSection[] {
+  return SECTIONS(selling)
+}
+
+const SECTIONS = (selling: boolean): LegalSection[] => [
   {
     id: 'short',
     title: 'The short version',
@@ -101,8 +108,9 @@ const SECTIONS: LegalSection[] = [
             },
             {
               term: 'Plan',
-              detail:
-                'Trial, free or Pro, when the trial ends, your Stripe customer id, and a snapshot of the subscription (status, monthly or yearly, current period end, whether it is set to cancel, whether the last payment failed).'
+              detail: selling
+                ? 'Trial, free or Pro, when the trial ends, your Stripe customer id, and a snapshot of the subscription (status, monthly or yearly, current period end, whether it is set to cancel, whether the last payment failed).'
+                : 'The plan state the instance records for the account (trial, free or Pro) and when the trial ends. While the instance is in private testing, whether the models are open to the account follows from its email address and is not stored separately.'
             },
             {
               term: 'Usage',
@@ -145,29 +153,7 @@ const SECTIONS: LegalSection[] = [
       </>
     )
   },
-  {
-    id: 'billing',
-    title: 'Payments',
-    body: (
-      <>
-        <p>
-          Pro is paid through Stripe. Checkout and the billing portal are Stripe pages; your card
-          details go to Stripe and never pass through Murmur. Stripe tells Murmur when a
-          subscription starts, changes, ends or fails to renew, and Murmur keeps the snapshot listed
-          above so the apps know your plan. Stripe keeps its own records (invoices, payment methods)
-          under{' '}
-          <a
-            href="https://stripe.com/privacy"
-            className="underline decoration-foreground/30 underline-offset-4"
-            rel="noreferrer"
-          >
-            its privacy policy
-          </a>
-          .
-        </p>
-      </>
-    )
-  },
+  ...(selling ? [BILLING] : []),
   {
     id: 'retention',
     title: 'How long it is kept',
@@ -178,7 +164,7 @@ const SECTIONS: LegalSection[] = [
             'Synced data stays until you change or delete it in the apps, or delete the account.',
             'Synced history is capped at 5,000 entries per account; the oldest are removed as new ones arrive.',
             'Usage counters stay with the account so the plan can be enforced; they are deleted with it.',
-            'Deleting your account (Delete my data in the app’s Account page, or deleting the Clerk account) removes every table above in one step: dictionary, snippets, rules, preferences, stats, devices, history and usage, then the account record itself. Stripe retains what it must for accounting.'
+            `Deleting your account (Delete my data in the app’s Account page, or deleting the Clerk account) removes every table above in one step: dictionary, snippets, rules, preferences, stats, devices, history and usage, then the account record itself.${selling ? ' Stripe retains what it must for accounting.' : ''}`
           ]}
         />
       </>
@@ -201,7 +187,9 @@ const SECTIONS: LegalSection[] = [
               detail:
                 'Transcription and formatting for accounts using Murmur’s models (see section 4).'
             },
-            { term: 'Stripe', detail: 'Payments, invoices and the billing portal.' },
+            ...(selling
+              ? [{ term: 'Stripe', detail: 'Payments, invoices and the billing portal.' }]
+              : []),
             { term: 'Cloudflare', detail: 'Hosts this website.' },
             { term: 'GitHub', detail: 'Hosts the source code, the releases and the downloads.' }
           ]}
@@ -256,12 +244,36 @@ const SECTIONS: LegalSection[] = [
           <Link href="/terms" className="underline decoration-foreground/30 underline-offset-4">
             terms
           </Link>{' '}
-          cover the subscription itself.
+          cover the {selling ? 'subscription' : 'service'} itself.
         </p>
       </>
     )
   }
 ]
+
+/** Only while the instance sells Pro. */
+const BILLING: LegalSection = {
+  id: 'billing',
+  title: 'Payments',
+  body: (
+    <>
+      <p>
+        Pro is paid through Stripe. Checkout and the billing portal are Stripe pages; your card
+        details go to Stripe and never pass through Murmur. Stripe tells Murmur when a subscription
+        starts, changes, ends or fails to renew, and Murmur keeps the snapshot listed above so the
+        apps know your plan. Stripe keeps its own records (invoices, payment methods) under{' '}
+        <a
+          href="https://stripe.com/privacy"
+          className="underline decoration-foreground/30 underline-offset-4"
+          rel="noreferrer"
+        >
+          its privacy policy
+        </a>
+        .
+      </p>
+    </>
+  )
+}
 
 export default function PrivacyPage() {
   return (
@@ -270,7 +282,7 @@ export default function PrivacyPage() {
       title="What goes where, and what stays."
       lede="Written from the code in the repository rather than from a template: what the apps send, what an account stores, how long it is kept, and how to delete it."
       updated={UPDATED}
-      sections={SECTIONS}
+      sections={privacySections(billingEnabled)}
       related={{ href: '/terms', label: 'terms' }}
     />
   )

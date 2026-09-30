@@ -1,3 +1,5 @@
+import { billingEnabled } from '@/lib/env'
+
 /**
  * Facts the whole site refers to. The GitHub repository is read from MURMUR_UPDATE_REPO, the same
  * variable the desktop and Android updaters use (CI sets it to `github.repository`), so a fork's
@@ -43,8 +45,32 @@ export function siteUrl(): URL {
   return new URL('http://localhost:3000')
 }
 
-export const NAV_LINKS = [
-  { href: '/#engine', label: 'How it works' },
-  { href: '/pricing', label: 'Pricing' },
-  { href: '/download', label: 'Download' }
-] as const
+export interface SiteLink {
+  href: string
+  label: string
+}
+
+/** The header's primary links; Pricing only while the site sells Pro. */
+export function navLinks(selling = billingEnabled): SiteLink[] {
+  return [
+    { href: '/#engine', label: 'How it works' },
+    ...(selling ? [{ href: '/pricing', label: 'Pricing' }] : []),
+    { href: '/download', label: 'Download' }
+  ]
+}
+
+/** The footer's product column: the header links plus the account page. */
+export function productLinks(selling = billingEnabled): SiteLink[] {
+  return [...navLinks(selling), { href: '/account', label: 'Account' }]
+}
+
+/** Every public page for the sitemap, with its priority; /pricing only while it exists. */
+export function sitemapPages(selling = billingEnabled): Array<{ path: string; priority: number }> {
+  return [
+    { path: '/', priority: 1 },
+    { path: '/download', priority: 0.9 },
+    ...(selling ? [{ path: '/pricing', priority: 0.8 }] : []),
+    { path: '/privacy', priority: 0.3 },
+    { path: '/terms', priority: 0.3 }
+  ]
+}

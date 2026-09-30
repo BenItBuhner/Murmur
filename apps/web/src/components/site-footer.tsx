@@ -2,14 +2,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { Container } from '@/components/ui/section'
 import { Wordmark } from '@/components/wordmark'
-import { latestDownloadBase, releasesUrl, repoUrl, SITE_TAGLINE } from '@/lib/site'
-
-const PRODUCT = [
-  { href: '/#engine', label: 'How it works' },
-  { href: '/pricing', label: 'Pricing' },
-  { href: '/download', label: 'Download' },
-  { href: '/account', label: 'Account' }
-] as const
+import { latestDownloadBase, productLinks, releasesUrl, repoUrl, SITE_TAGLINE } from '@/lib/site'
 
 const LEGAL = [
   { href: '/privacy', label: 'Privacy' },
@@ -33,7 +26,7 @@ export function SiteFooter() {
             <p className="mt-4 text-body text-muted-foreground">{SITE_TAGLINE}</p>
           </div>
           <FooterColumn title="Product">
-            {PRODUCT.map((item) => (
+            {productLinks().map((item) => (
               <li key={item.href}>
                 <Link href={item.href} className="footer-link">
                   {item.label}

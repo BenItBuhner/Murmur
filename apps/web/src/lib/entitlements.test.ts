@@ -9,9 +9,11 @@ import {
   formatAudioSeconds,
   formatLocalDate,
   formatLongDate,
+  isMetered,
   meterView,
   planLabel,
   resetPoint,
+  sellsPro,
   trialDaysLeft,
   upgradeIntent,
   usageDayUtc
@@ -40,6 +42,7 @@ function status(partial: Partial<InferenceStatus>): InferenceStatus {
     plan: 'free',
     planState: 'free',
     trialEndsAt: null,
+    billingEnabled: true,
     limits: {
       sttSecondsPerMonth: 7200,
       llmTokensPerMonth: 500_000,
@@ -67,6 +70,21 @@ describe('plan states and dates', () => {
     expect(planLabel('trial')).toBe('Pro trial')
     expect(planLabel('free')).toBe('Free')
     expect(planLabel('pro')).toBe('Pro')
+    // Private testing (packages/backend/convex/lib/access.ts): the two states without meters.
+    expect(planLabel('testing')).toBe('Private testing')
+    expect(planLabel('unlimited')).toBe('Unlimited')
+    expect(isMetered('testing')).toBe(false)
+    expect(isMetered('unlimited')).toBe(false)
+    expect(isMetered('trial')).toBe(true)
+    expect(isMetered('free')).toBe(true)
+    expect(isMetered('pro')).toBe(true)
+  })
+
+  it('reads the billing switch off the status, and treats a status from before it as selling', () => {
+    expect(sellsPro(status({ billingEnabled: false }))).toBe(false)
+    expect(sellsPro(status({ billingEnabled: true }))).toBe(true)
+    expect(sellsPro({})).toBe(true)
+    expect(sellsPro(null)).toBe(true)
   })
 
   it('counts trial days left, never below zero', () => {
@@ -184,6 +202,16 @@ describe('meters', () => {
       exhaustedNotice(status({ meters: [meter('sttSecondsPerMonth', 7200, 7200, OCTOBER)] }), NOW)
     ).toBe(
       "Transcription is paused until 1 Oct: this month's 120 min of Murmur transcription are used up; dictations are refused until then. Connect your own provider under Models to keep dictating, or upgrade for unlimited dictation."
+    )
+    // Without a way to buy Pro the free tier's sentence stops at its own provider.
+    expect(
+      exhaustedNotice(
+        status({ billingEnabled: false, meters: [meter('sttSecondsPerMonth', 7200, 7200, OCTOBER)] }),
+        NOW,
+        false
+      )
+    ).toBe(
+      "Transcription is paused until 1 Oct: this month's 120 min of Murmur transcription are used up; dictations are refused until then. Connect your own provider under Models to keep dictating."
     )
     expect(
       exhaustedNotice(pro({ meters: [meter('sttSecondsPerMonth', 216_000, 216_000, OCTOBER)] }), NOW)

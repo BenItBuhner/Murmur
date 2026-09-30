@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ButtonLink } from '@/components/ui/button'
 import { Container } from '@/components/ui/section'
 import { Wordmark } from '@/components/wordmark'
-import { NAV_LINKS } from '@/lib/site'
+import { navLinks } from '@/lib/site'
 
 export function SiteHeader() {
   return (
@@ -17,7 +17,7 @@ export function SiteHeader() {
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
-          {NAV_LINKS.map((item) => (
+          {navLinks().map((item) => (
             <Link
               key={item.href}
               href={item.href}

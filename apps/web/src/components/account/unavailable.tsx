@@ -1,6 +1,6 @@
 import { ButtonLink } from '@/components/ui/button'
 import { Surface } from '@/components/ui/surface'
-import type { AccountsSetup } from '@/lib/env'
+import { billingEnabled, type AccountsSetup } from '@/lib/env'
 
 /** What /account shows on a deployment without a Murmur instance behind it. */
 export function AccountUnavailable({
@@ -19,9 +19,11 @@ export function AccountUnavailable({
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <ButtonLink href="/download">Download Murmur</ButtonLink>
-          <ButtonLink href="/pricing" variant="tonal">
-            What an account adds
-          </ButtonLink>
+          {billingEnabled && (
+            <ButtonLink href="/pricing" variant="tonal">
+              What an account adds
+            </ButtonLink>
+          )}
         </div>
       </Surface>
       <Surface role="well">

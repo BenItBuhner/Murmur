@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import { Faq } from '@/components/pricing/faq'
 import { Plans } from '@/components/pricing/plans'
 import { PageHeader, Section } from '@/components/ui/section'
+import { billingEnabled } from '@/lib/env'
 import { formatPrice, PRICING, proPerMonth } from '@/lib/pricing'
 
 export const metadata: Metadata = {
@@ -10,7 +12,9 @@ export const metadata: Metadata = {
   description: `Murmur Pro is ${formatPrice(PRICING.proMonthly)} a month or ${formatPrice(PRICING.proYearly)} a year. Every account starts with ${PRICING.trialDays} days of Pro, no card, and keeps a free tier. Local mode with your own model is free forever.`
 }
 
+/* Behind the billing switch: while the site does not sell Pro this address is a 404, and nothing links here. */
 export default function PricingPage() {
+  if (!billingEnabled) notFound()
   return (
     <>
       <Section className="pb-8 sm:pb-10">

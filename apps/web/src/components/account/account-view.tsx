@@ -18,10 +18,12 @@ import {
 } from '@/lib/backend-api'
 import {
   checkoutOutcome,
+  sellsPro,
   upgradeIntent,
   usageDayUtc,
   type BillingInterval
 } from '@/lib/entitlements'
+import { billingEnabled } from '@/lib/env'
 import { formatNumber, formatRelative } from '@/lib/format'
 import { PRICING } from '@/lib/pricing'
 
@@ -71,9 +73,18 @@ function SignedOut() {
           on the device.
         </p>
         <ul className="mt-6 space-y-2.5 text-body text-foreground/85">
-          <li>{PRICING.trialDays} days of Pro to start, no card; a free tier after that.</li>
-          <li>See your plan, the days left in the trial and your usage against each limit.</li>
-          <li>Upgrade to Pro, change the card or cancel, all from here.</li>
+          {billingEnabled ? (
+            <>
+              <li>{PRICING.trialDays} days of Pro to start, no card; a free tier after that.</li>
+              <li>See your plan, the days left in the trial and your usage against each limit.</li>
+              <li>Upgrade to Pro, change the card or cancel, all from here.</li>
+            </>
+          ) : (
+            <>
+              <li>Your dictionary, snippets, style and stats, the same on every device.</li>
+              <li>Whether Murmur’s models are open to your account, and how much you used them.</li>
+            </>
+          )}
           <li>Every device that has connected to the account.</li>
         </ul>
       </div>
@@ -152,7 +163,9 @@ export function AccountDashboard({
 }: AccountDashboardProps) {
   return (
     <div className="grid gap-card">
-      {checkout && <CheckoutNotice outcome={checkout} planState={status?.planState ?? null} />}
+      {checkout && sellsPro(status) && (
+        <CheckoutNotice outcome={checkout} planState={status?.planState ?? null} />
+      )}
       <div className="grid gap-card lg:grid-cols-split lg:items-start">
         <ProfileCard
           user={me}

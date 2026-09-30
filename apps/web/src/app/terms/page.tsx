@@ -1,19 +1,27 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Bullets, Facts, LegalDocument, type LegalSection } from '@/components/legal/legal-document'
+import { billingEnabled } from '@/lib/env'
 import { formatPrice, PRICING, proPerMonth } from '@/lib/pricing'
 import { repoUrl } from '@/lib/site'
 
 export const metadata: Metadata = {
   title: 'Terms',
-  description:
-    'The terms of Murmur’s hosted service in plain language: the trial, the free tier, the Pro subscription, fair use, cancellation and refunds.'
+  description: billingEnabled
+    ? 'The terms of Murmur’s hosted service in plain language: the trial, the free tier, the Pro subscription, fair use, cancellation and refunds.'
+    : 'The terms of Murmur’s hosted service in plain language: the account, the models that come with it, fair use, and what the service does and does not promise.'
 }
 
-const UPDATED = '13 September 2026'
+const UPDATED = '30 September 2026'
 
-const SECTIONS: LegalSection[] = [
-  {
+/**
+ * The sections, for an instance that sells Pro (the trial, the free tier, Pro and its billing,
+ * cancellation and refunds) or for one that does not (`NEXT_PUBLIC_MURMUR_BILLING_ENABLED` off:
+ * one section on the models that come with the account, nothing about paying). Exported so the
+ * two shapes are pinned by a test.
+ */
+export function termsSections(selling: boolean): LegalSection[] {
+  const scope: LegalSection = {
     id: 'scope',
     title: 'What these terms cover',
     body: (
@@ -21,14 +29,37 @@ const SECTIONS: LegalSection[] = [
         <p>
           The Murmur apps are open source under the MIT licence; that licence, not this page,
           governs the software itself. These terms cover the hosted service you reach by signing in:
-          the account, the sync between your devices, the speech and formatting models Murmur
-          provides, and the Pro subscription. Using the service means you accept them. If you use
-          the apps in Local mode, with your own provider and no account, nothing here applies to
-          you.
+          the account, the sync between your devices{selling ? ',' : ' and'} the speech and
+          formatting models Murmur provides{selling ? ', and the Pro subscription' : ''}. Using the
+          service means you accept them. If you use the apps in Local mode, with your own provider
+          and no account, nothing here applies to you.
         </p>
       </>
     )
-  },
+  }
+  const models: LegalSection = {
+    id: 'models',
+    title: 'Murmur’s models',
+    body: (
+      <>
+        <p>
+          Access to the speech and formatting models the instance provides comes with the account,
+          within the allowances the apps and the account page show for it. While the instance is in
+          private testing, the models are open only to accounts the operator has listed; every other
+          account keeps syncing and dictates with a provider of its own. The models may be changed,
+          limited or withdrawn; a change that reduces what existing accounts get is announced at
+          least 30 days ahead on this page.
+        </p>
+      </>
+    )
+  }
+  return selling
+    ? [scope, ...COMMON.slice(0, 1), ...SELLING_SECTIONS, ...COMMON.slice(1)]
+    : [scope, ...COMMON.slice(0, 1), models, ...COMMON.slice(1)]
+}
+
+/** The account section, then everything after the plan sections: the service, liability, changes. */
+const COMMON: LegalSection[] = [
   {
     id: 'account',
     title: 'Your account',
@@ -44,6 +75,64 @@ const SECTIONS: LegalSection[] = [
       </>
     )
   },
+  {
+    id: 'service',
+    title: 'The service itself',
+    body: (
+      <>
+        <Bullets
+          items={[
+            'Murmur’s models run on third-party providers chosen by the operator; the provider or the model behind a plan may change. When a provider is unavailable the apps fall back to rule-based cleanup, and to your own provider if you have one configured.',
+            'The service is offered as is, with reasonable effort to keep it running, and without a guarantee of uptime or of any particular accuracy. Speech recognition makes mistakes; check what it types before you send it.',
+            'What you dictate is yours. It is processed only to provide the service, as the privacy page describes, and is not used to train models by Murmur.',
+            'Accounts used to break the law, to harm the service or other users, or against these terms may be suspended or closed.'
+          ]}
+        />
+      </>
+    )
+  },
+  {
+    id: 'liability',
+    title: 'Liability',
+    body: (
+      <>
+        <p>
+          To the extent the law where you live allows, Murmur’s liability for anything arising from
+          the service is limited to what you paid for it in the twelve months before the claim, and
+          excludes indirect losses such as lost work or lost profit. Nothing here limits rights
+          consumer law gives you that cannot be limited by contract.
+        </p>
+      </>
+    )
+  },
+  {
+    id: 'changes',
+    title: 'Changes and contact',
+    body: (
+      <>
+        <p>
+          These terms may change; the date at the top says when, and changes that reduce what you
+          get are announced 30 days ahead. Questions and notices go through{' '}
+          <a
+            href={`${repoUrl()}/issues`}
+            className="underline decoration-foreground/30 underline-offset-4"
+            rel="noreferrer"
+          >
+            the repository’s issue tracker
+          </a>
+          . The{' '}
+          <Link href="/privacy" className="underline decoration-foreground/30 underline-offset-4">
+            privacy page
+          </Link>{' '}
+          is part of these terms.
+        </p>
+      </>
+    )
+  }
+]
+
+/** Only while the instance sells Pro: the trial, the free tier, Pro and how it is billed, fair use, cancelling. */
+const SELLING_SECTIONS: LegalSection[] = [
   {
     id: 'trial',
     title: 'The trial',
@@ -162,60 +251,6 @@ const SECTIONS: LegalSection[] = [
         />
       </>
     )
-  },
-  {
-    id: 'service',
-    title: 'The service itself',
-    body: (
-      <>
-        <Bullets
-          items={[
-            'Murmur’s models run on third-party providers chosen by the operator; the provider or the model behind a plan may change. When a provider is unavailable the apps fall back to rule-based cleanup, and to your own provider if you have one configured.',
-            'The service is offered as is, with reasonable effort to keep it running, and without a guarantee of uptime or of any particular accuracy. Speech recognition makes mistakes; check what it types before you send it.',
-            'What you dictate is yours. It is processed only to provide the service, as the privacy page describes, and is not used to train models by Murmur.',
-            'Accounts used to break the law, to harm the service or other users, or against these terms may be suspended or closed.'
-          ]}
-        />
-      </>
-    )
-  },
-  {
-    id: 'liability',
-    title: 'Liability',
-    body: (
-      <>
-        <p>
-          To the extent the law where you live allows, Murmur’s liability for anything arising from
-          the service is limited to what you paid for it in the twelve months before the claim, and
-          excludes indirect losses such as lost work or lost profit. Nothing here limits rights
-          consumer law gives you that cannot be limited by contract.
-        </p>
-      </>
-    )
-  },
-  {
-    id: 'changes',
-    title: 'Changes and contact',
-    body: (
-      <>
-        <p>
-          These terms may change; the date at the top says when, and changes that reduce what you
-          get are announced 30 days ahead. Questions and notices go through{' '}
-          <a
-            href={`${repoUrl()}/issues`}
-            className="underline decoration-foreground/30 underline-offset-4"
-            rel="noreferrer"
-          >
-            the repository’s issue tracker
-          </a>
-          . The{' '}
-          <Link href="/privacy" className="underline decoration-foreground/30 underline-offset-4">
-            privacy page
-          </Link>{' '}
-          is part of these terms.
-        </p>
-      </>
-    )
   }
 ]
 
@@ -224,9 +259,13 @@ export default function TermsPage() {
     <LegalDocument
       eyebrow="Terms"
       title="The deal, in plain words."
-      lede={`A ${PRICING.trialDays}-day trial with no card, a free tier that stays, and a Pro subscription you can cancel from the page you bought it on. What each of those means, and what fair use means behind “unlimited”.`}
+      lede={
+        billingEnabled
+          ? `A ${PRICING.trialDays}-day trial with no card, a free tier that stays, and a Pro subscription you can cancel from the page you bought it on. What each of those means, and what fair use means behind “unlimited”.`
+          : 'An account, the models that come with it, and what the hosted service does and does not promise, in plain words.'
+      }
       updated={UPDATED}
-      sections={SECTIONS}
+      sections={termsSections(billingEnabled)}
       related={{ href: '/privacy', label: 'privacy page' }}
     />
   )

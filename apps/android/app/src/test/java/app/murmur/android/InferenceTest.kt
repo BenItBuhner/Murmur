@@ -7,6 +7,7 @@ import app.murmur.android.cloud.InferenceUsageDto
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
 import app.murmur.android.inference.InferenceRouting
+import app.murmur.android.inference.ServiceNotice
 import app.murmur.android.llm.ChatMessage
 import app.murmur.android.llm.LlmConfig
 import app.murmur.android.settings.InferenceSource
@@ -24,6 +25,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -131,6 +133,43 @@ class InferenceTest {
         assertTrue(message.startsWith("Unknown model"))
         val pair: Pair<String, List<String>> = parseErrorBody("plain text").let { (m, s) -> m to s }
         assertEquals("plain text" to emptyList<String>(), pair)
+    }
+
+    @Test
+    fun `a provider_unavailable answer is read into a service notice and its sentence shown verbatim`() {
+        val down = errorFromResponse(
+            503,
+            """{"error":{"type":"murmur_gateway_error","code":"provider_unavailable","message":"Murmur's speech service is unavailable right now",
+               "service":"speech","reason":"timeout","retryAfterSec":15}}"""
+        )
+        assertEquals(SttErrorKind.SERVER, down.kind)
+        assertEquals(503, down.status)
+        assertEquals("provider_unavailable", down.code)
+        assertNull("not a plan limit", down.limit)
+        assertEquals("Murmur's speech service is unavailable right now", down.friendly())
+        val notice = down.service!!
+        assertEquals(ServiceNotice("speech", "timeout", 15, "Murmur's speech service is unavailable right now"), notice)
+        assertEquals("Murmur's speech service is unavailable right now", notice.title)
+        assertEquals("Not your connection or your mic. Your recording is kept — try again in a moment.", notice.detail)
+
+        val formatting = errorFromResponse(
+            503,
+            """{"error":{"code":"provider_unavailable","message":"Murmur's formatting service is unavailable right now","service":"formatting","reason":"unavailable","retryAfterSec":9.2}}"""
+        )
+        assertEquals("formatting", formatting.service!!.service)
+        assertEquals(10, formatting.service!!.retryAfterSec)
+        assertEquals("Not your connection. Nothing was changed — try again in a moment.", formatting.service!!.detail)
+
+        // Any other 503 is not a service notice; nor is a limit refusal.
+        assertNull(errorFromResponse(503, """{"error":{"code":"upstream_busy","message":"The model provider is busy; try again in a moment"}}""").service)
+        assertNull(errorFromResponse(503, "Service Unavailable").service)
+        assertNull(errorFromResponse(429, """{"error":{"code":"quota_exceeded","message":"used up","limit":"wordsPerWeek"}}""").service)
+        // An instance that sends the code alone still gets a notice for the model that was asked.
+        assertEquals(
+            ServiceNotice("formatting", "unknown", null, "down"),
+            ServiceNotice.fromJson(JSONObject("""{"code":"provider_unavailable","message":"down"}"""), fallbackService = ServiceNotice.FORMATTING)
+        )
+        assertTrue(ServiceNotice.CODE in Inference.ERROR_CODES)
     }
 
     @Test

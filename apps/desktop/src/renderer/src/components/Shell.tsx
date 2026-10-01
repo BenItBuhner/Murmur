@@ -74,7 +74,7 @@ export function Shell({
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-56 shrink-0 flex-col bg-sidebar">
+      <aside className="flex w-60 shrink-0 flex-col bg-sidebar">
         <div className={cn('flex items-center px-6', isWin ? 'h-10 drag-region' : 'h-16')}>
           <Wordmark />
         </div>
@@ -110,7 +110,7 @@ export function Shell({
                     className="size-4 opacity-80 transition-colors duration-200"
                     strokeWidth={1.75}
                   />
-                  <span>{item.label}</span>
+                  <span className="truncate">{item.label}</span>
                 </button>
               </React.Fragment>
             )
@@ -203,7 +203,7 @@ function AccountCard({
           {signedIn ? (name ?? email ?? 'Your account') : 'Not signed in'}
         </span>
         <span className="block truncate text-caption text-muted-foreground">
-          {signedIn ? label : 'Sign in to sync across devices'}
+          {signedIn ? label : 'Sign in to sync'}
         </span>
       </span>
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />

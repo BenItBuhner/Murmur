@@ -2,6 +2,8 @@ package app.murmur.android
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
@@ -24,6 +26,7 @@ import app.murmur.android.ui.AccountTroubleScreen
 import app.murmur.android.ui.InferenceView
 import app.murmur.android.ui.LocalInferenceView
 import app.murmur.android.ui.TopNav
+import app.murmur.android.ui.syncLabel
 import app.murmur.android.ui.theme.MurmurTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +39,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * The Account screen's "Connection details" row: on the signed-in screen and on the one shown when
@@ -82,6 +87,17 @@ class ConnectionDetailsTest {
         return clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
     }
 
+    /** Draws the screen into `build/reports/pill-screenshots/account/<name>.png`, as the parity screenshot tests do. */
+    private fun snap(name: String) {
+        val dir = System.getProperty("murmur.screenshotDir")?.takeIf { it.isNotBlank() }?.let { File(it, "account") } ?: return
+        dir.mkdirs()
+        compose.waitForIdle()
+        val view = compose.activity.window.decorView
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        compose.runOnUiThread { view.draw(Canvas(bitmap)) }
+        FileOutputStream(File(dir, "$name.png")).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
     @Test
     fun `the signed-in screen carries the row, and Copy puts the report on the clipboard`() {
         CloudDiagnostics.boot("ready (optional, https://a.convex.cloud)")
@@ -115,9 +131,26 @@ class ConnectionDetailsTest {
         compose.onNodeWithText("Show").performScrollTo().performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("connection-details-report").performScrollTo().assertIsDisplayed()
+        snap("account-connection-details-shown")
         // With the status here and billing off, the card names the server's list, not a plan: the title and its badge.
         assertEquals(2, compose.onAllNodesWithTextContaining("Unlimited").fetchSemanticsNodesCount())
         assertEquals(0, compose.onAllNodesWithTextContaining("Free").fetchSemanticsNodesCount())
+    }
+
+    @Test
+    fun `the sync label keeps a reason to one short line, the whole of it being in the report`() {
+        val long = status(
+            SyncPhase.ERROR, 3,
+            "[Request ID: 6f1a2b] Server Error Uncaught Error: Not authenticated at getCurrentUser (../convex/lib/functions.ts:13:19)\n  at handler"
+        )
+        assertEquals("Sync issue: Server Error Uncaught Error: Not authenticated", syncLabel(long))
+        assertEquals("Sync issue: Timed out getting a session token", syncLabel(status(SyncPhase.ERROR, 0, "Timed out getting a session token")))
+        assertEquals(
+            "Sync issue: Failed to decode JSON, ensure you're using types compatible…",
+            syncLabel(status(SyncPhase.ERROR, 1, "Failed to decode JSON, ensure you're using types compatible with Convex in your return value"))
+        )
+        assertEquals("Offline, 239 pending", syncLabel(status(SyncPhase.OFFLINE, 239, null)))
+        assertEquals("Connecting…", syncLabel(status(SyncPhase.CONNECTING, 239, null)))
     }
 
     @Test
@@ -132,6 +165,7 @@ class ConnectionDetailsTest {
         compose.waitForIdle()
         compose.onNodeWithTag("account-trouble").assertIsDisplayed()
         compose.onNodeWithText("Connection details").performScrollTo().assertIsDisplayed()
+        snap("account-trouble-connection-details")
         compose.onNodeWithTag("connection-details-copy").performScrollTo().performClick()
         compose.waitForIdle()
         val report = clipboardText()
@@ -154,6 +188,7 @@ class ConnectionDetailsTest {
         compose.waitForIdle()
         compose.onNodeWithText("Murmur's models").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Checking your account…").performScrollTo().assertIsDisplayed()
+        snap("account-status-loading-billing-off")
         assertEquals(0, compose.onAllNodesWithTextContaining("Free").fetchSemanticsNodesCount())
         assertFalse(compose.onAllNodesWithTextContaining("Waiting for your account status").fetchSemanticsNodesCount() > 0)
         // The sync row says what is wrong rather than "Offline".

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -35,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -75,9 +77,19 @@ fun syncLabel(status: SyncStatus): String = when (status.phase) {
     SyncPhase.SYNCING -> "Syncing ${status.pendingOps}…"
     SyncPhase.CONNECTING -> "Connecting…"
     SyncPhase.OFFLINE -> if (status.pendingOps > 0) "Offline, ${status.pendingOps} pending" else "Offline"
-    SyncPhase.ERROR -> "Sync issue: ${status.error ?: "retrying"}"
+    // One line of the reason; the whole of it is in Connection details.
+    SyncPhase.ERROR -> "Sync issue: ${status.error?.let(::shortReason) ?: "retrying"}"
     SyncPhase.SIGNED_OUT -> "Signed out"
     SyncPhase.DISABLED -> "Local"
+}
+
+/** The first line of an error, without a Convex request id, cut to fit a status label. */
+private fun shortReason(error: String): String {
+    val line = error.lineSequence().firstOrNull()?.trim().orEmpty()
+        .replace(Regex("""^\[Request ID: [^\]]*]\s*"""), "")
+        .replace(Regex("""\s+at\s+\S+.*$"""), "")
+        .trim()
+    return if (line.length > 60) line.take(59).trimEnd() + "…" else line
 }
 
 private const val COPIED_LABEL_MS = 2000L
@@ -273,10 +285,11 @@ fun AccountContent(
 
         Group(rows = true) {
             ControlRow("Sync", description = "Dictionary, snippets, style and app rules, dictation stats. Your choice of speech model and any API keys of your own are device settings and are never uploaded.") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // A long reason wraps on the right rather than squeezing the row's words into a column.
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.widthIn(max = 168.dp)) {
                     Dot(syncColor(status), size = 6.dp, pulsing = status.phase == SyncPhase.SYNCING)
                     Spacer(Modifier.width(8.dp))
-                    Text(syncLabel(status), style = Murmur.type.labelSmall, color = c.inkSoft)
+                    Text(syncLabel(status), style = Murmur.type.labelSmall, color = c.inkSoft, textAlign = TextAlign.End)
                 }
             }
             ControlRow("Devices") {

@@ -85,14 +85,12 @@ object Haptics {
 
     private val debounce = Debounce(REPEAT_MS, GAP_MS)
 
-    @Volatile private var device: DeviceSink? = null
-
     /** Feel [haptic], as the settings and the debounce allow. Never throws; a phone without a vibrator stays still. */
     fun play(context: Context, haptic: Haptic) {
         val app = context.applicationContext
         if (!SettingsStore.get(app).get().haptics) return
         if (!debounce.accept(haptic, clock())) return
-        val target = sink ?: device ?: DeviceSink(app).also { device = it }
+        val target = sink ?: DeviceSink(app)
         runCatching { target.play(haptic) }.onFailure { Log.w(TAG, "could not vibrate for $haptic", it) }
     }
 

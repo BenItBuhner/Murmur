@@ -9,10 +9,8 @@
     <!-- Holding the overlay permission exempts us from background foreground-service-start
          restrictions, so recording can begin from the accessibility overlay pill. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Self-updates from GitHub Releases: hand the downloaded APK to the package installer, and on
-         Android 12+ let the app replace itself without a confirmation once it installed itself. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- The install permissions of the self-updater live in src/direct/AndroidManifest.xml: the
+         Google Play flavor has no updater and asks for none of them. -->
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
@@ -60,10 +58,5 @@
             android:name=".service.RecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
-
-        <!-- Outcome of the self-update install session (delivered through our own PendingIntent). -->
-        <receiver
-            android:name=".update.UpdateResultReceiver"
-            android:exported="false" />
     </application>
 </manifest>

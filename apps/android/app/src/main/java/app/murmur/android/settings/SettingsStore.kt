@@ -276,11 +276,16 @@ data class MurmurSettings(
      * everywhere. Recordings never sync, whatever this says.
      */
     val historySync: Boolean = false,
-    // Device-local update preferences (never synced), same defaults as the desktop app.
+    // Device-local update preferences (never synced); read by the direct flavor's updater only.
     /** Look for new releases when the app opens and daily from the accessibility service. */
     val updateAutoCheck: Boolean = true,
-    /** Download new versions and install them once nothing is being dictated. */
-    val updateAutoInstall: Boolean = true,
+    /**
+     * Fetch and verify new versions in the background and say when one is ready. Installing is
+     * always the user's tap on the Updates screen; the desktop's `updates.autoInstall` has no
+     * counterpart on the phone since 0.6.4 (Play Protect prompted on every unattended install).
+     * Carries the value of the retired `updateAutoInstall` key ([SettingsStore.migrate]).
+     */
+    val updateAutoDownload: Boolean = true,
     /** Offer pre-releases (vX.Y.Z-beta.N); always on while running a pre-release build. */
     val updateIncludePrereleases: Boolean = false,
     /** Version the user dismissed; withheld until a newer one appears. */
@@ -406,6 +411,16 @@ class SettingsStore(context: Context) {
             }
             prefs.edit().putInt(PARITY_MIGRATION_KEY, PARITY_MIGRATION).apply()
         }
+        // "Install automatically" became "Download updates automatically" when installing moved
+        // behind the user's own tap: an install that had turned it off keeps its choice. The old key
+        // goes, and never overrides a value the new one already holds.
+        if (prefs.contains(LEGACY_AUTO_INSTALL)) {
+            if (!prefs.contains("updateAutoDownload")) {
+                val wanted = prefs.getBoolean(LEGACY_AUTO_INSTALL, MurmurSettings().updateAutoDownload)
+                update(SettingsOrigin.LOCAL) { it.copy(updateAutoDownload = wanted) }
+            }
+            prefs.edit().remove(LEGACY_AUTO_INSTALL).apply()
+        }
         if (_flow.value.deviceId.isEmpty()) {
             update(SettingsOrigin.CLOUD) { it.copy(deviceId = java.util.UUID.randomUUID().toString()) }
         }
@@ -484,7 +499,7 @@ class SettingsStore(context: Context) {
             importedForUserId = prefs.getString("importedForUserId", d.importedForUserId) ?: "",
             historySync = prefs.getBoolean("historySync", d.historySync),
             updateAutoCheck = prefs.getBoolean("updateAutoCheck", d.updateAutoCheck),
-            updateAutoInstall = prefs.getBoolean("updateAutoInstall", d.updateAutoInstall),
+            updateAutoDownload = prefs.getBoolean("updateAutoDownload", d.updateAutoDownload),
             updateIncludePrereleases = prefs.getBoolean("updateIncludePrereleases", d.updateIncludePrereleases),
             updateSkippedVersion = prefs.getString("updateSkippedVersion", d.updateSkippedVersion) ?: "",
             stats = DictationStats(
@@ -546,7 +561,7 @@ class SettingsStore(context: Context) {
             .putString("importedForUserId", s.importedForUserId)
             .putBoolean("historySync", s.historySync)
             .putBoolean("updateAutoCheck", s.updateAutoCheck)
-            .putBoolean("updateAutoInstall", s.updateAutoInstall)
+            .putBoolean("updateAutoDownload", s.updateAutoDownload)
             .putBoolean("updateIncludePrereleases", s.updateIncludePrereleases)
             .putString("updateSkippedVersion", s.updateSkippedVersion)
             .putInt("statsTotalWords", s.stats.totalWords)
@@ -561,6 +576,8 @@ class SettingsStore(context: Context) {
     companion object {
         private const val LEGACY_ANCHOR_X = "overlayAnchorX"
         private const val LEGACY_OFFSET_DP = "overlayOffsetDp"
+        /** "Install automatically" up to 0.6.3; its value moved to `updateAutoDownload`. */
+        private const val LEGACY_AUTO_INSTALL = "updateAutoInstall"
         /**
          * Bump when RetiredModels gains entries that existing installs should be moved off. The
          * whole table runs again on a store below this generation (same as the desktop settings

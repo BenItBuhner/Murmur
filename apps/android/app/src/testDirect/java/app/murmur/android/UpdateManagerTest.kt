@@ -1,9 +1,13 @@
 package app.murmur.android
 
 import android.app.Application
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.ui.Route
 import app.murmur.android.update.UpdateManager
 import app.murmur.android.update.UpdatePhase
 import app.murmur.android.update.UpdateSource
@@ -37,6 +41,10 @@ import org.robolectric.annotation.Config
  * The whole Android update flow against a fake GitHub that answers with the real API responses
  * for v0.6.0 and v0.5.11 ([UpdateFixtures]). Only the 36 MB APK is stood in for by a small payload
  * whose size and digest the release JSON is rewritten to describe.
+ *
+ * The contract under test: Murmur checks and downloads on its own, verifies what it fetched, and
+ * then waits. The package installer is reached through [UpdateManager.install] alone, which the
+ * Install button calls; no check, download, notification or permission grant ever reaches it.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -86,14 +94,19 @@ class UpdateManagerTest {
         }
         app = ApplicationProvider.getApplicationContext()
         shadowOf(app.packageManager).setCanRequestPackageInstalls(true)
+        app.getSharedPreferences("murmur_updater", Context.MODE_PRIVATE).edit().clear().commit()
     }
 
     @After
     fun stop() = server.shutdown()
 
-    private fun manager(currentVersion: String, autoInstall: Boolean = true): UpdateManager {
+    /**
+     * A manager against the fake GitHub. Automatic checks are off so only the test drives it
+     * (`onAppVisible` would otherwise start one); automatic downloads are on, as shipped.
+     */
+    private fun manager(currentVersion: String, autoDownload: Boolean = true): UpdateManager {
         val settings = SettingsStore(app)
-        settings.update { it.copy(updateAutoInstall = autoInstall) }
+        settings.update { it.copy(updateAutoDownload = autoDownload, updateAutoCheck = false) }
         val source = UpdateSource(UpdateFixtures.REPO, currentVersion, origin, origin, checksumRetryDelaysMs = listOf(10L, 10L))
         return UpdateManager(app, settings, source).also { m ->
             m.commitInstall = { file, version -> synchronized(installed) { installed += file to version } }
@@ -108,45 +121,73 @@ class UpdateManagerTest {
         synchronized(installed) { installed.single() }
     }
 
+    private fun installs(): Int = synchronized(installed) { installed.size }
+
+    /** [UpdateManager.readyVersion] follows the state on the manager's own scope; wait for it to catch up. */
+    private suspend fun UpdateManager.awaitReadyVersion(expected: String?): Unit =
+        withTimeout(5_000) { readyVersion.first { it == expected } }
+
     private fun requested(suffix: String): Int = synchronized(requests) { requests.count { it.endsWith(suffix) } }
 
     private fun pendingPrefs(): Pair<String?, String?> =
         app.getSharedPreferences("murmur_updater", Context.MODE_PRIVATE).let { it.getString("pendingVersion", null) to it.getString("pendingFrom", null) }
 
-    private fun installsFromDigest(fixture: JsonObject, tag: String, from: String, others: List<JsonObject>) = runBlocking {
+    private val notificationManager get() = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val notifications get() = shadowOf(notificationManager)
+
+    private fun Notification.title(): String? = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+    private fun Notification.text(): String? = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+
+    /** Downloads and verifies [fixture], then stops: the user has not tapped Install. */
+    private fun downloadsFromDigest(fixture: JsonObject, tag: String, from: String, others: List<JsonObject>) = runBlocking {
+        val version = tag.removePrefix("v")
         releases = listOf(UpdateFixtures.withApkPayload(fixture, apk)) + others
         val m = manager(from)
 
         val found = m.check(manual = false)
         // The check kicks the download off before it returns; the state may already be past AVAILABLE.
-        assertTrue(found.error, found.phase in setOf(UpdatePhase.AVAILABLE, UpdatePhase.DOWNLOADING, UpdatePhase.READY, UpdatePhase.INSTALLING))
-        assertEquals(tag.removePrefix("v"), found.release?.version)
-        assertEquals("Murmur-${tag.removePrefix("v")}-android.apk", found.release?.apk?.name)
+        assertTrue(found.error, found.phase in setOf(UpdatePhase.AVAILABLE, UpdatePhase.DOWNLOADING, UpdatePhase.READY))
+        assertEquals(version, found.release?.version)
+        assertEquals("Murmur-$version-android.apk", found.release?.apk?.name)
         assertEquals(UpdateFixtures.sha256Hex(apk), found.release?.sha256)
         assertNull(found.release?.checksumProblem)
 
-        // "Install automatically" is on: download, verify, hand to the installer once idle.
-        val installing = m.awaitPhase(UpdatePhase.INSTALLING, UpdatePhase.ERROR)
-        assertEquals(installing.error, UpdatePhase.INSTALLING, installing.phase)
-        val (file, version) = awaitInstall()
-        assertEquals(tag.removePrefix("v"), version)
-        assertEquals("Murmur-${tag.removePrefix("v")}-android.apk", file.name)
-        assertEquals(UpdateFixtures.sha256Hex(apk), UpdateFixtures.sha256Hex(file.readBytes()))
-        assertEquals(tag.removePrefix("v") to from, pendingPrefs())
+        // "Download updates automatically" is on: download and verify, then wait for the user.
+        val ready = m.awaitPhase(UpdatePhase.READY, UpdatePhase.ERROR)
+        assertEquals(ready.error, UpdatePhase.READY, ready.phase)
+        assertTrue(ready.canInstall)
+        assertEquals(UpdateFixtures.sha256Hex(apk), UpdateFixtures.sha256Hex(File(ready.downloadedPath!!).readBytes()))
+        m.awaitReadyVersion(version)
+        delay(300)
+        assertEquals("nothing reaches the installer on its own", 0, installs())
+        assertEquals(UpdatePhase.READY, m.state.value.phase)
+        assertEquals(null to null, pendingPrefs())
 
         // The digest came with the release JSON: the checksum file was never needed.
         assertEquals(0, requested("SHA256SUMS.txt"))
         assertEquals(1, requested("-android.apk"))
+
+        // The user's tap is what hands the verified file over, once.
+        assertTrue(m.install())
+        val (file, installedVersion) = awaitInstall()
+        assertEquals(version, installedVersion)
+        assertEquals("Murmur-$version-android.apk", file.name)
+        assertEquals(UpdateFixtures.sha256Hex(apk), UpdateFixtures.sha256Hex(file.readBytes()))
+        assertEquals(version to from, pendingPrefs())
+        assertEquals(UpdatePhase.INSTALLING, m.state.value.phase)
+        m.awaitReadyVersion(null)
+        assertFalse("a second tap while the installer runs does nothing", m.install())
+        assertEquals(1, installs())
     }
 
     @Test
-    fun `a 0-5-11 phone verifies v0-6-0 against the release's asset digest and installs it`() =
-        installsFromDigest(v060, "v0.6.0", from = "0.5.11", others = listOf(v0511))
+    fun `a 0-5-11 phone verifies v0-6-0 against the release's asset digest and holds it for the user's Install tap`() =
+        downloadsFromDigest(v060, "v0.6.0", from = "0.5.11", others = listOf(v0511))
 
     /** The feed as a 0.5.10 phone saw it before v0.6.0 existed. */
     @Test
     fun `a 0-5-10 phone verifies v0-5-11 the same way`() =
-        installsFromDigest(v0511, "v0.5.11", from = "0.5.10", others = emptyList())
+        downloadsFromDigest(v0511, "v0.5.11", from = "0.5.10", others = emptyList())
 
     @Test
     fun `a release whose assets carry no digest is verified against its SHA256SUMS txt`() = runBlocking {
@@ -156,8 +197,11 @@ class UpdateManagerTest {
         assertTrue(found.error, found.phase != UpdatePhase.ERROR)
         assertEquals(UpdateFixtures.sha256Hex(apk), found.release?.sha256)
         assertEquals(1, requested("SHA256SUMS.txt"))
-        assertEquals(UpdatePhase.INSTALLING, m.awaitPhase(UpdatePhase.INSTALLING, UpdatePhase.ERROR).phase)
-        assertEquals("0.6.0", awaitInstall().second)
+        val ready = m.awaitPhase(UpdatePhase.READY, UpdatePhase.ERROR)
+        assertEquals(ready.error, UpdatePhase.READY, ready.phase)
+        m.awaitReadyVersion("0.6.0")
+        delay(200)
+        assertEquals(0, installs())
     }
 
     @Test
@@ -169,23 +213,24 @@ class UpdateManagerTest {
         val failed = m.check(manual = false)
         assertEquals(UpdatePhase.ERROR, failed.phase)
         assertTrue(failed.error, failed.error!!.contains("Could not download SHA256SUMS.txt for Murmur 0.6.0"))
-        assertTrue(failed.error, failed.error!!.contains("HTTP 503"))
-        assertFalse(failed.error, failed.error!!.contains("ships no"))
+        assertTrue(failed.error, failed.error.contains("HTTP 503"))
+        assertFalse(failed.error, failed.error.contains("ships no"))
         assertNull(failed.release)
         assertFalse(failed.canInstall)
         // Three attempts at the small file, and no APK: nothing could have verified it.
         assertEquals(3, requested("SHA256SUMS.txt"))
         delay(200)
         assertEquals(0, requested("-android.apk"))
-        assertTrue(synchronized(installed) { installed.isEmpty() })
+        assertEquals(0, installs())
 
-        // GitHub is back: the next check picks the update up and installs it.
+        // GitHub is back: the next check picks the update up, downloads it, and waits.
         sumsStatus = 200
         val found = m.check(manual = false)
         assertTrue(found.error, found.phase != UpdatePhase.ERROR)
         assertEquals(UpdateFixtures.sha256Hex(apk), found.release?.sha256)
-        assertEquals(UpdatePhase.INSTALLING, m.awaitPhase(UpdatePhase.INSTALLING, UpdatePhase.ERROR).phase)
-        assertEquals("0.6.0", awaitInstall().second)
+        assertEquals(UpdatePhase.READY, m.awaitPhase(UpdatePhase.READY, UpdatePhase.ERROR).phase)
+        delay(200)
+        assertEquals(0, installs())
     }
 
     @Test
@@ -208,6 +253,8 @@ class UpdateManagerTest {
         assertEquals(UpdatePhase.AVAILABLE, after.phase)
         assertEquals(found.release?.checksumProblem, after.error)
         assertEquals(0, requested("-android.apk"))
+        assertFalse(m.install())
+        assertEquals(0, installs())
     }
 
     @Test
@@ -232,19 +279,21 @@ class UpdateManagerTest {
         corruptApk = true
         val m = manager("0.5.11")
         m.check(manual = false)
-        val failed = m.awaitPhase(UpdatePhase.ERROR, UpdatePhase.READY, UpdatePhase.INSTALLING)
+        val failed = m.awaitPhase(UpdatePhase.ERROR, UpdatePhase.READY)
         assertEquals(UpdatePhase.ERROR, failed.phase)
         assertTrue(failed.error, failed.error!!.contains("did not match the release checksum"))
         assertNull(failed.downloadedPath)
         assertEquals(emptyList<String>(), File(app.cacheDir, "updates").listFiles()?.map { it.name } ?: emptyList<String>())
+        m.awaitReadyVersion(null)
         delay(100)
-        assertTrue(synchronized(installed) { installed.isEmpty() })
+        assertFalse("nothing to install, and the tap says so", m.install())
+        assertEquals(0, installs())
     }
 
     @Test
     fun `a re-check keeps a verified download only while the checksum is unchanged`() = runBlocking {
         releases = listOf(UpdateFixtures.withApkPayload(v060, apk), v0511)
-        val m = manager("0.5.11", autoInstall = false)
+        val m = manager("0.5.11", autoDownload = false)
         m.check(manual = true)
         m.download()
         val ready = m.awaitPhase(UpdatePhase.READY, UpdatePhase.ERROR)
@@ -274,6 +323,8 @@ class UpdateManagerTest {
         assertNull(changed.downloadedPath)
         assertFalse(File(ready.downloadedPath!!).exists())
         assertEquals(UpdateFixtures.sha256Hex(other), changed.release?.sha256)
+        // Through all of it, nothing was handed to the installer.
+        assertEquals(0, installs())
     }
 
     @Test
@@ -281,5 +332,148 @@ class UpdateManagerTest {
         assertEquals(60L * 60 * 1000, UpdateManager.nextCheckInterval(UpdatePhase.ERROR))
         assertEquals(24L * 60 * 60 * 1000, UpdateManager.nextCheckInterval(UpdatePhase.UP_TO_DATE))
         assertEquals(24L * 60 * 60 * 1000, UpdateManager.nextCheckInterval(UpdatePhase.READY))
+    }
+
+    // ---- the background loop: download, say so once, never install ---------------------------------
+
+    @Test
+    fun `the background cycle downloads and verifies, posts one quiet notification that opens Updates, and never installs`() = runBlocking {
+        releases = listOf(UpdateFixtures.withApkPayload(v060, apk), v0511)
+        // What a phone updated from 0.6.3 still has: the channel those builds announced on.
+        notificationManager.createNotificationChannel(NotificationChannel("murmur_updates", "Updates", NotificationManager.IMPORTANCE_DEFAULT))
+        val m = manager("0.5.11")
+
+        val st = m.backgroundCycle()
+        assertEquals(st.error, UpdatePhase.READY, st.phase)
+        assertTrue(st.canInstall)
+        delay(300)
+        assertEquals("the daily check never reaches the installer", 0, installs())
+        assertEquals(null to null, pendingPrefs())
+
+        val posted = notifications.allNotifications
+        assertEquals(1, posted.size)
+        val n = posted.single()
+        assertEquals("Murmur 0.6.0 is ready to install", n.title())
+        assertEquals("Tap to open Updates and install it.", n.text())
+        assertTrue("dismissed by the tap", n.flags and Notification.FLAG_AUTO_CANCEL != 0)
+        assertTrue("does not alert again when replaced", n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+        assertEquals(UpdateManager.CHANNEL_ID, n.channelId)
+        assertEquals(
+            "quiet: no sound, no heads-up",
+            NotificationManager.IMPORTANCE_LOW,
+            notificationManager.getNotificationChannel(UpdateManager.CHANNEL_ID).importance
+        )
+        assertNull("the loud channel of earlier builds is gone", notificationManager.getNotificationChannel("murmur_updates"))
+        val tap = shadowOf(n.contentIntent).savedIntent
+        assertEquals(MainActivity::class.java.name, tap.component?.className)
+        assertEquals(Route.UPDATES, MainActivity.routeFrom(tap))
+
+        // The next days find the same version ready: nothing new to say, even after the user swiped it away.
+        m.backgroundCycle()
+        assertEquals(1, notifications.allNotifications.size)
+        notificationManager.cancel(UpdateManager.NOTIFICATION_ID_UPDATE)
+        m.backgroundCycle()
+        assertEquals(0, notifications.allNotifications.size)
+        assertEquals(1, requested("-android.apk"))
+        assertEquals(0, installs())
+    }
+
+    @Test
+    fun `with automatic downloads off the background cycle only says a version is available`() = runBlocking {
+        releases = listOf(UpdateFixtures.withApkPayload(v060, apk), v0511)
+        val m = manager("0.5.11", autoDownload = false)
+
+        val st = m.backgroundCycle()
+        assertEquals(UpdatePhase.AVAILABLE, st.phase)
+        delay(200)
+        assertEquals(0, requested("-android.apk"))
+        assertEquals(0, installs())
+        val n = notifications.allNotifications.single()
+        assertEquals("Murmur 0.6.0 is available", n.title())
+        assertEquals("Tap to open Updates and download it.", n.text())
+        assertEquals(Route.UPDATES, MainActivity.routeFrom(shadowOf(n.contentIntent).savedIntent))
+
+        // Once downloaded (the user turned downloads on, or tapped Download), the ready one replaces it, once.
+        m.download()
+        assertEquals(UpdatePhase.READY, m.awaitPhase(UpdatePhase.READY, UpdatePhase.ERROR).phase)
+        delay(100)
+        assertEquals("Murmur 0.6.0 is ready to install", notifications.allNotifications.single().title())
+        notificationManager.cancel(UpdateManager.NOTIFICATION_ID_UPDATE)
+        m.backgroundCycle()
+        assertEquals(0, notifications.allNotifications.size)
+        assertEquals(0, installs())
+    }
+
+    @Test
+    fun `a download that finishes while the app is in front is shown in the app, and announced once it is not`() = runBlocking {
+        releases = listOf(UpdateFixtures.withApkPayload(v060, apk), v0511)
+        val m = manager("0.5.11")
+        m.onAppVisible()
+
+        m.check(manual = false)
+        assertEquals(UpdatePhase.READY, m.awaitPhase(UpdatePhase.READY, UpdatePhase.ERROR).phase)
+        delay(200)
+        assertEquals("Home and the drawer show it; no notification over the app", 0, notifications.allNotifications.size)
+        m.awaitReadyVersion("0.6.0")
+        m.backgroundCycle()
+        assertEquals(0, notifications.allNotifications.size)
+
+        m.onAppHidden()
+        m.backgroundCycle()
+        assertEquals("Murmur 0.6.0 is ready to install", notifications.allNotifications.single().title())
+        assertEquals(0, installs())
+    }
+
+    @Test
+    fun `skipping a version drops its download and its notification`() = runBlocking {
+        releases = listOf(UpdateFixtures.withApkPayload(v060, apk), v0511)
+        val m = manager("0.5.11")
+        m.backgroundCycle()
+        assertEquals(1, notifications.allNotifications.size)
+        val path = m.state.value.downloadedPath!!
+
+        m.skip()
+        assertEquals(UpdatePhase.UP_TO_DATE, m.state.value.phase)
+        assertFalse(File(path).exists())
+        assertEquals(0, notifications.allNotifications.size)
+        m.awaitReadyVersion(null)
+        assertEquals("0.6.0", SettingsStore(app).get().updateSkippedVersion)
+        // The skipped version stays quiet; a check finds nothing to offer.
+        assertEquals(UpdatePhase.UP_TO_DATE, m.backgroundCycle().phase)
+        assertEquals(0, notifications.allNotifications.size)
+        assertEquals(0, installs())
+    }
+
+    // ---- the install permission ----------------------------------------------------------------
+
+    @Test
+    fun `without the install permission the tap asks for it, and the grant alone starts nothing`() = runBlocking {
+        shadowOf(app.packageManager).setCanRequestPackageInstalls(false)
+        releases = listOf(UpdateFixtures.withApkPayload(v060, apk), v0511)
+        val m = manager("0.5.11")
+        assertTrue(m.state.value.needsInstallPermission)
+
+        m.check(manual = false)
+        val ready = m.awaitPhase(UpdatePhase.READY, UpdatePhase.ERROR)
+        assertEquals(ready.error, UpdatePhase.READY, ready.phase)
+        assertTrue("the file is verified and waiting", ready.canInstall)
+
+        assertFalse(m.install())
+        assertTrue(m.state.value.needsInstallPermission)
+        assertEquals(UpdatePhase.READY, m.state.value.phase)
+        delay(200)
+        assertEquals(0, installs())
+
+        // Back from "Allow from this source": the screen offers Install, and only the tap proceeds.
+        shadowOf(app.packageManager).setCanRequestPackageInstalls(true)
+        m.onAppVisible()
+        assertFalse(m.state.value.needsInstallPermission)
+        delay(300)
+        assertEquals("a granted permission is not a tap", 0, installs())
+        assertEquals(UpdatePhase.READY, m.state.value.phase)
+
+        assertTrue(m.install())
+        assertEquals("0.6.0", awaitInstall().second)
+        assertEquals(1, installs())
     }
 }

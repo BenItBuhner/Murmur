@@ -72,8 +72,7 @@ import app.murmur.android.ui.rememberInferenceView
 import app.murmur.android.ui.syncLabel
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.MurmurTheme
-import app.murmur.android.update.UpdateManager
-import app.murmur.android.update.UpdatePhase
+import app.murmur.android.update.Updates
 import com.clerk.api.Clerk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -113,13 +112,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        val updates = UpdateManager.get(this)
-        updates.foreground = true
-        updates.onAppVisible()
+        Updates.get(this).onAppVisible()
     }
 
     override fun onPause() {
-        UpdateManager.get(this).foreground = false
+        Updates.get(this).onAppHidden()
         super.onPause()
     }
 
@@ -224,7 +221,7 @@ private fun Main(
     }
     val permissions = rememberPermissionState()
     val dictation by DictationController.state.collectAsState()
-    val updateState by UpdateManager.get(context).state.collectAsState()
+    val updateReady by Updates.get(context).readyVersion.collectAsState()
     val inference = rememberInferenceView(settings)
     val modelReady = inference.sttReady
     val ready = permissions.allGranted && modelReady
@@ -247,7 +244,7 @@ private fun Main(
         cloud = config.enabled,
         modelReady = modelReady,
         permissionsGranted = permissions.allGranted,
-        updateReady = updateState.phase == UpdatePhase.READY,
+        updateReady = updateReady != null,
         cloudDown = cloudDown
     )
 

@@ -164,30 +164,45 @@ jobs:
       # v5 is the last MIT-licensed major; v6 moves caching into a proprietary
       # component that requires accepting Gradle's Terms of Use.
       - uses: gradle/actions/setup-gradle@v5
-      # assembleRelease exercises the release signing config (debug-key fallback without secrets).
-      # verifyReleaseApk opens the release APK and fails the job if it could not run the cloud path:
-      # Convex and JNA native libraries for arm64-v8a, the classes JNA and the SDKs need by name, the
-      # cloud values this workflow baked (production-shaped when MURMUR_CLOUD_RELEASE is true) and
-      # nothing else that looks like a Clerk key or a Convex deployment. The unit tests compose the
+      # Both distribution flavors are built and tested: direct (GitHub Releases, the in-app updater)
+      # and play (Google Play, no updater). assembleRelease builds both release APKs and exercises
+      # the release signing config (debug-key fallback without secrets); bundlePlayRelease is pulled
+      # in by its check and yields the Play app bundle. verifyReleaseApk opens each release APK (and
+      # verifyPlayReleaseBundle the AAB) and fails the job if it could not run the cloud path: Convex
+      # and JNA native libraries for arm64-v8a, the classes JNA and the SDKs need by name, the cloud
+      # values this workflow baked (production-shaped when MURMUR_CLOUD_RELEASE is true) and nothing
+      # else that looks like a Clerk key or a Convex deployment; or if it does not match its flavor:
+      # the Play build must carry no updater class, PackageInstaller reference or install permission,
+      # the direct build must carry all of them. The unit tests run once per flavor and compose the
       # real account gate with the real Clerk SDK (AccountGateWithClerkTest), the frame that took the
       # 0.6.0 release down on every phone.
-      - run: ./gradlew :app:assembleDebug :app:assembleRelease :app:verifyReleaseApk :app:testDebugUnitTest
+      - run: ./gradlew :app:assembleDebug :app:assembleRelease :app:verifyReleaseApk :app:verifyPlayReleaseBundle :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
       # The JUnit XML and HTML reports, so a failing test can be read in full after the run.
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: murmur-android-test-reports
           path: |
-            apps/android/app/build/test-results/testDebugUnitTest
-            apps/android/app/build/reports/tests/testDebugUnitTest
+            apps/android/app/build/test-results/test*DebugUnitTest
+            apps/android/app/build/reports/tests/test*DebugUnitTest
             apps/android/app/build/reports/apk
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: murmur-android
-          path: apps/android/app/build/outputs/apk/debug/*.apk
+          path: apps/android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: ignore
+          retention-days: 7
+      # The Google Play bundle and the reports of the artifact checks. A CI artifact only: nothing
+      # here is uploaded to Play, and the release workflow's assets are unchanged (the direct APK).
+      - uses: actions/upload-artifact@v7
+        with:
+          name: murmur-android-play
+          path: |
+            apps/android/app/build/outputs/bundle/playRelease/*.aab
+            apps/android/app/build/reports/apk/*.txt
+          if-no-files-found: error
           retention-days: 7
 
   web-check:

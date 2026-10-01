@@ -70,9 +70,9 @@ private fun detail(s: UpdateState): String {
             else megabytes(s.downloadedBytes)
         }
         UpdatePhase.READY -> when {
-            s.needsInstallPermission -> "Murmur needs permission to install its own updates."
-            !s.canInstall -> "Murmur could not verify this download, so it will not install it unattended."
-            else -> "Android asks you to confirm the first update; later ones install on their own."
+            s.needsInstallPermission -> "Downloaded and verified. Android asks you to allow updates from Murmur before the first install."
+            !s.canInstall -> "Murmur could not verify this download, so it will not install it."
+            else -> "Downloaded and verified. Tap Install when it suits you; the system installer takes it from there."
         }
         UpdatePhase.INSTALLING -> "The system installer is taking over; Murmur restarts when it is done."
         UpdatePhase.ERROR -> s.error ?: "Something went wrong."
@@ -91,12 +91,12 @@ private fun relative(ts: Long): String {
 
 /**
  * The Updates section: the current state and its actions in one card, the three device
- * preferences in another. Drawn with the app's own pieces, like every other screen.
+ * preferences in another. Drawn with the app's own pieces, like every other screen. The Install
+ * button here is the only thing in the app that starts an install ([UpdateManager.install]).
  */
 @Composable
-fun UpdatesSection(store: SettingsStore, settings: MurmurSettings) {
+fun UpdatesSection(store: SettingsStore, settings: MurmurSettings, manager: UpdateManager = UpdateManager.get(LocalContext.current)) {
     val context = LocalContext.current
-    val manager = UpdateManager.get(context)
     val state by manager.state.collectAsState()
     val scope = rememberCoroutineScope()
     val c = Murmur.colors
@@ -133,7 +133,7 @@ fun UpdatesSection(store: SettingsStore, settings: MurmurSettings) {
                 UpdatePhase.READY -> {
                     when {
                         state.needsInstallPermission -> PrimaryButton("Allow updates", onClick = { manager.requestInstallPermission(context) }, modifier = Modifier.height(36.dp))
-                        state.canInstall -> SecondaryButton("Install", compact = true, onClick = { manager.install() })
+                        state.canInstall -> PrimaryButton("Install", onClick = { manager.install() }, modifier = Modifier.height(36.dp))
                         else -> SecondaryButton("View release", compact = true, onClick = { manager.openReleasePage(context) })
                     }
                     TextLink("Skip", onClick = { manager.skip() })
@@ -167,10 +167,10 @@ fun UpdatesSection(store: SettingsStore, settings: MurmurSettings) {
             description = "When Murmur opens, and once a day while the dictation service runs."
         )
         ToggleRow(
-            "Install automatically",
-            settings.updateAutoInstall,
-            { store.update { s -> s.copy(updateAutoInstall = it) } },
-            description = "Downloads new versions and installs them once you are not dictating. The first time, Android asks you to allow updates from Murmur."
+            "Download updates automatically",
+            settings.updateAutoDownload,
+            { store.update { s -> s.copy(updateAutoDownload = it) } },
+            description = "Fetches new versions in the background and lets you know when one is ready. Nothing installs until you tap Install here."
         )
         ToggleRow(
             "Include pre-releases",

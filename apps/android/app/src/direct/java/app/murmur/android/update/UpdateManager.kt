@@ -12,8 +12,10 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import app.murmur.android.BuildConfig
+import app.murmur.android.MainActivity
 import app.murmur.android.R
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.ui.Route
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -26,7 +28,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -54,24 +59,31 @@ data class UpdateSource(
 
 /**
  * Android counterpart of apps/desktop/src/main/update/service.ts: reads the repository's GitHub
- * Releases, downloads `Murmur-<version>-android.apk`, verifies it against the checksum the release
- * carries for it and hands it to the system package installer.
+ * Releases, downloads `Murmur-<version>-android.apk` and verifies it against the checksum the
+ * release carries for it. Checking and downloading happen on their own (when the app opens, daily
+ * from the accessibility service); handing the file to the system package installer never does.
+ *
+ * Installing is the user's call, always: the one way to the installer is [install], which the
+ * Install button on the Updates screen calls, and nothing else does. Play Protect looks at every
+ * install, and on current Android it asked, or refused, every time the earlier build installed in
+ * the background; now that happens once, when the user has just tapped Install and is looking at
+ * the screen. A build that finished downloading while the app was away is announced by a single
+ * quiet notification per version that opens the Updates screen.
  *
  * The checksum is GitHub's own digest of the uploaded asset, which arrives in the same API response
  * as the asset list; a release whose assets carry no digest falls back to its SHA256SUMS.txt. A
  * checksum that cannot be fetched is a check failure to retry, never a reason to download an APK
  * that can then not be verified.
  *
- * Android never installs silently for a plain app... except when the app updates itself: with
- * UPDATE_PACKAGES_WITHOUT_USER_ACTION and a PackageInstaller session, Android 12+ lets an app
- * replace itself without a dialog once it has been the installer of its current version. The very
- * first in-app update therefore shows the system confirmation; the ones after it are unattended.
+ * With UPDATE_PACKAGES_WITHOUT_USER_ACTION and a PackageInstaller session, Android 12+ applies the
+ * update the user asked for without a second system dialog once the app has been the installer of
+ * its current version; the very first in-app update shows the system confirmation.
  */
 class UpdateManager internal constructor(
     private val app: Context,
     private val settings: SettingsStore,
     private val source: UpdateSource = UpdateSource()
-) {
+) : Updater {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val prefs = app.getSharedPreferences("murmur_updater", Context.MODE_PRIVATE)
     private val client = OkHttpClient.Builder()
@@ -94,13 +106,16 @@ class UpdateManager internal constructor(
     )
     val state: StateFlow<UpdateState> = _state
 
-    /** Set by MainActivity so a pending confirmation can be shown directly instead of via notification. */
-    @Volatile
-    var foreground: Boolean = false
+    override val readyVersion: StateFlow<String?> =
+        _state.map { if (it.canInstall) it.release?.version else null }.stateIn(scope, SharingStarted.Eagerly, null)
 
-    /** Whether a restart right now would interrupt the user (a dictation in flight). */
+    /**
+     * Whether MainActivity is in front. Decides where a ready build is announced (the Home card
+     * and the drawer dot in the app, a notification otherwise) and where the system's install
+     * confirmation goes once the user has tapped Install.
+     */
     @Volatile
-    var isIdle: () -> Boolean = { true }
+    private var foreground: Boolean = false
 
     init {
         val pendingVersion = prefs.getString(KEY_PENDING_VERSION, null)
@@ -129,8 +144,9 @@ class UpdateManager internal constructor(
         scope.launch { check(manual) }
     }
 
-    /** Called when the settings screen is shown: refresh permissions and check when it is time. */
-    fun onAppVisible() {
+    /** The app came to the front: refresh the install permission and check when it is time. */
+    override fun onAppVisible() {
+        foreground = true
         refreshInstallPermission()
         val st = _state.value
         if (settings.get().updateAutoCheck &&
@@ -139,11 +155,10 @@ class UpdateManager internal constructor(
         ) {
             checkAsync(manual = false)
         }
-        // Coming back from "Allow from this source": finish what the user started.
-        if (!st.needsInstallPermission && st.phase == UpdatePhase.READY && st.canInstall && awaitingPermission) {
-            awaitingPermission = false
-            install()
-        }
+    }
+
+    override fun onAppHidden() {
+        foreground = false
     }
 
     private suspend fun doCheck(manual: Boolean): UpdateState = withContext(Dispatchers.IO) {
@@ -202,7 +217,6 @@ class UpdateManager internal constructor(
                 prevRelease.sha256 != null && prevRelease.sha256 == info.sha256
             if (sameDownload) {
                 _state.update { it.copy(phase = UpdatePhase.READY, release = info, lastCheckedAt = now) }
-                if (prefsNow.updateAutoInstall && _state.value.canInstall) scope.launch { autoInstall() }
                 return@withContext _state.value
             }
             discardDownload()
@@ -213,7 +227,7 @@ class UpdateManager internal constructor(
                 )
             }
             // Without a checksum nothing could be verified, so nothing is fetched unattended.
-            if (prefsNow.updateAutoInstall && apk != null && info.sha256 != null) download()
+            if (prefsNow.updateAutoDownload && apk != null && info.sha256 != null) download()
             _state.value
         } catch (e: Exception) {
             val message = friendly(e)
@@ -359,7 +373,9 @@ class UpdateManager internal constructor(
             }
             Log.i(TAG, "downloaded and verified: $dest")
             _state.update { it.copy(phase = UpdatePhase.READY, downloadedPath = dest.absolutePath, progress = 1f) }
-            if (settings.get().updateAutoInstall && _state.value.canInstall) scope.launch { autoInstall() }
+            // The user may have left while it downloaded: say so, once. In the app the Home card and
+            // the drawer's dot already do.
+            if (!foreground) announce(_state.value)
         } catch (e: CancellationException) {
             part.delete()
             _state.update { it.copy(phase = UpdatePhase.AVAILABLE, progress = 0f, downloadedBytes = 0L) }
@@ -376,36 +392,11 @@ class UpdateManager internal constructor(
 
     // ---- installing -----------------------------------------------------------------------------
 
-    @Volatile
-    private var awaitingPermission = false
-
     /**
-     * Unattended path: wait until nothing is being dictated, then commit the session. Android
-     * either applies it silently (self-update, 12+) or answers with a confirmation we surface as
-     * a notification; a missing "install unknown apps" grant also becomes a notification.
+     * Hand the verified APK to the package installer. The only way into the installer, and it is
+     * called from one place: the Install button on the Updates screen. No check, download, timer or
+     * permission change leads here on its own. Returns false when something has to happen first.
      */
-    private suspend fun autoInstall() {
-        var waited = 0L
-        while (!isIdle() && waited < IDLE_WAIT_MAX_MS) {
-            delay(IDLE_POLL_MS)
-            waited += IDLE_POLL_MS
-        }
-        val st = _state.value
-        if (st.phase != UpdatePhase.READY || !st.canInstall || !settings.get().updateAutoInstall) return
-        if (!hasInstallPermission()) {
-            _state.update { it.copy(needsInstallPermission = true) }
-            notify(
-                NOTIFICATION_ID_UPDATE,
-                "Murmur ${st.release?.version} is ready to install",
-                "Tap to allow Murmur to install its own updates.",
-                launchAppIntent()
-            )
-            return
-        }
-        install()
-    }
-
-    /** Hand the verified APK to the package installer. Returns false when something has to happen first. */
     fun install(): Boolean {
         val st = _state.value
         val release = st.release
@@ -419,7 +410,6 @@ class UpdateManager internal constructor(
             return false
         }
         if (!hasInstallPermission()) {
-            awaitingPermission = true
             _state.update { it.copy(needsInstallPermission = true) }
             return false
         }
@@ -428,6 +418,7 @@ class UpdateManager internal constructor(
             .putString(KEY_PENDING_VERSION, release.version)
             .putString(KEY_PENDING_FROM, currentVersion)
             .commit()
+        cancelNotification(NOTIFICATION_ID_UPDATE)
         scope.launch(Dispatchers.IO) {
             try {
                 commitInstall(file, release.version)
@@ -473,6 +464,8 @@ class UpdateManager internal constructor(
         val version = _state.value.release?.version ?: ""
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                // The system wants the user to confirm the install they just asked for: in front of
+                // them when the app is in front, otherwise as the tap that brings it back.
                 if (confirmIntent == null) return
                 confirmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (foreground) {
@@ -484,9 +477,8 @@ class UpdateManager internal constructor(
                     }
                 }
                 notify(
-                    NOTIFICATION_ID_UPDATE,
                     "Finish installing Murmur $version",
-                    "Tap to confirm the update.",
+                    "Tap to confirm the update you started.",
                     PendingIntent.getActivity(app, 1, confirmIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                 )
             }
@@ -525,10 +517,12 @@ class UpdateManager internal constructor(
         _state.update { it.copy(needsInstallPermission = !hasInstallPermission()) }
     }
 
-    /** Open the system screen where the user allows Murmur to install apps. */
+    /**
+     * Open the system screen where the user allows Murmur to install apps. Coming back, the Updates
+     * screen offers Install; nothing starts until it is tapped.
+     */
     fun requestInstallPermission(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        awaitingPermission = true
         context.startActivity(
             Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -562,10 +556,11 @@ class UpdateManager internal constructor(
 
     /**
      * Daily check while the accessibility service is alive (the only long-lived part of the app).
-     * Finds -> downloads -> installs when "install automatically" is on, otherwise notifies. A check
-     * that failed (GitHub unreachable, checksum not downloadable) is retried after an hour instead.
+     * Finds -> downloads (with "Download updates automatically") -> tells the user, who installs
+     * from the Updates screen when it suits them. A check that failed (GitHub unreachable, checksum
+     * not downloadable) is retried after an hour instead.
      */
-    fun startBackgroundChecks(scope: CoroutineScope) {
+    override fun startBackgroundChecks(scope: CoroutineScope) {
         scope.launch {
             while (isActive) {
                 if (!settings.get().updateAutoCheck) {
@@ -577,19 +572,47 @@ class UpdateManager internal constructor(
                     delay(due)
                     continue
                 }
-                val st = check(manual = false)
-                if ((st.phase == UpdatePhase.AVAILABLE || st.phase == UpdatePhase.READY) && st.release != null &&
-                    !(settings.get().updateAutoInstall && st.release.apk != null && st.release.sha256 != null)
-                ) {
-                    notify(
-                        NOTIFICATION_ID_UPDATE,
-                        "Murmur ${st.release.version} is available",
-                        "Open Murmur to download and install it.",
-                        launchAppIntent()
-                    )
-                }
+                val st = backgroundCycle()
                 delay(nextCheckInterval(st.phase))
             }
+        }
+    }
+
+    /**
+     * One round of the background loop: check, wait for the download the check may have started,
+     * then announce what came of it (once per version, and not while the app is in front, where
+     * Home and the drawer show it). Never installs.
+     */
+    internal suspend fun backgroundCycle(): UpdateState {
+        check(manual = false)
+        downloadJob?.join()
+        val st = _state.value
+        if (!foreground) announce(st)
+        return st
+    }
+
+    /**
+     * One quiet notification per version and stage: "ready to install" once a verified download
+     * is waiting, "available" when a release could not be fetched unattended (no auto-download, or
+     * nothing to verify it against). Tapping it opens the Updates screen; a re-check that finds the
+     * same version says nothing new.
+     */
+    private fun announce(st: UpdateState) {
+        val release = st.release ?: return
+        val stage = when {
+            st.canInstall -> STAGE_READY
+            st.phase == UpdatePhase.AVAILABLE -> STAGE_AVAILABLE
+            else -> return
+        }
+        val key = "$stage:${release.version}"
+        if (prefs.getString(KEY_ANNOUNCED, null) == key) return
+        prefs.edit().putString(KEY_ANNOUNCED, key).apply()
+        if (stage == STAGE_READY) {
+            notify("Murmur ${release.version} is ready to install", "Tap to open Updates and install it.", updatesScreenIntent())
+        } else {
+            val text = if (release.apk != null && release.sha256 != null) "Tap to open Updates and download it."
+            else "Tap to open Updates to see it."
+            notify("Murmur ${release.version} is available", text, updatesScreenIntent())
         }
     }
 
@@ -609,31 +632,37 @@ class UpdateManager internal constructor(
         prefs.edit().remove(KEY_PENDING_VERSION).remove(KEY_PENDING_FROM).apply()
     }
 
-    private fun launchAppIntent(): PendingIntent = PendingIntent.getActivity(
+    /** Brings Murmur to the front on the Updates screen (the activity is a single task). */
+    private fun updatesScreenIntent(): PendingIntent = PendingIntent.getActivity(
         app, 0,
-        app.packageManager.getLaunchIntentForPackage(app.packageName),
+        MainActivity.intentFor(app, Route.UPDATES).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    private fun notify(id: Int, title: String, text: String, tap: PendingIntent) {
+    /** Posts (or replaces) the one update notification: low importance, so it neither sounds nor pops over the screen. */
+    private fun notify(title: String, text: String, tap: PendingIntent) {
         try {
             val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Builds up to 0.6.3 announced on a default-importance channel; a channel's
+                // importance is the user's once created, so the quiet one is a new channel.
+                nm.deleteNotificationChannel(LEGACY_CHANNEL_ID)
                 nm.createNotificationChannel(
-                    NotificationChannel(CHANNEL_ID, app.getString(R.string.notification_channel_updates), NotificationManager.IMPORTANCE_DEFAULT)
+                    NotificationChannel(CHANNEL_ID, app.getString(R.string.notification_channel_updates), NotificationManager.IMPORTANCE_LOW)
                 )
             }
             val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Notification.Builder(app, CHANNEL_ID)
             } else {
-                @Suppress("DEPRECATION") Notification.Builder(app)
+                @Suppress("DEPRECATION") Notification.Builder(app).setPriority(Notification.PRIORITY_LOW)
             }
             nm.notify(
-                id,
+                NOTIFICATION_ID_UPDATE,
                 builder.setSmallIcon(R.drawable.ic_mic_notification)
                     .setContentTitle(title)
                     .setContentText(text)
                     .setContentIntent(tap)
+                    .setOnlyAlertOnce(true)
                     .setAutoCancel(true)
                     .build()
             )
@@ -657,13 +686,16 @@ class UpdateManager internal constructor(
         private const val KEY_LAST_CHECKED = "lastCheckedAt"
         private const val KEY_PENDING_VERSION = "pendingVersion"
         private const val KEY_PENDING_FROM = "pendingFrom"
-        private const val CHANNEL_ID = "murmur_updates"
-        private const val NOTIFICATION_ID_UPDATE = 1292
+        /** `<stage>:<version>` of the last notification posted, so each version is announced once per stage. */
+        private const val KEY_ANNOUNCED = "announced"
+        private const val STAGE_READY = "ready"
+        private const val STAGE_AVAILABLE = "available"
+        private const val LEGACY_CHANNEL_ID = "murmur_updates"
+        const val CHANNEL_ID = "murmur_updates_quiet"
+        const val NOTIFICATION_ID_UPDATE = 1292
         private val FOREGROUND_INTERVAL_MS = TimeUnit.HOURS.toMillis(1)
         private val BACKGROUND_INTERVAL_MS = TimeUnit.HOURS.toMillis(24)
         private val RETRY_INTERVAL_MS = TimeUnit.HOURS.toMillis(1)
-        private val IDLE_POLL_MS = TimeUnit.SECONDS.toMillis(20)
-        private val IDLE_WAIT_MAX_MS = TimeUnit.MINUTES.toMillis(30)
 
         /** How long the background loop waits after a check that ended in [phase]. */
         internal fun nextCheckInterval(phase: UpdatePhase): Long =

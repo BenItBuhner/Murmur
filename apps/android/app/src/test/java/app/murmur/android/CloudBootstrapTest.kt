@@ -74,12 +74,14 @@ class CloudBootstrapTest {
     fun fresh() {
         CloudBootstrap.reset()
         guard().disarm()
+        guard().clearTrips()
     }
 
     @After
     fun tearDown() {
         CloudBootstrap.reset()
         guard().disarm()
+        guard().clearTrips()
     }
 
     @Test
@@ -168,7 +170,7 @@ class CloudBootstrapTest {
     }
 
     @Test
-    fun aLaunchThatDiedWhileConnectingSkipsTheCloudOnceThenRetries() {
+    fun aLaunchThatDiedWhileConnectingHoldsTheCloudBackThenBringsItUpByItself() {
         // The previous process armed the guard and never got to disarm it.
         guard().arm()
         var clerkStarts = 0
@@ -177,17 +179,74 @@ class CloudBootstrapTest {
         val failed = boot as CloudBoot.Failed
         assertEquals(CloudStage.PREVIOUS_LAUNCH, failed.stage)
         assertNull(failed.error)
-        assertEquals("the cloud is not brought up on the launch after a crash", 0, clerkStarts)
-        assertFalse("the next launch tries again", guard().tripped())
+        assertEquals(CloudBootGuard.FIRST_RETRY_MS, failed.retryInMs)
+        assertEquals("the cloud is not brought up right away on the launch after a crash", 0, clerkStarts)
+        assertFalse("the flag is cleared so the launch after this one is not held back twice", guard().tripped())
+        assertEquals(1, guard().trips)
         assertEquals(
-            "Murmur closed unexpectedly while connecting last time, so it started without the account service.",
+            "Murmur closed unexpectedly while connecting last time, so it started without the account service. It tries again on its own in 30 seconds.",
             CloudBootstrap.explain(failed)
         )
-        // Trying again from the Account screen brings the cloud up.
+        // Half a minute later the bootstrap tries by itself, with nobody tapping anything.
+        shadowOf(Looper.getMainLooper()).idleFor(CloudBootGuard.FIRST_RETRY_MS - 1, TimeUnit.MILLISECONDS)
+        assertEquals(0, clerkStarts)
+        shadowOf(Looper.getMainLooper()).idleFor(1, TimeUnit.MILLISECONDS)
+        assertEquals(1, clerkStarts)
+        assertEquals(CloudBoot.Ready(config), CloudBootstrap.state.value)
+        assertTrue("armed again while the cloud proves itself", guard().tripped())
+        // Up for the whole window: the death was not the cloud's doing, and the count starts over.
+        shadowOf(Looper.getMainLooper()).idleFor(CloudBootstrap.GUARD_WINDOW_MS + 1, TimeUnit.MILLISECONDS)
+        assertFalse(guard().tripped())
+        assertEquals(0, guard().trips)
+    }
+
+    @Test
+    fun tryingAgainFromTheAccountScreenNeedsNoWait() {
+        guard().arm()
+        var clerkStarts = 0
+        CloudBootstrap.start(context, config, steps(initClerk = { _, _ -> clerkStarts++ }), guard())
+        assertEquals(0, clerkStarts)
         val retried = CloudBootstrap.retry(context)
         assertEquals(CloudBoot.Ready(config), retried)
         assertEquals(1, clerkStarts)
         assertEquals(retried, CloudBootstrap.state.value)
+        // The timer that would have tried as well is gone: no second start.
+        shadowOf(Looper.getMainLooper()).idleFor(CloudBootGuard.FIRST_RETRY_MS + 1, TimeUnit.MILLISECONDS)
+        assertEquals(1, clerkStarts)
+    }
+
+    @Test
+    fun deathsInARowWaitLongerEachTime() {
+        assertEquals(30_000L, CloudBootGuard.retryDelayMs(1))
+        assertEquals(120_000L, CloudBootGuard.retryDelayMs(2))
+        assertEquals(480_000L, CloudBootGuard.retryDelayMs(3))
+        assertEquals(1_920_000L, CloudBootGuard.retryDelayMs(4))
+        assertEquals(3_600_000L, CloudBootGuard.retryDelayMs(5))
+        assertEquals(3_600_000L, CloudBootGuard.retryDelayMs(40))
+        assertEquals(30_000L, CloudBootGuard.retryDelayMs(0))
+
+        // Second launch in a row that finds the flag set: two minutes, and the words say so.
+        guard().arm()
+        guard().recordTrip()
+        val failed = CloudBootstrap.start(context, config, steps(), guard()) as CloudBoot.Failed
+        assertEquals(120_000L, failed.retryInMs)
+        assertEquals(2, guard().trips)
+        assertTrue(CloudBootstrap.explain(failed).endsWith("It tries again on its own in 2 minutes."))
+        shadowOf(Looper.getMainLooper()).idleFor(CloudBootGuard.FIRST_RETRY_MS + 1, TimeUnit.MILLISECONDS)
+        assertFalse("not yet", CloudBootstrap.state.value.usable)
+        shadowOf(Looper.getMainLooper()).idleFor(120_000L - CloudBootGuard.FIRST_RETRY_MS, TimeUnit.MILLISECONDS)
+        assertTrue(CloudBootstrap.state.value.usable)
+    }
+
+    @Test
+    fun aLaunchThatLeavesNormallyBeforeTheWindowKeepsTheCount() {
+        guard().recordTrip()
+        CloudBootstrap.start(context, config, steps(), guard())
+        assertTrue(guard().tripped())
+        // The UI goes away after a few seconds: not a crash, but not proof either.
+        CloudBootstrap.onUiStopped()
+        assertFalse(guard().tripped())
+        assertEquals(1, guard().trips)
     }
 
     @Test

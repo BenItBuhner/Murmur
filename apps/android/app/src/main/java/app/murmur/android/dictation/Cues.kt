@@ -4,10 +4,6 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import android.util.Log
 import app.murmur.android.settings.SettingsStore
 import kotlin.math.PI
@@ -19,15 +15,15 @@ import kotlin.math.sin
 
 private const val TAG = "MurmurCues"
 
-/** The moments a dictation makes itself heard (and felt); the desktop's `SoundName`. */
+/** The moments a dictation makes itself heard; the desktop's `SoundName`. What it makes felt is [Haptic]. */
 enum class Cue { START, STOP, LOCK, CANCEL, ERROR }
 
 /**
  * Short synthesized cues for the moments of a dictation, the desktop overlay's `sounds.ts` note for
  * note: the same frequencies, offsets, lengths and envelope (an 8 ms attack, an exponential decay to
  * silence), so a dictation sounds the same on a phone beside a laptop. Rendered to PCM on demand
- * and played through a short-lived [AudioTrack] on the system-sounds stream; no asset files. A
- * light tap from the vibrator goes with each cue when haptics are on.
+ * and played through a short-lived [AudioTrack] on the system-sounds stream; no asset files. The
+ * touch that goes with each moment is [Haptics]' business, behind its own setting.
  */
 object Cues {
     const val SAMPLE_RATE = 44_100
@@ -77,16 +73,13 @@ object Cues {
         return ShortArray(samples) { i -> (mix[i].coerceIn(-1.0, 1.0) * Short.MAX_VALUE).roundToInt().toShort() }
     }
 
-    /** Play [cue] and tap the vibrator, as the settings allow. Never throws; a device without a speaker just stays quiet. */
+    /** Play [cue] as the settings allow. Never throws; a device without a speaker just stays quiet. */
     fun play(context: Context, cue: Cue) {
-        val app = context.applicationContext
-        val s = SettingsStore.get(app).get()
-        if (s.sounds) {
-            pcm(cue, s.soundVolume)?.let { samples ->
-                runCatching { playPcm(samples) }.onFailure { Log.w(TAG, "could not play the $cue cue", it) }
-            }
+        val s = SettingsStore.get(context.applicationContext).get()
+        if (!s.sounds) return
+        pcm(cue, s.soundVolume)?.let { samples ->
+            runCatching { playPcm(samples) }.onFailure { Log.w(TAG, "could not play the $cue cue", it) }
         }
-        if (s.haptics) runCatching { tap(app, cue) }.onFailure { Log.w(TAG, "could not vibrate for $cue", it) }
     }
 
     private fun playPcm(samples: ShortArray) {
@@ -118,29 +111,6 @@ object Cues {
             override fun onPeriodicNotification(t: AudioTrack) = Unit
         })
         track.play()
-    }
-
-    /** A click for the moments a dictation begins or ends, a heavier one for a failure. */
-    private fun tap(app: Context, cue: Cue) {
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (app.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        } ?: return
-        if (!vibrator.hasVibrator()) return
-        val effect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            VibrationEffect.createPredefined(
-                when (cue) {
-                    Cue.ERROR -> VibrationEffect.EFFECT_HEAVY_CLICK
-                    Cue.CANCEL -> VibrationEffect.EFFECT_TICK
-                    else -> VibrationEffect.EFFECT_CLICK
-                }
-            )
-        } else {
-            VibrationEffect.createOneShot(if (cue == Cue.ERROR) 40L else 15L, VibrationEffect.DEFAULT_AMPLITUDE)
-        }
-        vibrator.vibrate(effect)
     }
 
     /** For tests: the loudest sample of [samples], as a fraction of full scale. */

@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The dictation's haptics (dictation/Haptics.kt) go through the Vibrator, which refuses every
+         call without this; the button's own drag ticks go through View.performHapticFeedback and
+         never needed it. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Holding the overlay permission exempts us from background foreground-service-start
          restrictions, so recording can begin from the accessibility overlay pill. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

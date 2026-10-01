@@ -218,6 +218,7 @@ object DictationController {
         locked = true
         if (mode == DictationMode.HOLD) mode = DictationMode.HANDS_FREE
         (_state.value as? DictationState.Listening)?.let { _state.value = it.copy(mode = mode, locked = true) }
+        Haptics.play(context, Haptic.LOCK)
         Cues.play(context, Cue.LOCK)
     }
 
@@ -248,11 +249,15 @@ object DictationController {
         if (mode == DictationMode.COMMAND) {
             val currentSink = sink
             if (currentSink == null) {
-                showTransient(DictationState.Error("Accessibility service not running"))
+                showNotice(appContext, "Accessibility service not running")
                 return
             }
             selectionJob = scope.async { runCatching { currentSink.readSelection() }.getOrNull() }
         }
+
+        // The press is felt the moment it is accepted, ahead of the recorder's own start-up: a
+        // click that lags the finger reads as a button that did not take.
+        Haptics.play(appContext, Haptic.START)
 
         if (fixtureMode(settings)) {
             // Debug aid for emulators without a microphone: "listen" briefly, then dictate
@@ -272,7 +277,7 @@ object DictationController {
             } catch (e: Exception) {
                 Log.e(TAG, "recorder start failed", e)
                 RecordingService.stop(appContext)
-                showTransient(DictationState.Error(friendlyError(e)))
+                showNotice(appContext, friendlyError(e))
                 return
             }
             _state.value = DictationState.Listening(0, 0f, mode, locked)
@@ -295,7 +300,7 @@ object DictationController {
             scope.launch {
                 if (selection.await() == null && isListening && sessionId == id) {
                     cancel(appContext)
-                    showTransient(DictationState.Error(NO_SELECTION))
+                    showNotice(appContext, NO_SELECTION)
                 }
             }
         }
@@ -308,6 +313,7 @@ object DictationController {
         recorder.cancel()
         RecordingService.stop(context.applicationContext)
         _state.value = DictationState.Idle
+        Haptics.play(context, Haptic.CANCEL)
         Cues.play(context, Cue.CANCEL)
     }
 
@@ -321,6 +327,7 @@ object DictationController {
         val mode = this.mode
         val selectionJob = this.selectionJob
         _state.value = DictationState.Processing("Transcribing…", mode)
+        Haptics.play(appContext, Haptic.STOP)
         Cues.play(appContext, Cue.STOP)
 
         scope.launch {
@@ -333,11 +340,11 @@ object DictationController {
                     val recorded = recorder.stop()
                     RecordingService.stop(appContext)
                     if (recorded.size < SAMPLE_RATE * 15 / 100) {
-                        showTransient(DictationState.Error("Too short"))
+                        showNotice(appContext, "Too short")
                         return@launch
                     }
                     if (Wav.peakDb(recorded) < -48.0) {
-                        showTransient(DictationState.Error("No speech detected"))
+                        showNotice(appContext, "No speech detected")
                         return@launch
                     }
                     recorded
@@ -654,6 +661,7 @@ object DictationController {
         if (run.previous != null) history.replace(entry) else history.add(entry)
         if (error == null) {
             Log.i(TAG, "${if (run.insert) "inserted" else "copied"} $wordCount words in ${entry.timings.totalMs}ms${if (run.attempts > 1) " (attempt ${run.attempts})" else ""}")
+            Haptics.play(context, Haptic.DONE)
             showTransient(
                 DictationState.Success(if (!run.insert) "Copied" else if (run.mode == DictationMode.COMMAND) "Edited" else "Inserted", softLimit),
                 if (softLimit != null) SOFT_LIMIT_HOLD_MS else 1500
@@ -754,6 +762,16 @@ object DictationController {
     }
 
     /**
+     * A dictation that ended before it reached a model (too short, nothing but silence, no field to
+     * edit, a microphone that would not open): a notice on the pill, felt as an error by the hand
+     * but, as on the desktop, without the error sound.
+     */
+    private fun showNotice(context: Context, message: String) {
+        Haptics.play(context, Haptic.ERROR)
+        showTransient(DictationState.Error(message))
+    }
+
+    /**
      * A failure the user can do something about: when the audio was stored the pill offers to send
      * it again and waits much longer for the answer than a plain message would. A plan limit is
      * explained on the pill, with the ways forward, and waits longer still; so is a Murmur service
@@ -766,6 +784,7 @@ object DictationController {
         limit: LimitNotice? = null,
         service: ServiceNotice? = null
     ) {
+        Haptics.play(context, Haptic.ERROR)
         Cues.play(context, Cue.ERROR)
         val retryId = run.id.takeIf { run.recording != null }
         val hold = when {

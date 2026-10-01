@@ -22,11 +22,23 @@ const contract = JSON.parse(
   readFileSync(new URL('./fixtures/settings-parity.json', import.meta.url), 'utf8')
 ) as {
   defaults: Record<string, unknown>
+  androidOnly: Record<string, unknown>
   ranges: Record<string, { min: number; max: number }>
   sttPresets: Array<Record<string, unknown>>
   snippetPlaceholders: string[]
   appRule: { tones: string[]; modes: string[]; speeds: string[] }
   sttSpeeds: string[]
+}
+
+/** Every key at every depth of a settings object. */
+function keysDeep(value: unknown, out = new Set<string>()): Set<string> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out.add(k)
+      keysDeep(v, out)
+    }
+  }
+  return out
 }
 
 describe('settings parity contract', () => {
@@ -70,6 +82,14 @@ describe('settings parity contract', () => {
       sideSensitive: s.hotkeys.sideSensitive,
       escapeCancels: s.hotkeys.escapeCancels
     }).toEqual(contract.defaults)
+  })
+
+  it("the phone's own settings are a decision, not a gap: the desktop schema has no setting of those names", () => {
+    // A laptop has no vibrator, so the dictation's haptics (and their switch) are Android's alone.
+    const androidOnly = Object.keys(contract.androidOnly).filter((k) => !k.startsWith('$'))
+    expect(androidOnly).toEqual(['haptics'])
+    const desktopKeys = keysDeep(defaultSettings())
+    for (const key of androidOnly) expect(desktopKeys.has(key), key).toBe(false)
   })
 
   it('the bounds are the ones both apps clamp to', () => {

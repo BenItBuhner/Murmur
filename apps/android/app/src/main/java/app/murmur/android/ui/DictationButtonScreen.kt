@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.dictation.Haptic
+import app.murmur.android.dictation.Haptics
 import app.murmur.android.keyboard.KeyboardPresence
 import app.murmur.android.overlay.OverlayArrangement
 import app.murmur.android.overlay.OverlayDefaults
@@ -217,7 +219,8 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
             }
             ToggleRow(
                 title = "Haptics",
-                description = "A light tap when a dictation starts, stops, or fails.",
+                description = "A click as recording starts, a tick as it stops, a light-then-firm tap once the text is in, " +
+                    "and a double buzz when something needs a look. Tap the preview above to feel them.",
                 checked = settings.haptics,
                 onCheckedChange = { store.update { s -> s.copy(haptics = it) } }
             )
@@ -244,7 +247,8 @@ private fun SpotRow(index: Int, spot: String, active: Boolean) {
 /**
  * The real overlay view in preview mode on a keyboard-like stage, in the same colours the
  * accessibility service gives the real button. Tap it and it plays a whole dictation: listening,
- * transcribing, formatting, inserted.
+ * transcribing, formatting, inserted, each moment felt as the real one would be (while Haptics
+ * is on), so the setting below can be tried right here.
  */
 @Composable
 fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modifier) {
@@ -289,6 +293,7 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
             return@LaunchedEffect
         }
         val start = System.currentTimeMillis()
+        Haptics.play(context, Haptic.START)
         while (System.currentTimeMillis() - start < 2600) {
             val t = (System.currentTimeMillis() - start) / 1000f
             val level = (0.42f + 0.28f * sin(t * 7.3f) + 0.22f * sin(t * 13.1f)).coerceIn(0.1f, 1f)
@@ -296,10 +301,12 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
             delay(80)
         }
         previewState = DictationState.Processing("Transcribing…")
+        Haptics.play(context, Haptic.STOP)
         delay(1300)
         previewState = DictationState.Processing("Formatting…")
         delay(900)
         previewState = DictationState.Success("Inserted")
+        Haptics.play(context, Haptic.DONE)
         delay(1400)
         previewState = DictationState.Idle
         playing = false

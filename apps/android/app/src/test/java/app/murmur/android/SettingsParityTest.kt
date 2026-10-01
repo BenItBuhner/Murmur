@@ -89,6 +89,17 @@ class SettingsParityTest {
     }
 
     @Test
+    fun `the phone's own settings ship with the defaults the contract records for them`() {
+        // A laptop has no vibrator: the dictation's haptics are Android's alone, on by default, and
+        // the desktop side of the contract checks its schema never grows a setting of the same name.
+        val own = contract.getJSONObject("androidOnly")
+        val names = own.keys().asSequence().filterNot { it.startsWith("$") }.toList()
+        assertEquals(listOf("haptics"), names)
+        assertEquals(own.getBoolean("haptics"), MurmurSettings().haptics)
+        assertEquals(true, MurmurSettings().haptics)
+    }
+
+    @Test
     fun `the bounds are the ones both apps clamp to`() {
         val r = contract.getJSONObject("ranges")
         fun range(name: String): IntRange = r.getJSONObject(name).let { it.getInt("min")..it.getInt("max") }

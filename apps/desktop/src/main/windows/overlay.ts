@@ -10,7 +10,10 @@ const log = createLogger('overlay')
 
 const WIDTH = 360
 const HEIGHT = 120
-/** A plan limit has more to say (two lines and up to four buttons): the window grows for it. */
+/**
+ * A plan limit has more to say (two lines and up to four buttons): the window grows for it. A
+ * Murmur service that is unavailable is explained on the same two lines.
+ */
 const LIMIT_WIDTH = 600
 const LIMIT_HEIGHT = 160
 const MARGIN = 28
@@ -19,9 +22,17 @@ const MARGIN = 28
 const SUCCESS_HOLD_MS = 1100
 const ERROR_HOLD_MS = 2800
 const RETRY_HOLD_MS = 15000
-/** A limit refusal is read, not glanced at; a text inserted unformatted deserves a beat more too. */
+/**
+ * A limit refusal or a service notice is read, not glanced at; a text inserted unformatted
+ * deserves a beat more too.
+ */
 const LIMIT_HOLD_MS = 20000
 const SOFT_LIMIT_HOLD_MS = 5000
+
+/** The pill is explaining something on two lines: a plan limit, or a Murmur service that is down. */
+function explains(state: OverlayState): boolean {
+  return !!state.limit || (state.phase === 'error' && !!state.service)
+}
 
 /**
  * The always-alive overlay window. It renders the pill *and* owns microphone capture (a renderer
@@ -124,13 +135,15 @@ export class OverlayWindow {
     this.state = state
     this.push()
     this.applyVisibility()
-    this.setInteractive(state.phase === 'error' && (!!state.retryId || !!state.limit))
+    this.setInteractive(
+      state.phase === 'error' && (!!state.retryId || !!state.limit || !!state.service)
+    )
     this.armHideTimer()
   }
 
-  /** The window's size for the current state: roomier while a plan limit is being explained. */
+  /** The window's size for the current state: roomier while the pill is explaining something. */
   private size(): { width: number; height: number } {
-    if (!this.state.limit) return { width: WIDTH, height: HEIGHT }
+    if (!explains(this.state)) return { width: WIDTH, height: HEIGHT }
     return { width: LIMIT_WIDTH, height: this.state.phase === 'error' ? LIMIT_HEIGHT : HEIGHT }
   }
 
@@ -144,14 +157,14 @@ export class OverlayWindow {
   /** Results go away on their own; an error that can be retried waits for the user much longer. */
   private armHideTimer(): void {
     this.clearHideTimer()
-    const { phase, retryId, limit } = this.state
+    const { phase, retryId, limit, service } = this.state
     if (phase !== 'success' && phase !== 'error') return
     const hold =
       phase === 'success'
         ? limit
           ? SOFT_LIMIT_HOLD_MS
           : SUCCESS_HOLD_MS
-        : limit
+        : limit || service
           ? LIMIT_HOLD_MS
           : retryId
             ? RETRY_HOLD_MS

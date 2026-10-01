@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { ServiceNotice } from '@shared/inference'
 import type { LimitNotice } from '@shared/limits'
 import type { OverlayPhase, OverlayState } from '@shared/types'
 import { PILL_SURFACES, pillSurface } from '../src/renderer/src/overlay/surface'
@@ -20,13 +21,21 @@ const words: LimitNotice = {
   message: "This week's 500 free words are used up."
 }
 
-/** Every look the pill takes, including the limit notice and the soft-limit success line. */
+const speechDown: ServiceNotice = {
+  service: 'speech',
+  reason: 'timeout',
+  retryAfterSec: 15,
+  message: "Murmur's speech service is unavailable right now"
+}
+
+/** Every look the pill takes, including the limit and service notices and the soft-limit line. */
 const STATES: OverlayState[] = [
   ...PHASES.map((phase) => ({ phase })),
   { phase: 'listening', mode: 'command' },
   { phase: 'listening', locked: true },
   { phase: 'error', message: 'Timed out', retryId: 'entry-1' },
   { phase: 'error', message: words.message, retryId: 'entry-1', limit: words },
+  { phase: 'error', message: speechDown.message, retryId: 'entry-1', service: speechDown },
   { phase: 'success', limit: { ...words, limit: 'llmTokensPerMonth' } }
 ]
 
@@ -57,8 +66,9 @@ describe('pill surface', () => {
     expect(pillSurface({ phase: 'success' })).toBe('bg-overlay-success')
     expect(pillSurface({ phase: 'success', limit: words })).toBe('bg-overlay-success')
     expect(pillSurface({ phase: 'error' })).toBe('bg-overlay-error')
-    // A plan limit is not a fault: the pill keeps its own colour.
+    // A plan limit is not a fault: the pill keeps its own colour. Nor is Murmur's provider being down.
     expect(pillSurface({ phase: 'error', limit: words })).toBe('bg-overlay')
+    expect(pillSurface({ phase: 'error', service: speechDown })).toBe('bg-overlay')
     expect(pillSurface({ phase: 'disabled' })).toMatch(/^bg-overlay-disabled\b/)
     // A mic fault only colours the idle bar.
     expect(pillSurface({ phase: 'listening' }, true)).toBe('bg-overlay')

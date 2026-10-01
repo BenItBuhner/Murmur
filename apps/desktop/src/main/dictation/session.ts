@@ -30,6 +30,7 @@ import {
   MURMUR_ERROR_CODES,
   effectiveSpeed,
   formattingModeAt,
+  type ServiceNotice,
   type SpeedOutcome
 } from '@shared/inference'
 import { isPlanLimit, type LimitNotice } from '@shared/limits'
@@ -397,15 +398,17 @@ export class DictationController extends EventEmitter {
     }
     // A refusal on a plan limit is still a failure the recording survives: the entry and the pill
     // carry the limit so the user learns what ran out, when it comes back, and what else they can
-    // do, with Retry right there for when it has.
+    // do, with Retry right there for when it has. A Murmur provider that is down is explained the
+    // same calm way, with Retry for when it is back.
     const failure = (raw: string, resolved: ResolvedStt | null, err: unknown): ProcessOutcome => {
       const error = friendlyError(err)
       const limit = planLimitOf(err)
+      const service = serviceNoticeOf(err)
       log.warn(
-        `session ${job.id.slice(0, 8)} failed${limit ? ` on plan limit ${limit.limit}` : ''}: ${error}`
+        `session ${job.id.slice(0, 8)} failed${limit ? ` on plan limit ${limit.limit}` : ''}${service ? ` (Murmur ${service.service} service unavailable: ${service.reason})` : ''}: ${error}`
       )
       this.recordFailure(job, raw, app, timings, resolved, error)
-      this.showError(error, job.recording ? job.id : undefined, limit)
+      this.showError(error, job.recording ? job.id : undefined, limit, service)
       return { ok: false, error, recorded: true }
     }
 
@@ -828,10 +831,16 @@ export class DictationController extends EventEmitter {
   /**
    * `retryId`: the failed dictation's audio is stored, so the pill offers to send it again.
    * `limit`: the plan limit that refused it, so the pill can explain and offer the ways forward.
+   * `service`: the Murmur service that is unavailable, so the pill can say so calmly.
    */
-  private showError(message: string, retryId?: string, limit?: LimitNotice): void {
+  private showError(
+    message: string,
+    retryId?: string,
+    limit?: LimitNotice,
+    service?: ServiceNotice
+  ): void {
     if (this.deps.settings.get().general.sounds) this.deps.overlay.playSound('error')
-    this.deps.overlay.setState({ phase: 'error', message, retryId, limit })
+    this.deps.overlay.setState({ phase: 'error', message, retryId, limit, service })
   }
 }
 
@@ -846,6 +855,11 @@ export function speedLogNote(speed: SpeedOutcome): string {
 export function planLimitOf(err: unknown): LimitNotice | undefined {
   if (!(err instanceof SttError) || !err.limit) return undefined
   return isPlanLimit(err.limit.limit) ? err.limit : undefined
+}
+
+/** The service notice behind an error, when a Murmur instance said its provider is down. */
+export function serviceNoticeOf(err: unknown): ServiceNotice | undefined {
+  return err instanceof SttError ? err.service : undefined
 }
 
 export function friendlyError(err: unknown): string {

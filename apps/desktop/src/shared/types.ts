@@ -1,4 +1,4 @@
-import type { SpeedMode, SpeedOutcome } from './inference'
+import type { ServiceNotice, SpeedMode, SpeedOutcome } from './inference'
 import type { LimitNotice } from './limits'
 import type { InstallKind } from './updates'
 
@@ -26,6 +26,12 @@ export interface OverlayState {
    * formatting model was paused or refused, and the pill says so quietly.
    */
   limit?: LimitNotice
+  /**
+   * Error phase only: the Murmur instance answered that the provider behind its models is down
+   * (`provider_unavailable`). Not a fault of the user's, so the pill explains it calmly, in its own
+   * colour, with Retry beside it: the recording is kept like for any other failure.
+   */
+  service?: ServiceNotice
 }
 
 export interface StageTimings {

@@ -1,4 +1,9 @@
-import type { SpeedMode, SpeedOutcome } from '@shared/inference'
+import {
+  parseServiceNotice,
+  type ServiceNotice,
+  type SpeedMode,
+  type SpeedOutcome
+} from '@shared/inference'
 import { parseLimitNotice, type LimitNotice } from '@shared/limits'
 import type { SttProviderKind } from '@shared/settings'
 
@@ -60,7 +65,9 @@ export class SttError extends Error {
     /** Machine-readable `error.code` from the server, when it sent one (the Murmur gateway does). */
     public readonly code?: string,
     /** The plan limit a Murmur instance refused the request on, when that is what happened. */
-    public readonly limit?: LimitNotice
+    public readonly limit?: LimitNotice,
+    /** A Murmur instance whose provider is down (`provider_unavailable`), when that is what happened. */
+    public readonly service?: ServiceNotice
   ) {
     super(message)
     this.name = 'SttError'
@@ -94,17 +101,19 @@ export function combineSignals(timeoutMs: number, external?: AbortSignal): Abort
 
 /**
  * Pull a human-readable message, an error code, any "available models" hint and the Murmur
- * gateway's structured limit out of an error body.
+ * gateway's structured limit or service notice out of an error body.
  */
 export function parseErrorBody(body: string): {
   message: string
   suggestedModels: string[]
   code?: string
   limit?: LimitNotice
+  service?: ServiceNotice
 } {
   let message = body.trim().slice(0, 500)
   let code: string | undefined
   let limit: LimitNotice | undefined
+  let service: ServiceNotice | undefined
   try {
     const json = JSON.parse(body) as {
       error?: { message?: string; code?: string | number } | string
@@ -117,7 +126,10 @@ export function parseErrorBody(body: string): {
     else if (typeof json.detail === 'string') message = json.detail
     if (typeof json.error === 'object' && typeof json.error?.code === 'string')
       code = json.error.code
-    if (typeof json.error === 'object') limit = parseLimitNotice(json.error, message) ?? undefined
+    if (typeof json.error === 'object') {
+      limit = parseLimitNotice(json.error, message) ?? undefined
+      service = parseServiceNotice(json.error, message) ?? undefined
+    }
   } catch {
     // not JSON
   }
@@ -129,19 +141,20 @@ export function parseErrorBody(body: string): {
       if (id) suggested.push(id)
     }
   }
-  return { message, suggestedModels: suggested, code, limit }
+  return { message, suggestedModels: suggested, code, limit, service }
 }
 
 /** Build the error for a non-2xx response from an OpenAI-style server. */
 export function errorFromResponse(status: number, body: string): SttError {
-  const { message, suggestedModels, code, limit } = parseErrorBody(body)
+  const { message, suggestedModels, code, limit, service } = parseErrorBody(body)
   return new SttError(
     message || `HTTP ${status}`,
     classifyStatus(status, message),
     status,
     suggestedModels,
     code,
-    limit
+    limit,
+    service
   )
 }
 

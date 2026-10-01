@@ -199,7 +199,70 @@ export const MURMUR_ERROR_CODES = new Set([
   'upstream_error',
   'upstream_auth',
   'upstream_busy',
+  // The provider behind the instance is down or not answering (see `ServiceNotice`).
+  'provider_unavailable',
   // Raised on the device before a request is made.
   'murmur_signed_out',
   'murmur_no_token'
 ])
+
+/**
+ * `error.code` of a gateway answer (HTTP 503) that says the provider behind Murmur's models is
+ * down, unreachable or out of time: not the account, not the device, nothing the user did. The
+ * gateway cuts such a request off within its own budget, so the app hears this long before its
+ * own request timeout and can say so calmly. Must match `GatewayErrorCode` in
+ * packages/backend/convex/lib/inference.ts.
+ */
+export const PROVIDER_UNAVAILABLE_CODE = 'provider_unavailable'
+
+/** The managed model a `provider_unavailable` answer is about. */
+export type MurmurService = 'speech' | 'formatting'
+
+/** The structured part of a `provider_unavailable` answer (`error.service`, `error.reason`, …). */
+export interface ServiceNotice {
+  service: MurmurService
+  /** `timeout`, `unreachable` or `unavailable`; `unknown` from an instance that did not say. */
+  reason: string
+  /** Seconds the gateway suggests waiting before asking again; null when it did not say. */
+  retryAfterSec: number | null
+  /** The gateway's own sentence. */
+  message: string
+}
+
+/**
+ * Read a service notice out of a gateway `error` object. Null for every other code, and for a body
+ * that only looks like one. `fallbackService` names the model the request was for, for an instance
+ * that sends the code without the field.
+ */
+export function parseServiceNotice(
+  source: unknown,
+  message?: string,
+  fallbackService: MurmurService = 'speech'
+): ServiceNotice | null {
+  if (!source || typeof source !== 'object') return null
+  const o = source as Record<string, unknown>
+  if (o.code !== PROVIDER_UNAVAILABLE_CODE) return null
+  const service: MurmurService =
+    o.service === 'speech' || o.service === 'formatting' ? o.service : fallbackService
+  const retryAfter = o.retryAfterSec
+  return {
+    service,
+    reason: typeof o.reason === 'string' && o.reason ? o.reason : 'unknown',
+    retryAfterSec:
+      typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.ceil(retryAfter)
+        : null,
+    message: message ?? (typeof o.message === 'string' ? o.message : '')
+  }
+}
+
+/** The two calm lines the pill shows for a service that is unavailable, the same on both apps. */
+export function describeServiceNotice(notice: ServiceNotice): { title: string; detail: string } {
+  return {
+    title: `Murmur's ${notice.service} service is unavailable right now`,
+    detail:
+      notice.service === 'speech'
+        ? 'Not your connection or your mic. Your recording is kept — try again in a moment.'
+        : 'Not your connection. Nothing was changed — try again in a moment.'
+  }
+}

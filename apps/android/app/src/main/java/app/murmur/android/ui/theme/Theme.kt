@@ -138,8 +138,17 @@ data class Paper(
     val stage: Color,
     /** Text on the stage. */
     val onStage: Color,
+    /**
+     * What dims the screen under the drawer, a sheet or a dialog: the scheme's scrim (tone 0 in
+     * both modes) at [ScrimAlpha], so the page always recedes into shadow and never washes toward
+     * white, whichever mode is on and whatever the ink colour is.
+     */
+    val scrim: Color,
     val isDark: Boolean
 )
+
+/** How much of the scrim's black shows through: the same in both modes. */
+const val ScrimAlpha = 0.4f
 
 /**
  * Map the Material roles onto the editorial ones. Light: rail tone 94, paper tone 96, card tone
@@ -164,6 +173,7 @@ fun paperFrom(scheme: ColorScheme, extras: MurmurColors, dark: Boolean): Paper =
     // The pill follows the mode, so its stage does too: near-black at night, keyboard grey by day.
     stage = if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainerHighest,
     onStage = if (dark) scheme.onSurface else scheme.onSurfaceVariant,
+    scrim = scheme.scrim.copy(alpha = ScrimAlpha),
     isDark = dark
 )
 

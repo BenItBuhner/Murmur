@@ -200,7 +200,7 @@ export function registerIpc(deps: IpcDeps): void {
   })
   ipcMain.on(IPC.overlayDismiss, () => overlay.dismiss())
   // The limit pill's ways forward. The message is waved away as the user acts on it: the account
-  // page opens in the browser, or the Models page comes up to connect their own provider.
+  // page opens in the browser, or the Speech model page comes up to connect their own provider.
   ipcMain.on(IPC.overlayOpenUrl, (_e, url: string) => {
     if (typeof url !== 'string' || !/^https:\/\//.test(url)) return
     void shell.openExternal(url)

@@ -2,52 +2,43 @@ import React, { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   BookA,
+  ChevronRight,
   Clock3,
   Home,
   Keyboard,
   Mic,
+  Palette,
+  RectangleHorizontal,
   Settings2,
   Sparkles,
   UserRound,
-  Waves,
-  Zap
+  Waves
 } from 'lucide-react'
 import type { OverlayState } from '@shared/types'
-import { SyncCard } from '@renderer/components/SyncBadge'
+import { syncLabel } from '@renderer/components/SyncBadge'
 import { Rolling, directionBetween, page, settle } from '@renderer/components/motion'
+import { useCloud } from '@renderer/hooks/useCloud'
+import { NAV, type Route } from '@renderer/lib/navigation'
 import { cn } from '@renderer/lib/utils'
 
-export type Route =
-  | 'home'
-  | 'history'
-  | 'dictionary'
-  | 'snippets'
-  | 'style'
-  | 'shortcuts'
-  | 'audio'
-  | 'providers'
-  | 'general'
-  | 'account'
+export type { Route } from '@renderer/lib/navigation'
 
-const NAV: Array<{
-  id: Route
-  label: string
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
-  group?: string
-  /** Only shown when the build talks to a Murmur cloud instance. */
-  cloud?: boolean
-}> = [
-  { id: 'home', label: 'Home', icon: Home },
-  { id: 'history', label: 'History', icon: Clock3 },
-  { id: 'dictionary', label: 'Dictionary', icon: BookA, group: 'Personalize' },
-  { id: 'snippets', label: 'Snippets', icon: Zap },
-  { id: 'style', label: 'Style', icon: Sparkles },
-  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard, group: 'Setup' },
-  { id: 'audio', label: 'Microphone', icon: Mic },
-  { id: 'providers', label: 'Models', icon: Waves },
-  { id: 'general', label: 'General', icon: Settings2 },
-  { id: 'account', label: 'Account', icon: UserRound, group: 'Cloud', cloud: true }
-]
+type Icon = React.ComponentType<{ className?: string; strokeWidth?: number }>
+
+/** The glyph beside each rail item; the structure itself is `NAV`. */
+const ICONS: Record<Route, Icon> = {
+  home: Home,
+  history: Clock3,
+  dictionary: BookA,
+  style: Sparkles,
+  providers: Waves,
+  shortcuts: Keyboard,
+  audio: Mic,
+  button: RectangleHorizontal,
+  appearance: Palette,
+  general: Settings2,
+  account: UserRound
+}
 
 interface Props {
   route: Route
@@ -61,7 +52,8 @@ interface Props {
 
 /**
  * The frame: a rail down the left one tone below the canvas (no rule between them), the page on
- * the right. The active section is a raised pill that glides between items.
+ * the right. The active section is a raised pill that glides between items. The rail's foot holds
+ * the account (the one place it is reached from) and the live state of the button.
  */
 export function Shell({
   route,
@@ -73,7 +65,6 @@ export function Shell({
   children
 }: Props): React.JSX.Element {
   const isWin = platform === 'win32'
-  const nav = NAV.filter((item) => !item.cloud || showAccount)
   const direction = useDirection(route)
   // A new page starts at its top, whatever the last one was scrolled to.
   const scroller = useRef<HTMLDivElement>(null)
@@ -83,7 +74,7 @@ export function Shell({
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-56 shrink-0 flex-col bg-sidebar">
+      <aside className="flex w-60 shrink-0 flex-col bg-sidebar">
         <div className={cn('flex items-center px-6', isWin ? 'h-10 drag-region' : 'h-16')}>
           <Wordmark />
         </div>
@@ -92,9 +83,10 @@ export function Shell({
           z-index inside the nav's own stacking context, so mid-flight it passes under every label
           rather than over the ones it crosses.
         */}
-        <nav className="isolate flex-1 space-y-px px-3 pt-3">
-          {nav.map((item) => {
+        <nav className="isolate flex-1 space-y-px overflow-y-auto px-3 pt-3">
+          {NAV.map((item) => {
             const active = route === item.id
+            const Icon = ICONS[item.id]
             return (
               <React.Fragment key={item.id}>
                 {item.group && <div className="eyebrow px-3 pb-2 pt-6">{item.group}</div>}
@@ -114,18 +106,20 @@ export function Shell({
                       aria-hidden
                     />
                   )}
-                  <item.icon
+                  <Icon
                     className="size-4 opacity-80 transition-colors duration-200"
                     strokeWidth={1.75}
                   />
-                  <span>{item.label}</span>
+                  <span className="truncate">{item.label}</span>
                 </button>
               </React.Fragment>
             )
           })}
         </nav>
         <div className="space-y-2 p-3">
-          {showAccount && <SyncCard />}
+          {showAccount && (
+            <AccountCard active={route === 'account'} onOpen={() => onNavigate('account')} />
+          )}
           <StatusCard state={state} enabled={enabled} />
         </div>
       </aside>
@@ -151,8 +145,8 @@ export function Shell({
   )
 }
 
-/** Sidebar order, top to bottom; decides which way a page transition leans. */
-const ORDER: readonly Route[] = NAV.map((n) => n.id)
+/** Sidebar order, top to bottom, the account last; decides which way a page transition leans. */
+const ORDER: readonly Route[] = [...NAV.map((n) => n.id), 'account']
 
 /**
  * Which way the page just chosen sits from the one before it in the sidebar: below (1), above
@@ -166,7 +160,58 @@ function useDirection(route: Route): number {
   return directionBetween(ORDER, from, route)
 }
 
-/** The rail's foot: a small raised card with the live state of the button. */
+/**
+ * The rail's foot, cloud builds only: who is signed in and how the sync stands, the way the
+ * Android drawer's foot shows it. Clicking it opens the Account page; it is the only way there.
+ */
+function AccountCard({
+  active,
+  onOpen
+}: {
+  active: boolean
+  onOpen: () => void
+}): React.JSX.Element | null {
+  const { enabled, status, clerk } = useCloud()
+  if (!enabled || !status || status.phase === 'disabled') return null
+  const { label, hint } = syncLabel(status)
+  const signedIn = status.signedIn || clerk.signedIn
+  const name = status.user?.name?.trim() || clerk.name?.trim() || null
+  const email = status.user?.email ?? clerk.email
+  const initial = (name ?? email ?? '?').charAt(0).toUpperCase()
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'surface-raised flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left transition-[background-color,box-shadow,transform] duration-200 hover:bg-accent active:scale-[0.985]',
+        active && 'bg-accent'
+      )}
+      title={signedIn ? `${label}: ${hint}` : hint}
+    >
+      <span
+        className={cn(
+          'flex size-7 shrink-0 items-center justify-center rounded-full text-caption font-medium',
+          signedIn ? 'bg-primary text-primary-foreground' : 'well text-muted-foreground'
+        )}
+        aria-hidden
+      >
+        {signedIn ? initial : <UserRound className="size-3.5" strokeWidth={1.75} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-note font-medium">
+          {signedIn ? (name ?? email ?? 'Your account') : 'Not signed in'}
+        </span>
+        <span className="block truncate text-caption text-muted-foreground">
+          {signedIn ? label : 'Sign in to sync'}
+        </span>
+      </span>
+      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+    </button>
+  )
+}
+
+/** The rail's foot: a small raised card with the live state of the button; clicking it starts or stops a hands-free dictation. */
 function StatusCard({
   state,
   enabled

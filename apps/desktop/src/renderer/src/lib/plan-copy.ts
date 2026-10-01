@@ -40,13 +40,13 @@ export function sourceCaption(inference: PlanFacts): string {
  */
 export function planDescription(inference: InferenceView): string {
   if (!inference.managedAvailable)
-    return 'This Murmur instance does not provide models of its own; connect your provider under Models.'
+    return 'This Murmur instance does not provide models of its own; connect your provider under Speech model.'
   if (!inference.status) return 'Waiting for your account status…'
   const selling = inference.billingEnabled
   const stopped = transcriptionPaused(inference.meters)
   switch (inference.planState) {
     case 'testing':
-      return 'This Murmur server is in private testing: its speech and formatting models are not open to this account yet. Connect your own provider under Models to dictate meanwhile; your dictionary, snippets, style and stats keep syncing.'
+      return 'This Murmur server is in private testing: its speech and formatting models are not open to this account yet. Connect your own provider under Speech model to dictate meanwhile; your dictionary, snippets, style and stats keep syncing.'
     case 'unlimited':
       return "This account is on the server's list: Murmur's speech and formatting models without an allowance to run out of."
     case 'trial':
@@ -55,7 +55,7 @@ export function planDescription(inference: InferenceView): string {
         : 'Unlimited dictation within fair use: the meters below show how far this month has come.'
     case 'pro':
       if (stopped)
-        return `Unlimited dictation within fair use. This month's ${formatAudioSeconds(stopped.allowed)} are used up, so Murmur's speech model rests until ${formatResetTime(stopped.resetsAt).replace(/^on /, '')}; your own provider under Models keeps dictating meanwhile.`
+        return `Unlimited dictation within fair use. This month's ${formatAudioSeconds(stopped.allowed)} are used up, so Murmur's speech model rests until ${formatResetTime(stopped.resetsAt).replace(/^on /, '')}; your own provider under Speech model keeps dictating meanwhile.`
       if (inference.formattingPaused)
         return 'Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules.'
       return selling
@@ -63,8 +63,8 @@ export function planDescription(inference: InferenceView): string {
         : 'Unlimited dictation within fair use: the meters below show how far this month has come.'
     default:
       return selling
-        ? 'A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Models.'
-        : 'A weekly allowance of words and speech, a handful of dictations a day, clips up to a minute. Connect your own provider under Models to dictate without them.'
+        ? 'A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Speech model.'
+        : 'A weekly allowance of words and speech, a handful of dictations a day, clips up to a minute. Connect your own provider under Speech model to dictate without them.'
   }
 }
 
@@ -79,7 +79,7 @@ export function planLine(inference: InferenceView): string | null {
   const selling = inference.billingEnabled
   if (inference.planState === 'testing')
     return inference.routing.stt === 'murmur'
-      ? "Murmur's models are in private testing · connect your own under Models"
+      ? "Murmur's models are in private testing · connect your own under Speech model"
       : null
   if (inference.planState === 'unlimited') return null
   if (inference.routing.stt !== 'murmur' && inference.planState !== 'trial') return null

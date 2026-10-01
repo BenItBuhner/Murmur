@@ -46,7 +46,7 @@ export function ProvidersPage({
     <div className="space-y-section">
       {!embedded && (
         <PageHeader
-          title="Models"
+          title="Speech model"
           description={
             inference.offersMurmur
               ? 'Where your audio goes to become text: the models that come with your account, or a provider you run or pay for yourself.'

@@ -16,16 +16,19 @@ export function SiteHeader() {
           <Wordmark />
         </Link>
 
+        {/* Download is the header's primary button, so the link list leaves it out; the footer keeps the full list. */}
         <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
-          {navLinks().map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="rounded-full px-3.5 py-1.5 text-note font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
-            >
-              {item.label}
-            </Link>
-          ))}
+          {navLinks()
+            .filter((item) => item.href !== '/download')
+            .map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="rounded-full px-3.5 py-1.5 text-note font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
+              >
+                {item.label}
+              </Link>
+            ))}
         </nav>
 
         <div className="flex items-center gap-2">

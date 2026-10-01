@@ -17,6 +17,28 @@ export function formatNumber(n: number): string {
   return new Intl.NumberFormat('en-US').format(n)
 }
 
+/** The typing speed the apps compare dictation against (Home's "Time saved"). */
+export const TYPING_WPM = 40
+
+/** Words per minute of speech across every dictation, as the apps' Home shows it; 0 before anything was said. */
+export function wordsPerMinute(totalWords: number, totalSpeechMs: number): number {
+  const minutes = totalSpeechMs / 60_000
+  return minutes > 0 ? Math.round(totalWords / minutes) : 0
+}
+
+/** How much longer typing those words at [TYPING_WPM] would have taken than saying them; never negative. */
+export function timeSavedMs(totalWords: number, totalSpeechMs: number): number {
+  return Math.max(0, (totalWords / TYPING_WPM) * 60_000 - totalSpeechMs)
+}
+
+/** `48 s`, `12 min`, `1.5 h`: the short duration the apps print for time saved. */
+export function formatDurationShort(ms: number): string {
+  const s = ms / 1000
+  if (s < 60) return `${Math.round(s)} s`
+  if (s < 3600) return `${Math.round(s / 60)} min`
+  return `${(s / 3600).toFixed(1)} h`
+}
+
 /** `15 Aug 2026`, stable across server and client (fixed locale and UTC). */
 export function formatDate(iso: string): string {
   const date = new Date(iso)

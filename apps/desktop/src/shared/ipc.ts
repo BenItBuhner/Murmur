@@ -82,7 +82,7 @@ export const IPC = {
   overlayDismiss: 'overlay:dismiss',
   /** The pill's Upgrade button: open the account page in the browser (overlay -> main). */
   overlayOpenUrl: 'overlay:open-url',
-  /** The pill's "use my own provider" button: open the Models page (overlay -> main). */
+  /** The pill's "use my own provider" button: open the Speech model page (overlay -> main). */
   overlayOpenModels: 'overlay:open-models',
   /** The pointer entered or left the pill; main makes the window clickable only while it is over. */
   overlayHover: 'overlay:hover',

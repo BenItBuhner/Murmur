@@ -97,8 +97,7 @@ fun OnboardingScreen(
             previous = (index - 1).takeIf { it >= 0 },
             depth = { it },
             onBack = { if (index > 0) index-- },
-            modifier = Modifier.weight(1f),
-            motion = BackMotion.PAGE
+            modifier = Modifier.weight(1f)
         ) { i ->
             Column(
                 Modifier

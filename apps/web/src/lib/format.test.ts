@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   formatBytes,
   formatDate,
+  formatDurationShort,
   formatPeriod,
   formatRelative,
-  usagePeriod
+  timeSavedMs,
+  usagePeriod,
+  wordsPerMinute
 } from './format'
 
 describe('formatBytes', () => {
@@ -35,5 +38,21 @@ describe('dates and periods', () => {
     expect(formatRelative(now - 5 * 60_000, now)).toBe('5 min ago')
     expect(formatRelative(now - 3 * 3_600_000, now)).toBe('3 h ago')
     expect(formatRelative(now - 2 * 86_400_000, now)).toBe('2 d ago')
+  })
+})
+
+describe('the account stats, the same figures the apps show on Home', () => {
+  it('derives pace and time saved from the account totals', () => {
+    // 1200 words in 10 minutes of speech: 120 wpm, against 30 minutes of typing at 40 wpm.
+    expect(wordsPerMinute(1200, 10 * 60_000)).toBe(120)
+    expect(timeSavedMs(1200, 10 * 60_000)).toBe(20 * 60_000)
+    // Nothing said yet, or slower than typing: no pace, nothing saved, never a negative.
+    expect(wordsPerMinute(0, 0)).toBe(0)
+    expect(timeSavedMs(10, 60_000)).toBe(0)
+  })
+  it('prints durations the way the apps do', () => {
+    expect(formatDurationShort(48_000)).toBe('48 s')
+    expect(formatDurationShort(12 * 60_000)).toBe('12 min')
+    expect(formatDurationShort(1.5 * 3_600_000)).toBe('1.5 h')
   })
 })

@@ -365,7 +365,7 @@ export function StylePage(): React.JSX.Element {
 
       <Section
         title="Per-app rules"
-        description="Match on the window title or process name; the first matching rule wins. Anything left on “Default” follows the settings above, Speed the Models page (Fast: faster speech model and no AI formatting in that app)."
+        description="Match on the window title or process name; the first matching rule wins. Anything left on “Default” follows the settings above, Speed the Speech model page (Fast: faster speech model and no AI formatting in that app)."
         actions={
           <Button variant="outline" size="sm" onClick={addRule}>
             <Plus /> Add rule

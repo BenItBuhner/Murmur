@@ -12,7 +12,13 @@ import { SyncBadge } from '@renderer/components/SyncBadge'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { uid } from '@renderer/lib/utils'
+import { SnippetsSection } from './Snippets'
 
+/**
+ * Everything the transcriber should know about how you talk: the words it must get right and the
+ * cues that expand into longer text. One page, as on Android, with the cleanup preview that
+ * exercises both at the bottom.
+ */
 export function DictionaryPage(): React.JSX.Element {
   const { settings, patch } = useSettings()
   const { status } = useCloud()
@@ -68,94 +74,106 @@ export function DictionaryPage(): React.JSX.Element {
   return (
     <div className="space-y-section">
       <PageHeader
-        title="Dictionary"
+        title="Dictionary and snippets"
         description={
           synced
-            ? 'Names, jargon, and spellings the transcriber should get right. Saved to your account and shared with every device you sign in on.'
-            : 'Names, jargon, and spellings the transcriber should get right. Words are sent to the speech model as a hint and enforced in the text afterwards.'
+            ? 'Names, jargon and spellings the transcriber should get right, and short cues that paste longer text. Saved to your account and shared with every device you sign in on.'
+            : 'Names, jargon and spellings the transcriber should get right, and short cues that paste longer text. Words are sent to the speech model as a hint and enforced in the text afterwards.'
         }
         actions={<SyncBadge />}
       />
 
-      <div className="surface-raised rounded-xl p-card">
-        <div className="grid gap-4 md:grid-cols-[1fr_1.4fr]">
-          <div className="space-y-1.5">
-            <Label htmlFor="dict-word">Word or phrase</Label>
-            <Input
-              id="dict-word"
-              placeholder="e.g. Wispr Flow"
-              value={word}
-              onChange={(e) => setWord(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void add()}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="dict-alias">Sounds like (optional)</Label>
-            <Input
-              id="dict-alias"
-              placeholder="whisper flow, wisper flow"
-              value={aliases}
-              onChange={(e) => setAliases(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void add()}
-            />
-          </div>
+      <section className="space-y-3">
+        <div>
+          <h2 className="eyebrow">Dictionary</h2>
+          <p className="mt-2 text-note text-muted-foreground">
+            Words and phrases the speech model gets wrong on its own, with the ways they tend to
+            come out.
+          </p>
         </div>
-        <div className="mt-4 flex items-center justify-between">
-          <label className="flex items-center gap-2 text-note text-muted-foreground">
-            <Switch checked={fuzzy} onCheckedChange={setFuzzy} /> Also fix near-misses (one or two
-            letters off)
-          </label>
-          <Button onClick={add} disabled={!word.trim()}>
-            <Plus /> Add word
-          </Button>
-        </div>
-      </div>
 
-      {settings.dictionary.length === 0 ? (
-        <Empty
-          icon={<BookA />}
-          title="Your dictionary is empty"
-          description="Add the names of people, products and tools you say often. Capitalized names are fuzzy-matched automatically."
-        />
-      ) : (
-        /* A list card: each word is a row one radius step in from the card (20 - 8 = 12). */
-        <div className="surface-raised rounded-xl p-card-tight">
-          {settings.dictionary.map((d) => (
-            <div
-              key={d.id}
-              className="flex items-center gap-4 rounded-md px-3 py-2.5 transition-colors hover:bg-accent/60"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">{d.word}</div>
-                {d.aliases.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {d.aliases.map((a) => (
-                      <Badge key={a} variant="secondary">
-                        {a}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <label
-                className="flex items-center gap-2 text-meta text-muted-foreground"
-                title="Correct near-miss spellings too"
-              >
-                <Switch checked={d.fuzzy} onCheckedChange={(v) => void toggleFuzzy(d.id, v)} />{' '}
-                fuzzy
-              </label>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => void remove(d.id)}
-                title="Remove"
-              >
-                <Trash2 />
-              </Button>
+        <div className="surface-raised rounded-xl p-card">
+          <div className="grid gap-4 md:grid-cols-[1fr_1.4fr]">
+            <div className="space-y-1.5">
+              <Label htmlFor="dict-word">Word or phrase</Label>
+              <Input
+                id="dict-word"
+                placeholder="e.g. Wispr Flow"
+                value={word}
+                onChange={(e) => setWord(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void add()}
+              />
             </div>
-          ))}
+            <div className="space-y-1.5">
+              <Label htmlFor="dict-alias">Sounds like (optional)</Label>
+              <Input
+                id="dict-alias"
+                placeholder="whisper flow, wisper flow"
+                value={aliases}
+                onChange={(e) => setAliases(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void add()}
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-between">
+            <label className="flex items-center gap-2 text-note text-muted-foreground">
+              <Switch checked={fuzzy} onCheckedChange={setFuzzy} /> Also fix near-misses (one or two
+              letters off)
+            </label>
+            <Button onClick={add} disabled={!word.trim()}>
+              <Plus /> Add word
+            </Button>
+          </div>
         </div>
-      )}
+
+        {settings.dictionary.length === 0 ? (
+          <Empty
+            icon={<BookA />}
+            title="Your dictionary is empty"
+            description="Add the names of people, products and tools you say often. Capitalized names are fuzzy-matched automatically."
+          />
+        ) : (
+          /* A list card: each word is a row one radius step in from the card (20 - 8 = 12). */
+          <div className="surface-raised rounded-xl p-card-tight">
+            {settings.dictionary.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center gap-4 rounded-md px-3 py-2.5 transition-colors hover:bg-accent/60"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{d.word}</div>
+                  {d.aliases.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {d.aliases.map((a) => (
+                        <Badge key={a} variant="secondary">
+                          {a}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <label
+                  className="flex items-center gap-2 text-meta text-muted-foreground"
+                  title="Correct near-miss spellings too"
+                >
+                  <Switch checked={d.fuzzy} onCheckedChange={(v) => void toggleFuzzy(d.id, v)} />{' '}
+                  fuzzy
+                </label>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => void remove(d.id)}
+                  title="Remove"
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <SnippetsSection />
 
       <section className="space-y-3">
         <div>

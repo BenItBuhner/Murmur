@@ -15,28 +15,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
@@ -50,8 +47,8 @@ import app.murmur.android.keyboard.WidthClass
 import app.murmur.android.ui.components.ArrowLeft
 import app.murmur.android.ui.components.Chevron
 import app.murmur.android.ui.components.Dot
-import app.murmur.android.ui.components.Glyph
 import app.murmur.android.ui.components.GlyphButton
+import app.murmur.android.ui.components.Glyph
 import app.murmur.android.ui.components.GlyphIcon
 import app.murmur.android.ui.components.Overline
 import app.murmur.android.ui.components.PageMargin
@@ -61,6 +58,7 @@ import app.murmur.android.ui.theme.Layout
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
 import app.murmur.android.ui.theme.Space
+import app.murmur.android.ui.theme.surface
 import kotlinx.coroutines.launch
 
 /**
@@ -72,17 +70,6 @@ sealed interface TopNav {
     data class Back(val onBack: () -> Unit) : TopNav
     data object None : TopNav
 }
-
-/** One destination in the drawer, grouped the way the desktop sidebar is. */
-data class Section(
-    val route: Route,
-    val label: String,
-    val glyph: Glyph,
-    /** Starts a new group with this heading. */
-    val group: String? = null,
-    /** Something there needs the user (setup unfinished, an update ready). */
-    val attention: Boolean = false
-)
 
 /**
  * The app's frame once set up: a drawer down the left with every section, opened by the button at
@@ -109,7 +96,7 @@ fun AppShell(
                     drawerContentColor = c.ink,
                     drawerTonalElevation = 0.dp
                 ) {
-                    DrawerBody(sections, navigator.current, onSelect = navigator::select, footer = { footer(navigator::select) })
+                    DrawerBody(sections, navigator.section, onSelect = navigator::select, footer = { footer(navigator::select) })
                 }
             }
         ) {
@@ -121,30 +108,31 @@ fun AppShell(
         return
     }
 
-    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val drawer = rememberMurmurDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val open: () -> Unit = { scope.launch { drawer.open() } }
     val select: (Route) -> Unit = { route ->
         navigator.select(route)
         scope.launch { drawer.close() }
     }
+    val width = (LocalConfiguration.current.screenWidthDp.dp - 64.dp).coerceIn(240.dp, 320.dp)
 
-    ModalNavigationDrawer(
-        drawerState = drawer,
+    MurmurDrawer(
+        state = drawer,
+        drawerWidth = width,
         // Only top-level screens open the drawer with a drag; a pushed screen keeps the edge for back.
         gesturesEnabled = drawer.isOpen || navigator.entry.topLevel,
-        scrimColor = c.ink.copy(alpha = if (c.isDark) 0.5f else 0.28f),
         drawerContent = {
             Drawer(
-                drawerState = drawer,
                 sections = sections,
-                current = navigator.current,
+                current = navigator.section,
                 onSelect = select,
                 footer = { footer(select) }
             )
         }
     ) {
-        NavHost(navigator) { entry ->
+        // While the drawer is open, back is its to close; the stack's own handler stands down.
+        NavHost(navigator, backEnabled = !drawer.isOpen) { entry ->
             val nav = if (entry.topLevel) TopNav.Menu(open) else TopNav.Back { navigator.back() }
             content(entry, nav)
         }
@@ -152,14 +140,12 @@ fun AppShell(
 }
 
 /**
- * The sheet itself: wordmark, grouped sections, then whatever the caller puts at the bottom.
- * Material's sheet underneath gives it the predictive back gesture (it shrinks under the finger
- * and closes on release) and the "navigation menu" semantics; the surface is ours: a floating
- * layer at the sheet radius, lifted by elevation rather than edged.
+ * The sheet itself: wordmark, grouped sections, then whatever the caller puts at the bottom. A
+ * floating layer at the sheet radius, lifted by elevation rather than edged; [MurmurDrawer] moves
+ * it with the finger and gives it the "navigation menu" semantics.
  */
 @Composable
 private fun Drawer(
-    drawerState: DrawerState,
     sections: List<Section>,
     current: Route,
     onSelect: (Route) -> Unit,
@@ -167,24 +153,19 @@ private fun Drawer(
 ) {
     val c = Murmur.colors
     val shape = RoundedCornerShape(topEnd = Radii.sheet, bottomEnd = Radii.sheet)
-    val width = (LocalConfiguration.current.screenWidthDp.dp - 64.dp).coerceIn(240.dp, 320.dp)
-    ModalDrawerSheet(
-        drawerState = drawerState,
-        modifier = Modifier
-            .width(width)
+    Column(
+        Modifier
             .fillMaxHeight()
-            .shadow(Elevation.floating, shape, clip = false)
-            .testTag("drawer"),
-        drawerShape = shape,
-        drawerContainerColor = c.floating,
-        drawerContentColor = c.ink,
-        drawerTonalElevation = 0.dp
+            .surface(Elevation.floating, shape, c.floating)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .testTag("drawer")
     ) {
         DrawerBody(sections, current, onSelect, footer)
     }
 }
 
-/** What both drawers hold: the wordmark, the grouped sections, the footer. */
+/** What both drawers hold: the wordmark, the sections, the footer. */
 @Composable
 private fun ColumnScope.DrawerBody(
     sections: List<Section>,
@@ -208,6 +189,8 @@ private fun ColumnScope.DrawerBody(
         for (section in sections) {
             if (section.group != null) {
                 Overline(section.group, Modifier.padding(start = 14.dp, top = 24.dp, bottom = 8.dp))
+            } else if (section.separated) {
+                Spacer(Modifier.height(20.dp))
             }
             DrawerItem(section, selected = section.route == current, onClick = { onSelect(section.route) })
         }
@@ -252,7 +235,7 @@ private fun DrawerItem(section: Section, selected: Boolean, onClick: () -> Unit)
 }
 
 /**
- * A line at the bottom of the drawer, like the desktop's status card: a dot, a label, a hint, and a
+ * A line at the bottom of the drawer, like the desktop's account card: a dot, a label, a hint, and a
  * chevron when tapping it leads somewhere. A well sunk into the sheet, one radius step in from its
  * corner (sheet 24 - inset 12 = 12).
  */

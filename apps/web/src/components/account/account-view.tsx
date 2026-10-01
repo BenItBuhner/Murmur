@@ -24,7 +24,13 @@ import {
   type BillingInterval
 } from '@/lib/entitlements'
 import { billingEnabled } from '@/lib/env'
-import { formatNumber, formatRelative } from '@/lib/format'
+import {
+  formatDurationShort,
+  formatNumber,
+  formatRelative,
+  timeSavedMs,
+  wordsPerMinute
+} from '@/lib/format'
 import { PRICING } from '@/lib/pricing'
 
 const MINUTE = 60_000
@@ -241,12 +247,14 @@ function ProfileCard({
   )
 }
 
+/* The same four figures the apps put on Home, from the account's totals. */
 function StatsCard({ stats, className }: { stats: StatsDto | null; className?: string }) {
-  const minutes = stats ? Math.round(stats.totalSpeechMs / 60_000) : 0
+  const wpm = stats ? wordsPerMinute(stats.totalWords, stats.totalSpeechMs) : 0
+  const saved = stats ? timeSavedMs(stats.totalWords, stats.totalSpeechMs) : 0
   const items = [
     { label: 'Words dictated', value: stats ? formatNumber(stats.totalWords) : '—' },
-    { label: 'Dictations', value: stats ? formatNumber(stats.totalSessions) : '—' },
-    { label: 'Minutes spoken', value: stats ? formatNumber(minutes) : '—' },
+    { label: 'Speaking pace', value: wpm > 0 ? `${wpm} wpm` : '—' },
+    { label: 'Time saved', value: saved > 0 ? formatDurationShort(saved) : '—' },
     { label: 'Day streak', value: stats ? formatNumber(stats.streakDays) : '—' }
   ]
   return (
@@ -261,9 +269,10 @@ function StatsCard({ stats, className }: { stats: StatsDto | null; className?: s
           </div>
         ))}
       </dl>
-      {stats?.lastSessionDay && (
+      {stats && (
         <p className="mt-3 text-meta text-muted-foreground">
-          Last dictation on {stats.lastSessionDay}.
+          {formatNumber(stats.totalSessions)} dictation{stats.totalSessions === 1 ? '' : 's'}
+          {stats.lastSessionDay ? `, the last on ${stats.lastSessionDay}.` : '.'}
         </p>
       )}
     </Surface>

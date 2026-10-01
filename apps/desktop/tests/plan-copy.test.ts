@@ -111,7 +111,7 @@ describe('the Account page sentence', () => {
     expect(planDescription(view({ planState: 'free' }))).toMatch(/Upgrade for unlimited dictation/)
     const free = planDescription(view({ planState: 'free', billingEnabled: false }))
     expect(free).not.toMatch(/[Uu]pgrade|Pro/)
-    expect(free).toMatch(/Connect your own provider under Models/)
+    expect(free).toMatch(/Connect your own provider under Speech model/)
     expect(planDescription(view({ planState: 'pro', plan: 'pro' }))).toMatch(
       /Invoices, the card and cancellation/
     )
@@ -163,7 +163,7 @@ describe('the Home line', () => {
 
   it('points a testing account at its own provider, and says nothing for an unlimited one', () => {
     expect(planLine(view({ planState: 'testing', plan: 'testing', billingEnabled: false }))).toBe(
-      "Murmur's models are in private testing · connect your own under Models"
+      "Murmur's models are in private testing · connect your own under Speech model"
     )
     // Already on its own provider: nothing to say.
     expect(

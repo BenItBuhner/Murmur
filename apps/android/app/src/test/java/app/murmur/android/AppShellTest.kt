@@ -6,11 +6,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
+import androidx.compose.ui.geometry.Offset
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.ui.AppShell
 import app.murmur.android.ui.Navigator
@@ -120,15 +125,41 @@ class AppShellTest {
     @Test
     fun `a pushed screen wears the back arrow, and the arrow pops it`() {
         show()
-        compose.runOnUiThread { navigator.open(Route.STYLE) }
+        compose.runOnUiThread { navigator.open(Route.LANGUAGE) }
         compose.waitForIdle()
-        compose.onNodeWithText("Screen STYLE").assertIsDisplayed()
+        compose.onNodeWithText("Screen LANGUAGE").assertIsDisplayed()
         compose.onNodeWithText("back").assertIsDisplayed()
 
         compose.onNodeWithContentDescription("Back").performClick()
         compose.waitForIdle()
         assertEquals(listOf(Route.HOME), navigator.stack)
         compose.onNodeWithText("Screen HOME").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a section pushed from home still wears the menu button, and the drawer marks it`() {
+        show()
+        compose.runOnUiThread { navigator.open(Route.STYLE) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Screen STYLE").assertIsDisplayed()
+        compose.onNodeWithText("menu").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Sections").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Style").assertIsDisplayed().assertIsSelected()
+        compose.onNodeWithText("Home").assertIsNotSelected()
+    }
+
+    @Test
+    fun `the scrim behind the open drawer is the theme's scrim, dark in both modes`() {
+        show()
+        compose.onNodeWithContentDescription("Sections").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Close navigation menu").assertIsDisplayed()
+        // Tapping the scrim, beside the sheet, closes the drawer without touching the stack.
+        compose.onNodeWithContentDescription("Close navigation menu").performTouchInput { click(Offset(width - 10f, height / 2f)) }
+        compose.waitForIdle()
+        compose.onNodeWithText("PERSONALIZE").assertIsNotDisplayed()
+        assertEquals(listOf(Route.HOME), navigator.stack)
     }
 
     @Test

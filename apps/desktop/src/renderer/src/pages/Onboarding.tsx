@@ -178,8 +178,8 @@ export function Onboarding(): React.JSX.Element {
                 {sttOk && (
                   <p className="text-note text-success">
                     {murmurModels
-                      ? 'Working. You can switch to your own provider any time under Models.'
-                      : 'Working. You can tweak fallback models later under Models.'}
+                      ? 'Working. You can switch to your own provider any time under Speech model.'
+                      : 'Working. You can tweak fallback models later under Speech model.'}
                   </p>
                 )}
               </div>

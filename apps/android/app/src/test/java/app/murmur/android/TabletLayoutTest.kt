@@ -9,6 +9,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.filterToOne
+import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -29,8 +32,9 @@ import app.murmur.android.ui.KeyboardScreen
 import app.murmur.android.ui.LocalInferenceView
 import app.murmur.android.ui.Navigator
 import app.murmur.android.ui.Route
-import app.murmur.android.ui.Section
-import app.murmur.android.ui.components.Glyph
+import app.murmur.android.ui.SettingsScreen
+import app.murmur.android.ui.drawerSections
+import app.murmur.android.ui.settingsEntries
 import app.murmur.android.ui.theme.Layout
 import app.murmur.android.ui.theme.MurmurTheme
 import org.junit.Assert.assertEquals
@@ -62,12 +66,12 @@ class TabletLayoutTest {
     private lateinit var navigator: Navigator
     private lateinit var store: SettingsStore
 
-    private val sections = listOf(
-        Section(Route.HOME, "Home", Glyph.HOME),
-        Section(Route.HISTORY, "History", Glyph.HISTORY),
-        Section(Route.BUTTON, "Dictation button", Glyph.BUTTON, group = "Setup"),
-        Section(Route.KEYBOARD, "Keyboard", Glyph.KEYBOARD),
-        Section(Route.MODEL, "Speech model", Glyph.MODEL)
+    private val sections = drawerSections(settingsAttention = false)
+    private val entries = settingsEntries(
+        model = "Groq · whisper-large-v3-turbo", modelReady = true, language = "Auto-detect",
+        button = "Shape, position, sounds and haptics", keyboard = "Hold Ctrl + Meta to dictate",
+        appearance = "Follows the system · coral", permissions = "All 3 allowed", permissionsGranted = true,
+        updates = "Murmur ${BuildConfig.VERSION_NAME}", updateReady = false
     )
 
     private val ready = InferenceView(
@@ -90,6 +94,7 @@ class TabletLayoutTest {
                     AppShell(navigator, sections, footer = { Text("Murmur ${BuildConfig.VERSION_NAME}") }) { entry, nav ->
                         when (entry.route) {
                             Route.KEYBOARD -> KeyboardScreen(store, settings, nav)
+                            Route.SETTINGS -> SettingsScreen(entries, nav, onOpen = navigator::open)
                             else -> HomeScreen(
                                 CloudConfig.OFF, settings, signedIn = false, firstName = "Bennett", syncStatus = null,
                                 nav = nav, onOpen = navigator::open, howTo = "hold Ctrl + Meta to dictate"
@@ -105,7 +110,7 @@ class TabletLayoutTest {
     @Test
     fun `the drawer is a rail, the menu button is gone, and the content is capped and centred`() {
         compose.onNodeWithTag("drawer").assertIsDisplayed()
-        compose.onNodeWithText("Dictation button").assertIsDisplayed()
+        compose.onNodeWithText("Settings").assertIsDisplayed()
         compose.onNodeWithContentDescription("Sections").assertDoesNotExist()
         // Home: the greeting sits beside the rail, inside the capped column.
         val rail = compose.onNodeWithTag("drawer").getBoundsInRoot()
@@ -115,17 +120,32 @@ class TabletLayoutTest {
         assertTrue("greeting starts at ${greeting.left}, content column at $contentLeft", (greeting.left - contentLeft - 24.dp).value in -2f..2f)
         save("tablet-home.png")
 
-        // Keyboard: chosen from the rail, still no menu button, the heading in the same column.
-        compose.onNodeWithText("Keyboard").performClick()
+        // Settings: chosen from the rail, still no menu button, its rows in the same column.
+        compose.onNodeWithText("Settings").performClick()
         compose.waitForIdle()
-        assertEquals(listOf(Route.HOME, Route.KEYBOARD), navigator.stack)
+        assertEquals(listOf(Route.HOME, Route.SETTINGS), navigator.stack)
         compose.onNodeWithContentDescription("Sections").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Back").assertDoesNotExist()
+        compose.onNodeWithText("Speech model").assertIsDisplayed()
+        save("tablet-settings.png")
+
+        // Keyboard: a row on Settings, so it wears a back arrow even beside the rail; the heading in the same column.
+        compose.onNodeWithTag("settings-row-KEYBOARD").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(Route.HOME, Route.SETTINGS, Route.KEYBOARD), navigator.stack)
+        compose.onNodeWithContentDescription("Back").assertIsDisplayed()
         compose.onNodeWithText("Push to talk").assertIsDisplayed()
-        val heading = compose.onAllNodesWithText("Keyboard")[1].getBoundsInRoot()
+        val heading = compose.onAllNodesWithText("Keyboard")[0].getBoundsInRoot()
         assertTrue("heading starts at ${heading.left}", (heading.left - contentLeft - 24.dp).value in -2f..2f)
         val description = compose.onAllNodesWithText("With a keyboard attached", substring = true)[0].getBoundsInRoot()
         assertTrue("description is ${description.width} wide", description.width <= Layout.contentMaxWidth - 48.dp + 1.dp)
         save("tablet-keyboard.png")
+
+        // Back from the page lands on Settings, which the rail still marks.
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(Route.HOME, Route.SETTINGS), navigator.stack)
+        compose.onAllNodesWithText("Settings").filterToOne(isSelectable()).assertIsSelected()
     }
 
     /** Draw the activity's window as the user would see it. */

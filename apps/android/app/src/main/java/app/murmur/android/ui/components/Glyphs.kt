@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  */
 enum class Glyph {
     MENU, HOME, HISTORY, DICTIONARY, STYLE, BUTTON, KEYBOARD, MODEL, LANGUAGE, APPEARANCE, PERMISSIONS, UPDATES,
-    TRY_IT, ACCOUNT, WORDS, PACE, TIME, STREAK, SEARCH
+    TRY_IT, ACCOUNT, SETTINGS, WORDS, PACE, TIME, STREAK, SEARCH
 }
 
 @Composable
@@ -157,6 +157,15 @@ fun DrawScope.draw(glyph: Glyph, color: Color) {
                 quadraticTo(w * 0.22f, h * 0.58f, w * 0.5f, h * 0.58f)
                 quadraticTo(w * 0.78f, h * 0.58f, w * 0.78f, h * 0.82f)
             }
+        }
+        Glyph.SETTINGS -> {
+            // Two sliders with their knobs offset: the desktop sidebar's Settings glyph.
+            line(color, 0.18f, 0.36f, 0.26f, 0.36f)
+            ring(color, 0.36f, 0.36f, 0.08f)
+            line(color, 0.46f, 0.36f, 0.82f, 0.36f)
+            line(color, 0.18f, 0.64f, 0.54f, 0.64f)
+            ring(color, 0.64f, 0.64f, 0.08f)
+            line(color, 0.74f, 0.64f, 0.82f, 0.64f)
         }
         Glyph.WORDS -> {
             line(color, 0.2f, 0.3f, 0.8f, 0.3f)

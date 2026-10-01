@@ -1,20 +1,10 @@
 import React, { useState } from 'react'
 import { FolderOpen, Loader2, Power, RotateCcw, Type } from 'lucide-react'
 import { toast } from 'sonner'
-import type { InjectionMethod, OverlayPosition } from '@shared/settings'
-import { languageName } from '@shared/languages'
-import { AppearanceSettings } from '@renderer/components/AppearanceSettings'
+import type { InjectionMethod } from '@shared/settings'
 import { Button } from '@renderer/components/ui/button'
 import { Input, Textarea } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
-import { Slider } from '@renderer/components/ui/slider'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@renderer/components/ui/select'
 import { Badge, Segmented } from '@renderer/components/ui/misc'
 import {
   Dialog,
@@ -25,23 +15,21 @@ import {
   DialogTitle
 } from '@renderer/components/ui/dialog'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
-import { LanguageSelect } from '@renderer/components/LanguageSelect'
 import { UpdatesSection } from '@renderer/components/Updates'
-import { useCloud } from '@renderer/hooks/useCloud'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { describeInstallKind } from '@shared/updates'
 
+/**
+ * What is left once the pill, the look and the language have pages of their own: startup, text
+ * insertion, updates and the app itself.
+ */
 export function GeneralPage(): React.JSX.Element {
   const { settings, patch, info } = useSettings()
-  const { status } = useCloud()
   const g = settings.general
   const inj = settings.injection
   const [testing, setTesting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const isWin = info?.platform === 'win32'
-  // Same predicate the prompt builder uses, so the description never promises a lock it does not apply.
-  const autoLanguage = !languageName(settings.stt.language)
-  const synced = !!status?.signedIn
 
   const testInsert = async (): Promise<void> => {
     setTesting(true)
@@ -53,21 +41,10 @@ export function GeneralPage(): React.JSX.Element {
 
   return (
     <div className="space-y-section">
-      <PageHeader title="General" />
-
-      <Section title="Language">
-        <SettingRow
-          title="Dictation language"
-          description={
-            (autoLanguage
-              ? 'The speech model guesses the language of each dictation. Fine if you switch languages mid-sentence; pick your language if unclear speech sometimes comes back in the wrong one.'
-              : 'The speech model is locked to this language and the formatting model is told to stay in it, so mumbled words are fixed instead of guessed as another language.') +
-            (synced ? ' Saved to your account and shared with every device you sign in on.' : '')
-          }
-        >
-          <LanguageSelect />
-        </SettingRow>
-      </Section>
+      <PageHeader
+        title="General"
+        description="How Murmur starts, how it puts text where your cursor is, and the app itself."
+      />
 
       <Section title="Startup">
         <SettingRow
@@ -86,75 +63,6 @@ export function GeneralPage(): React.JSX.Element {
           <Switch
             checked={g.startMinimized}
             onCheckedChange={(v) => void patch({ general: { startMinimized: v } })}
-          />
-        </SettingRow>
-      </Section>
-
-      <Section title="Appearance">
-        <AppearanceSettings />
-        <SettingRow
-          title="Overlay position"
-          description="Where the listening pill appears on the screen with your cursor."
-        >
-          <Select
-            value={g.overlayPosition}
-            onValueChange={(v) =>
-              void patch({ general: { overlayPosition: v as OverlayPosition } })
-            }
-          >
-            <SelectTrigger className="w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="bottom-center">Bottom center</SelectItem>
-              <SelectItem value="top-center">Top center</SelectItem>
-              <SelectItem value="bottom-right">Bottom right</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-        <SettingRow
-          title="Show idle indicator"
-          description="A small bar stays visible when Murmur is ready, so you always know it is running."
-        >
-          <Switch
-            checked={g.showOverlayWhenIdle}
-            onCheckedChange={(v) => void patch({ general: { showOverlayWhenIdle: v } })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="Button shadow"
-          description="The pill floats with a soft shadow and a light catch on its top edge. Off, it sits flat."
-        >
-          <Switch
-            checked={g.buttonShadow}
-            onCheckedChange={(v) => void patch({ general: { buttonShadow: v } })}
-          />
-        </SettingRow>
-        <SettingRow title="Sounds" description="Soft cues when recording starts, stops, or fails.">
-          <div className="flex items-center gap-4">
-            {g.sounds && (
-              <Slider
-                className="w-28"
-                min={0}
-                max={1}
-                step={0.05}
-                value={[g.soundVolume]}
-                onValueChange={([v]) => void patch({ general: { soundVolume: v } })}
-              />
-            )}
-            <Switch
-              checked={g.sounds}
-              onCheckedChange={(v) => void patch({ general: { sounds: v } })}
-            />
-          </div>
-        </SettingRow>
-        <SettingRow
-          title="Show latency in history"
-          description="Per-stage timing bars on Home and History."
-        >
-          <Switch
-            checked={g.showLatencyInHistory}
-            onCheckedChange={(v) => void patch({ general: { showLatencyInHistory: v } })}
           />
         </SettingRow>
       </Section>

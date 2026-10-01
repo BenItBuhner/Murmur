@@ -10,6 +10,8 @@
     <style name="Theme.Murmur.Base" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Platform dialogs (the account sheet) dim with the same scrim as the drawer: black at 40 % in both modes. -->
+        <item name="android:backgroundDimAmount">0.4</item>
     </style>
 
     <style name="Theme.Murmur" parent="Theme.Murmur.Base" />
@@ -19,5 +21,7 @@
     <style name="Theme.Murmur.Dark" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Platform dialogs (the account sheet) dim with the same scrim as the drawer: black at 40 % in both modes. -->
+        <item name="android:backgroundDimAmount">0.4</item>
     </style>
 </resources>

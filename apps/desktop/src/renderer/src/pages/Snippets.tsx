@@ -13,11 +13,16 @@ import {
   DialogHeader,
   DialogTitle
 } from '@renderer/components/ui/dialog'
-import { Empty, PageHeader } from '@renderer/components/SettingRow'
+import { Empty } from '@renderer/components/SettingRow'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { uid } from '@renderer/lib/utils'
 
-export function SnippetsPage(): React.JSX.Element {
+/**
+ * The snippets half of the Dictionary and snippets page: say a short cue and Murmur pastes the
+ * full text. An eyebrow and its action, then the list card (or the empty well), and the editor
+ * dialog.
+ */
+export function SnippetsSection(): React.JSX.Element {
   const { settings, patch } = useSettings()
   const [editing, setEditing] = useState<Snippet | null>(null)
   const [open, setOpen] = useState(false)
@@ -48,16 +53,19 @@ export function SnippetsPage(): React.JSX.Element {
     patch({ snippets: settings.snippets.filter((s) => s.id !== id) })
 
   return (
-    <div className="space-y-section">
-      <PageHeader
-        title="Snippets"
-        description="Say a short cue and Murmur pastes the full text. Great for links, intros, addresses and replies you type all the time."
-        actions={
-          <Button onClick={startNew}>
-            <Plus /> New snippet
-          </Button>
-        }
-      />
+    <section className="space-y-3">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h2 className="eyebrow">Snippets</h2>
+          <p className="mt-2 text-note text-muted-foreground">
+            Say a short cue and Murmur pastes the full text. Great for links, intros, addresses and
+            replies you type all the time.
+          </p>
+        </div>
+        <Button onClick={startNew}>
+          <Plus /> New snippet
+        </Button>
+      </div>
       {settings.snippets.length === 0 ? (
         <Empty
           icon={<Zap />}
@@ -151,6 +159,6 @@ export function SnippetsPage(): React.JSX.Element {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </section>
   )
 }

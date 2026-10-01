@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -137,6 +138,8 @@ fun MurmurDrawer(
                 .fillMaxHeight()
                 .width(drawerWidth)
                 .offset { IntOffset((-(1f - state.fraction) * widthPx).roundToInt(), 0) }
+                // Shut, the sheet rests just off screen; without this its shadow would still catch the edge.
+                .graphicsLayer { alpha = if (state.fraction > 0.001f) 1f else 0f }
                 .semantics {
                     paneTitle = NavigationMenu
                     if (state.isOpen) {

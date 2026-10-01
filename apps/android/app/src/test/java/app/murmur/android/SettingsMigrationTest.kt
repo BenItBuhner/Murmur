@@ -160,6 +160,39 @@ class SettingsMigrationTest {
         assertEquals(PARITY_GENERATION, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("parityMigration", 0))
     }
 
+    // ---- "Install automatically" became "Download updates automatically" ------------------------
+
+    @Test
+    fun `an install that had turned automatic installs off keeps automatic downloads off`() {
+        seed("updateAutoInstall" to false, "updateAutoCheck" to true)
+        val s = SettingsStore(context).get()
+        assertEquals(false, s.updateAutoDownload)
+        assertEquals(true, s.updateAutoCheck)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        assertEquals("persisted under the new key", false, prefs.getBoolean("updateAutoDownload", true))
+        assertEquals("the old key is gone", false, prefs.contains("updateAutoInstall"))
+    }
+
+    @Test
+    fun `an install that had automatic installs on downloads automatically, and loses the old key`() {
+        seed("updateAutoInstall" to true)
+        val s = SettingsStore(context).get()
+        assertEquals(true, s.updateAutoDownload)
+        assertEquals(false, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains("updateAutoInstall"))
+    }
+
+    @Test
+    fun `a stale old key never overrides a value the new key already holds`() {
+        seed("updateAutoInstall" to false, "updateAutoDownload" to true)
+        assertEquals(true, SettingsStore(context).get().updateAutoDownload)
+        assertEquals(false, context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains("updateAutoInstall"))
+    }
+
+    @Test
+    fun `a fresh install downloads automatically and installs on a tap`() {
+        assertEquals(true, SettingsStore(context).get().updateAutoDownload)
+    }
+
     @Test
     fun `an install that never wrote a session limit runs unlimited, keeping its old maximum for when it opts in`() {
         // Earlier builds stopped every session at maxDurationSec; the limit is now a choice, off by default.

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into src/main/AndroidManifest.xml for the direct (GitHub Releases) flavor only. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Self-updates from GitHub Releases: hand the downloaded APK to the package installer once the
+         user taps Install, and on Android 12+ let the app replace itself without a second
+         confirmation once it installed itself. The Google Play flavor declares neither. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
+    <application>
+        <!-- Outcome of the install session the user started (delivered through our own PendingIntent). -->
+        <receiver
+            android:name=".update.UpdateResultReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

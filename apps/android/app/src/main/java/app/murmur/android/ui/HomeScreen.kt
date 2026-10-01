@@ -64,8 +64,7 @@ import app.murmur.android.keyboard.WidthClass
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Radii
 import app.murmur.android.ui.theme.Space
-import app.murmur.android.update.UpdateManager
-import app.murmur.android.update.UpdatePhase
+import app.murmur.android.update.Updates
 
 /** How many recent dictations the home screen lists before pointing at History. */
 private const val RECENT = 5
@@ -91,7 +90,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val permissions = rememberPermissionState()
     val dictation by DictationController.state.collectAsState()
-    val updateState by UpdateManager.get(context).state.collectAsState()
+    val readyVersion by Updates.get(context).readyVersion.collectAsState()
     val history by HistoryStore.get(context).entries.collectAsState()
     val inference = rememberInferenceView(settings)
     val modelReady = inference.sttReady
@@ -104,7 +103,7 @@ fun HomeScreen(
     val recent = remember(history) { history.take(RECENT) }
     val last = remember(history) { lastSuccessful(history) }
     val insights = remember(history) { insightLines(history, daySummary(history, DictationStats.localDay(System.currentTimeMillis()))) }
-    val updateReady = updateState.phase == UpdatePhase.READY
+    val updateReady = readyVersion != null
 
     Column(
         Modifier
@@ -183,8 +182,8 @@ fun HomeScreen(
                 Appear(updateReady) {
                     Column {
                         AttentionCard(
-                            "Version ${updateState.release?.version ?: ""} is ready".trim(),
-                            "Downloaded and checked; it installs the next time nothing is being dictated.",
+                            "Version ${readyVersion ?: ""} is ready".trim(),
+                            "Downloaded and verified. Open Updates to install it when it suits you.",
                             onClick = { onOpen(Route.UPDATES) }
                         )
                         Spacer(Modifier.height(12.dp))

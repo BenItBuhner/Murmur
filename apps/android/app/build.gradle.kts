@@ -86,13 +86,36 @@ android {
             "String", "CLERK_PUBLISHABLE_KEY", "\"${envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY")}\""
         )
         buildConfigField("String", "ACCOUNT_MODE", "\"${envOrProp("MURMUR_ACCOUNT_MODE")}\"")
+    }
 
-        // GitHub repository (owner/name) whose Releases the in-app updater follows. CI passes the
-        // building repository so forks update from their own releases.
-        buildConfigField(
-            "String", "UPDATE_REPO",
-            "\"${envOrProp("MURMUR_UPDATE_REPO").ifBlank { "BenItBuhner/Murmur" }}\""
-        )
+    // ---- Distribution flavors -------------------------------------------------------------------
+    // One codebase, two ways to ship it. Only the update layer and the manifest differ:
+    //  - direct (the default, what GitHub Releases carry): the in-app updater in src/direct checks
+    //    the repository's releases, downloads the APK in the background and installs it when, and
+    //    only when, the user taps Install on the Updates screen (REQUEST_INSTALL_PACKAGES).
+    //  - play (Google Play): no updater at all. Play's Device and Network Abuse policy forbids an app
+    //    updating itself outside Play, so src/play ships a no-op in its place, the manifest asks for
+    //    no install permission, and the Updates screen points at the Play listing. verifyPlayReleaseApk
+    //    opens the built APK and bundle and refuses one that carries any of the updater.
+    // Build one with assembleDirectRelease / assemblePlayRelease (bundlePlayRelease for the AAB);
+    // assembleRelease builds both.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("direct") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("String", "DISTRIBUTION", "\"direct\"")
+            // GitHub repository (owner/name) whose Releases the in-app updater follows. CI passes
+            // the building repository so forks update from their own releases.
+            buildConfigField(
+                "String", "UPDATE_REPO",
+                "\"${envOrProp("MURMUR_UPDATE_REPO").ifBlank { "BenItBuhner/Murmur" }}\""
+            )
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION", "\"play\"")
+        }
     }
 
     signingConfigs {
@@ -195,19 +218,178 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
 }
 
-// ---- Release APK check --------------------------------------------------------------------------
-// `verifyReleaseApk` opens the release APK and refuses one that could not run the cloud path: the
-// Convex client is Rust behind UniFFI, loaded through JNA, so its native library and JNA's must be in
-// the APK for arm64-v8a, and the classes JNA and the SDKs reach by name must be in the dex (R8 would
-// strip or rename them without keep rules). The baked cloud values must be exactly the ones the
-// build was given, production-shaped for a cloud release (MURMUR_CLOUD_RELEASE=true), and nothing
-// else that looks like a Clerk key or a Convex deployment may be in the dex (a test fixture, a dev
-// instance). CI and the release workflow run it right after assembleRelease, before anything ships.
-// The gate and the SDKs themselves are exercised by the unit tests (AccountGateWithClerkTest).
-abstract class VerifyReleaseApk : DefaultTask() {
-    @get:InputFiles
-    abstract val apkDir: DirectoryProperty
+// ---- Release artifact checks --------------------------------------------------------------------
+// `verify<Variant>ReleaseApk` opens a release APK (and `verify<Variant>ReleaseBundle` the AAB) and
+// refuses one that could not run the cloud path, or that does not match its distribution flavor:
+//  - Cloud path: the Convex client is Rust behind UniFFI, loaded through JNA, so its native library
+//    and JNA's must be in the artifact for arm64-v8a, and the classes JNA and the SDKs reach by name
+//    must be in the dex (R8 would strip or rename them without keep rules). The baked cloud values
+//    must be exactly the ones the build was given, production-shaped for a cloud release
+//    (MURMUR_CLOUD_RELEASE=true), and nothing else that looks like a Clerk key or a Convex deployment
+//    may be in the dex (a test fixture, a dev instance).
+//  - Distribution: a `play` artifact carries no updater class beyond the seam the shared code talks
+//    to, no PackageInstaller or GitHub reference in its dex, and asks for no install permission in
+//    its manifest (Google Play's Device and Network Abuse policy); a `direct` artifact carries the
+//    updater and both install permissions, so the two are provably different builds of one code base.
+// `verifyReleaseApk` runs the APK check of every flavor. CI runs it with the Play bundle check after
+// assembleRelease; the release workflow runs the direct check before anything ships. The gate and the
+// SDKs themselves are exercised by the unit tests (AccountGateWithClerkTest).
 
+/** What tells the two distribution flavors apart in a built artifact. */
+object Distribution {
+    const val DIRECT = "direct"
+    const val PLAY = "play"
+    val INSTALL_PERMISSIONS = listOf(
+        "android.permission.REQUEST_INSTALL_PACKAGES",
+        "android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION"
+    )
+    /** The updater's package. In a Play build only the seam may be left of it. */
+    const val UPDATER_PACKAGE = "Lapp/murmur/android/update/"
+    val SEAM_CLASSES = setOf(
+        "Lapp/murmur/android/update/Updater;",
+        "Lapp/murmur/android/update/Updates;",
+        "Lapp/murmur/android/update/NoUpdater;",
+        "Lapp/murmur/android/update/PlayListing;"
+    )
+    /** What a direct build must define. */
+    val UPDATER_CLASSES = listOf(
+        "Lapp/murmur/android/update/UpdateManager;",
+        "Lapp/murmur/android/update/UpdateResultReceiver;",
+        "Lapp/murmur/android/update/UpdateSelection;"
+    )
+    /**
+     * Framework types, endpoints and names only the updater reaches; none may be in a Play dex.
+     * (PackageInstaller itself is also touched by Play Services' own update check,
+     * GooglePlayServicesUtilLight, so the install session types stand for it.)
+     */
+    val UPDATER_STRINGS = listOf(
+        "Landroid/content/pm/PackageInstaller\$Session;",
+        "Landroid/content/pm/PackageInstaller\$SessionParams;",
+        "canRequestPackageInstalls",
+        "setRequireUserAction",
+        "android.settings.MANAGE_UNKNOWN_APP_SOURCES",
+        "https://api.github.com",
+        "SHA256SUMS.txt",
+        "-android.apk"
+    )
+    const val RESULT_RECEIVER = "app.murmur.android.update.UpdateResultReceiver"
+
+    fun isSeam(descriptor: String): Boolean =
+        descriptor in SEAM_CLASSES || SEAM_CLASSES.any { descriptor.startsWith(it.removeSuffix(";") + "$") }
+}
+
+/** Readers for the pieces of an APK or bundle the checks look at. */
+object ArtifactReaders {
+    val DEX_NAME = Regex("""(?:base/dex/)?classes\d*\.dex""")
+
+    /** The string table and the defined class descriptors of one dex file (format: source.android.com/docs/core/runtime/dex-format). */
+    fun readDex(dex: ByteArray): Pair<List<String>, Set<String>> {
+        val buf = ByteBuffer.wrap(dex).order(ByteOrder.LITTLE_ENDIAN)
+        require(dex.size > 0x70 && dex[0] == 'd'.code.toByte() && dex[1] == 'e'.code.toByte() && dex[2] == 'x'.code.toByte()) { "not a dex file" }
+        val stringIdsSize = buf.getInt(0x38)
+        val stringIdsOff = buf.getInt(0x3C)
+        val typeIdsOff = buf.getInt(0x44)
+        val classDefsSize = buf.getInt(0x60)
+        val classDefsOff = buf.getInt(0x64)
+        val strings = ArrayList<String>(stringIdsSize)
+        for (i in 0 until stringIdsSize) {
+            var p = buf.getInt(stringIdsOff + i * 4)
+            // string_data_item: uleb128 utf16 length, then MUTF-8 bytes ending in NUL.
+            while (dex[p].toInt() and 0x80 != 0) p++
+            p++
+            val start = p
+            while (dex[p] != 0.toByte()) p++
+            strings += String(dex, start, p - start, Charsets.UTF_8)
+        }
+        val classes = HashSet<String>(classDefsSize)
+        for (i in 0 until classDefsSize) {
+            val typeIdx = buf.getInt(classDefsOff + i * 32)
+            classes += strings[buf.getInt(typeIdsOff + typeIdx * 4)]
+        }
+        return strings to classes
+    }
+
+    /**
+     * The string pool of a compiled (binary) AndroidManifest.xml, as an APK carries it: every tag,
+     * attribute name and attribute value, so the permissions asked for and the components declared
+     * are all in it (format: ResXMLTree_header, then a ResStringPool chunk; UTF-8 or UTF-16).
+     */
+    fun readBinaryXmlStrings(xml: ByteArray): List<String> {
+        val buf = ByteBuffer.wrap(xml).order(ByteOrder.LITTLE_ENDIAN)
+        require(xml.size > 36 && buf.getShort(0).toInt() and 0xFFFF == 0x0003) { "not a binary XML" }
+        val pool = buf.getShort(2).toInt() and 0xFFFF
+        require(buf.getShort(pool).toInt() and 0xFFFF == 0x0001) { "no string pool after the XML header" }
+        val headerSize = buf.getShort(pool + 2).toInt() and 0xFFFF
+        val count = buf.getInt(pool + 8)
+        val utf8 = buf.getInt(pool + 16) and (1 shl 8) != 0
+        val stringsStart = buf.getInt(pool + 20)
+        val out = ArrayList<String>(count)
+        for (i in 0 until count) {
+            var p = pool + stringsStart + buf.getInt(pool + headerSize + i * 4)
+            if (utf8) {
+                // Character count then byte count, each one byte or (high bit set) two.
+                if (xml[p].toInt() and 0x80 != 0) p += 2 else p += 1
+                var len = xml[p].toInt() and 0xFF
+                p++
+                if (len and 0x80 != 0) {
+                    len = ((len and 0x7F) shl 8) or (xml[p].toInt() and 0xFF)
+                    p++
+                }
+                out += String(xml, p, len, Charsets.UTF_8)
+            } else {
+                var len = buf.getShort(p).toInt() and 0xFFFF
+                p += 2
+                if (len and 0x8000 != 0) {
+                    len = ((len and 0x7FFF) shl 16) or (buf.getShort(p).toInt() and 0xFFFF)
+                    p += 2
+                }
+                out += String(xml, p, len * 2, Charsets.UTF_16LE)
+            }
+        }
+        return out
+    }
+}
+
+/** Everything the checks read out of one artifact, APK or bundle. */
+class ArtifactContents(
+    val dexEntries: List<Pair<String, Int>>,
+    val strings: Set<String>,
+    val classes: Set<String>,
+    /** Strings of the manifest: the binary XML's pool (APK) or every readable run of the proto manifest (bundle). */
+    val manifestStrings: List<String>,
+    val nativeLibSizes: Map<String, Long>
+) {
+    fun manifestHas(needle: String): Boolean = manifestStrings.any { it.contains(needle) }
+
+    companion object {
+        fun read(zip: ZipFile, bundle: Boolean, abi: String, nativeLibs: List<String>): ArtifactContents {
+            val prefix = if (bundle) "base/" else ""
+            val dexEntries = mutableListOf<Pair<String, Int>>()
+            val strings = HashSet<String>()
+            val classes = HashSet<String>()
+            for (entry in zip.entries().asSequence().filter { ArtifactReaders.DEX_NAME.matches(it.name) }.sortedBy { it.name }) {
+                val (dexStrings, dexClasses) = ArtifactReaders.readDex(zip.getInputStream(entry).use { it.readBytes() })
+                strings += dexStrings
+                classes += dexClasses
+                dexEntries += entry.name to dexClasses.size
+            }
+            val manifestEntry = zip.getEntry("${prefix}manifest/AndroidManifest.xml".takeIf { bundle } ?: "AndroidManifest.xml")
+                ?: throw GradleException("no AndroidManifest.xml in ${zip.name}")
+            val manifestBytes = zip.getInputStream(manifestEntry).use { it.readBytes() }
+            val manifestStrings = if (bundle) {
+                // aapt2's protobuf manifest keeps names and values as plain UTF-8 runs.
+                Regex("""[\x20-\x7E]{4,}""").findAll(String(manifestBytes, Charsets.ISO_8859_1)).map { it.value }.toList()
+            } else {
+                ArtifactReaders.readBinaryXmlStrings(manifestBytes)
+            }
+            val libs = nativeLibs.associateWith { lib -> zip.getEntry("${prefix}lib/$abi/$lib")?.size ?: -1L }
+            return ArtifactContents(dexEntries, strings, classes, manifestStrings, libs)
+        }
+    }
+}
+
+/** The checks shared by the APK and the bundle task; [problems] collects what is wrong, [lines] the report. */
+abstract class VerifyReleaseArtifact : DefaultTask() {
     @get:Internal
     abstract val builtArtifactsLoader: Property<BuiltArtifactsLoader>
 
@@ -224,53 +406,36 @@ abstract class VerifyReleaseApk : DefaultTask() {
     @get:Input
     abstract val accountMode: Property<String>
 
-    /** MURMUR_CLOUD_RELEASE was "true": the APK must carry a production instance. */
+    /** MURMUR_CLOUD_RELEASE was "true": the artifact must carry a production instance. */
     @get:Input
     abstract val cloudRelease: Property<Boolean>
+
+    /** The variant's distribution flavor: [Distribution.DIRECT] or [Distribution.PLAY]. */
+    @get:Input
+    abstract val distribution: Property<String>
 
     @get:OutputFile
     abstract val report: RegularFileProperty
 
-    @TaskAction
-    fun verify() {
-        val built = builtArtifactsLoader.get().load(apkDir.get())
-            ?: throw GradleException("No release APK to check in ${apkDir.get().asFile}")
-        val lines = mutableListOf<String>()
-        val problems = mutableListOf<String>()
-        for (artifact in built.elements) {
-            val apk = File(artifact.outputFile)
-            lines += "${apk.name} (${apk.length() / 1024} KiB, versionCode ${artifact.versionCode}, versionName ${artifact.versionName})"
-            checkApk(apk, lines, problems)
-        }
+    protected fun finish(subject: String, lines: List<String>, problems: List<String>) {
         val text = lines.joinToString("\n") + (if (problems.isEmpty()) "\n\nOK" else "\n\nPROBLEMS:\n - " + problems.joinToString("\n - ")) + "\n"
         report.get().asFile.also { it.parentFile.mkdirs() }.writeText(text)
-        if (problems.isNotEmpty()) throw GradleException("The release APK would not run the cloud path:\n - " + problems.joinToString("\n - ") + "\n\n$text")
+        if (problems.isNotEmpty()) throw GradleException("$subject is not fit to ship:\n - " + problems.joinToString("\n - ") + "\n\n$text")
         logger.lifecycle(text)
     }
 
-    private fun checkApk(apk: File, lines: MutableList<String>, problems: MutableList<String>) {
-        ZipFile(apk).use { zip ->
-            for (lib in NATIVE_LIBS) {
-                val entry = zip.getEntry("lib/$ABI/$lib")
-                if (entry == null || entry.size <= 0) problems += "lib/$ABI/$lib is missing"
-                else lines += "  lib/$ABI/$lib: ${entry.size} bytes"
-            }
-            val dexEntries = zip.entries().asSequence().filter { DEX_NAME.matches(it.name) }.sortedBy { it.name }.toList()
-            if (dexEntries.isEmpty()) problems += "no classes.dex"
-            val classes = HashSet<String>()
-            val strings = HashSet<String>()
-            for (entry in dexEntries) {
-                val dex = zip.getInputStream(entry).use { it.readBytes() }
-                val (dexStrings, dexClasses) = readDex(dex)
-                strings += dexStrings
-                classes += dexClasses
-                lines += "  ${entry.name}: ${dexClasses.size} classes, ${dexStrings.size} strings"
-            }
-            for (descriptor in REQUIRED_CLASSES) {
-                if (descriptor !in classes) problems += "class $descriptor is not defined in the dex (stripped or renamed?)"
-            }
-            checkBakedValues(strings, lines, problems)
+    protected fun check(file: File, bundle: Boolean, lines: MutableList<String>, problems: MutableList<String>) {
+        val contents = ZipFile(file).use { ArtifactContents.read(it, bundle, ABI, NATIVE_LIBS) }
+        for ((lib, size) in contents.nativeLibSizes) {
+            if (size <= 0) problems += "lib/$ABI/$lib is missing" else lines += "  lib/$ABI/$lib: $size bytes"
         }
+        if (contents.dexEntries.isEmpty()) problems += "no classes.dex"
+        for ((name, count) in contents.dexEntries) lines += "  $name: $count classes"
+        for (descriptor in REQUIRED_CLASSES) {
+            if (descriptor !in contents.classes) problems += "class $descriptor is not defined in the dex (stripped or renamed?)"
+        }
+        checkBakedValues(contents.strings, lines, problems)
+        checkDistribution(contents, lines, problems)
     }
 
     private fun checkBakedValues(strings: Set<String>, lines: MutableList<String>, problems: MutableList<String>) {
@@ -301,37 +466,39 @@ abstract class VerifyReleaseApk : DefaultTask() {
         }
     }
 
-    /** The string table and the defined class descriptors of one dex file (format: source.android.com/docs/core/runtime/dex-format). */
-    private fun readDex(dex: ByteArray): Pair<List<String>, Set<String>> {
-        val buf = ByteBuffer.wrap(dex).order(ByteOrder.LITTLE_ENDIAN)
-        require(dex.size > 0x70 && dex[0] == 'd'.code.toByte() && dex[1] == 'e'.code.toByte() && dex[2] == 'x'.code.toByte()) { "not a dex file" }
-        val stringIdsSize = buf.getInt(0x38)
-        val stringIdsOff = buf.getInt(0x3C)
-        val typeIdsOff = buf.getInt(0x44)
-        val classDefsSize = buf.getInt(0x60)
-        val classDefsOff = buf.getInt(0x64)
-        val strings = ArrayList<String>(stringIdsSize)
-        for (i in 0 until stringIdsSize) {
-            var p = buf.getInt(stringIdsOff + i * 4)
-            // string_data_item: uleb128 utf16 length, then MUTF-8 bytes ending in NUL.
-            while (dex[p].toInt() and 0x80 != 0) p++
-            p++
-            val start = p
-            while (dex[p] != 0.toByte()) p++
-            strings += String(dex, start, p - start, Charsets.UTF_8)
+    /** A Play artifact carries none of the updater; a direct one carries all of it. */
+    private fun checkDistribution(contents: ArtifactContents, lines: MutableList<String>, problems: MutableList<String>) {
+        val flavor = distribution.get()
+        val updaterClasses = contents.classes.filter { it.startsWith(Distribution.UPDATER_PACKAGE) }.sorted()
+        val permissions = Distribution.INSTALL_PERMISSIONS.filter { contents.manifestHas(it) }
+        lines += "  distribution: $flavor, ${updaterClasses.size} classes under ${Distribution.UPDATER_PACKAGE}, install permissions: ${permissions.ifEmpty { listOf("none") }.joinToString()}"
+        when (flavor) {
+            Distribution.PLAY -> {
+                for (cls in updaterClasses) {
+                    if (!Distribution.isSeam(cls)) problems += "Play build carries updater class $cls"
+                }
+                for (s in Distribution.UPDATER_STRINGS) {
+                    if (s in contents.strings) problems += "Play build's dex references the updater: \"$s\""
+                }
+                for (p in permissions) problems += "Play build's manifest asks for $p"
+                if (contents.manifestHas(Distribution.RESULT_RECEIVER)) problems += "Play build's manifest declares ${Distribution.RESULT_RECEIVER}"
+            }
+            Distribution.DIRECT -> {
+                for (cls in Distribution.UPDATER_CLASSES) {
+                    if (cls !in contents.classes) problems += "direct build lacks updater class $cls"
+                }
+                for (p in Distribution.INSTALL_PERMISSIONS) {
+                    if (p !in permissions) problems += "direct build's manifest lacks $p"
+                }
+                if (!contents.manifestHas(Distribution.RESULT_RECEIVER)) problems += "direct build's manifest lacks ${Distribution.RESULT_RECEIVER}"
+            }
+            else -> problems += "unknown distribution flavor \"$flavor\""
         }
-        val classes = HashSet<String>(classDefsSize)
-        for (i in 0 until classDefsSize) {
-            val typeIdx = buf.getInt(classDefsOff + i * 32)
-            classes += strings[buf.getInt(typeIdsOff + typeIdx * 4)]
-        }
-        return strings to classes
     }
 
     companion object {
         const val ABI = "arm64-v8a"
         val NATIVE_LIBS = listOf("libconvexmobile.so", "libjnidispatch.so")
-        val DEX_NAME = Regex("""classes\d*\.dex""")
         /** What JNA, UniFFI and the SDKs reach by name or by reflection, plus the app's own cloud path. */
         val REQUIRED_CLASSES = listOf(
             "Lcom/sun/jna/Native;",
@@ -356,19 +523,70 @@ abstract class VerifyReleaseApk : DefaultTask() {
     }
 }
 
+abstract class VerifyReleaseApk : VerifyReleaseArtifact() {
+    @get:InputFiles
+    abstract val apkDir: DirectoryProperty
+
+    @TaskAction
+    fun verify() {
+        val built = builtArtifactsLoader.get().load(apkDir.get())
+            ?: throw GradleException("No release APK to check in ${apkDir.get().asFile}")
+        val lines = mutableListOf<String>()
+        val problems = mutableListOf<String>()
+        for (artifact in built.elements) {
+            val apk = File(artifact.outputFile)
+            lines += "${apk.name} (${apk.length() / 1024} KiB, versionCode ${artifact.versionCode}, versionName ${artifact.versionName})"
+            check(apk, bundle = false, lines, problems)
+        }
+        finish("The ${distribution.get()} release APK", lines, problems)
+    }
+}
+
+abstract class VerifyReleaseBundle : VerifyReleaseArtifact() {
+    @get:InputFile
+    abstract val bundle: RegularFileProperty
+
+    @TaskAction
+    fun verify() {
+        val aab = bundle.get().asFile
+        val lines = mutableListOf("${aab.name} (${aab.length() / 1024} KiB)")
+        val problems = mutableListOf<String>()
+        check(aab, bundle = true, lines, problems)
+        finish("The ${distribution.get()} release bundle", lines, problems)
+    }
+}
+
+val verifyReleaseApk by tasks.registering {
+    group = "verification"
+    description = "Checks the release APK of every distribution flavor (cloud path, and what the flavor must and must not carry)."
+}
+
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
-        tasks.register<VerifyReleaseApk>("verify${variant.name.replaceFirstChar { it.uppercase() }}Apk") {
+        val flavor = variant.flavorName ?: error("release variant ${variant.name} has no distribution flavor")
+        val capitalized = variant.name.replaceFirstChar { it.uppercase() }
+        fun VerifyReleaseArtifact.configureInputs() {
             group = "verification"
-            description = "Checks that the ${variant.name} APK carries what the cloud path needs (native libs, classes, baked instance)."
-            apkDir.set(variant.artifacts.get(SingleArtifact.APK))
             builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
             convexUrl.set(envOrProp("MURMUR_CONVEX_URL"))
             convexSiteUrl.set(envOrProp("MURMUR_CONVEX_SITE_URL"))
             clerkPublishableKey.set(envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY"))
             accountMode.set(envOrProp("MURMUR_ACCOUNT_MODE"))
             cloudRelease.set(envOrProp("MURMUR_CLOUD_RELEASE").trim().equals("true", ignoreCase = true))
+            distribution.set(flavor)
+        }
+        val apkCheck = tasks.register<VerifyReleaseApk>("verify${capitalized}Apk") {
+            configureInputs()
+            description = "Checks that the ${variant.name} APK carries what the cloud path needs and matches the $flavor distribution."
+            apkDir.set(variant.artifacts.get(SingleArtifact.APK))
             report.set(layout.buildDirectory.file("reports/apk/${variant.name}-apk-check.txt"))
         }
+        tasks.register<VerifyReleaseBundle>("verify${capitalized}Bundle") {
+            configureInputs()
+            description = "Checks that the ${variant.name} app bundle carries what the cloud path needs and matches the $flavor distribution."
+            bundle.set(variant.artifacts.get(SingleArtifact.BUNDLE))
+            report.set(layout.buildDirectory.file("reports/apk/${variant.name}-bundle-check.txt"))
+        }
+        verifyReleaseApk.configure { dependsOn(apkCheck) }
     }
 }

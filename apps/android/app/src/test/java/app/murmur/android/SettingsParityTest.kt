@@ -67,7 +67,9 @@ class SettingsParityTest {
         assertEquals(d.getString("sttSpeed"), s.sttSpeed.id)
         assertEquals(d.getBoolean("llmSameAsStt"), s.llmSameAsStt)
         assertEquals(d.getBoolean("updateAutoCheck"), s.updateAutoCheck)
-        assertEquals(d.getBoolean("updateAutoInstall"), s.updateAutoInstall)
+        // The desktop's `updateAutoInstall` has no counterpart here: the phone downloads on its own
+        // (`updateAutoDownload`, on by default like the desktop switch) and installs only on a tap.
+        assertEquals(true, s.updateAutoDownload)
         assertEquals(d.getBoolean("updateIncludePrereleases"), s.updateIncludePrereleases)
         assertEquals(d.getBoolean("sounds"), s.sounds)
         assertEquals(d.getDouble("soundVolume"), s.soundVolume.toDouble(), 0.0001)

@@ -45,7 +45,7 @@ import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.Route
-import app.murmur.android.update.UpdateManager
+import app.murmur.android.update.Updates
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -291,12 +291,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                 if (session != null) shortcuts.startCapture { ShortcutRecorder.publish(it) } else shortcuts.stopCapture()
             }
         }
-        // The only long-lived part of the app: the daily update check lives here. An unattended
-        // install waits until no dictation is in flight and the keyboard is away.
-        UpdateManager.get(this).apply {
-            isIdle = { DictationController.state.value is DictationState.Idle && !keyboard.visible }
-            startBackgroundChecks(mainScope)
-        }
+        // The only long-lived part of the app: the daily update check lives here. It downloads and
+        // tells the user when a build is ready; installing waits for their tap on the Updates screen.
+        Updates.get(this).startBackgroundChecks(mainScope)
         Log.i(TAG, "accessibility service connected")
     }
 

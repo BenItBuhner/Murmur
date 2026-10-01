@@ -1,8 +1,11 @@
 package app.murmur.android.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,8 +20,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -29,12 +34,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.murmur.android.cloud.CloudBoot
 import app.murmur.android.cloud.CloudBootstrap
 import app.murmur.android.cloud.CloudConfig
+import app.murmur.android.cloud.CloudDiagnostics
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.SyncPhase
 import app.murmur.android.cloud.SyncStatus
@@ -52,6 +59,7 @@ import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.components.Tag
 import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.components.ToggleRow
+import app.murmur.android.ui.components.Well
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Paper
 import app.murmur.android.ui.theme.Radii
@@ -59,6 +67,7 @@ import app.murmur.android.ui.theme.Space
 import app.murmur.android.ui.theme.clerkTheme
 import com.clerk.api.Clerk
 import com.clerk.ui.userprofile.UserProfileView
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 fun syncLabel(status: SyncStatus): String = when (status.phase) {
@@ -69,6 +78,57 @@ fun syncLabel(status: SyncStatus): String = when (status.phase) {
     SyncPhase.ERROR -> "Sync issue: ${status.error ?: "retrying"}"
     SyncPhase.SIGNED_OUT -> "Signed out"
     SyncPhase.DISABLED -> "Local"
+}
+
+private const val COPIED_LABEL_MS = 2000L
+
+/**
+ * The Account screen's Diagnostics row: what the cloud path has been doing on this phone (the
+ * last Clerk token fetch, the Convex WebSocket and auth state, the outbox and its last flush, the
+ * boot guard), one line here and the whole of it on the clipboard, like the keyboard timing log
+ * under Permissions. It names states, counts and errors, never a token or what was dictated.
+ */
+@Composable
+fun ConnectionDetailsRow(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val c = Murmur.colors
+    var copies by remember { mutableIntStateOf(0) }
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(copies) {
+        if (copies > 0) {
+            delay(COPIED_LABEL_MS)
+            copies = 0
+        }
+    }
+    Column(modifier.testTag("connection-details")) {
+        ControlRow("Connection details", description = CloudDiagnostics.summary()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton(if (shown) "Hide" else "Show", onClick = { shown = !shown }, compact = true)
+                SecondaryButton(
+                    if (copies > 0) "Copied" else "Copy",
+                    onClick = {
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("Murmur connection details", CloudDiagnostics.report(context)))
+                        copies++
+                    },
+                    compact = true,
+                    modifier = Modifier.testTag("connection-details-copy")
+                )
+            }
+        }
+        if (shown) {
+            Well(Modifier.padding(bottom = Space.row)) {
+                SelectionContainer {
+                    Text(
+                        CloudDiagnostics.report(context),
+                        style = Murmur.type.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = c.inkSoft,
+                        modifier = Modifier.testTag("connection-details-report")
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -167,6 +227,10 @@ fun AccountTroubleScreen(detail: String?, nav: TopNav, onRetry: () -> Unit) {
         nav = nav
     ) {
         CloudTrouble(detail = detail, onRetry = onRetry, modifier = Modifier.testTag("account-trouble"))
+        SectionGap()
+        Group("Diagnostics", rows = true) {
+            ConnectionDetailsRow()
+        }
     }
 }
 
@@ -250,6 +314,12 @@ fun AccountContent(
                 TextLink("Privacy", onClick = { openUrl(legal.first) }, color = c.inkSoft)
                 TextLink("Terms", onClick = { openUrl(legal.second) }, color = c.inkSoft)
             }
+        }
+
+        SectionGap()
+
+        Group("Diagnostics", rows = true) {
+            ConnectionDetailsRow()
         }
     }
 }

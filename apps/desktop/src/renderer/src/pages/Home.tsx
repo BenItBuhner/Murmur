@@ -111,7 +111,7 @@ export function HomePage({
             </div>
             <div className="text-note text-muted-foreground">
               {murmurModels
-                ? 'Your account includes speech and formatting models. Or connect your own provider under Models.'
+                ? 'Your account includes speech and formatting models. Or connect your own provider under Speech model.'
                 : 'Murmur needs a transcription endpoint. OpenAI, Groq, Deepgram, or any local whisper server works.'}
             </div>
           </div>

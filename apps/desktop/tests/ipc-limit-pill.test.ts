@@ -65,7 +65,7 @@ describe('the limit pill on the main-process side', () => {
     } as unknown as Parameters<typeof registerIpc>[0])
   })
 
-  it('"Use my own model" brings the Models page up and waves the notice away', () => {
+  it('"Use my own model" brings the Speech model page up and waves the notice away', () => {
     handlers.get(IPC.overlayOpenModels)!({})
     expect(showMainWindow).toHaveBeenCalledWith('providers')
     expect(overlay.dismiss).toHaveBeenCalledTimes(1)

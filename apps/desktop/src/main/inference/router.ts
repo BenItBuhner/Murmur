@@ -106,7 +106,7 @@ export class InferenceRouter {
     if (token) return token
     if (!this.deps.signedIn()) {
       throw new SttError(
-        'Sign in to use Murmur models, or choose your own provider under Models',
+        'Sign in to use Murmur models, or choose your own provider under Speech model',
         'auth',
         undefined,
         [],

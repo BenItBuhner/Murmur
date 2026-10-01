@@ -9,9 +9,12 @@ import { CloudProvider, useCloud } from './hooks/useCloud'
 import { SettingsProvider, useSettingsMaybe } from './hooks/useSettings'
 import { ThemeProvider } from './hooks/useTheme'
 import { UpdatesProvider } from './hooks/useUpdates'
+import { resolveRoute } from './lib/navigation'
 import { AccountPage } from './pages/Account'
 import { AccountGate } from './pages/AccountGate'
+import { AppearancePage } from './pages/Appearance'
 import { AudioPage } from './pages/Audio'
+import { DictationButtonPage } from './pages/DictationButton'
 import { DictionaryPage } from './pages/Dictionary'
 import { GeneralPage } from './pages/General'
 import { HistoryPage } from './pages/History'
@@ -19,21 +22,7 @@ import { HomePage } from './pages/Home'
 import { Onboarding } from './pages/Onboarding'
 import { ProvidersPage } from './pages/Providers'
 import { ShortcutsPage } from './pages/Shortcuts'
-import { SnippetsPage } from './pages/Snippets'
 import { StylePage } from './pages/Style'
-
-const ROUTES = new Set<Route>([
-  'home',
-  'history',
-  'dictionary',
-  'snippets',
-  'style',
-  'shortcuts',
-  'audio',
-  'providers',
-  'general',
-  'account'
-])
 
 export default function App(): React.JSX.Element {
   return (
@@ -73,7 +62,10 @@ function Root(): React.JSX.Element | null {
     const unsubs = [
       window.murmur.dictation.onState((e) => setState(e.state)),
       window.murmur.app.onEnabledChanged(setEnabled),
-      window.murmur.app.onNavigate((r) => ROUTES.has(r as Route) && setRoute(r as Route))
+      window.murmur.app.onNavigate((r) => {
+        const route = resolveRoute(r)
+        if (route) setRoute(route)
+      })
     ]
     return () => unsubs.forEach((u) => u())
   }, [])
@@ -123,11 +115,12 @@ function Root(): React.JSX.Element | null {
             {route === 'home' && <HomePage state={state} onNavigate={setRoute} />}
             {route === 'history' && <HistoryPage />}
             {route === 'dictionary' && <DictionaryPage />}
-            {route === 'snippets' && <SnippetsPage />}
             {route === 'style' && <StylePage />}
+            {route === 'providers' && <ProvidersPage />}
             {route === 'shortcuts' && <ShortcutsPage />}
             {route === 'audio' && <AudioPage />}
-            {route === 'providers' && <ProvidersPage />}
+            {route === 'button' && <DictationButtonPage />}
+            {route === 'appearance' && <AppearancePage />}
             {route === 'general' && <GeneralPage />}
             {route === 'account' && cloud.enabled && <AccountPage />}
           </Shell>

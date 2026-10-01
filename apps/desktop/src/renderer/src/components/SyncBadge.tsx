@@ -1,5 +1,5 @@
 import React from 'react'
-import { Cloud, CloudOff, Loader2, RefreshCw, TriangleAlert } from 'lucide-react'
+import { Cloud, CloudOff, Loader2, TriangleAlert } from 'lucide-react'
 import type { SyncStatus } from '@shared/cloud'
 import { Badge } from '@renderer/components/ui/misc'
 import { useCloud } from '@renderer/hooks/useCloud'
@@ -73,37 +73,5 @@ export function SyncBadge({ className }: { className?: string }): React.JSX.Elem
       <SyncIcon status={status} />
       {label}
     </Badge>
-  )
-}
-
-/** Sidebar card with a manual "sync now" affordance. */
-export function SyncCard(): React.JSX.Element | null {
-  const { enabled, status } = useCloud()
-  if (!enabled || !status || status.phase === 'disabled') return null
-  const { label, hint } = syncLabel(status)
-  const canRetry = status.signedIn && (status.pendingOps > 0 || status.phase === 'error')
-  return (
-    <button
-      type="button"
-      onClick={() => canRetry && void window.murmur.cloud.syncNow()}
-      className={cn(
-        'surface-raised flex w-full items-center gap-2.5 rounded-md px-3.5 py-2.5 text-left transition-colors',
-        canRetry ? 'hover:bg-accent' : 'cursor-default'
-      )}
-      title={hint}
-    >
-      <SyncIcon
-        status={status}
-        className={
-          status.phase === 'synced'
-            ? 'text-success'
-            : status.phase === 'error'
-              ? 'text-destructive'
-              : 'text-muted-foreground'
-        }
-      />
-      <span className="flex-1 text-note font-medium">{label}</span>
-      {canRetry && <RefreshCw className="size-3 text-muted-foreground" />}
-    </button>
   )
 }

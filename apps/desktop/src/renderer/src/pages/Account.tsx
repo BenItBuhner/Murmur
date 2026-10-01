@@ -368,7 +368,7 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
       title={inference.billingEnabled ? 'Plan' : 'Murmur models'}
       description={
         inference.managedAvailable
-          ? 'The speech and formatting models that come with your account. Choose your own provider instead under Models and Style; keys for those stay on this device.'
+          ? 'The speech and formatting models that come with your account. Choose your own provider instead under Speech model and Style; keys for those stay on this device.'
           : undefined
       }
     >
@@ -405,7 +405,7 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
             Transcription paused until {formatResetTime(stopped.resetsAt).replace(/^on /, '')}
           </div>
           <div className="text-note text-muted-foreground">
-            {`This month's ${formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up${inference.plan === 'pro' ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Models to keep dictating${inference.plan === 'pro' || !inference.billingEnabled ? '.' : ', or upgrade for unlimited dictation.'}`}
+            {`This month's ${formatAudioSeconds(stopped.allowed)} of Murmur transcription are used up${inference.plan === 'pro' ? ' (fair use)' : ''}; dictations are refused until then. Connect your own provider under Speech model to keep dictating${inference.plan === 'pro' || !inference.billingEnabled ? '.' : ', or upgrade for unlimited dictation.'}`}
           </div>
         </Banner>
       ) : (

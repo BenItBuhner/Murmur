@@ -20,6 +20,7 @@ import app.murmur.android.dictation.DictationState
 import app.murmur.android.inference.LimitNotice
 import app.murmur.android.inference.LimitStage
 import app.murmur.android.inference.Limits
+import app.murmur.android.inference.ServiceNotice
 import app.murmur.android.settings.OverlayPosition
 import app.murmur.android.settings.OverlayShape
 import kotlin.math.PI
@@ -155,7 +156,8 @@ class OverlayPillView(context: Context) : View(context) {
     /** Each frame drawn, with how much of the pill it shows (0..1) and the frame's time; for the keyboard timing log. */
     var onFrameDrawn: ((presence: Float, frameTimeMs: Long) -> Unit)? = null
 
-    private enum class Kind { IDLE, LISTENING, PROCESSING, SUCCESS, ERROR, LIMIT }
+    /** [LIMIT] is a plan limit explained with its ways forward; [NOTICE] a Murmur service that is down. */
+    private enum class Kind { IDLE, LISTENING, PROCESSING, SUCCESS, ERROR, LIMIT, NOTICE }
 
     /** [restingW] is the width the contents were laid out for; [w] may be a mid-morph snapshot. */
     private data class Look(
@@ -169,6 +171,8 @@ class OverlayPillView(context: Context) : View(context) {
         val retryId: String? = null,
         /** Limit only: what refused the dictation, explained on the pill with its ways forward. */
         val limit: LimitNotice? = null,
+        /** Notice only: the Murmur service that is down, explained on the pill with Retry. */
+        val service: ServiceNotice? = null,
         /** Listening only: a command session wears the command tint. */
         val mode: DictationMode = DictationMode.HANDS_FREE,
         /** Listening in the desktop presentation: a locked session wears the hands-free badge. */
@@ -178,7 +182,7 @@ class OverlayPillView(context: Context) : View(context) {
     ) {
         fun sameContent(other: Look): Boolean =
             kind == other.kind && text == other.text && retryId == other.retryId && limit == other.limit &&
-                mode == other.mode && locked == other.locked && desktop == other.desktop
+                service == other.service && mode == other.mode && locked == other.locked && desktop == other.desktop
     }
 
     /** Tappable pieces of the edit-mode panel. */
@@ -560,10 +564,14 @@ class OverlayPillView(context: Context) : View(context) {
         }
         is DictationState.Error -> {
             val limit = s.limit?.takeIf { it.isPlanLimit }
+            val service = s.service
+            val maxW = if (screenW > 0f) min(dp(LIMIT_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)) else dp(LIMIT_MAX_W_DP)
             if (limit != null) {
                 // Not a fault: the pill keeps its own colour and explains, with the ways forward.
-                val maxW = if (screenW > 0f) min(dp(LIMIT_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)) else dp(LIMIT_MAX_W_DP)
                 Look(Kind.LIMIT, maxW, dp(LIMIT_H_DP), palette.background, s.message, retryId = s.retryId, limit = limit)
+            } else if (service != null) {
+                // Nor is Murmur's provider being down: the same calm two lines, with Retry.
+                Look(Kind.NOTICE, maxW, dp(LIMIT_H_DP), palette.background, s.message, retryId = s.retryId, service = service)
             } else if (s.retryId == null) {
                 Look(Kind.ERROR, min(dp(MESSAGE_MAX_W_DP), textPaint.measureText(s.message) + dp(56f)), dp(TALL_DP), palette.errorBackground, s.message)
             } else {
@@ -916,9 +924,9 @@ class OverlayPillView(context: Context) : View(context) {
         if (isAnimating(now)) postInvalidateOnAnimation()
     }
 
-    /** A capsule, except for the limit notice, which sits on the sheet radius. */
+    /** A capsule, except for the two-line notices (a limit, a service that is down), which sit on the sheet radius. */
     private fun radiusOf(look: Look, h: Float): Float =
-        if (look.kind == Kind.LIMIT) min(dp(LIMIT_RADIUS_DP), h / 2f) else h / 2f
+        if (look.kind == Kind.LIMIT || look.kind == Kind.NOTICE) min(dp(LIMIT_RADIUS_DP), h / 2f) else h / 2f
 
     private fun drawLayer(canvas: Canvas, box: Box, look: Look, alpha: Float, scale: Float, now: Long, dt: Long) {
         val full = alpha >= 0.999f && abs(scale - 1f) < 0.001f
@@ -936,6 +944,7 @@ class OverlayPillView(context: Context) : View(context) {
             Kind.SUCCESS -> drawMessage(canvas, box, look, palette.successForeground, true, now)
             Kind.ERROR -> drawMessage(canvas, box, look, palette.errorForeground, false, now)
             Kind.LIMIT -> drawLimit(canvas, box, look)
+            Kind.NOTICE -> drawNotice(canvas, box, look)
         }
         if (!full) canvas.restore()
         canvas.restore()
@@ -1249,18 +1258,75 @@ class OverlayPillView(context: Context) : View(context) {
     private fun drawLimit(canvas: Canvas, box: Box, look: Look) {
         val limit = look.limit ?: return
         val copy = Limits.describe(limit)
+        val chips = drawExplanationRows(canvas, box, look, copy.title, copy.detail) { cx, cy ->
+            // A clock glyph: the limit comes back.
+            strokePaint.color = palette.accent
+            strokePaint.strokeWidth = dp(1.8f)
+            canvas.drawCircle(cx, cy, dp(7f), strokePaint)
+            canvas.drawLine(cx, cy - dp(3.5f), cx, cy, strokePaint)
+            canvas.drawLine(cx, cy, cx + dp(2.6f), cy + dp(1.8f), strokePaint)
+        }
+
+        // Row 3: the chips, right-aligned, Retry last so it sits where the error pill has it.
+        var x = chips.right
+        upgradeBox = Box.EMPTY
+        ownModelBox = Box.EMPTY
+        x = drawRetryChip(canvas, look, x, chips.cy)
+        val chipH = chips.height
+        val ownW = smallTextPaint.measureText(OWN_MODEL_LABEL) + dp(24f)
+        ownModelBox = Box(x - ownW, chips.cy - chipH / 2f, x, chips.cy + chipH / 2f)
+        drawChip(canvas, ownModelBox, OWN_MODEL_LABEL, palette.chip, palette.onChip, pressed && ownModelBox.inflate(dp(4f)).contains(downX, downY))
+        x = ownModelBox.left - dp(6f)
+        val upgradeUrl = limit.upgradeUrl?.takeIf { copy.upgradeHelps }
+        if (upgradeUrl != null) {
+            val w = smallTextPaint.measureText(UPGRADE_LABEL) + dp(24f)
+            upgradeBox = Box(x - w, chips.cy - chipH / 2f, x, chips.cy + chipH / 2f)
+            drawChip(canvas, upgradeBox, UPGRADE_LABEL, palette.accent, palette.onAccent, pressed && upgradeBox.inflate(dp(4f)).contains(downX, downY))
+        }
+    }
+
+    /**
+     * A Murmur service that is down. Not a fault of the user's, so no red: which service, that
+     * there is nothing to fix on their side, and Retry, since the recording is kept and the
+     * gateway asks the provider again once it has had a moment. A cross waves it away.
+     */
+    private fun drawNotice(canvas: Canvas, box: Box, look: Look) {
+        val service = look.service ?: return
+        val chips = drawExplanationRows(canvas, box, look, service.title, service.detail) { cx, cy ->
+            // A cloud with a gap in it: the service, not the phone, is what is out.
+            strokePaint.color = palette.accent
+            strokePaint.strokeWidth = dp(1.8f)
+            canvas.drawArc(cx - dp(7.5f), cy - dp(4f), cx + dp(1f), cy + dp(5f), 20f, 250f, false, strokePaint)
+            canvas.drawArc(cx - dp(2.5f), cy - dp(7f), cx + dp(7.5f), cy + dp(5f), 190f, 240f, false, strokePaint)
+            canvas.drawLine(cx - dp(7f), cy - dp(7f), cx + dp(7f), cy + dp(7f), strokePaint)
+        }
+        upgradeBox = Box.EMPTY
+        ownModelBox = Box.EMPTY
+        drawRetryChip(canvas, look, chips.right, chips.cy)
+    }
+
+    /** Where the chip row of a two-line notice sits: its right edge, centre line and height. */
+    private class ChipRow(val right: Float, val cy: Float, val height: Float)
+
+    /**
+     * The two text rows of a two-line notice: an icon, the title and the dismiss cross on the
+     * first, the quieter detail under it. Returns where the chip row goes.
+     */
+    private fun drawExplanationRows(
+        canvas: Canvas,
+        box: Box,
+        look: Look,
+        title: String,
+        detail: String,
+        icon: (cx: Float, cy: Float) -> Unit
+    ): ChipRow {
         val left = box.left + dp(16f)
         val right = box.left + look.restingW - dp(12f)
         val top = box.top + dp(12f)
 
-        // Row 1: a clock glyph, the title, the dismiss cross.
-        val iconCx = left + dp(8f)
+        // Row 1: the icon, the title, the dismiss cross.
         val row1Cy = top + dp(10f)
-        strokePaint.color = palette.accent
-        strokePaint.strokeWidth = dp(1.8f)
-        canvas.drawCircle(iconCx, row1Cy, dp(7f), strokePaint)
-        canvas.drawLine(iconCx, row1Cy - dp(3.5f), iconCx, row1Cy, strokePaint)
-        canvas.drawLine(iconCx, row1Cy, iconCx + dp(2.6f), row1Cy + dp(1.8f), strokePaint)
+        icon(left + dp(8f), row1Cy)
         val dismissR = dp(14f)
         val dismissCx = right - dismissR
         dismissBox = Box.centered(dismissCx, row1Cy, dismissR * 2, dismissR * 2)
@@ -1272,37 +1338,27 @@ class OverlayPillView(context: Context) : View(context) {
         canvas.drawLine(dismissCx - xr, row1Cy - xr, dismissCx + xr, row1Cy + xr, strokePaint)
         canvas.drawLine(dismissCx - xr, row1Cy + xr, dismissCx + xr, row1Cy - xr, strokePaint)
         val textLeft = left + dp(26f)
-        canvas.drawText(fitText(copy.title, textPaint, dismissBox.left - dp(8f) - textLeft), textLeft, row1Cy + textPaint.textSize / 2.8f, textPaint)
+        canvas.drawText(fitText(title, textPaint, dismissBox.left - dp(8f) - textLeft), textLeft, row1Cy + textPaint.textSize / 2.8f, textPaint)
 
-        // Row 2: the allowance and its reset, quieter.
+        // Row 2: the explanation, quieter.
         tinyTextPaint.color = ink(0xA6)
         val row2Baseline = row1Cy + dp(10f) + dp(4f) + tinyTextPaint.textSize
-        canvas.drawText(fitText(copy.detail, tinyTextPaint, right - textLeft), textLeft, row2Baseline, tinyTextPaint)
+        canvas.drawText(fitText(detail, tinyTextPaint, right - textLeft), textLeft, row2Baseline, tinyTextPaint)
         tinyTextPaint.color = palette.ink
 
-        // Row 3: the chips, right-aligned, Retry last so it sits where the error pill has it.
         val chipH = dp(30f)
-        val chipCy = box.top + look.h - dp(12f) - chipH / 2f
-        var x = right
+        return ChipRow(right, box.top + look.h - dp(12f) - chipH / 2f, chipH)
+    }
+
+    /** The Retry chip of a two-line notice, when the recording was kept; returns where the next chip ends. */
+    private fun drawRetryChip(canvas: Canvas, look: Look, right: Float, cy: Float): Float {
         retryBox = Box.EMPTY
-        upgradeBox = Box.EMPTY
-        ownModelBox = Box.EMPTY
-        if (look.retryId != null) {
-            val w = retryChipWidth()
-            retryBox = Box(x - w, chipCy - chipH / 2f, x, chipCy + chipH / 2f)
-            drawChip(canvas, retryBox, RETRY_LABEL, palette.chip, palette.onChip, pressed && retryBox.inflate(dp(4f)).contains(downX, downY))
-            x = retryBox.left - dp(6f)
-        }
-        val ownW = smallTextPaint.measureText(OWN_MODEL_LABEL) + dp(24f)
-        ownModelBox = Box(x - ownW, chipCy - chipH / 2f, x, chipCy + chipH / 2f)
-        drawChip(canvas, ownModelBox, OWN_MODEL_LABEL, palette.chip, palette.onChip, pressed && ownModelBox.inflate(dp(4f)).contains(downX, downY))
-        x = ownModelBox.left - dp(6f)
-        val upgradeUrl = limit.upgradeUrl?.takeIf { copy.upgradeHelps }
-        if (upgradeUrl != null) {
-            val w = smallTextPaint.measureText(UPGRADE_LABEL) + dp(24f)
-            upgradeBox = Box(x - w, chipCy - chipH / 2f, x, chipCy + chipH / 2f)
-            drawChip(canvas, upgradeBox, UPGRADE_LABEL, palette.accent, palette.onAccent, pressed && upgradeBox.inflate(dp(4f)).contains(downX, downY))
-        }
+        if (look.retryId == null) return right
+        val w = retryChipWidth()
+        val chipH = dp(30f)
+        retryBox = Box(right - w, cy - chipH / 2f, right, cy + chipH / 2f)
+        drawChip(canvas, retryBox, RETRY_LABEL, palette.chip, palette.onChip, pressed && retryBox.inflate(dp(4f)).contains(downX, downY))
+        return retryBox.left - dp(6f)
     }
 
     // ---- flick between spots (normal mode) ------------------------------------------------------
@@ -1754,6 +1810,13 @@ class OverlayPillView(context: Context) : View(context) {
                 when {
                     upgradeUrl != null && upgradeBox != Box.EMPTY && upgradeBox.inflate(dp(4f)).contains(x, y) -> onUpgradeTap?.invoke(upgradeUrl)
                     ownModelBox != Box.EMPTY && ownModelBox.inflate(dp(4f)).contains(x, y) -> onOwnModelTap?.invoke()
+                    retryId != null && retryBox != Box.EMPTY && retryBox.inflate(dp(4f)).contains(x, y) -> onRetryTap?.invoke(retryId)
+                    dismissBox.inflate(dp(4f)).contains(x, y) -> onDismissTap?.invoke()
+                }
+            }
+            Kind.NOTICE -> {
+                val retryId = toLook.retryId
+                when {
                     retryId != null && retryBox != Box.EMPTY && retryBox.inflate(dp(4f)).contains(x, y) -> onRetryTap?.invoke(retryId)
                     dismissBox.inflate(dp(4f)).contains(x, y) -> onDismissTap?.invoke()
                 }

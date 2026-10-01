@@ -68,6 +68,9 @@ class DictationFlowTest {
     /** How many transcription requests the "server" still refuses on the free plan's weekly words. */
     @Volatile private var refusals = 0
 
+    /** How many transcription requests the "server" still answers as a Murmur gateway whose provider is down. */
+    @Volatile private var outages = 0
+
     /** A captured transcription response to answer with instead of the sample transcript. */
     @Volatile private var sttBody: String? = null
 
@@ -110,6 +113,13 @@ class DictationFlowTest {
                         """{"error":{"type":"murmur_gateway_error","code":"quota_exceeded","message":"This week's 500 free words are used up.",
                            "limit":"wordsPerWeek","plan":"free","planState":"free","used":503,"allowed":500,
                            "resetsAt":${System.currentTimeMillis() + 172_800_000L},"upgradeUrl":"https://murmur.app/account?upgrade=yearly"}}"""
+                    )
+                }
+                if (outages > 0) {
+                    outages--
+                    return MockResponse().setResponseCode(503).setHeader("Retry-After", "15").setBody(
+                        """{"error":{"type":"murmur_gateway_error","code":"provider_unavailable","message":"Murmur's speech service is unavailable right now",
+                           "service":"speech","reason":"timeout","retryAfterSec":15}}"""
                     )
                 }
                 // The captured clip is shorter than the sample audio: the rest of it, which transcript
@@ -266,6 +276,46 @@ class DictationFlowTest {
         assertEquals(DictationState.Success("Inserted"), awaitOutcome(timeoutMs = 30_000))
         assertEquals(lightText(), field.text.toString())
         assertEquals(2, history.get(retryId)!!.attempts)
+    }
+
+    @Test
+    fun `a Murmur speech service that is down keeps the recording, says so calmly on the pill and retries once it is back`() {
+        val (activity, field) = setUpField()
+        val history = HistoryStore.get(activity)
+        val recordings = RecordingStore.get(activity)
+        outages = 1
+
+        DictationController.start(activity)
+        DictationController.stopAndInsert(activity)
+        val down = awaitOutcome(timeoutMs = 30_000)
+
+        assertTrue("expected an error, got $down", down is DictationState.Error)
+        down as DictationState.Error
+        assertEquals("Murmur's speech service is unavailable right now", down.message)
+        assertNull("not a plan limit", down.limit)
+        val service = down.service
+        assertNotNull("the pill carries the service notice", service)
+        assertEquals("speech", service!!.service)
+        assertEquals("timeout", service.reason)
+        assertEquals(15, service.retryAfterSec)
+        assertEquals("Murmur's speech service is unavailable right now", service.title)
+        assertEquals("Not your connection or your mic. Your recording is kept — try again in a moment.", service.detail)
+        val retryId = down.retryId
+        assertNotNull("the recording survives the outage", retryId)
+        val entry = history.get(retryId!!)!!
+        assertTrue(entry.retryable)
+        assertTrue(recordings.has(entry.recording))
+        assertEquals(down.message, entry.error)
+        assertEquals("", field.text.toString())
+        // The gateway already said the provider is down: one request, no waiting on a fallback.
+        assertEquals("one transcription request: $requests", 1, requests.size)
+
+        // The provider is back: the same audio goes through untouched.
+        assertNull(DictationController.retry(activity, retryId, insert = true))
+        assertEquals(DictationState.Success("Inserted"), awaitOutcome(timeoutMs = 30_000))
+        assertEquals(lightText(), field.text.toString())
+        assertEquals(2, history.get(retryId)!!.attempts)
+        assertNull(history.get(retryId)!!.error)
     }
 
     @Test

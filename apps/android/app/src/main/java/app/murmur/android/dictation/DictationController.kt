@@ -18,6 +18,7 @@ import app.murmur.android.history.StageTimings
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
 import app.murmur.android.inference.LimitNotice
+import app.murmur.android.inference.ServiceNotice
 import app.murmur.android.keyboard.HotkeyAction
 import app.murmur.android.service.RecordingService
 import app.murmur.android.settings.DictationStats
@@ -99,8 +100,16 @@ sealed class DictationState {
      * Retry button and stays up until the user acts on it (or gives up on them after a while).
      * [limit]: the plan limit that refused the request; the pill explains it and offers Upgrade and
      * the user's own provider as the ways forward, beside Retry.
+     * [service]: the Murmur instance answered that the provider behind its models is down
+     * (`provider_unavailable`); not a fault of the user's, so the pill explains it calmly, in its
+     * own colour, with Retry beside it.
      */
-    data class Error(val message: String, val retryId: String? = null, val limit: LimitNotice? = null) : DictationState()
+    data class Error(
+        val message: String,
+        val retryId: String? = null,
+        val limit: LimitNotice? = null,
+        val service: ServiceNotice? = null
+    ) : DictationState()
 }
 
 /** One run of the pipeline: a dictation that was just spoken, or a stored one sent again. */
@@ -350,7 +359,7 @@ object DictationController {
                 val message = friendlyError(e)
                 val failed = run ?: Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = null, mode = mode)
                 recordFailure(appContext, settings, failed, raw = "", error = message)
-                showError(appContext, message, failed, planLimitOf(e))
+                showError(appContext, message, failed, planLimitOf(e), serviceNoticeOf(e))
             } finally {
                 run?.let { releaseRecording(appContext, it) }
             }
@@ -398,7 +407,7 @@ object DictationController {
                 Log.e(TAG, "retry failed", e)
                 val message = friendlyError(e)
                 recordFailure(appContext, settings, run, raw = "", error = message)
-                showError(appContext, message, run, planLimitOf(e))
+                showError(appContext, message, run, planLimitOf(e), serviceNoticeOf(e))
             } finally {
                 releaseRecording(appContext, run)
             }
@@ -747,21 +756,32 @@ object DictationController {
     /**
      * A failure the user can do something about: when the audio was stored the pill offers to send
      * it again and waits much longer for the answer than a plain message would. A plan limit is
-     * explained on the pill, with the ways forward, and waits longer still.
+     * explained on the pill, with the ways forward, and waits longer still; so is a Murmur service
+     * that is down, with Retry for when it is back.
      */
-    private fun showError(context: Context, message: String, run: Run, limit: LimitNotice? = null) {
+    private fun showError(
+        context: Context,
+        message: String,
+        run: Run,
+        limit: LimitNotice? = null,
+        service: ServiceNotice? = null
+    ) {
         Cues.play(context, Cue.ERROR)
         val retryId = run.id.takeIf { run.recording != null }
         val hold = when {
-            limit != null -> LIMIT_HOLD_MS
+            limit != null || service != null -> LIMIT_HOLD_MS
             retryId != null -> RETRY_HOLD_MS
             else -> 2500L
         }
-        showTransient(DictationState.Error(message, retryId, limit), hold)
+        if (service != null) Log.w(TAG, "Murmur ${service.service} service unavailable (${service.reason}); recording kept for Retry")
+        showTransient(DictationState.Error(message, retryId, limit, service), hold)
     }
 
     /** The plan limit behind an error, when a Murmur instance refused (or paused) on one. */
     fun planLimitOf(err: Throwable): LimitNotice? = (err as? SttException)?.planLimit
+
+    /** The service notice behind an error, when a Murmur instance said its provider is down. */
+    fun serviceNoticeOf(err: Throwable): ServiceNotice? = (err as? SttException)?.service
 
     private fun loadFixture(context: Context): ShortArray {
         val bytes = context.assets.open("fixtures/jfk.wav").use { it.readBytes() }

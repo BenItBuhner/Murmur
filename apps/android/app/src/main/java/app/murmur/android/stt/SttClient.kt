@@ -2,6 +2,7 @@ package app.murmur.android.stt
 
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.LimitNotice
+import app.murmur.android.inference.ServiceNotice
 import app.murmur.android.settings.SttKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,7 +31,9 @@ class SttException(
     /** Machine-readable `error.code` from the server, when it sent one (the Murmur gateway does). */
     val code: String? = null,
     /** The plan limit a Murmur instance refused the request on, when that is what happened. */
-    val limit: LimitNotice? = null
+    val limit: LimitNotice? = null,
+    /** A Murmur instance whose provider is down (`provider_unavailable`), when that is what happened. */
+    val service: ServiceNotice? = null
 ) : Exception(message) {
     /** The plan limit behind this error, or null for anything else (including a plain rate limit). */
     val planLimit: LimitNotice? get() = limit?.takeIf { it.isPlanLimit }
@@ -63,17 +66,20 @@ data class ParsedError(
     val suggestedModels: List<String>,
     val code: String? = null,
     /** The Murmur gateway's structured limit, when the body carries one. */
-    val limit: LimitNotice? = null
+    val limit: LimitNotice? = null,
+    /** The Murmur gateway's service notice (`provider_unavailable`), when the body carries one. */
+    val service: ServiceNotice? = null
 )
 
 /**
  * Pull a human-readable message, an error code, any "available models" hint and the Murmur
- * gateway's structured limit out of an error body.
+ * gateway's structured limit or service notice out of an error body.
  */
 fun parseErrorBody(body: String): ParsedError {
     var message = body.trim().take(500)
     var code: String? = null
     var limit: LimitNotice? = null
+    var service: ServiceNotice? = null
     try {
         val json = JSONObject(body)
         when {
@@ -86,6 +92,7 @@ fun parseErrorBody(body: String): ParsedError {
         json.optJSONObject("error")?.let { error ->
             error.opt("code")?.let { if (it is String) code = it }
             limit = LimitNotice.fromJson(error, message)
+            service = ServiceNotice.fromJson(error, message)
         }
     } catch (_: Exception) {
         // not JSON
@@ -98,13 +105,13 @@ fun parseErrorBody(body: String): ParsedError {
             if (id.isNotEmpty()) suggested.add(id)
         }
     }
-    return ParsedError(message, suggested, code, limit)
+    return ParsedError(message, suggested, code, limit, service)
 }
 
 /** Build the exception for a non-2xx response from an OpenAI-style server. */
 fun errorFromResponse(status: Int, body: String): SttException {
-    val (message, suggested, code, limit) = parseErrorBody(body)
-    return SttException(message.ifEmpty { "HTTP $status" }, classifyStatus(status, message), status, suggested, code, limit)
+    val (message, suggested, code, limit, service) = parseErrorBody(body)
+    return SttException(message.ifEmpty { "HTTP $status" }, classifyStatus(status, message), status, suggested, code, limit, service)
 }
 
 fun classifyStatus(status: Int, message: String): SttErrorKind = when {

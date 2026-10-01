@@ -27,6 +27,7 @@ import type * as lib_normalize from "../lib/normalize.js";
 import type * as lib_plans from "../lib/plans.js";
 import type * as lib_streak from "../lib/streak.js";
 import type * as lib_stripe from "../lib/stripe.js";
+import type * as lib_upstream from "../lib/upstream.js";
 import type * as lib_users from "../lib/users.js";
 import type * as lib_validators from "../lib/validators.js";
 import type * as preferences from "../preferences.js";
@@ -60,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   "lib/plans": typeof lib_plans;
   "lib/streak": typeof lib_streak;
   "lib/stripe": typeof lib_stripe;
+  "lib/upstream": typeof lib_upstream;
   "lib/users": typeof lib_users;
   "lib/validators": typeof lib_validators;
   preferences: typeof preferences;

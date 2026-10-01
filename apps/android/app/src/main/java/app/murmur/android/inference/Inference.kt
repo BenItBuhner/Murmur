@@ -85,6 +85,8 @@ object Inference {
         "unauthorized", "not_configured", "model_not_found", "clip_too_long", "quota_exceeded",
         // Private testing: the instance's models are not open to this account (a zero allowance).
         "rate_limited", "private_testing", "upstream_error", "upstream_auth", "upstream_busy",
+        // The provider behind the instance is down or not answering (see [ServiceNotice]).
+        ServiceNotice.CODE,
         // Raised on the phone before a request is made.
         "murmur_signed_out", "murmur_no_token"
     )

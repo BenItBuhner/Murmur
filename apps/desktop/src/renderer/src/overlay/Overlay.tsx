@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { describeServiceNotice, type ServiceNotice } from '@shared/inference'
 import { describeLimit, type LimitNotice } from '@shared/limits'
 import type { OverlayState } from '@shared/types'
 import { cn } from '@renderer/lib/utils'
@@ -42,13 +43,23 @@ function isLimitStop(s: OverlayState): s is OverlayState & { limit: LimitNotice 
   return s.phase === 'error' && !!s.limit
 }
 
+/** A Murmur service that is down: explained on two calm lines, like a limit, with Retry. */
+function isServiceStop(s: OverlayState): s is OverlayState & { service: ServiceNotice } {
+  return s.phase === 'error' && !s.limit && !!s.service
+}
+
+/** The pill is explaining something on two lines and a row of buttons. */
+function isExplaining(s: OverlayState): boolean {
+  return isLimitStop(s) || isServiceStop(s)
+}
+
 /** Text inserted with rule-based cleanup only because a plan limit paused or refused the model. */
 function isSoftLimit(s: OverlayState): s is OverlayState & { limit: LimitNotice } {
   return s.phase === 'success' && !!s.limit
 }
 
 function contentHeight(s: OverlayState): string {
-  if (isLimitStop(s)) return 'h-[112px]'
+  if (isExplaining(s)) return 'h-[112px]'
   if (isSoftLimit(s)) return 'h-[64px]'
   return 'h-11'
 }
@@ -77,7 +88,7 @@ function contentKey(s: OverlayState): string {
     case 'listening':
       return `listening:${s.mode === 'command' ? 'command' : 'dictation'}`
     default:
-      return `${s.phase}:${s.mode ?? ''}:${s.message ?? ''}:${s.retryId ?? ''}:${s.limit?.limit ?? ''}`
+      return `${s.phase}:${s.mode ?? ''}:${s.message ?? ''}:${s.retryId ?? ''}:${s.limit?.limit ?? ''}:${s.service?.service ?? ''}`
   }
 }
 
@@ -120,8 +131,8 @@ export function Overlay({
   const key = contentKey(state)
   const idle = state.phase === 'idle'
   const listening = state.phase === 'listening'
-  const limitStop = isLimitStop(state)
-  const interactive = state.phase === 'error' && (!!state.retryId || limitStop)
+  const explaining = isExplaining(state)
+  const interactive = state.phase === 'error' && (!!state.retryId || explaining)
 
   // ---- waveform: a new sample slides in on a fixed cadence, independent of the frame rate -----
   const [levels, setLevels] = useState<readonly number[]>(FLAT_LEVELS)
@@ -192,11 +203,11 @@ export function Overlay({
     return () => observer.disconnect()
   }, [key])
 
-  const padX = limitStop ? LIMIT_PAD_X : PILL_PAD_X
+  const padX = explaining ? LIMIT_PAD_X : PILL_PAD_X
   const width = idle ? IDLE_WIDTH : Math.max(IDLE_WIDTH, contentWidth + padX * 2)
   const height = idle
     ? IDLE_HEIGHT
-    : limitStop
+    : explaining
       ? LIMIT_HEIGHT
       : isSoftLimit(state)
         ? SOFT_HEIGHT
@@ -211,7 +222,7 @@ export function Overlay({
         className={cn(
           'overlay-pill relative overflow-hidden text-note font-medium text-overlay-foreground',
           // Two lines of explanation sit better on the sheet radius than in a capsule.
-          limitStop ? 'rounded-2xl' : 'rounded-full',
+          explaining ? 'rounded-2xl' : 'rounded-full',
           // The pill floats over other windows: the overlay elevation, and a thin light catch on
           // its top edge rather than an outline, so it reads as a surface with a light on it.
           // Both go when the button shadow is turned off (elevation.ts).
@@ -278,6 +289,16 @@ function Contents({
         onDismiss={onDismiss}
         onUpgrade={onUpgrade}
         onOwnProvider={onOwnProvider}
+      />
+    )
+  }
+  if (isServiceStop(state)) {
+    return (
+      <ServiceStop
+        service={state.service}
+        retryId={state.retryId}
+        onRetry={onRetry}
+        onDismiss={onDismiss}
       />
     )
   }
@@ -482,6 +503,81 @@ function LimitStop({
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * A Murmur service that is down. Not a fault of the user's, so no red: which service, that there
+ * is nothing to fix on their side, and Retry, since the recording is kept and the gateway asks
+ * the provider again once it has had a moment.
+ */
+function ServiceStop({
+  service,
+  retryId,
+  onRetry,
+  onDismiss
+}: {
+  service: ServiceNotice
+  retryId?: string
+  onRetry?: (id: string) => void
+  onDismiss?: () => void
+}): React.JSX.Element {
+  const copy = describeServiceNotice(service)
+  return (
+    <div className="flex w-[520px] max-w-[520px] flex-col whitespace-nowrap">
+      <div className="flex items-center gap-3">
+        <ServiceIcon />
+        <span className="min-w-0 flex-1 truncate" title={service.message}>
+          {copy.title}
+        </span>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          title="Dismiss"
+          onClick={() => onDismiss?.()}
+          className="-mr-1.5 flex size-7 items-center justify-center rounded-full text-overlay-foreground/70 transition-colors hover:bg-overlay-foreground/15 hover:text-overlay-foreground"
+        >
+          <CloseIcon />
+        </button>
+      </div>
+      <span
+        className="mt-0.5 min-w-0 truncate pl-7 text-meta font-normal text-overlay-foreground/65"
+        title={copy.detail}
+      >
+        {copy.detail}
+      </span>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        {retryId && (
+          <button
+            type="button"
+            onClick={() => onRetry?.(retryId)}
+            className="flex h-7 items-center gap-1.5 rounded-full bg-overlay-foreground/15 px-3 text-meta font-semibold text-overlay-foreground transition-colors hover:bg-overlay-foreground/28 active:bg-overlay-foreground/35"
+          >
+            <RetryIcon /> Retry
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** A cloud with a gap in it: the service, not the device, is what is out. */
+function ServiceIcon(): React.JSX.Element {
+  return (
+    <svg
+      className="shrink-0 text-warning"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 0 1 0 9" />
+      <path d="M4 4l16 16" />
+    </svg>
   )
 }
 

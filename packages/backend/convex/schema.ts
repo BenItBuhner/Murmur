@@ -5,6 +5,7 @@ import {
   appRuleOverrides,
   dictationModeValidator,
   formattingPreferencesValidator,
+  inferenceKindValidator,
   platformValidator,
   subscriptionValidator,
   syncPreferencesValidator,
@@ -81,6 +82,23 @@ export default defineSchema({
     formats: v.number(),
     updatedAt: v.number()
   }).index('by_user_and_day', ['userId', 'day']),
+
+  /**
+   * How the instance's managed providers have been answering lately, one row per kind: the
+   * unavailable answers in a row and, once there are enough of them, until when the gateway
+   * answers `provider_unavailable` itself instead of asking again (the breaker in lib/upstream.ts).
+   * Instance-wide by design: a provider that is down is down for every account.
+   */
+  providerHealth: defineTable({
+    kind: inferenceKindValidator,
+    failures: v.number(),
+    /** Epoch ms; while in the future, requests for this provider are refused at once. */
+    openUntil: v.optional(v.number()),
+    lastFailureAt: v.optional(v.number()),
+    /** `timeout`, `unreachable` or `unavailable`: what the last failure was. */
+    lastReason: v.optional(v.string()),
+    updatedAt: v.number()
+  }).index('by_kind', ['kind']),
 
   devices: defineTable({
     userId: v.id('users'),

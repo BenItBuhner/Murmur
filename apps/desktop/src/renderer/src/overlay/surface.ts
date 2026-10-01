@@ -19,7 +19,7 @@ export const PILL_SURFACES = {
 
 /** The background class for `state`; `micError` colours the idle bar only. */
 export function pillSurface(
-  state: Pick<OverlayState, 'phase' | 'mode' | 'limit'>,
+  state: Pick<OverlayState, 'phase' | 'mode' | 'limit' | 'service'>,
   micError = false
 ): string {
   switch (state.phase) {
@@ -30,8 +30,9 @@ export function pillSurface(
     case 'success':
       return PILL_SURFACES.success
     case 'error':
-      // A plan limit is not a fault: it keeps the pill's own colour and speaks calmly.
-      return state.limit ? PILL_SURFACES.active : PILL_SURFACES.error
+      // A plan limit, or a Murmur service that is down, is not a fault of the user's: the pill
+      // keeps its own colour and speaks calmly.
+      return state.limit || state.service ? PILL_SURFACES.active : PILL_SURFACES.error
     case 'disabled':
       return PILL_SURFACES.disabled
     default:

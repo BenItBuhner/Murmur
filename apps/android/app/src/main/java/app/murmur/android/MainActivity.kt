@@ -116,6 +116,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Updates.get(this).onAppVisible()
+        // Back in front: a sync waiting out a retry timer, or a client waiting to authenticate, goes now.
+        CloudSync.get()?.onAppVisible()
     }
 
     override fun onPause() {

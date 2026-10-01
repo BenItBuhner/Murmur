@@ -63,14 +63,38 @@ data class InferenceView(
     val planTitle: String get() = Limits.planTitle(planState)
 
     /**
-     * How the Murmur source is captioned where a plan would be named: the plan while the instance
-     * sells Pro, the private-testing state when there is one, otherwise nothing plan-shaped.
+     * The account status has not arrived yet (or there is no account): neither the plan nor
+     * whether the instance sells one is known, so the screens say "Murmur's models" and that the
+     * account is being checked rather than guess at a plan (the web account page does the same).
+     */
+    val loading: Boolean get() = status == null
+
+    /**
+     * How the Murmur source is captioned where a plan would be named: "Murmur's models" until the
+     * status arrives, then the plan while the instance sells Pro, the private-testing state when
+     * there is one, otherwise nothing plan-shaped.
      */
     val sourceCaption: String
-        get() = if (!metered) planTitle else if (billingEnabled) planTitle else "Included with your account"
+        get() = when {
+            loading -> "Murmur's models"
+            !metered -> planTitle
+            billingEnabled -> planTitle
+            else -> "Included with your account"
+        }
 
-    /** A plan label is a billing thing; the private-testing states are about the server, so they show. */
-    val labelled: Boolean get() = billingEnabled || !metered
+    /**
+     * A plan label is a billing thing; the private-testing states are about the server, so they
+     * show. Nothing is labelled before the status says which it is.
+     */
+    val labelled: Boolean get() = !loading && (billingEnabled || !metered)
+
+    /**
+     * What follows "Included with your account" where the Murmur source is chosen: the plan when
+     * one may be named ([labelled]) and the month's minutes when metered; null when there is
+     * nothing to add (before the status arrives, or with billing off on a metered plan).
+     */
+    val sourceMeta: String?
+        get() = listOfNotNull(if (labelled) sourceCaption else null, minutesLabel).joinToString(" · ").ifEmpty { null }
 
     /** The rolling and monthly allowances of the tier, with what is used and when each resets. */
     val meters: List<UsageMeterDto> get() = if (metered) Limits.usageMeters(status?.meters ?: emptyList()) else emptyList()

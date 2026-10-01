@@ -1,8 +1,11 @@
 package app.murmur.android.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,12 +16,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -29,12 +35,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.murmur.android.cloud.CloudBoot
 import app.murmur.android.cloud.CloudBootstrap
 import app.murmur.android.cloud.CloudConfig
+import app.murmur.android.cloud.CloudDiagnostics
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.SyncPhase
 import app.murmur.android.cloud.SyncStatus
@@ -52,6 +61,7 @@ import app.murmur.android.ui.components.SectionGap
 import app.murmur.android.ui.components.Tag
 import app.murmur.android.ui.components.TextLink
 import app.murmur.android.ui.components.ToggleRow
+import app.murmur.android.ui.components.Well
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Paper
 import app.murmur.android.ui.theme.Radii
@@ -59,6 +69,7 @@ import app.murmur.android.ui.theme.Space
 import app.murmur.android.ui.theme.clerkTheme
 import com.clerk.api.Clerk
 import com.clerk.ui.userprofile.UserProfileView
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 fun syncLabel(status: SyncStatus): String = when (status.phase) {
@@ -66,9 +77,70 @@ fun syncLabel(status: SyncStatus): String = when (status.phase) {
     SyncPhase.SYNCING -> "Syncing ${status.pendingOps}…"
     SyncPhase.CONNECTING -> "Connecting…"
     SyncPhase.OFFLINE -> if (status.pendingOps > 0) "Offline, ${status.pendingOps} pending" else "Offline"
-    SyncPhase.ERROR -> "Sync issue: ${status.error ?: "retrying"}"
+    // One line of the reason; the whole of it is in Connection details.
+    SyncPhase.ERROR -> "Sync issue: ${status.error?.let(::shortReason) ?: "retrying"}"
     SyncPhase.SIGNED_OUT -> "Signed out"
     SyncPhase.DISABLED -> "Local"
+}
+
+/** The first line of an error, without a Convex request id, cut to fit a status label. */
+private fun shortReason(error: String): String {
+    val line = error.lineSequence().firstOrNull()?.trim().orEmpty()
+        .replace(Regex("""^\[Request ID: [^\]]*]\s*"""), "")
+        .replace(Regex("""\s+at\s+\S+.*$"""), "")
+        .trim()
+    return if (line.length > 60) line.take(59).trimEnd() + "…" else line
+}
+
+private const val COPIED_LABEL_MS = 2000L
+
+/**
+ * The Account screen's Diagnostics row: what the cloud path has been doing on this phone (the
+ * last Clerk token fetch, the Convex WebSocket and auth state, the outbox and its last flush, the
+ * boot guard), one line here and the whole of it on the clipboard, like the keyboard timing log
+ * under Permissions. It names states, counts and errors, never a token or what was dictated.
+ */
+@Composable
+fun ConnectionDetailsRow(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val c = Murmur.colors
+    var copies by remember { mutableIntStateOf(0) }
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(copies) {
+        if (copies > 0) {
+            delay(COPIED_LABEL_MS)
+            copies = 0
+        }
+    }
+    Column(modifier.testTag("connection-details")) {
+        ControlRow("Connection details", description = CloudDiagnostics.summary()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton(if (shown) "Hide" else "Show", onClick = { shown = !shown }, compact = true)
+                SecondaryButton(
+                    if (copies > 0) "Copied" else "Copy",
+                    onClick = {
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("Murmur connection details", CloudDiagnostics.report(context)))
+                        copies++
+                    },
+                    compact = true,
+                    modifier = Modifier.testTag("connection-details-copy")
+                )
+            }
+        }
+        if (shown) {
+            Well(Modifier.padding(bottom = Space.row)) {
+                SelectionContainer {
+                    Text(
+                        CloudDiagnostics.report(context),
+                        style = Murmur.type.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = c.inkSoft,
+                        modifier = Modifier.testTag("connection-details-report")
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -167,6 +239,10 @@ fun AccountTroubleScreen(detail: String?, nav: TopNav, onRetry: () -> Unit) {
         nav = nav
     ) {
         CloudTrouble(detail = detail, onRetry = onRetry, modifier = Modifier.testTag("account-trouble"))
+        SectionGap()
+        Group("Diagnostics", rows = true) {
+            ConnectionDetailsRow()
+        }
     }
 }
 
@@ -209,10 +285,11 @@ fun AccountContent(
 
         Group(rows = true) {
             ControlRow("Sync", description = "Dictionary, snippets, style and app rules, dictation stats. Your choice of speech model and any API keys of your own are device settings and are never uploaded.") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // A long reason wraps on the right rather than squeezing the row's words into a column.
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.widthIn(max = 168.dp)) {
                     Dot(syncColor(status), size = 6.dp, pulsing = status.phase == SyncPhase.SYNCING)
                     Spacer(Modifier.width(8.dp))
-                    Text(syncLabel(status), style = Murmur.type.labelSmall, color = c.inkSoft)
+                    Text(syncLabel(status), style = Murmur.type.labelSmall, color = c.inkSoft, textAlign = TextAlign.End)
                 }
             }
             ControlRow("Devices") {
@@ -251,6 +328,12 @@ fun AccountContent(
                 TextLink("Terms", onClick = { openUrl(legal.second) }, color = c.inkSoft)
             }
         }
+
+        SectionGap()
+
+        Group("Diagnostics", rows = true) {
+            ConnectionDetailsRow()
+        }
     }
 }
 
@@ -261,7 +344,8 @@ fun AccountContent(
  */
 fun planDescription(inference: InferenceView): String {
     if (!inference.managedAvailable) return "This Murmur instance does not provide models of its own; connect your provider under Speech model."
-    if (inference.status == null) return "Waiting for your account status…"
+    // Before the status arrives nothing is known about a plan or a switch, so nothing plan-shaped is said.
+    if (inference.status == null) return "Checking your account…"
     val selling = inference.billingEnabled
     val stopped = Limits.transcriptionPaused(inference.meters)
     return when (inference.planState) {

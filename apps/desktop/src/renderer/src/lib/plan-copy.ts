@@ -22,15 +22,39 @@ export function planTitle(state: PlanState): string {
   return `${planStateLabel(state)} plan`
 }
 
-type PlanFacts = Pick<InferenceView, 'planState' | 'billingEnabled' | 'metered'>
+type PlanFacts = Pick<InferenceView, 'planState' | 'billingEnabled' | 'metered' | 'status'>
 
 /**
- * How the Murmur source is captioned where a plan would be named: the plan while the instance
- * sells Pro, the private-testing state when there is one, otherwise nothing plan-shaped.
+ * Until the account status arrives neither the plan nor whether the instance sells one is known,
+ * so the pages say "Murmur models" and that the account is being checked rather than guess at a
+ * plan (the web account page does the same).
+ */
+export function planLoading(inference: Pick<InferenceView, 'status'>): boolean {
+  return !inference.status
+}
+
+/**
+ * Whether a plan label may be shown: a plan label is a billing thing, the private-testing states
+ * are about the server, so they show; nothing is labelled before the status says which it is.
+ */
+export function planLabelled(inference: PlanFacts): boolean {
+  return !planLoading(inference) && (inference.billingEnabled || !inference.metered)
+}
+
+/**
+ * How the Murmur source is captioned where a plan would be named: "Murmur models" until the status
+ * arrives, then the plan while the instance sells Pro, the private-testing state when there is
+ * one, otherwise nothing plan-shaped.
  */
 export function sourceCaption(inference: PlanFacts): string {
+  if (planLoading(inference)) return 'Murmur models'
   if (!inference.metered) return planTitle(inference.planState)
   return inference.billingEnabled ? planTitle(inference.planState) : 'Included with your account'
+}
+
+/** The heading of the plan section: "Plan" while the instance is known to sell one, "Murmur models" otherwise. */
+export function planSectionTitle(inference: PlanFacts): string {
+  return !planLoading(inference) && inference.billingEnabled ? 'Plan' : 'Murmur models'
 }
 
 /**
@@ -41,7 +65,7 @@ export function sourceCaption(inference: PlanFacts): string {
 export function planDescription(inference: InferenceView): string {
   if (!inference.managedAvailable)
     return 'This Murmur instance does not provide models of its own; connect your provider under Speech model.'
-  if (!inference.status) return 'Waiting for your account status…'
+  if (!inference.status) return 'Checking your account…'
   const selling = inference.billingEnabled
   const stopped = transcriptionPaused(inference.meters)
   switch (inference.planState) {

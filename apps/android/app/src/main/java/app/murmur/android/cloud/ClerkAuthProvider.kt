@@ -17,16 +17,22 @@ data class ClerkCredentials(val userId: String, val email: String?, val name: St
 /** How long a Clerk call (a session token, a sign-out) may take before it counts as failed. */
 const val CLERK_CALL_TIMEOUT_MS = 15_000L
 
+/** What [ClerkTokens.sessionToken] answers while the cloud is not up; callers show it as is. */
+const val CLOUD_NOT_CONNECTED = "Murmur's server is not connected"
+
 /**
  * A session token from Clerk, or an explanation: null with [error] set when nobody is signed in,
- * when Clerk answers with an error, when it does not answer within [CLERK_CALL_TIMEOUT_MS], or when
- * the cloud never came up (its classes may then not even load, so Clerk is not touched at all).
+ * when Clerk answers with an error, or when it does not answer within the timeout.
  */
 private class TokenAnswer(val token: String?, val error: String?)
 
-private suspend fun clerkToken(skipCache: Boolean, timeoutMs: Long): TokenAnswer {
-    if (!CloudBootstrap.state.value.usable) return TokenAnswer(null, "Murmur's server is not connected")
-    return try {
+/**
+ * Asks Clerk for a Convex JWT (the `convex` template). [purpose] names the caller in the
+ * diagnostics: the Convex client's own provider, or the managed-inference gateway. Never throws.
+ */
+private suspend fun clerkToken(skipCache: Boolean, timeoutMs: Long, purpose: String): TokenAnswer {
+    val started = System.currentTimeMillis()
+    val answer = try {
         withTimeoutOrNull(timeoutMs) {
             if (Clerk.userFlow.value == null) return@withTimeoutOrNull TokenAnswer(null, "Not signed in")
             var token: String? = null
@@ -42,17 +48,26 @@ private suspend fun clerkToken(skipCache: Boolean, timeoutMs: Long): TokenAnswer
         Log.w("MurmurCloud", "getting a session token failed", e)
         TokenAnswer(null, CloudBootstrap.describe(e))
     }
+    if (answer.error != "Not signed in") {
+        CloudDiagnostics.tokenFetch(purpose, skipCache, started, answer.token != null, answer.error)
+    }
+    return answer
 }
 
 /** Session tokens for callers outside the Convex client, such as the managed-inference gateway. */
 object ClerkTokens {
     /**
-     * A Convex JWT for the signed-in account, or null when nobody is signed in, Clerk cannot mint
-     * one, or does not answer in time. Never throws and never waits longer than [timeoutMs], so the
-     * dictation service cannot hang on it.
+     * A Convex JWT for the signed-in account, or null when the cloud never came up (Clerk's classes
+     * may then not even load, so Clerk is not touched at all), nobody is signed in, Clerk cannot
+     * mint one, or does not answer in time. Never throws and never waits longer than [timeoutMs],
+     * so the dictation service cannot hang on it.
      */
     suspend fun sessionToken(skipCache: Boolean, timeoutMs: Long = CLERK_CALL_TIMEOUT_MS): String? {
-        val answer = clerkToken(skipCache, timeoutMs)
+        if (!CloudBootstrap.state.value.usable) {
+            Log.w("MurmurCloud", "could not get a session token: $CLOUD_NOT_CONNECTED")
+            return null
+        }
+        val answer = clerkToken(skipCache, timeoutMs, purpose = "gateway")
         if (answer.token == null && answer.error != "Not signed in") {
             Log.w("MurmurCloud", "could not get a session token: ${answer.error}")
         }
@@ -64,6 +79,11 @@ object ClerkTokens {
  * Bridges the Clerk Android SDK into Convex's [AuthProvider]. Sign-in itself happens in the UI
  * (Clerk's AuthView); this provider only turns the resulting session into Convex JWTs minted from
  * the `convex` JWT template, and hands out a fresh one whenever the Rust client asks for a refresh.
+ *
+ * It is built by [CloudBootstrap] after Clerk has been initialised and only ever asked by the
+ * Convex client, so it does not look at the published boot state: the client's first request for a
+ * token comes while the bootstrap is still publishing, and refusing it then left the engine
+ * unauthenticated for the life of the process.
  */
 class ClerkAuthProvider(private val timeoutMs: Long = CLERK_CALL_TIMEOUT_MS) : AuthProvider<ClerkCredentials> {
     override suspend fun login(context: Context, onIdToken: (String?) -> Unit): Result<ClerkCredentials> {
@@ -97,7 +117,7 @@ class ClerkAuthProvider(private val timeoutMs: Long = CLERK_CALL_TIMEOUT_MS) : A
         } catch (e: Throwable) {
             return Result.failure(IllegalStateException(CloudBootstrap.describe(e), e))
         } ?: return Result.failure(IllegalStateException("Not signed in"))
-        val answer = clerkToken(skipCache, timeoutMs)
+        val answer = clerkToken(skipCache, timeoutMs, purpose = "convex")
         val jwt = answer.token ?: return Result.failure(IllegalStateException(answer.error ?: "Could not get a session token"))
         val name = listOfNotNull(user.firstName, user.lastName).joinToString(" ").trim().ifEmpty { null }
         return Result.success(

@@ -74,7 +74,7 @@ fun SpeechModelForm(store: SettingsStore, settings: MurmurSettings, showAdvanced
         SourceChooser(
             title = "Speech model",
             selected = settings.sttSource,
-            murmurMeta = listOfNotNull(inference.sourceCaption, inference.minutesLabel).joinToString(" · "),
+            murmurMeta = inference.sourceMeta,
             onSelect = { source -> store.update { s -> s.copy(sttSource = source) } }
         )
         SectionGap()
@@ -119,7 +119,8 @@ fun RecognitionGroup(store: SettingsStore, settings: MurmurSettings) {
 fun SourceChooser(
     title: String,
     selected: InferenceSource,
-    murmurMeta: String,
+    /** The plan or allowance in brackets after "Included with your account"; null for no brackets. */
+    murmurMeta: String?,
     onSelect: (InferenceSource) -> Unit,
     ownLabel: String = "Your own provider"
 ) {
@@ -132,7 +133,7 @@ fun SourceChooser(
         Text(
             when (selected) {
                 InferenceSource.MURMUR ->
-                    "Included with your account ($murmurMeta). Nothing to set up: your recording goes to this Murmur instance, which transcribes it with the models it provides."
+                    "Included with your account${murmurMeta?.let { " ($it)" }.orEmpty()}. Nothing to set up: your recording goes to this Murmur instance, which transcribes it with the models it provides."
                 InferenceSource.CUSTOM ->
                     "OpenAI, Groq, Deepgram, ElevenLabs or a local whisper server with your own key. Audio goes straight from this phone to that provider and never touches Murmur’s servers."
             },
@@ -173,9 +174,14 @@ private fun MurmurSpeechSummary(store: SettingsStore, settings: MurmurSettings, 
             )
         }
         ControlRow(
-            if (inference.billingEnabled) "Plan" else "Allowance",
+            when {
+                inference.loading -> "Murmur's models"
+                inference.billingEnabled -> "Plan"
+                else -> "Allowance"
+            },
             description = when {
                 !inference.signedIn -> "Sign in to use Murmur models."
+                inference.loading -> "Checking your account…"
                 inference.minutesLabel != null -> "Transcription minutes reset at the start of every month."
                 inference.planState == "testing" -> "Not open to this account while the server is in private testing; your own provider still works."
                 inference.planState == "unlimited" -> "No allowance to run out of."

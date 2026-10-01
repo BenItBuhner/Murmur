@@ -480,12 +480,14 @@ describe('managed inference gateway', () => {
 
   it('translates provider failures and never bills them', async () => {
     let upstream: Response = jsonResponse({ error: { message: 'timestamp_granularities is not supported' } }, 400)
-    stubFetch(() => upstream)
+    const calls = stubFetch(() => upstream)
     const t = setup()
     const asAda = t.withIdentity(ada)
     const bad = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(3)))
     expect(bad.status).toBe(400)
     expect((await bad.json()).error.message).toMatch(/timestamp_granularities/)
+    // A real 4xx is the provider's answer: passed through once, never retried.
+    expect(calls).toHaveLength(1)
 
     upstream = new Response('Invalid API key sk-stt-secret', { status: 401 })
     const auth = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(3)))
@@ -497,10 +499,18 @@ describe('managed inference gateway', () => {
     upstream = new Response('rate limited', { status: 429 })
     expect((await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(3)))).status).toBe(503)
 
-    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))))
+    // A provider that cannot be reached at all is "unavailable", the calm notice, not a bare 502.
+    const unreachable = vi.fn(async () => Promise.reject(new TypeError('fetch failed')))
+    vi.stubGlobal('fetch', unreachable)
     const down = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(3)))
-    expect(down.status).toBe(502)
-    expect((await down.json()).error.code).toBe('upstream_error')
+    expect(down.status).toBe(503)
+    expect((await down.json()).error).toMatchObject({
+      code: 'provider_unavailable',
+      service: 'speech',
+      reason: 'unreachable'
+    })
+    // A connection that failed outright is the one case worth a second try.
+    expect(unreachable).toHaveBeenCalledTimes(2)
 
     const status = await asAda.query(api.inference.status, {})
     expect(status.usage.sttRequests).toBe(0)
@@ -1057,8 +1067,10 @@ describe('POST /v1/format', () => {
     const out = await res.json()
     expect(out.status.outcome).toBe('failed')
     expect(out.text).toBe('Hello there everyone')
-    // Nothing was billed for a request the provider never answered.
-    expect((await asAda.query(api.inference.status, {})).usage.llmRequests).toBe(1)
+    // Nothing was billed for a request the provider never answered: no tokens, and not a request.
+    const usage = (await asAda.query(api.inference.status, {})).usage
+    expect(usage.llmRequests).toBe(0)
+    expect(usage.llmTokens).toBe(0)
   })
 
   it('enforces sign-in, configuration, the body shape and the quota', async () => {

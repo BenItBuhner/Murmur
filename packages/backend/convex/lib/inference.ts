@@ -9,6 +9,7 @@ import type {
 import { PRIVATE_TESTING_CODE, PRIVATE_TESTING_MESSAGE } from './access'
 import type { Meter, Refusal } from './entitlements'
 import { billingEnabled, type AccessState, type Plan } from './plans'
+import { serviceOf, type UnavailableReason, type UpstreamOutcome } from './upstream'
 
 /**
  * Pure helpers behind the managed-inference gateway (convex/gateway.ts). Nothing here touches the
@@ -330,6 +331,8 @@ export type GatewayErrorCode =
   | 'upstream_error'
   | 'upstream_auth'
   | 'upstream_busy'
+  /** The provider behind the instance is down, unreachable or not answering in time (503). */
+  | 'provider_unavailable'
 
 /** OpenAI-style error body; the apps read `error.message` and `error.code`. */
 export function gatewayError(
@@ -584,11 +587,33 @@ export const STT_PASSTHROUGH_FIELDS = new Set([
 /** Upper bound on completion length so one request cannot drain a month of tokens. */
 export const MAX_COMPLETION_TOKENS = 4096
 
-/** Human-readable message for an upstream failure, without leaking the instance's credentials. */
-export function describeUpstreamFailure(
-  status: number,
-  body: string
-): { status: number; code: GatewayErrorCode; message: string } {
+/**
+ * What the gateway tells a client about a provider that failed it. `provider_unavailable` is the
+ * one the apps render as a calm notice; everything else keeps its existing shape.
+ */
+export interface UpstreamFailure {
+  status: number
+  code: GatewayErrorCode
+  message: string
+  /** `provider_unavailable` only: why, and when it is worth asking again. */
+  unavailable?: { service: 'speech' | 'formatting'; reason: UnavailableReason; retryAfterSec: number }
+  /** The provider's own words, when it said any (never for credentials). */
+  detail?: string
+}
+
+/**
+ * The `Retry-After` the gateway suggests when a provider is unavailable and nothing says better:
+ * the breaker's cooldown, so a client that waits it out finds the gateway asking the provider again.
+ */
+export const PROVIDER_RETRY_AFTER_SEC = 15
+
+/** The one calm sentence for a provider that is down, the same words in both apps. */
+export function unavailableMessage(kind: InferenceKind): string {
+  return `Murmur's ${serviceOf(kind)} service is unavailable right now`
+}
+
+/** The provider's own words from an error body, trimmed; empty when there were none. */
+function upstreamDetail(body: string): string {
   let detail = body.trim().slice(0, 300)
   try {
     const json = JSON.parse(body) as { error?: { message?: string } | string; message?: string }
@@ -598,11 +623,35 @@ export function describeUpstreamFailure(
   } catch {
     // plain text
   }
+  return detail
+}
+
+/** A provider's own `Retry-After` (delay-seconds form), when it is a sensible one. */
+function upstreamRetryAfter(headers: Headers | undefined): number | null {
+  const raw = headers?.get('retry-after')?.trim()
+  if (!raw || !/^\d+$/.test(raw)) return null
+  const seconds = Number(raw)
+  return seconds >= 1 && seconds <= 120 ? seconds : null
+}
+
+/**
+ * Human-readable description of a non-2xx provider answer, without leaking the instance's
+ * credentials. Real 4xx answers are passed through as `bad_request` with the provider's words so
+ * clients can adapt (e.g. drop word timestamps); 502/503/504 mean the provider has no healthy
+ * model behind it and are reported as `provider_unavailable`, like a timeout.
+ */
+export function describeUpstreamFailure(
+  status: number,
+  body: string,
+  kind: InferenceKind = 'stt',
+  headers?: Headers
+): UpstreamFailure {
+  const detail = upstreamDetail(body)
   if (status === 401 || status === 403)
     return {
       status: 502,
       code: 'upstream_auth',
-      message: 'The speech provider behind this Murmur instance rejected its credentials'
+      message: `The ${serviceOf(kind)} provider behind this Murmur instance rejected its credentials`
     }
   if (status === 429)
     return {
@@ -611,17 +660,77 @@ export function describeUpstreamFailure(
       message: 'The model provider is busy; try again in a moment'
     }
   if (status === 400 || status === 404 || status === 422)
-    // Passed through with the upstream's own words so clients can adapt (e.g. drop word timestamps).
     return {
       status: 400,
       code: 'bad_request',
       message: detail || `Provider rejected the request (HTTP ${status})`
+    }
+  if (status === 502 || status === 503 || status === 504)
+    return {
+      status: 503,
+      code: 'provider_unavailable',
+      message: unavailableMessage(kind),
+      unavailable: {
+        service: serviceOf(kind),
+        reason: 'unavailable',
+        retryAfterSec: upstreamRetryAfter(headers) ?? PROVIDER_RETRY_AFTER_SEC
+      },
+      detail: detail || undefined
     }
   return {
     status: 502,
     code: 'upstream_error',
     message: detail || `Provider error (HTTP ${status})`
   }
+}
+
+/** The failure behind an upstream call that did not come back with a 2xx. */
+export function describeUpstreamOutcome(kind: InferenceKind, outcome: UpstreamOutcome): UpstreamFailure {
+  if (outcome.kind === 'response')
+    return describeUpstreamFailure(outcome.res.status, outcome.text, kind, outcome.res.headers)
+  return {
+    status: 503,
+    code: 'provider_unavailable',
+    message: unavailableMessage(kind),
+    unavailable: {
+      service: serviceOf(kind),
+      reason: outcome.kind,
+      retryAfterSec: PROVIDER_RETRY_AFTER_SEC
+    },
+    detail: outcome.kind === 'unreachable' ? outcome.detail : undefined
+  }
+}
+
+/** A provider that the gateway did not even ask: its breaker is open for `retryAfterSec` more seconds. */
+export function providerDownFailure(kind: InferenceKind, retryAfterSec: number): UpstreamFailure {
+  return {
+    status: 503,
+    code: 'provider_unavailable',
+    message: unavailableMessage(kind),
+    unavailable: { service: serviceOf(kind), reason: 'unavailable', retryAfterSec }
+  }
+}
+
+/**
+ * The HTTP answer for an upstream failure. A `provider_unavailable` carries `Retry-After` and the
+ * structured `service`, `reason` and `retryAfterSec` fields next to the sentence, so a client can
+ * tell it from Murmur's own errors and from the plan and private-testing refusals.
+ */
+export function upstreamFailureResponse(failure: UpstreamFailure, retryAfterSec?: number): Response {
+  if (!failure.unavailable) return gatewayError(failure.status, failure.code, failure.message)
+  const seconds = retryAfterSec ?? failure.unavailable.retryAfterSec
+  return gatewayError(
+    failure.status,
+    failure.code,
+    failure.message,
+    { 'retry-after': String(seconds) },
+    {
+      service: failure.unavailable.service,
+      reason: failure.unavailable.reason,
+      retryAfterSec: seconds,
+      ...(failure.detail ? { detail: failure.detail } : {})
+    }
+  )
 }
 
 // ---- /v1/format -------------------------------------------------------------------------------

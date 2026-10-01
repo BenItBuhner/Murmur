@@ -1,5 +1,6 @@
+import type { FunctionReturnType } from 'convex/server'
 import { internal } from './_generated/api'
-import { httpAction } from './_generated/server'
+import { httpAction, type ActionCtx } from './_generated/server'
 import { formatTranscript } from '../../text-engine/src/format'
 import { sttLanguageField } from '../../text-engine/src/languages'
 import type { ChatMessage, ChatOptions, ChatResult } from '../../text-engine/src/types'
@@ -13,7 +14,7 @@ import {
   STT_PASSTHROUGH_FIELDS,
   chooseSttModel,
   clipSeconds,
-  describeUpstreamFailure,
+  describeUpstreamOutcome,
   gatewayError,
   identityOf,
   limitDetail,
@@ -24,18 +25,24 @@ import {
   parseMultipart,
   parseSpeedMode,
   privateTestingError,
+  providerDownFailure,
   readUpstreams,
   tokensUsed,
   transcriptWords,
+  unavailableMessage,
+  upstreamFailureResponse,
   upstreamModelFor,
   upstreamRejectedModel,
   wavInfo,
   type GatewayIdentity,
+  type InferenceKind,
   type MultipartFile,
   type SpeedFallback,
   type SpeedMode,
-  type Upstream
+  type Upstream,
+  type UpstreamFailure
 } from './lib/inference'
+import { callUpstream, readUpstreamBudgets, sttBudgetMs } from './lib/upstream'
 
 /**
  * Managed inference: an OpenAI-compatible facade in front of the model providers the operator
@@ -44,10 +51,17 @@ import {
  * provider credentials never leave the deployment's environment variables. During private testing
  * (lib/access.ts) only the accounts on the list get past `authorize`.
  *
+ * Every provider call runs under a budget with one safe retry (lib/upstream.ts); a provider that
+ * is down answers `provider_unavailable` within it, and after a few such answers in a row the
+ * breaker answers for it until the cooldown has passed.
+ *
  * Mounted in convex/http.ts at /v1/models, /v1/audio/transcriptions and /v1/chat/completions.
  */
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
+
+type Gate = FunctionReturnType<typeof internal.inference.authorize>
+type Allowed = Extract<Gate, { ok: true }>
 
 /** The `authorize` arguments that name the caller. */
 function callerArgs(identity: GatewayIdentity): {
@@ -56,6 +70,46 @@ function callerArgs(identity: GatewayIdentity): {
   emailVerified?: boolean
 } {
   return { clerkId: identity.subject, email: identity.email, emailVerified: identity.emailVerified }
+}
+
+/** The answer for a request `authorize` turned down. */
+function gateRefusal(gate: Exclude<Gate, { ok: true }>, kind: InferenceKind): Response {
+  if (gate.denied !== undefined) return privateTestingError()
+  if (gate.unavailable !== undefined) {
+    console.warn(`[gateway] ${kind} provider breaker open; refused without asking the provider`)
+    return upstreamFailureResponse(providerDownFailure(kind, gate.unavailable.retryAfterSec))
+  }
+  return limitError(gate.refusal, gate.plan, gate.planState, process.env)
+}
+
+/**
+ * A provider call that did not come back usable: a `provider_unavailable` counts against the
+ * provider's breaker and carries the cooldown it may have opened as its `Retry-After`; every
+ * other failure is reported as it is. Nothing is billed for any of them.
+ */
+async function providerFailure(
+  ctx: ActionCtx,
+  kind: InferenceKind,
+  failure: UpstreamFailure,
+  upstreamMs: number
+): Promise<Response> {
+  if (!failure.unavailable) {
+    console.warn(`[gateway] ${kind} upstream -> ${failure.status} ${failure.code} upstreamMs=${upstreamMs}`)
+    return upstreamFailureResponse(failure)
+  }
+  const state = await ctx.runMutation(internal.inference.providerFailed, {
+    kind,
+    reason: failure.unavailable.reason
+  })
+  console.warn(
+    `[gateway] ${kind} provider unavailable (${failure.unavailable.reason}${failure.detail ? `: ${failure.detail.slice(0, 120)}` : ''}) upstreamMs=${upstreamMs} failures=${state.failures}${state.openForSec !== null ? ` breakerOpenSec=${state.openForSec}` : ''}`
+  )
+  return upstreamFailureResponse(failure, state.openForSec ?? undefined)
+}
+
+/** The provider answered: forget the failures counted against it, if there were any. */
+async function providerAnswered(ctx: ActionCtx, kind: InferenceKind, gate: Allowed): Promise<void> {
+  if (gate.provider.failures > 0) await ctx.runMutation(internal.inference.providerRecovered, { kind })
 }
 
 function modelNotFound(requested: string, available: string): Response {
@@ -120,7 +174,7 @@ export const transcriptions = httpAction(async (ctx, request) => {
     kind: 'stt',
     seconds
   })
-  if (!gate.ok) return 'denied' in gate ? privateTestingError() : limitError(gate.refusal, gate.plan, gate.planState, process.env)
+  if (!gate.ok) return gateRefusal(gate, 'stt')
 
   const buildForm = (upstreamModel: string): FormData => {
     const form = new FormData()
@@ -141,21 +195,15 @@ export const transcriptions = httpAction(async (ctx, request) => {
   }
   const headers: Record<string, string> = {}
   if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
+  // One budget for the request, clip length included: a second model call (below) gets what is left.
+  const budgetMs = sttBudgetMs(readUpstreamBudgets(process.env).stt, seconds)
   const started = Date.now()
-  const transcribe = async (upstreamModel: string): Promise<{ res: Response; text: string } | Response> => {
-    let res: Response
-    try {
-      res = await fetch(`${upstream.baseUrl}/audio/transcriptions`, {
-        method: 'POST',
-        headers,
-        body: buildForm(upstreamModel)
-      })
-    } catch (err) {
-      console.error('[gateway] stt upstream unreachable', err instanceof Error ? err.message : err)
-      return gatewayError(502, 'upstream_error', 'Could not reach the speech provider behind this instance')
-    }
-    return { res, text: await res.text() }
-  }
+  const transcribe = (upstreamModel: string) =>
+    callUpstream(
+      `${upstream.baseUrl}/audio/transcriptions`,
+      () => ({ method: 'POST', headers, body: buildForm(upstreamModel) }),
+      Math.max(1_000, budgetMs - (Date.now() - started))
+    )
 
   // The tier's model for normal; the fast model for fast, or the tier's model again when the
   // instance has none, and again when the provider does not know the fast model yet. Either way
@@ -164,7 +212,8 @@ export const transcriptions = httpAction(async (ctx, request) => {
   let ran: SpeedMode = choice.speed
   let fallback: SpeedFallback | undefined = choice.fallback
   let attempt = await transcribe(choice.model)
-  if (attempt instanceof Response) return attempt
+  if (attempt.kind !== 'response')
+    return providerFailure(ctx, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
   if (
     !attempt.res.ok &&
     choice.normalModel !== undefined &&
@@ -176,14 +225,11 @@ export const transcriptions = httpAction(async (ctx, request) => {
     ran = 'normal'
     fallback = 'model_not_found'
     attempt = await transcribe(choice.normalModel)
-    if (attempt instanceof Response) return attempt
+    if (attempt.kind !== 'response')
+      return providerFailure(ctx, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
   }
   const { res, text } = attempt
-  if (!res.ok) {
-    const failure = describeUpstreamFailure(res.status, text)
-    console.warn(`[gateway] stt upstream ${res.status} -> ${failure.status} ${failure.code}`)
-    return gatewayError(failure.status, failure.code, failure.message)
-  }
+  if (!res.ok) return providerFailure(ctx, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
   let json: { duration?: number } | undefined
   try {
     json = JSON.parse(text) as { duration?: number }
@@ -195,9 +241,10 @@ export const transcriptions = httpAction(async (ctx, request) => {
   const upstreamType = res.headers.get('content-type') ?? 'application/json'
   const words = transcriptWords(text, upstreamType)
   await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'stt', seconds: billed, words })
+  await providerAnswered(ctx, 'stt', gate)
   const speedNote = fallback ? `${ran} (asked ${speed}, ${fallback})` : ran
   console.log(
-    `[gateway] stt plan=${gate.plan} speed=${speedNote} seconds=${billed.toFixed(1)} words=${words} upstreamMs=${Date.now() - started}`
+    `[gateway] stt plan=${gate.plan} speed=${speedNote} seconds=${billed.toFixed(1)} words=${words} upstreamMs=${Date.now() - started}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}`
   )
   const responseHeaders: Record<string, string> = { 'content-type': upstreamType, [SPEED_HEADER]: ran }
   if (fallback) responseHeaders[SPEED_FALLBACK_HEADER] = fallback
@@ -236,7 +283,7 @@ export const chatCompletions = httpAction(async (ctx, request) => {
     return gatewayError(400, 'bad_request', '"messages" must be a non-empty array')
 
   const gate = await ctx.runMutation(internal.inference.authorize, { ...callerArgs(identity), kind: 'llm' })
-  if (!gate.ok) return 'denied' in gate ? privateTestingError() : limitError(gate.refusal, gate.plan, gate.planState, process.env)
+  if (!gate.ok) return gateRefusal(gate, 'llm')
 
   const outbound: Record<string, unknown> = { model: upstreamModelFor(upstream, gate.plan), stream: false }
   for (const key of CHAT_PASSTHROUGH) if (input[key] !== undefined) outbound[key] = input[key]
@@ -247,19 +294,14 @@ export const chatCompletions = httpAction(async (ctx, request) => {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
   const started = Date.now()
-  let res: Response
-  try {
-    res = await fetch(`${upstream.baseUrl}/chat/completions`, { method: 'POST', headers, body: requestBody })
-  } catch (err) {
-    console.error('[gateway] llm upstream unreachable', err instanceof Error ? err.message : err)
-    return gatewayError(502, 'upstream_error', 'Could not reach the model provider behind this instance')
-  }
-  const text = await res.text()
-  if (!res.ok) {
-    const failure = describeUpstreamFailure(res.status, text)
-    console.warn(`[gateway] llm upstream ${res.status} -> ${failure.status} ${failure.code}`)
-    return gatewayError(failure.status, failure.code, failure.message)
-  }
+  const outcome = await callUpstream(
+    `${upstream.baseUrl}/chat/completions`,
+    () => ({ method: 'POST', headers, body: requestBody }),
+    readUpstreamBudgets(process.env).chatMs
+  )
+  if (outcome.kind !== 'response' || !outcome.res.ok)
+    return providerFailure(ctx, 'llm', describeUpstreamOutcome('llm', outcome), Date.now() - started)
+  const { text } = outcome
   let json: Record<string, unknown>
   try {
     json = JSON.parse(text) as Record<string, unknown>
@@ -272,6 +314,7 @@ export const chatCompletions = httpAction(async (ctx, request) => {
     text.length
   )
   await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'llm', tokens })
+  await providerAnswered(ctx, 'llm', gate)
   console.log(`[gateway] llm plan=${gate.plan} tokens=${tokens} upstreamMs=${Date.now() - started}`)
   // The upstream model is the instance's business; clients asked for the Murmur alias.
   return new Response(JSON.stringify({ ...json, model: MURMUR_MODELS.llm }), { status: 200, headers: JSON_HEADERS })
@@ -286,6 +329,10 @@ export const chatCompletions = httpAction(async (ctx, request) => {
  *   { transcript, context: { category, tone, app?, language?, precedingText?, instructions?,
  *                           dictionary?: [{ word, aliases }], keepVerbatim?: [] } }
  *   -> { text, pressEnter, status, modelText?, llmMs, stages, model }
+ *
+ * A provider that is down never fails a dictation here: the engine's rule-based text goes out
+ * with `status.outcome = "failed"` and the `provider_unavailable` sentence as its detail, and when
+ * the provider's breaker is open the model is not asked at all.
  */
 export const format = httpAction(async (ctx, request) => {
   const identity = await identityOf(ctx.auth)
@@ -308,26 +355,50 @@ export const format = httpAction(async (ctx, request) => {
     kind: 'llm',
     degradable: true
   })
-  if (!gate.ok) return 'denied' in gate ? privateTestingError() : limitError(gate.refusal, gate.plan, gate.planState, process.env)
+  if (!gate.ok) return gateRefusal(gate, 'llm')
 
   const model = upstreamModelFor(upstream, gate.plan)
+  const budgetMs = readUpstreamBudgets(process.env).formatMs
   let tokens = 0
-  let calls = 0
+  /** Model round trips the provider answered; only those are usage. */
+  let answered = 0
+  // Assigned inside `complete`; typed through the assertion so the check below sees the union.
+  let unavailable = null as UpstreamFailure | null
   const started = Date.now()
   const complete = async (messages: ChatMessage[], opts: ChatOptions): Promise<ChatResult> => {
-    calls++
-    const res = await upstreamChat(upstream, model, messages, opts)
-    tokens += res.tokens
-    return res.result
+    const answer = await upstreamChat(upstream, model, messages, opts, budgetMs)
+    if (!answer.ok) {
+      if (answer.failure.unavailable) unavailable = answer.failure
+      else console.warn(`[gateway] llm upstream -> ${answer.failure.status} ${answer.failure.code}`)
+      throw new UpstreamError(answer.failure.message, answer.failure.status, answer.failure.code)
+    }
+    answered++
+    tokens += answer.tokens
+    return answer.result
+  }
+  // The breaker is open: the engine runs without the model and the answer says why, at once.
+  const breakerOpen = async (): Promise<ChatResult> => {
+    throw new UpstreamError(unavailableMessage('llm'), 503, 'provider_unavailable')
   }
   // Past Pro's soft fair-use cap the engine runs without a model: rule-based text, never an error.
   const formatted = await formatTranscript(
     { transcript: parsed.request.transcript, mode: 'smart', context: parsed.request.context },
-    gate.paused ? null : complete
+    gate.paused ? null : gate.provider.openForSec !== null ? breakerOpen : complete
   )
-  if (calls > 0) await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'llm', tokens })
+  if (answered > 0) await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'llm', tokens })
+  if (unavailable?.unavailable) {
+    const state = await ctx.runMutation(internal.inference.providerFailed, {
+      kind: 'llm',
+      reason: unavailable.unavailable.reason
+    })
+    console.warn(
+      `[gateway] llm provider unavailable (${unavailable.unavailable.reason}${unavailable.detail ? `: ${unavailable.detail.slice(0, 120)}` : ''}) failures=${state.failures}${state.openForSec !== null ? ` breakerOpenSec=${state.openForSec}` : ''}; rule-based text sent`
+    )
+  } else if (answered > 0) {
+    await providerAnswered(ctx, 'llm', gate)
+  }
   console.log(
-    `[gateway] format plan=${gate.plan} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} tokens=${tokens} paused=${gate.paused !== null} ms=${Date.now() - started}`
+    `[gateway] format plan=${gate.plan} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} tokens=${tokens} paused=${gate.paused !== null} breakerOpen=${gate.provider.openForSec !== null} ms=${Date.now() - started}`
   )
   const body = gate.paused
     ? {
@@ -350,13 +421,17 @@ class UpstreamError extends Error {
   }
 }
 
-/** One chat completion against the instance's model; throws an `UpstreamError` the engine reports as a failure. */
+/**
+ * One chat completion against the instance's model within `budgetMs`, or the failure the engine
+ * will report (through `UpstreamError`) and the gateway will count against the provider.
+ */
 async function upstreamChat(
   upstream: Upstream,
   model: string,
   messages: ChatMessage[],
-  opts: ChatOptions
-): Promise<{ result: ChatResult; tokens: number }> {
+  opts: ChatOptions,
+  budgetMs: number
+): Promise<{ ok: true; result: ChatResult; tokens: number } | { ok: false; failure: UpstreamFailure }> {
   const body = JSON.stringify({
     model,
     messages,
@@ -366,19 +441,14 @@ async function upstreamChat(
   })
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
-  let res: Response
-  try {
-    res = await fetch(`${upstream.baseUrl}/chat/completions`, { method: 'POST', headers, body })
-  } catch (err) {
-    console.error('[gateway] llm upstream unreachable', err instanceof Error ? err.message : err)
-    throw new UpstreamError('Could not reach the model provider behind this instance', 502, 'upstream_error')
-  }
-  const text = await res.text()
-  if (!res.ok) {
-    const failure = describeUpstreamFailure(res.status, text)
-    console.warn(`[gateway] llm upstream ${res.status} -> ${failure.status} ${failure.code}`)
-    throw new UpstreamError(failure.message, failure.status, failure.code)
-  }
+  const outcome = await callUpstream(
+    `${upstream.baseUrl}/chat/completions`,
+    () => ({ method: 'POST', headers, body }),
+    budgetMs
+  )
+  if (outcome.kind !== 'response' || !outcome.res.ok)
+    return { ok: false, failure: describeUpstreamOutcome('llm', outcome) }
+  const text = outcome.text
   let json: {
     choices?: Array<{ message?: { content?: string | Array<{ text?: string }> }; finish_reason?: string }>
     usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
@@ -386,12 +456,16 @@ async function upstreamChat(
   try {
     json = JSON.parse(text)
   } catch {
-    throw new UpstreamError('The model provider returned a malformed answer', 502, 'upstream_error')
+    return {
+      ok: false,
+      failure: { status: 502, code: 'upstream_error', message: 'The model provider returned a malformed answer' }
+    }
   }
   const choice = json.choices?.[0]
   const content = choice?.message?.content
   const answer = Array.isArray(content) ? content.map((c) => c.text ?? '').join('') : (content ?? '')
   return {
+    ok: true,
     result: { text: answer, finishReason: choice?.finish_reason, model, usage: json.usage },
     tokens: tokensUsed(json.usage, body.length, text.length)
   }

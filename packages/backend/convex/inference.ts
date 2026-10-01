@@ -49,6 +49,7 @@ import {
   usagePeriod,
   WEEK_DAYS
 } from './lib/plans'
+import { breakerAfterFailure, breakerOpenFor, retryAfterSeconds } from './lib/upstream'
 import { findUserByClerkId, planStateOf, upsertUser } from './lib/users'
 import {
   inferenceKindValidator,
@@ -203,6 +204,14 @@ export const status = authedQuery({
   }
 })
 
+/** What `authorize` knows about the provider the request is for (the breaker in lib/upstream.ts). */
+const providerStateValidator = v.object({
+  /** Unavailable answers in a row so far; the gateway resets it after a good one. */
+  failures: v.number(),
+  /** Set while the breaker is open: how long a client should wait before asking again. */
+  openForSec: v.union(v.number(), v.null())
+})
+
 const authorizeResultValidator = v.union(
   v.object({
     ok: v.literal(true),
@@ -210,7 +219,12 @@ const authorizeResultValidator = v.union(
     plan: planValidator,
     planState: accessStateValidator,
     /** Set when the caller may proceed without the model (Pro past its soft fair-use cap). */
-    paused: v.union(meterValidator, v.null())
+    paused: v.union(meterValidator, v.null()),
+    /**
+     * The provider's recent health. With `openForSec` set the caller must not ask the provider: a
+     * degradable route answers with rule-based text, any other route would have been refused.
+     */
+    provider: providerStateValidator
   }),
   v.object({
     ok: v.literal(false),
@@ -224,8 +238,25 @@ const authorizeResultValidator = v.union(
     plan: v.literal('testing'),
     planState: v.literal('testing'),
     denied: v.literal('private_testing')
+  }),
+  /** The provider's breaker is open: refused before the provider is asked, nothing counted. */
+  v.object({
+    ok: v.literal(false),
+    plan: planValidator,
+    planState: accessStateValidator,
+    unavailable: v.object({ retryAfterSec: v.number() })
   })
 )
+
+async function providerHealthRow(
+  ctx: QueryCtx | MutationCtx,
+  kind: 'stt' | 'llm'
+): Promise<Doc<'providerHealth'> | null> {
+  return await ctx.db
+    .query('providerHealth')
+    .withIndex('by_kind', (q) => q.eq('kind', kind))
+    .unique()
+}
 
 /** The session claims the gateway forwards so the private-testing list can judge the account. */
 const identityArgs = {
@@ -298,6 +329,15 @@ export const authorize = internalMutation({
     const rate = checkRate(requestRateFor(limits, snapshot.month), windowStart, windowCount, now)
     if (rate) return { ok: false as const, plan, planState, refusal: rate }
 
+    // The provider's breaker (lib/upstream.ts): while it is open the provider is not asked. A
+    // route that can answer without the model goes on and says so; any other is refused here,
+    // before the request counts against the rate window it never used.
+    const health = await providerHealthRow(ctx, args.kind)
+    const openMs = health ? breakerOpenFor({ failures: health.failures, openUntil: health.openUntil ?? null }, now) : null
+    const provider = { failures: health?.failures ?? 0, openForSec: openMs === null ? null : retryAfterSeconds(openMs) }
+    if (provider.openForSec !== null && args.degradable !== true)
+      return { ok: false as const, plan, planState, unavailable: { retryAfterSec: provider.openForSec } }
+
     if (usage) {
       await ctx.db.patch('inferenceUsage', usage._id, {
         windowStart,
@@ -314,7 +354,52 @@ export const authorize = internalMutation({
         updatedAt: now
       })
     }
-    return { ok: true as const, userId: user._id, plan, planState, paused }
+    return { ok: true as const, userId: user._id, plan, planState, paused, provider }
+  }
+})
+
+/**
+ * The provider answered `provider_unavailable`-style (timed out, unreachable, or a 502/503/504):
+ * one more failure in a row, and from the third the breaker opens for the cooldown. Returns the
+ * state after, for the gateway's log line and its `Retry-After`.
+ */
+export const providerFailed = internalMutation({
+  args: {
+    kind: inferenceKindValidator,
+    reason: v.union(v.literal('timeout'), v.literal('unreachable'), v.literal('unavailable'))
+  },
+  returns: providerStateValidator,
+  handler: async (ctx, args) => {
+    const now = Date.now()
+    const row = await providerHealthRow(ctx, args.kind)
+    const next = breakerAfterFailure({ failures: row?.failures ?? 0, openUntil: row?.openUntil ?? null }, now)
+    const patch = {
+      failures: next.failures,
+      openUntil: next.openUntil ?? undefined,
+      lastFailureAt: now,
+      lastReason: args.reason,
+      updatedAt: now
+    }
+    if (row) await ctx.db.patch('providerHealth', row._id, patch)
+    else await ctx.db.insert('providerHealth', { kind: args.kind, ...patch })
+    const openMs = breakerOpenFor(next, now)
+    return { failures: next.failures, openForSec: openMs === null ? null : retryAfterSeconds(openMs) }
+  }
+})
+
+/** The provider answered: whatever failures were counted against it are forgotten. */
+export const providerRecovered = internalMutation({
+  args: { kind: inferenceKindValidator },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const row = await providerHealthRow(ctx, args.kind)
+    if (row && (row.failures > 0 || row.openUntil !== undefined))
+      await ctx.db.patch('providerHealth', row._id, {
+        failures: 0,
+        openUntil: undefined,
+        updatedAt: Date.now()
+      })
+    return null
   }
 })
 

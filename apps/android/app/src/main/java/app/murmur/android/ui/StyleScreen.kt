@@ -137,7 +137,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                 SourceChooser(
                     title = "Formatting model",
                     selected = if (inference.routing.murmurLlm) InferenceSource.MURMUR else InferenceSource.CUSTOM,
-                    murmurMeta = inference.sourceCaption,
+                    murmurMeta = inference.sourceMeta,
                     ownLabel = "Your own model",
                     onSelect = { source ->
                         store.update { s ->
@@ -160,7 +160,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                     description = when {
                         !inference.signedIn -> "Sign in to use Murmur models."
                         inference.planState == "testing" -> "Provided by this Murmur instance; not open to this account while the server is in private testing."
-                        inference.billingEnabled && inference.metered -> "Provided by this Murmur instance on your ${inference.planTitle}. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted."
+                        inference.labelled && inference.metered -> "Provided by this Murmur instance on your ${inference.planTitle}. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted."
                         else -> "Provided by this Murmur instance. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted."
                     }
                 ) {

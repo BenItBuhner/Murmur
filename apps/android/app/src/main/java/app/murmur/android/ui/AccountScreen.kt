@@ -261,7 +261,8 @@ fun AccountContent(
  */
 fun planDescription(inference: InferenceView): String {
     if (!inference.managedAvailable) return "This Murmur instance does not provide models of its own; connect your provider under Speech model."
-    if (inference.status == null) return "Waiting for your account status…"
+    // Before the status arrives nothing is known about a plan or a switch, so nothing plan-shaped is said.
+    if (inference.status == null) return "Checking your account…"
     val selling = inference.billingEnabled
     val stopped = Limits.transcriptionPaused(inference.meters)
     return when (inference.planState) {

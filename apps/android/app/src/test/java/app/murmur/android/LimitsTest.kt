@@ -317,6 +317,40 @@ class LimitsTest {
     }
 
     @Test
+    fun `before the status arrives the card names no plan and shows no badge, whatever the switch`() {
+        // Signed in, status still on its way: neither the plan nor the instance's billing switch is
+        // known, so nothing plan-shaped is said (the web account page does the same since #72).
+        val loading = InferenceView(
+            cloudEnabled = true, managedAvailable = true, routing = InferenceRouting(InferenceSource.MURMUR, InferenceSource.MURMUR),
+            signedIn = true, status = null, plan = "free", planState = "free", trialDaysLeft = 0, sttReady = true, llmReady = true
+        )
+        for (view in listOf(loading, loading.copy(billingEnabled = false))) {
+            assertTrue(view.loading)
+            assertEquals("Murmur's models", view.sourceCaption)
+            assertFalse(view.labelled)
+            assertNull(view.sourceMeta)
+            assertEquals("Checking your account…", planDescription(view))
+            assertNull(planLine(view, NOW))
+        }
+        // Once it is here, with billing off: Unlimited is named, a metered plan is not.
+        val unlimited = loading.copy(status = InferenceStatusDto(plan = "unlimited", planState = "unlimited", billingEnabled = false), plan = "unlimited", planState = "unlimited", billingEnabled = false)
+        assertFalse(unlimited.loading)
+        assertTrue(unlimited.labelled)
+        assertEquals("Unlimited", unlimited.sourceCaption)
+        assertEquals("Unlimited", unlimited.sourceMeta)
+        val free = loading.copy(status = InferenceStatusDto(plan = "free", planState = "free", billingEnabled = false), billingEnabled = false)
+        assertFalse(free.labelled)
+        assertEquals("Included with your account", free.sourceCaption)
+        // The brackets after "Included with your account" carry the month's minutes, never the plan.
+        assertEquals("0 of 0 min this month", free.sourceMeta)
+        // And with billing on, the plan is back in its place.
+        val selling = loading.copy(status = InferenceStatusDto(plan = "free", planState = "free", billingEnabled = true))
+        assertTrue(selling.labelled)
+        assertEquals("Free plan", selling.sourceCaption)
+        assertEquals("Free plan", selling.sourceMeta?.substringBefore(" · "))
+    }
+
+    @Test
     fun `the privacy and terms pages sit next to the account page the instance sent`() {
         assertEquals("https://murmur.app", Limits.siteOrigin(ACCOUNT))
         assertEquals("http://127.0.0.1:3000", Limits.siteOrigin("http://127.0.0.1:3000/account"))

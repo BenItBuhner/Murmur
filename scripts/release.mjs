@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.7': [
+    "**A dictation you can feel, on Android.** Each moment has its own touch: a click when recording starts, a tick when it switches to transcribing, a light-then-firm pulse when the text lands, and a double click for a problem (a limit reached, a Murmur service unavailable, nothing heard). It happens whatever started the dictation: the floating button, the desktop-style pill's confirm and cancel, a hardware shortcut, Retry on the pill or in History. The **Haptics** switch on the Dictation button screen (on by default, beside Sounds) governs all of it, and the patterns follow the system's Touch feedback setting and intensity, like the keyboard's own taps; the pill preview on that screen plays them so the switch can be tried where it lives. A phone without a vibrator stays still.",
+    '**The haptics that were already there never vibrated; fixed.** The light tap added with the sound cues in 0.5.x asked the vibrator without the `VIBRATE` permission, which Android refused quietly, so on a real phone those taps never happened. The permission is declared now.'
+  ],
   '0.6.6': [
     '**A Murmur service that is down no longer hangs your dictation.** When the speech or formatting service behind Murmur\'s models is slow or down, a dictation used to wait up to 45 seconds and end in a bare error. The server now gives each request a budget sized from healthy response times (about 15 seconds for a short clip, a little more for a long one, 8 seconds per formatting round), retries once only when the request cannot have reached the model, and stops asking a provider that has just failed three times in a row for 15 seconds. The pill says "Murmur\'s speech service is unavailable right now" (or "formatting service"), your recording is kept for **Retry**, and nothing that failed is counted against your account. Your own provider is unaffected.'
   ],

@@ -1,6 +1,9 @@
 package app.murmur.android.cloud
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import app.murmur.android.BuildConfig
@@ -18,13 +21,16 @@ import app.murmur.android.settings.SettingsStore
 import com.clerk.api.Clerk
 import dev.convex.android.AuthState
 import dev.convex.android.ConvexClientWithAuth
+import dev.convex.android.InternalError
 import dev.convex.android.WebSocketState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -41,6 +47,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 private const val TAG = "MurmurCloud"
 private const val RETRY_MS = 15_000L
 private const val ONBOARDING_VERSION = 1.0
+
+/** A failed attempt to authenticate with Convex is tried again after this long, doubling each time up to [AUTH_RETRY_MAX_MS]. */
+private const val AUTH_RETRY_FIRST_MS = 2_000L
+private const val AUTH_RETRY_MAX_MS = 60_000L
 
 /** How many dictations follow the account: the newest this many are pushed when sync is turned on and mirrored from `history:recent`. */
 private const val HISTORY_BACKLOG = 200
@@ -76,6 +86,14 @@ data class SyncStatus(
  * idempotent outbox and replayed. The dictionary the dictation pipeline reads is always
  * derive(server snapshot, pending ops), so the app works offline.
  *
+ * Nothing here is tried only once. Authenticating the Convex client with Clerk is a loop that
+ * keeps trying with backoff until it succeeds or the user signs out, and tries again at once when
+ * the network comes back, the app comes to the front, the WebSocket reconnects or the user taps
+ * Sync now ([nudge]); the server answering "Not authenticated" (a token refresh that failed on a
+ * reconnect) starts it over. Connecting the account (`users:ensure`, the heartbeat, the first
+ * merge, the subscriptions) retries the same way, and the outbox flush keeps one retry timer. The
+ * Rust client reconnects the WebSocket by itself and asks the provider for a fresh token each time.
+ *
  * The constructor takes every outside dependency so a test can run the whole engine against a
  * fake Convex client (see HistorySyncTest); [init] wires the real ones.
  */
@@ -98,7 +116,26 @@ class CloudSync internal constructor(
     private var signedIn = false
     private var authenticated = false
     private var connected = false
+    /** The WebSocket has been up at least once this sign-in: afterwards, not connected means offline rather than connecting. */
+    private var everConnected = false
+    /** The device has a network, as far as the system has told us; true until it says otherwise. */
+    @Volatile private var online = true
     private var error: String? = null
+    /** Why the last attempt to authenticate with Convex failed; null once one succeeds. */
+    private var authError: String? = null
+    /** The server answered a call as unauthenticated while the client believed it was signed in. */
+    @Volatile private var authStale = false
+    /** Fresh logins in a row that the server threw away again before any subscription delivered. */
+    private var staleStreak = 0
+    /** The loop that gets and keeps the Convex client authenticated; replaced on every sign-in. */
+    private var authJob: Job? = null
+    /** The account connection in progress (`users:ensure`, heartbeat, merge, subscriptions); replaced on every authentication. */
+    private var connectJob: Job? = null
+    /** The one pending retry of a failed flush. */
+    private var flushRetry: Job? = null
+    /** "Try now" signals for the auth loop: the newest reason wins, nothing queues up. */
+    private val nudges = Channel<String>(Channel.CONFLATED)
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var user: UserDto? = null
     private var devices: List<DeviceDto> = emptyList()
     private var inference: InferenceStatusDto? = null
@@ -129,8 +166,12 @@ class CloudSync internal constructor(
             convex.webSocketStateFlow.collect { state ->
                 val was = connected
                 connected = state == WebSocketState.CONNECTED
+                if (connected) everConnected = true
+                CloudDiagnostics.socket(if (connected) "connected" else if (everConnected) "reconnecting" else "connecting")
                 if (connected && !was) {
                     error = null
+                    // Back on the wire: whatever waited goes now, and an unauthenticated client tries again at once.
+                    nudge("websocket connected")
                     launch { flush() }
                 }
                 publish()
@@ -139,23 +180,86 @@ class CloudSync internal constructor(
         scope.launch {
             convex.authState.collect { state ->
                 authenticated = state is AuthState.Authenticated
-                if (state is AuthState.Authenticated) onAuthenticated(state.userInfo)
+                CloudDiagnostics.auth(
+                    when (state) {
+                        is AuthState.Authenticated -> "authenticated"
+                        is AuthState.AuthLoading -> "logging in"
+                        else -> "unauthenticated"
+                    }
+                )
+                if (state is AuthState.Authenticated) {
+                    authStale = false
+                    authError = null
+                    onAuthenticated(state.userInfo)
+                }
                 publish()
             }
         }
         scope.launch {
             account.distinctUntilChanged().collect { userId ->
+                CloudDiagnostics.clerk(if (userId != null) "ready, a user is signed in" else "ready, nobody signed in")
                 if (userId != null) onSignedIn(userId) else onSignedOut()
             }
         }
+        watchNetwork()
         publish()
         Log.i(TAG, "sync engine started (${config.accountMode}, ${config.convexUrl})")
+    }
+
+    /**
+     * The device's default network coming and going. Losing it is shown as offline; getting one
+     * back wakes the auth loop at once instead of at the end of its backoff.
+     */
+    private fun watchNetwork() {
+        val cm = app.getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val was = online
+                online = true
+                if (!was) publish()
+                nudge("network available")
+            }
+
+            override fun onLost(network: Network) {
+                online = false
+                publish()
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) && !online) {
+                    online = true
+                    publish()
+                    nudge("network validated")
+                }
+            }
+        }
+        try {
+            cm.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (e: Exception) {
+            Log.w(TAG, "cannot watch the network; relying on timed retries", e)
+        }
+    }
+
+    /**
+     * Something changed that makes a retry worth it now: the auth loop wakes if it is waiting out
+     * a backoff, and the outbox is flushed if the client is authenticated.
+     */
+    private fun nudge(reason: String) {
+        nudges.trySend(reason)
+    }
+
+    /** The app came to the front: whatever is waiting on a timer gets to go now. */
+    fun onAppVisible() {
+        if (!config.enabled || !signedIn) return
+        nudge("app visible")
+        if (authenticated) scope.launch { flush() }
     }
 
     // ---- auth ---------------------------------------------------------------------------------
 
     private fun onSignedIn(userId: String) {
-        val convex = client ?: return
+        if (client == null) return
         val wasSignedIn = signedIn
         signedIn = true
         val previousUser = settings.get().lastSignedInUserId
@@ -164,11 +268,66 @@ class CloudSync internal constructor(
         outbox.bind(userId)
         settings.update(SettingsOrigin.CLOUD) { it.copy(lastSignedInUserId = userId) }
         publish()
-        scope.launch {
-            convex.loginFromCache().onFailure {
-                error = it.message
-                Log.w(TAG, "could not authenticate with Convex", it)
+        startAuth(generation)
+    }
+
+    private fun startAuth(gen: Int) {
+        authJob?.cancel()
+        authJob = scope.launch { keepAuthenticated(gen) }
+    }
+
+    /**
+     * Gets the Convex client authenticated through Clerk and keeps it so, for as long as this
+     * sign-in ([gen]) lasts. A failed attempt (Clerk unreachable, a token that could not be minted,
+     * the provider refusing) is tried again after a backoff that doubles up to a minute; a [nudge]
+     * ends the wait early. Once authenticated the loop sleeps until the server reports the identity
+     * gone ([authStale]) and then starts over, which hands the Rust client a fresh token.
+     */
+    private suspend fun keepAuthenticated(gen: Int) {
+        val convex = client ?: return
+        var attempt = 0
+        // The loop's own record of its last attempt: `authenticated` mirrors the client's state
+        // flow, which arrives on its own schedule, and must not decide whether to try again.
+        var loggedIn = false
+        while (gen == generation && signedIn) {
+            if (loggedIn && !authStale) {
+                nudges.receive()
+                continue
+            }
+            attempt++
+            val wasStale = authStale
+            authStale = false
+            val result = try {
+                convex.loginFromCache()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // The client itself threw (the Rust side refusing the callback, a linkage error): a failure like any other.
+                Result.failure(e)
+            }
+            if (gen != generation || !signedIn) return
+            loggedIn = result.isSuccess
+            result.onSuccess {
+                CloudDiagnostics.authAttempt(attempt, ok = true, error = null)
+                attempt = 0
+                authError = null
                 publish()
+                if (wasStale) {
+                    // The server threw the identity away again right after a fresh login: logging
+                    // in a third time at once would only repeat that, so each repeat waits longer.
+                    staleStreak++
+                    if (staleStreak > 1) delay(authRetryDelay(staleStreak - 1))
+                }
+            }.onFailure { e ->
+                val message = e.message ?: CloudBootstrap.describe(e)
+                authError = message
+                if (wasStale) authStale = true
+                CloudDiagnostics.authAttempt(attempt, ok = false, error = message)
+                Log.w(TAG, "could not authenticate with Convex (attempt $attempt): $message")
+                publish()
+                val wait = authRetryDelay(attempt)
+                // Wait out the backoff, or until something says it is worth trying now.
+                withTimeoutOrNull(wait) { nudges.receive() }
             }
         }
     }
@@ -187,10 +346,19 @@ class CloudSync internal constructor(
         Log.i(TAG, "signed out; clearing account data from this device")
         signedIn = false
         generation++
+        authJob?.cancel()
+        authJob = null
+        connectJob?.cancel()
+        connectJob = null
+        flushRetry?.cancel()
+        flushRetry = null
         subscriptions?.cancel()
         subscriptions = null
         stopHistorySubscription()
         authenticated = false
+        authStale = false
+        authError = null
+        everConnected = false
         user = null
         devices = emptyList()
         inference = null
@@ -217,27 +385,74 @@ class CloudSync internal constructor(
         publish()
     }
 
+    /** Authenticated (again): the account connection starts over, replacing one in progress. */
     private fun onAuthenticated(credentials: ClerkCredentials) {
-        val convex = client ?: return
         val gen = generation
-        scope.launch {
+        connectJob?.cancel()
+        connectJob = scope.launch { connectAccount(credentials, gen) }
+    }
+
+    /**
+     * Brings the account up on an authenticated client: the user record, this device's heartbeat,
+     * the one-time merge of local data, the subscriptions, then the outbox. A call that fails is
+     * tried again after [RETRY_MS] for as long as this sign-in lasts and the client stays
+     * authenticated; the server answering "Not authenticated" hands over to the auth loop instead.
+     */
+    private suspend fun connectAccount(credentials: ClerkCredentials, gen: Int) {
+        val convex = client ?: return
+        while (gen == generation && authenticated) {
             try {
+                CloudDiagnostics.event("connecting the account")
                 user = convex.mutation<UserDto>("users:ensure")
                 heartbeat()
                 importLocalData(credentials.userId)
-                if (gen != generation) return@launch
+                if (gen != generation) return
                 subscribe(gen)
                 error = null
+                CloudDiagnostics.event("account connected; subscriptions up")
+                publish()
                 flush()
+                return
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                if (gen != generation) return@launch
+                if (gen != generation) return
                 error = e.message
+                CloudDiagnostics.convexError("account connection", e.message)
                 Log.e(TAG, "account connection failed; retrying", e)
+                publish()
+                if (isAuthError(e)) {
+                    authLost("account connection")
+                    return
+                }
                 delay(RETRY_MS)
-                if (gen == generation && authenticated) onAuthenticated(credentials)
             }
-            publish()
         }
+    }
+
+    /**
+     * The server treated a call as unauthenticated although the client believed it was signed in:
+     * the Rust client's token refresh on a reconnect failed, or the identity expired. The auth loop
+     * logs in again, which hands the client a fresh token and reruns the account connection.
+     */
+    private fun authLost(where: String) {
+        if (authStale) return
+        authStale = true
+        CloudDiagnostics.serverAuthLost(where)
+        nudge("server says not authenticated")
+    }
+
+    /** A subscription or call failed: shown as the sync issue, and recognised as a lost identity when it is one. */
+    private fun noteFailure(where: String, e: Throwable) {
+        error = e.message
+        CloudDiagnostics.convexError(where, e.message)
+        if (isAuthError(e)) authLost(where)
+    }
+
+    /** A subscription delivered: the identity the server holds works, whatever happened before. */
+    private fun delivered(name: String) {
+        CloudDiagnostics.subscriptionData(name)
+        staleStreak = 0
     }
 
     private suspend fun importLocalData(userId: String) {
@@ -292,10 +507,11 @@ class CloudSync internal constructor(
                 convex.subscribe<List<DictionaryEntryDto>>("dictionary:list").collect { result ->
                     if (gen != generation) return@collect
                     result.onSuccess { list ->
+                        delivered("dictionary:list")
                         serverDictionary = list
                         outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
                         applyDerived()
-                    }.onFailure { error = it.message }
+                    }.onFailure { noteFailure("dictionary:list", it) }
                     publish()
                 }
             }
@@ -303,10 +519,11 @@ class CloudSync internal constructor(
                 convex.subscribe<List<SnippetDto>>("snippets:list").collect { result ->
                     if (gen != generation) return@collect
                     result.onSuccess { list ->
+                        delivered("snippets:list")
                         serverSnippets = list
                         outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
                         applyDerived()
-                    }.onFailure { error = it.message }
+                    }.onFailure { noteFailure("snippets:list", it) }
                     publish()
                 }
             }
@@ -314,10 +531,11 @@ class CloudSync internal constructor(
                 convex.subscribe<List<AppRuleDto>>("appRules:list").collect { result ->
                     if (gen != generation) return@collect
                     result.onSuccess { list ->
+                        delivered("appRules:list")
                         serverAppRules = list
                         outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
                         applyDerived()
-                    }.onFailure { error = it.message }
+                    }.onFailure { noteFailure("appRules:list", it) }
                     publish()
                 }
             }
@@ -325,6 +543,7 @@ class CloudSync internal constructor(
                 convex.subscribe<PreferencesDto?>("preferences:get").collect { result ->
                     if (gen != generation) return@collect
                     result.onSuccess { prefs ->
+                        delivered("preferences:get")
                         serverPreferences = prefs
                         if (!preferencesLoaded) {
                             preferencesLoaded = true
@@ -336,28 +555,37 @@ class CloudSync internal constructor(
                             }
                         }
                         applyDerived()
-                    }.onFailure { error = it.message }
+                    }.onFailure { noteFailure("preferences:get", it) }
                     publish()
                 }
             }
             launch {
                 convex.subscribe<UserDto?>("users:me").collect { result ->
                     if (gen != generation) return@collect
-                    result.onSuccess { user = it }
+                    result.onSuccess {
+                        delivered("users:me")
+                        user = it
+                    }.onFailure { noteFailure("users:me", it) }
                     publish()
                 }
             }
             launch {
                 convex.subscribe<List<DeviceDto>>("devices:list").collect { result ->
                     if (gen != generation) return@collect
-                    result.onSuccess { devices = it }
+                    result.onSuccess {
+                        delivered("devices:list")
+                        devices = it
+                    }.onFailure { noteFailure("devices:list", it) }
                     publish()
                 }
             }
             launch {
                 convex.subscribe<StatsDto?>("stats:get").collect { result ->
                     if (gen != generation) return@collect
-                    result.onSuccess { serverStats = it }.onFailure { error = it.message }
+                    result.onSuccess {
+                        delivered("stats:get")
+                        serverStats = it
+                    }.onFailure { noteFailure("stats:get", it) }
                     publish()
                 }
             }
@@ -382,13 +610,18 @@ class CloudSync internal constructor(
             val subscription = launch {
                 convex.subscribe<InferenceStatusDto>("inference:status", args).collect { result ->
                     if (gen != generation) return@collect
-                    result.onSuccess { inference = it }.onFailure { e ->
+                    result.onSuccess {
+                        delivered("inference:status")
+                        inference = it
+                    }.onFailure { e ->
                         if (withDay && e.message?.contains("ArgumentValidationError", ignoreCase = true) == true) {
                             Log.i(TAG, "instance does not take a day for inference:status; asking without it")
                             statusWithoutDay = true
                             refused.complete(Unit)
                         } else {
                             Log.w(TAG, "inference status: ${e.message}")
+                            CloudDiagnostics.convexError("inference:status", e.message)
+                            if (isAuthError(e)) authLost("inference:status")
                         }
                     }
                     publish()
@@ -423,8 +656,9 @@ class CloudSync internal constructor(
             convex.subscribe<List<HistoryEntryDto>>("history:recent", mapOf("limit" to HISTORY_BACKLOG.toDouble())).collect { result ->
                 if (gen != generation) return@collect
                 result.onSuccess { list ->
+                    delivered("history:recent")
                     history.mergeRemote(list.filter { it.deviceId != mine }.map(SyncReducers::historyFromRemote))
-                }.onFailure { error = it.message }
+                }.onFailure { noteFailure("history:recent", it) }
                 publish()
             }
         }
@@ -626,8 +860,38 @@ class CloudSync internal constructor(
         scope.launch { flush() }
     }
 
+    /**
+     * The user asked for a sync: whatever stands in the way is tried again now, and the reason is
+     * reported when it cannot be. Not signed in, there is nothing to sync; unauthenticated, the
+     * auth loop is woken (its failure, if any, becomes the sync issue); otherwise the outbox is
+     * flushed, and a flush that cannot reach the server says so.
+     */
     fun syncNow() {
-        scope.launch { flush() }
+        if (!config.enabled) return
+        scope.launch {
+            when {
+                !signedIn -> {
+                    CloudDiagnostics.syncRequest("nothing to do: not signed in")
+                }
+                !authenticated || authStale -> {
+                    CloudDiagnostics.syncRequest("not authenticated with Convex; logging in again" + (authError?.let { " (last: $it)" }.orEmpty()))
+                    error = null
+                    publish()
+                    nudge("sync now")
+                }
+                !connected && !online -> {
+                    CloudDiagnostics.syncRequest("no network; ${outbox.pending} pending")
+                    error = "No network connection"
+                    publish()
+                }
+                else -> {
+                    CloudDiagnostics.syncRequest("flushing ${outbox.pending} pending" + (if (!connected) " (websocket reconnecting)" else ""))
+                    error = null
+                    publish()
+                    flush()
+                }
+            }
+        }
     }
 
     /**
@@ -659,38 +923,69 @@ class CloudSync internal constructor(
 
     // ---- outbox flush -------------------------------------------------------------------------
 
+    /**
+     * Replays the outbox head to tail. An op the server refused for good is dropped; one whose
+     * mutation ran but whose answer could not be read is finished too (the server has it); any
+     * other failure stops the flush and books one retry in [RETRY_MS], replacing the one before
+     * it, so a long outage never builds up a crowd of retries.
+     */
     private suspend fun flush() {
         val convex = client ?: return
         if (!authenticated) return
         if (!flushMutex.tryLock()) return
         val gen = generation
+        var sent = 0
+        var dropped = 0
+        var failure: String? = null
         try {
+            flushRetry?.cancel()
+            flushRetry = null
             while (gen == generation && authenticated) {
                 val op = outbox.ops.firstOrNull { !it.isAcked } ?: break
                 try {
                     send(convex, op)
                     if (gen != generation) break
+                    sent++
                     error = null
                     applyDerived()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     if (gen != generation) break
-                    if (isPermanentError(e)) {
-                        Log.w(TAG, "dropping ${op::class.simpleName}: ${e.message}")
+                    if (isDecodeError(e)) {
+                        // The mutation ran; only its answer was unreadable. Keeping the op would send it again forever.
+                        Log.w(TAG, "${op::class.simpleName} ran but its answer could not be read; counting it done: ${e.message}")
+                        CloudDiagnostics.event("${op::class.simpleName}: answer unreadable, counted done")
                         outbox.remove(op.id)
+                        sent++
                         applyDerived()
                         continue
                     }
-                    error = e.message
+                    if (isPermanentError(e)) {
+                        Log.w(TAG, "dropping ${op::class.simpleName}: ${e.message}")
+                        CloudDiagnostics.event("${op::class.simpleName} refused by the server, dropped: ${e.message}")
+                        outbox.remove(op.id)
+                        dropped++
+                        applyDerived()
+                        continue
+                    }
+                    failure = e.message ?: CloudBootstrap.describe(e)
+                    error = failure
                     Log.w(TAG, "sync failed, retrying in ${RETRY_MS / 1000}s: ${e.message}")
-                    scope.launch {
-                        delay(RETRY_MS)
-                        flush()
+                    if (isAuthError(e)) {
+                        authLost("flush of ${op::class.simpleName}")
+                    } else {
+                        flushRetry = scope.launch {
+                            delay(RETRY_MS)
+                            flush()
+                        }
                     }
                     break
                 }
             }
         } finally {
             flushMutex.unlock()
+            CloudDiagnostics.flush(sent, dropped, failure)
             publish()
         }
     }
@@ -732,13 +1027,18 @@ class CloudSync internal constructor(
                 convex.mutation<Boolean>("appRules:remove", mapOf("id" to op.remoteId))
             is SyncOp.PreferencesUpdate ->
                 convex.mutation<PreferencesDto>("preferences:update", op.prefs.patchArgs(null))
-            is SyncOp.StatsRecord ->
-                convex.mutation<Map<String, Double?>>("stats:recordSession", mapOf(
+            is SyncOp.StatsRecord -> {
+                // The answer is the account's totals (StatsDto, with the last day as a string):
+                // read as such, it refreshes the stats shown; read as numbers only it failed to
+                // decode after every send and wedged the outbox at this op for good.
+                val totals = convex.mutation<StatsDto>("stats:recordSession", mapOf(
                     "words" to op.words.toDouble(),
                     "speechMs" to op.speechMs.toDouble(),
                     "day" to op.day,
                     "sessionId" to op.sessionId
                 ))
+                serverStats = totals
+            }
             is SyncOp.CompleteOnboarding ->
                 convex.mutation<UserDto>("users:completeOnboarding", mapOf("version" to ONBOARDING_VERSION))
             is SyncOp.HistoryPush ->
@@ -762,19 +1062,32 @@ class CloudSync internal constructor(
         ))
     }
 
+    /**
+     * The status for the screens. Before the client is authenticated the WebSocket says nothing
+     * (the Rust client only opens it once it has a token), so the auth loop's state comes first:
+     * its last failure is the sync issue, else it is connecting. Authenticated, the socket counts:
+     * opening for the first time is connecting, dropped after being up is offline. No network at
+     * all is offline whatever else is going on.
+     */
     private fun publish() {
         val pending = outbox.pending
         val phase = when {
             !config.enabled -> SyncPhase.DISABLED
             !signedIn -> SyncPhase.SIGNED_OUT
-            !connected -> SyncPhase.OFFLINE
+            !online -> SyncPhase.OFFLINE
+            !authenticated && authError != null -> SyncPhase.ERROR
             !authenticated -> SyncPhase.CONNECTING
+            !connected && !everConnected -> SyncPhase.CONNECTING
+            !connected -> SyncPhase.OFFLINE
             error != null -> SyncPhase.ERROR
             pending > 0 -> SyncPhase.SYNCING
             else -> SyncPhase.SYNCED
         }
+        // While the client cannot authenticate, that is the issue to show, whatever a subscription said before.
+        val shown = if (!authenticated && authError != null) authError else error
         val stats = serverStats?.let { SyncReducers.deriveStats(settings.get().stats, it, outbox.ops) }
-        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, error, stats, inference)
+        _status.value = SyncStatus(phase, signedIn, authenticated, connected, pending, user, devices, shown, stats, inference)
+        CloudDiagnostics.sync(phase.name.lowercase(), pending, outbox.ops.firstOrNull { !it.isAcked }?.let { it::class.simpleName })
     }
 
     companion object {
@@ -833,10 +1146,29 @@ class CloudSync internal constructor(
         /** Server-side validation/ownership errors: retrying would wedge the queue. */
         fun isPermanentError(e: Throwable): Boolean {
             val message = e.message ?: return false
-            if (message.contains("Not authenticated", ignoreCase = true)) return false
+            if (isAuthError(e)) return false
             return e is dev.convex.android.ConvexError ||
                 Regex("Server Error|ArgumentValidationError|Uncaught Error|ReturnsValidationError", RegexOption.IGNORE_CASE)
                     .containsMatchIn(message)
+        }
+
+        /** The server ran the function as nobody: the client's identity is gone or was never accepted. */
+        fun isAuthError(e: Throwable): Boolean =
+            e.message?.contains("Not authenticated", ignoreCase = true) == true
+
+        /**
+         * The mutation ran on the server, but its answer could not be decoded into the type asked
+         * for (the Convex client's [InternalError] from `jsonApi.decodeFromString`): the op is done
+         * as far as the server is concerned, and sending it again would only run it again.
+         */
+        fun isDecodeError(e: Throwable): Boolean =
+            e is InternalError && e.message?.startsWith("Failed to decode JSON") == true
+
+        /** How long the auth loop waits after its [attempt]th failure in a row. */
+        fun authRetryDelay(attempt: Int): Long {
+            var delay = AUTH_RETRY_FIRST_MS
+            repeat((attempt - 1).coerceIn(0, 10)) { delay = (delay * 2).coerceAtMost(AUTH_RETRY_MAX_MS) }
+            return delay.coerceAtMost(AUTH_RETRY_MAX_MS)
         }
     }
 }

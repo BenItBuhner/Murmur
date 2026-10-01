@@ -23,9 +23,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.murmur.android.cloud.AccountMode
 import app.murmur.android.cloud.CloudBoot
@@ -33,16 +33,16 @@ import app.murmur.android.cloud.CloudBootstrap
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.SyncStatus
-import app.murmur.android.dictation.DictationController
-import app.murmur.android.dictation.DictationState
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.keyboard.KeyboardPresence
 import app.murmur.android.keyboard.Keys
 import app.murmur.android.overlay.OverlayEditor
 import app.murmur.android.overlay.PillPresentation
+import app.murmur.android.settings.Languages
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.settings.SttPresets
 import app.murmur.android.settings.ThemeMode
 import app.murmur.android.ui.AccountGateScreen
 import app.murmur.android.ui.AccountScreen
@@ -58,20 +58,23 @@ import app.murmur.android.ui.LanguageScreen
 import app.murmur.android.ui.OnboardingScreen
 import app.murmur.android.ui.PermissionsScreen
 import app.murmur.android.ui.Route
-import app.murmur.android.ui.Section
+import app.murmur.android.ui.SettingsScreen
 import app.murmur.android.ui.SpeechModelScreen
 import app.murmur.android.ui.StyleScreen
 import app.murmur.android.ui.TryItScreen
 import app.murmur.android.ui.UpdatesScreen
 import app.murmur.android.ui.components.Glyph
 import app.murmur.android.ui.components.GlyphIcon
+import app.murmur.android.ui.drawerSections
 import app.murmur.android.ui.rememberNavigator
 import app.murmur.android.ui.rememberPermissionState
 import app.murmur.android.ui.murmurStt
 import app.murmur.android.ui.rememberInferenceView
+import app.murmur.android.ui.settingsEntries
 import app.murmur.android.ui.syncLabel
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.MurmurTheme
+import app.murmur.android.ui.theme.supportsDynamicColor
 import app.murmur.android.update.Updates
 import com.clerk.api.Clerk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -194,8 +197,8 @@ private fun Root(
 
 /**
  * The app proper: the drawer of sections down the left, and the current section in front of it.
- * The drawer's foot mirrors the desktop sidebar: the live state of the button, the account, the
- * version.
+ * The drawer's foot mirrors the desktop sidebar: the account, then the version. The state of the
+ * button lives on the home screen, not in the drawer.
  */
 @Composable
 private fun Main(
@@ -220,11 +223,9 @@ private fun Main(
         }
     }
     val permissions = rememberPermissionState()
-    val dictation by DictationController.state.collectAsState()
-    val updateReady by Updates.get(context).readyVersion.collectAsState()
+    val readyVersion by Updates.get(context).readyVersion.collectAsState()
     val inference = rememberInferenceView(settings)
     val modelReady = inference.sttReady
-    val ready = permissions.allGranted && modelReady
     // A keyboard attached or detached recreates the activity; read the device again each time.
     val presence = remember(context) { KeyboardPresence.get(context) }
     val configuration = LocalConfiguration.current
@@ -237,41 +238,42 @@ private fun Main(
         desktopPill -> "tap the pill to dictate"
         else -> "tap the button beside your keyboard"
     }
-    // Murmur models only need a signed-in account; the user's own provider needs the model screen.
-    val modelRoute = if (inference.routing.murmurStt) Route.ACCOUNT else Route.MODEL
     val cloudDown = config.enabled && !cloud.usable
-    val sections = sections(
-        cloud = config.enabled,
+    val updateReady = readyVersion != null
+    val sections = drawerSections(settingsAttention = !modelReady || !permissions.allGranted || updateReady)
+    val entries = settingsEntries(
+        model = when {
+            inference.routing.murmurStt -> "Murmur's models · ${settings.sttSpeed.label}"
+            !modelReady -> "Not connected"
+            else -> listOf(SttPresets.find(settings.sttPresetId).name, settings.sttModel).filter { it.isNotBlank() }.joinToString(" · ")
+        },
         modelReady = modelReady,
+        language = Languages.label(settings.language),
+        button = "Shape, position, sounds and haptics",
+        keyboard = when {
+            posture.hardwareKeyboard && settings.keyboard.shortcuts && settings.keyboard.pushToTalk.isNotEmpty() ->
+                "Hold ${Keys.chordLabel(settings.keyboard.pushToTalk, settings.keyboard.sideSensitive)} to dictate"
+            else -> "Shortcuts with a keyboard attached"
+        },
+        appearance = listOfNotNull(
+            when (settings.themeMode) {
+                ThemeMode.SYSTEM -> "Follows the system"
+                ThemeMode.LIGHT -> "Light"
+                ThemeMode.DARK -> "Dark"
+            },
+            if (settings.dynamicColor && supportsDynamicColor) "wallpaper colours" else settings.accent.label.lowercase()
+        ).joinToString(" · "),
+        permissions = if (permissions.allGranted) "All ${permissions.total} allowed" else "${permissions.total - permissions.granted} of ${permissions.total} to allow",
         permissionsGranted = permissions.allGranted,
-        updateReady = updateReady != null,
-        cloudDown = cloudDown
+        updates = if (updateReady) "Version ${readyVersion ?: ""} is ready".trim() else "Murmur ${BuildConfig.VERSION_NAME}",
+        updateReady = updateReady
     )
 
     AppShell(
         navigator = navigator,
         sections = sections,
         footer = { select ->
-            val (label, hint, dot, pulsing) = when {
-                dictation is DictationState.Listening -> StatusRow("Listening", "the button is recording", c.ember, true)
-                dictation is DictationState.Processing -> StatusRow("Working", (dictation as DictationState.Processing).label, c.ember, true)
-                !modelReady -> StatusRow(
-                    "Setup needed",
-                    if (inference.routing.murmurStt) "sign in to use Murmur's models" else "connect a speech model",
-                    c.ember, false
-                )
-                !permissions.allGranted -> StatusRow("Setup needed", "${permissions.total - permissions.granted} permissions to allow", c.ember, false)
-                else -> StatusRow("Ready", readyHint, c.sage, false)
-            }
-            DrawerRow(
-                label = label,
-                hint = hint,
-                dot = dot,
-                pulsing = pulsing,
-                onClick = if (ready) null else ({ select(if (!modelReady) modelRoute else Route.PERMISSIONS) })
-            )
             if (config.enabled) {
-                Spacer(Modifier.height(8.dp))
                 val name = syncStatus?.user?.name?.takeIf { it.isNotBlank() } ?: firstName
                 val email = syncStatus?.user?.email
                 DrawerRow(
@@ -288,10 +290,11 @@ private fun Main(
                     },
                     dot = if (cloudDown) c.ember else null,
                     leading = { Avatar((name ?: email ?: "?").first().uppercaseChar(), signedIn) },
-                    onClick = { select(Route.ACCOUNT) }
+                    onClick = { select(Route.ACCOUNT) },
+                    modifier = Modifier.testTag("drawer-account")
                 )
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(12.dp))
             Text(
                 "Murmur ${BuildConfig.VERSION_NAME}",
                 style = Murmur.type.labelSmall,
@@ -302,6 +305,7 @@ private fun Main(
     ) { entry, nav ->
         when (entry.route) {
             Route.HOME -> HomeScreen(config, settings, signedIn, firstName, syncStatus, nav, onOpen = navigator::open, howTo = readyHint)
+            Route.SETTINGS -> SettingsScreen(entries, nav, onOpen = navigator::open)
             Route.HISTORY -> HistoryScreen(HistoryStore.get(context), store, RecordingStore.get(context), nav, syncStatus)
             Route.BUTTON -> DictationButtonScreen(store, settings, nav)
             Route.KEYBOARD -> KeyboardScreen(store, settings, nav)
@@ -319,31 +323,6 @@ private fun Main(
             )
         }
     }
-}
-
-private data class StatusRow(val label: String, val hint: String, val dot: Color, val pulsing: Boolean)
-
-/** The drawer's sections, grouped like the desktop sidebar; the ember dots mark unfinished setup. */
-private fun sections(
-    cloud: Boolean,
-    modelReady: Boolean,
-    permissionsGranted: Boolean,
-    updateReady: Boolean,
-    cloudDown: Boolean = false
-): List<Section> = buildList {
-    add(Section(Route.HOME, "Home", Glyph.HOME))
-    add(Section(Route.HISTORY, "History", Glyph.HISTORY))
-    add(Section(Route.DICTIONARY, "Dictionary", Glyph.DICTIONARY, group = "Personalize"))
-    add(Section(Route.STYLE, "Style", Glyph.STYLE))
-    add(Section(Route.BUTTON, "Dictation button", Glyph.BUTTON, group = "Setup"))
-    add(Section(Route.KEYBOARD, "Keyboard", Glyph.KEYBOARD))
-    add(Section(Route.MODEL, "Speech model", Glyph.MODEL, attention = !modelReady))
-    add(Section(Route.LANGUAGE, "Language", Glyph.LANGUAGE))
-    add(Section(Route.APPEARANCE, "Appearance", Glyph.APPEARANCE))
-    add(Section(Route.PERMISSIONS, "Permissions", Glyph.PERMISSIONS, attention = !permissionsGranted))
-    add(Section(Route.UPDATES, "Updates", Glyph.UPDATES, attention = updateReady))
-    add(Section(Route.TRY_IT, "Try it", Glyph.TRY_IT))
-    if (cloud) add(Section(Route.ACCOUNT, "Account", Glyph.ACCOUNT, group = "Cloud", attention = cloudDown))
 }
 
 /** The account's initial in a small disc; hollow when nobody is signed in. */

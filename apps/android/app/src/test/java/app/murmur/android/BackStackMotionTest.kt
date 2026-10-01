@@ -1,125 +1,112 @@
 package app.murmur.android
 
-import app.murmur.android.ui.BackGesture
-import app.murmur.android.ui.surfaceMotion
+import androidx.activity.BackEventCompat
+import app.murmur.android.ui.CornerRampEnd
+import app.murmur.android.ui.CoverFadeEnd
+import app.murmur.android.ui.UnderParallax
+import app.murmur.android.ui.directionFor
+import app.murmur.android.ui.revealFraction
+import app.murmur.android.ui.topMotion
+import app.murmur.android.ui.underMotion
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The predictive-back lift-off of a full-screen surface (ui/BackStackHost.kt), checked against the
- * numbers Material's back helper and the system's cross-activity animation use.
+ * The progress mapping of the predictive back transition (ui/BackStackHost.kt, ported from Cursor
+ * for Android): the leaving screen slides the way the finger moves and never shrinks, the screen
+ * underneath fades in behind it with a short drift, and a lateral move is a plain crossfade.
  */
 class BackStackMotionTest {
 
     private val width = 1080f
-    private val height = 2400f
-    private val gap = 24f
-    private val maxDy = 300f
-    private val radius = 66f
-
-    private fun motion(lift: Float, gesture: BackGesture?) =
-        surfaceMotion(lift, gesture, width, height, gap, maxTranslationY = maxDy, cornerRadius = radius)
-
-    private fun left(progress: Float, dy: Float = 0f) = BackGesture(progress, fromLeft = true, dy = dy)
-    private fun right(progress: Float, dy: Float = 0f) = BackGesture(progress, fromLeft = false, dy = dy)
+    private val corner = 66f
 
     @Test
-    fun `nothing moves before the gesture has made progress`() {
-        for (m in listOf(motion(0f, null), motion(0f, left(0f)), motion(0f, right(0f, dy = 400f)))) {
-            assertEquals(1f, m.scale, 0f)
-            assertEquals(0f, m.translationX, 0f)
-            assertEquals(0f, m.translationY, 0f)
-            assertEquals(0f, m.cornerRadius, 0f)
+    fun `at rest nothing has moved, faded or rounded`() {
+        val top = topMotion(0f, 1f, width, corner, crossfade = false)
+        assertEquals(0f, top.translationX, 0f)
+        assertEquals(1f, top.alpha, 0f)
+        assertEquals(0f, top.cornerRadius, 0f)
+        val under = underMotion(0f, 1f, width, crossfade = false)
+        assertEquals(0f, under.alpha, 0f)
+        assertEquals(-width * UnderParallax, under.translationX, 1e-3f)
+    }
+
+    @Test
+    fun `the leaving screen slides by exactly the gesture's progress, full size and opaque`() {
+        for (p in listOf(0.1f, 0.25f, 0.5f, 0.75f, 1f)) {
+            val m = topMotion(p, 1f, width, corner, crossfade = false)
+            assertEquals("progress $p", p * width, m.translationX, 1e-3f)
+            assertEquals(1f, m.alpha, 0f)
         }
     }
 
     @Test
-    fun `a back press shrinks the surface in place to 90 percent with rounded corners`() {
-        val m = motion(1f, gesture = null)
-        assertEquals(0.9f, m.scale, 1e-6f)
-        assertEquals(0f, m.translationX, 0f)
-        assertEquals(0f, m.translationY, 0f)
-        assertEquals(radius, m.cornerRadius, 1e-6f)
+    fun `a left-edge swipe sends it right, a right-edge swipe sends it left`() {
+        assertEquals(1f, directionFor(BackEventCompat.EDGE_LEFT), 0f)
+        assertEquals(-1f, directionFor(BackEventCompat.EDGE_RIGHT), 0f)
+        val right = topMotion(0.5f, directionFor(BackEventCompat.EDGE_LEFT), width, corner, crossfade = false)
+        val left = topMotion(0.5f, directionFor(BackEventCompat.EDGE_RIGHT), width, corner, crossfade = false)
+        assertEquals(-right.translationX, left.translationX, 1e-3f)
+        assertTrue(right.translationX > 0f)
     }
 
     @Test
-    fun `halfway there the surface is halfway shrunk and halfway rounded`() {
-        val m = motion(0.5f, gesture = null)
-        assertEquals(0.95f, m.scale, 1e-6f)
-        assertEquals(radius / 2, m.cornerRadius, 1e-6f)
+    fun `the corners round over the first quarter and stay round`() {
+        assertEquals(corner / 2, topMotion(CornerRampEnd / 2, 1f, width, corner, false).cornerRadius, 1e-3f)
+        assertEquals(corner, topMotion(CornerRampEnd, 1f, width, corner, false).cornerRadius, 1e-3f)
+        assertEquals(corner, topMotion(0.9f, 1f, width, corner, false).cornerRadius, 1e-3f)
     }
 
     @Test
-    fun `a swipe from the left pushes the surface right until it rests a gap from the right edge`() {
-        val m = motion(1f, left(1f))
-        assertTrue(m.translationX > 0f)
-        val rightEdge = width / 2 + m.translationX + width * m.scale / 2
-        assertEquals(width - gap, rightEdge, 1e-3f)
+    fun `the screen underneath fades in smoothly and drifts into place from a quarter width off`() {
+        assertEquals(0f, revealFraction(0f), 0f)
+        assertEquals(0.5f, revealFraction(0.5f), 1e-6f)
+        assertEquals(1f, revealFraction(1f), 0f)
+        // Slow to start: a quarter of the way in, well under a quarter revealed.
+        assertTrue(revealFraction(0.25f) < 0.2f)
+        var last = -1f
+        for (i in 0..20) {
+            val f = revealFraction(i / 20f)
+            assertTrue("monotonic at $i", f >= last)
+            last = f
+        }
+        val half = underMotion(0.5f, 1f, width, crossfade = false)
+        assertEquals(revealFraction(0.5f), half.alpha, 1e-6f)
+        assertEquals(-0.5f * width * UnderParallax, half.translationX, 1e-3f)
+        val done = underMotion(1f, 1f, width, crossfade = false)
+        assertEquals(1f, done.alpha, 0f)
+        assertEquals(0f, done.translationX, 0f)
+        assertEquals(0f, done.cornerRadius, 0f)
     }
 
     @Test
-    fun `a swipe from the right mirrors the push`() {
-        assertEquals(-motion(1f, left(1f)).translationX, motion(1f, right(1f)).translationX, 1e-6f)
-        val m = motion(1f, right(1f))
-        val leftEdge = width / 2 + m.translationX - width * m.scale / 2
-        assertEquals(gap, leftEdge, 1e-3f)
+    fun `the drift follows the direction the top screen leaves in`() {
+        assertTrue(underMotion(0.5f, 1f, width, false).translationX < 0f)
+        assertTrue(underMotion(0.5f, -1f, width, false).translationX > 0f)
     }
 
     @Test
-    fun `the push grows with the lift`() {
-        val quarter = motion(0.25f, left(0.25f)).translationX
-        val half = motion(0.5f, left(0.5f)).translationX
-        val full = motion(1f, left(1f)).translationX
-        assertTrue(0f < quarter && quarter < half && half < full)
-        assertEquals(full / 2, half, 1e-3f)
+    fun `a lateral move crossfades without moving either screen`() {
+        for (p in listOf(0.2f, 0.5f, 0.8f)) {
+            val top = topMotion(p, 1f, width, corner, crossfade = true)
+            assertEquals(0f, top.translationX, 0f)
+            assertEquals(0f, top.cornerRadius, 0f)
+            assertEquals(1f - p, top.alpha, 1e-6f)
+            assertEquals(0f, underMotion(p, 1f, width, crossfade = true).translationX, 0f)
+        }
+        // The covered screen is gone by the midpoint of the fade, so the two are never both legible.
+        assertEquals(1f, underMotion(1f, 1f, width, crossfade = true).alpha, 0f)
+        assertEquals(0f, underMotion(CoverFadeEnd, 1f, width, crossfade = true).alpha, 0f)
+        assertEquals(0f, underMotion(0.2f, 1f, width, crossfade = true).alpha, 0f)
+        assertEquals(0.5f, underMotion(0.75f, 1f, width, crossfade = true).alpha, 1e-6f)
     }
 
     @Test
-    fun `the surface follows the finger up and down, no further than the room it has`() {
-        // The freed vertical space minus the gap (96 px here) binds before the 300 px cap does.
-        val headroom = minOf((height - height * 0.9f) / 2 - gap, maxDy)
-        assertEquals(96f, headroom, 1e-3f)
-
-        val down = motion(1f, left(1f, dy = height / 4))
-        val up = motion(1f, left(1f, dy = -height / 4))
-        assertTrue(down.translationY > 0f)
-        assertEquals(-down.translationY, up.translationY, 1e-6f)
-        assertEquals(headroom / 4, down.translationY, 1e-3f)
-
-        val farther = motion(1f, left(1f, dy = height / 2))
-        assertTrue(farther.translationY > down.translationY)
-        val wayOff = motion(1f, left(1f, dy = height * 3))
-        assertEquals(headroom, wayOff.translationY, 1e-3f)
-    }
-
-    @Test
-    fun `on a tall surface the cap is what limits the follow`() {
-        val tall = surfaceMotion(1f, left(1f, dy = 100_000f), width, height = 20_000f, edgeGap = gap, maxTranslationY = maxDy, cornerRadius = radius)
-        assertEquals(maxDy, tall.translationY, 1e-3f)
-    }
-
-    @Test
-    fun `the vertical follow never leaves less than the gap above or below`() {
-        // Little headroom: a short surface cannot move the whole cap.
-        val short = surfaceMotion(1f, left(1f, dy = 10_000f), width, height = 1000f, edgeGap = gap, maxTranslationY = maxDy, cornerRadius = radius)
-        val headroom = (1000f - 1000f * short.scale) / 2 - gap
-        assertTrue(headroom > 0f && headroom < maxDy)
-        assertEquals(headroom, short.translationY, 1e-3f)
-    }
-
-    @Test
-    fun `a gap wider than the room to move means no push rather than a pull the other way`() {
-        val m = surfaceMotion(1f, left(1f), width = 100f, height = 100f, edgeGap = 40f, maxTranslationY = maxDy, cornerRadius = radius)
-        assertEquals(0f, m.translationX, 0f)
-        assertEquals(0f, m.translationY, 0f)
-    }
-
-    @Test
-    fun `an unmeasured surface produces finite values`() {
-        val m = surfaceMotion(0.7f, left(0.7f, dy = 50f), width = 0f, height = 0f, edgeGap = gap, maxTranslationY = maxDy, cornerRadius = radius)
-        assertTrue(m.scale.isFinite() && m.translationX.isFinite() && m.translationY.isFinite() && m.cornerRadius.isFinite())
-        assertEquals(0f, m.translationX, 0f)
-        assertEquals(0f, m.translationY, 0f)
+    fun `progress outside the range is clamped`() {
+        assertEquals(width, topMotion(1.5f, 1f, width, corner, false).translationX, 1e-3f)
+        assertEquals(0f, topMotion(-0.5f, 1f, width, corner, false).translationX, 0f)
+        assertEquals(1f, underMotion(2f, 1f, width, false).alpha, 0f)
     }
 }

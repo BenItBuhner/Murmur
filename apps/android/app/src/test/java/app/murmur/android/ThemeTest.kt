@@ -1,14 +1,22 @@
 package app.murmur.android
 
 import android.content.res.Configuration
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import app.murmur.android.overlay.PillPalette
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.AccentPreset
 import app.murmur.android.settings.ThemeMode
+import app.murmur.android.ui.theme.MurmurColors
 import app.murmur.android.ui.theme.Oklch
+import app.murmur.android.ui.theme.ScrimAlpha
 import app.murmur.android.ui.theme.harmonizeHue
 import app.murmur.android.ui.theme.hueDelta
+import app.murmur.android.ui.theme.paperFrom
 import app.murmur.android.ui.theme.schemeFromSeed
+import app.murmur.android.ui.theme.toColorScheme
 import app.murmur.android.ui.theme.toneToLightness
 import app.murmur.android.ui.theme.withAlpha
 import org.junit.Assert.assertEquals
@@ -156,6 +164,26 @@ class ThemeTest {
             assertTrue(Oklch.fromArgb(p.successForeground).h in 130.0..170.0)
         }
         assertEquals(0x80123456.toInt(), 0xFF123456.toInt().withAlpha(0x80))
+    }
+
+    @Test
+    fun `the scrim is the same translucent black in both modes, for every accent`() {
+        val extras = MurmurColors(Color(0xFF3F8F63), Color.White, Color(0xFFB07A1B))
+        for (preset in AccentPreset.entries) {
+            val light = paperFrom(schemeFromSeed(preset.seed, dark = false).toColorScheme(dark = false), extras, dark = false)
+            val dark = paperFrom(schemeFromSeed(preset.seed, dark = true).toColorScheme(dark = true), extras, dark = true)
+            for (paper in listOf(light, dark)) {
+                assertEquals("${preset.label} scrim alpha", ScrimAlpha, paper.scrim.alpha, 1e-6f)
+                // Black, or as near as the palette's neutral gets: it darkens, it never whitens.
+                assertTrue("${preset.label} scrim luminance ${paper.scrim.luminance()}", paper.scrim.luminance() < 0.02f)
+                // Nothing in the scrim comes from the ink, which flips between the modes.
+                assertTrue(paper.scrim.copy(alpha = 1f) != paper.ink)
+            }
+            assertEquals(light.scrim, dark.scrim)
+        }
+        // Material's stock schemes (the Android 12+ wallpaper schemes are built on them) agree.
+        assertEquals(Color.Black.copy(alpha = ScrimAlpha), paperFrom(lightColorScheme(), extras, dark = false).scrim)
+        assertEquals(Color.Black.copy(alpha = ScrimAlpha), paperFrom(darkColorScheme(), extras, dark = true).scrim)
     }
 
     @Test

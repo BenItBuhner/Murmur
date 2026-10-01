@@ -136,14 +136,14 @@ object Haptics {
  * supports them and fall back to a predefined effect or a plain waveform. Phones older than
  * Android 10 (no predefined effects) get plain pulses of matching weight.
  *
- * | Moment | Primitives (Android 11+, supported) | Predefined (Android 10+) | Older       |
- * |--------|-------------------------------------|--------------------------|-------------|
- * | START  | click                               | click                    | 20 ms       |
- * | STOP   | tick                                | tick                     | 10 ms       |
- * | LOCK   | tick, tick 40 ms later              | 12 ms, 40 ms, 12 ms      | the same    |
- * | CANCEL | tick                                | tick                     | 10 ms       |
- * | DONE   | tick at 0.6, click 50 ms later      | heavy click              | 35 ms       |
- * | ERROR  | double click                        | double click             | 30, 80, 30  |
+ * | Moment | Vibrator with primitives (Android 11+) | Predefined (Android 10+) | Older (plain pulses) |
+ * |--------|----------------------------------------|--------------------------|----------------------|
+ * | START  | click                                  | click                    | 20 ms                |
+ * | STOP   | tick                                   | tick                     | 10 ms                |
+ * | LOCK   | tick, tick 40 ms later                 | 12 ms, 40 ms off, 12 ms  | the same             |
+ * | CANCEL | tick                                   | tick                     | 10 ms                |
+ * | DONE   | tick at 0.6, click 50 ms later         | heavy click              | 35 ms                |
+ * | ERROR  | double click                           | double click             | 30 ms, 80 off, 30 ms |
  */
 object HapticPatterns {
     /** What the vibrator can do: its SDK, and whether it has the primitives the two-step patterns are composed from. */

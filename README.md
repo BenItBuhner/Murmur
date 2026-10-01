@@ -73,12 +73,16 @@ themselves current:
   goes through `pkexec dpkg -i`, and the macOS bundle is swapped. Turn **Install automatically** off
   to be asked first; the portable Windows build and development builds only download the new file
   and show it to you.
-- **Android** checks when you open the app and once a day while the dictation service is running.
-  It downloads `Murmur-<version>-android.apk`, verifies the checksum and installs it through the
-  system package installer. The first time you have to allow Murmur to install updates and confirm
-  the install; from then on (Android 12+) updates apply on their own, waiting until the keyboard is
-  away and nothing is being dictated. A release-signed APK cannot update a debug-signed install (see
-  the keystore secrets under [Releases](#releases)).
+- **Android** (the GitHub build) checks when you open the app and once a day while the dictation
+  service is running. With **Download updates automatically** on (the default) it downloads
+  `Murmur-<version>-android.apk` in the background, verifies the checksum and then tells you once,
+  with a quiet notification that opens the Updates screen: installing is always your tap on
+  **Install** there. Murmur never launches the package installer on its own, so Play Protect's
+  check happens while you are looking, not while you are dictating. The first time you have to allow
+  Murmur to install updates and confirm the install; from then on (Android 12+) a tapped update
+  applies without a second dialog. A release-signed APK cannot update a debug-signed install (see
+  the keystore secrets under [Releases](#releases)). The Google Play build has no updater at all;
+  Play delivers its updates.
 
 Pre-releases (`vX.Y.Z-beta.N`) are only offered when **Include pre-releases** is on or you are
 already running one. **Skip this version** hides a release until a newer one appears. Releases
@@ -167,8 +171,18 @@ the pill, and can be played back or sent again from History later.
 
 ```bash
 cd apps/android
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDirectDebug   # the GitHub Releases build (the default; what the release workflow ships)
+./gradlew :app:assemblePlayDebug     # the Google Play build: no self-updater, no install permission
+./gradlew :app:bundlePlayRelease     # the Play app bundle (.aab)
 ```
+
+The two **distribution flavors** share everything but the update layer and the manifest. `direct`
+carries the in-app updater described under [Updates](#updates); `play` ships a no-op in its place,
+because Google Play's Device and Network Abuse policy forbids an app updating itself outside Play,
+and its Updates screen points at the Play listing instead. `./gradlew :app:verifyReleaseApk` opens
+both release APKs (and `verifyPlayReleaseBundle` the bundle) and refuses a Play build that carries
+any updater class, a PackageInstaller reference or an install permission, and a direct build that
+lacks them.
 
 ## Accounts and sync (`packages/backend`)
 

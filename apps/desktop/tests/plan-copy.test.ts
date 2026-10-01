@@ -3,7 +3,10 @@ import type { InferenceStatus, UsageMeter } from '@shared/cloud'
 import type { InferenceView } from '../src/renderer/src/hooks/useInference'
 import {
   planDescription,
+  planLabelled,
   planLine,
+  planLoading,
+  planSectionTitle,
   planTitle,
   sourceCaption
 } from '../src/renderer/src/lib/plan-copy'
@@ -137,7 +140,29 @@ describe('the Account page sentence', () => {
     expect(planDescription(view({ managedAvailable: false }))).toMatch(
       /does not provide models of its own/
     )
-    expect(planDescription(view({ status: null }))).toBe('Waiting for your account status…')
+    expect(planDescription(view({ status: null }))).toBe('Checking your account…')
+  })
+
+  it('names no plan and shows no label before the status arrives, whatever the switch would say', () => {
+    // Before the instance's status is here its switch is not known: the card opens with "Murmur
+    // models" and a neutral sentence instead of flashing "Free plan" (the web account page does the same).
+    for (const billingEnabled of [true, false]) {
+      const loading = view({ status: null, billingEnabled })
+      expect(planLoading(loading)).toBe(true)
+      expect(sourceCaption(loading)).toBe('Murmur models')
+      expect(planSectionTitle(loading)).toBe('Murmur models')
+      expect(planLabelled(loading)).toBe(false)
+      expect(planDescription(loading)).toBe('Checking your account…')
+    }
+    // Once it is here, the private-testing states are named, a sold plan too, an unsold one not.
+    const unlimited = view({ planState: 'unlimited', plan: 'unlimited', billingEnabled: false })
+    expect(planLoading(unlimited)).toBe(false)
+    expect(planLabelled(unlimited)).toBe(true)
+    expect(sourceCaption(unlimited)).toBe('Unlimited')
+    expect(planSectionTitle(unlimited)).toBe('Murmur models')
+    expect(planLabelled(view({ planState: 'free', billingEnabled: false }))).toBe(false)
+    expect(planLabelled(view({ planState: 'free' }))).toBe(true)
+    expect(planSectionTitle(view({ planState: 'free' }))).toBe('Plan')
   })
 })
 

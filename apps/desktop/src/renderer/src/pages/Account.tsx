@@ -40,7 +40,12 @@ import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow
 import { SyncBadge, syncLabel } from '@renderer/components/SyncBadge'
 import { useCloud } from '@renderer/hooks/useCloud'
 import { minutesLabel, useInference, type InferenceView } from '@renderer/hooks/useInference'
-import { planDescription, sourceCaption } from '@renderer/lib/plan-copy'
+import {
+  planDescription,
+  planLabelled,
+  planSectionTitle,
+  sourceCaption
+} from '@renderer/lib/plan-copy'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, formatNumber, formatRelative } from '@renderer/lib/utils'
 
@@ -361,11 +366,12 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
   const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
   // Transcription that has stopped outranks a paused formatting model: nothing is inserted at all.
   const stopped = transcriptionPaused(inference.meters)
-  // A plan label is a billing thing; the private-testing states are about the server, so they show.
-  const labelled = inference.billingEnabled || !inference.metered
+  // A plan label is a billing thing; the private-testing states are about the server, so they
+  // show; nothing is labelled before the status says which it is.
+  const labelled = planLabelled(inference)
   return (
     <Section
-      title={inference.billingEnabled ? 'Plan' : 'Murmur models'}
+      title={planSectionTitle(inference)}
       description={
         inference.managedAvailable
           ? 'The speech and formatting models that come with your account. Choose your own provider instead under Speech model and Style; keys for those stay on this device.'

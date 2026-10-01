@@ -28,7 +28,7 @@ import { minutesLabel, useInference, type InferenceView } from '@renderer/hooks/
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn } from '@renderer/lib/utils'
 import { planStateLabel } from '@shared/limits'
-import { sourceCaption } from '@renderer/lib/plan-copy'
+import { planLabelled, planLoading, sourceCaption } from '@renderer/lib/plan-copy'
 
 export function ProvidersPage({
   embedded,
@@ -124,7 +124,7 @@ export function ProvidersPage({
                 <Badge variant="outline">{inference.status.models.stt}</Badge>
               )}
               {stt.speed === 'fast' && <Badge variant="outline">fast</Badge>}
-              {(inference.billingEnabled || !inference.metered) && (
+              {planLabelled(inference) && (
                 <Badge variant="success">{sourceCaption(inference)}</Badge>
               )}
             </>
@@ -267,22 +267,26 @@ function MurmurSpeechSection({
         />
       </SettingRow>
       <SettingRow
-        title={inference.billingEnabled ? 'Plan' : 'Allowance'}
+        title={
+          planLoading(inference) ? 'Murmur models' : inference.billingEnabled ? 'Plan' : 'Allowance'
+        }
         description={
           inference.signedIn
-            ? minutes
-              ? 'Transcription minutes reset at the start of every month.'
-              : inference.planState === 'testing'
-                ? 'Not open to this account while the server is in private testing; your own provider still works.'
-                : inference.planState === 'unlimited'
-                  ? 'No allowance to run out of.'
-                  : 'Waiting for your account status…'
+            ? planLoading(inference)
+              ? 'Checking your account…'
+              : minutes
+                ? 'Transcription minutes reset at the start of every month.'
+                : inference.planState === 'testing'
+                  ? 'Not open to this account while the server is in private testing; your own provider still works.'
+                  : inference.planState === 'unlimited'
+                    ? 'No allowance to run out of.'
+                    : 'Waiting for your account status…'
             : 'Sign in to use Murmur models.'
         }
         vertical
       >
         <div className="flex w-full items-center gap-3">
-          {(inference.billingEnabled || !inference.metered) && (
+          {planLabelled(inference) && (
             <Badge
               variant={
                 inference.plan === 'pro' || inference.plan === 'unlimited' ? 'success' : 'secondary'

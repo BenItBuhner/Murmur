@@ -28,7 +28,11 @@ import org.robolectric.annotation.Config
 class HardwareShortcutsTest {
 
     private val actions = ArrayList<HotkeyAction>()
-    private val filter = HardwareShortcuts(KeyboardSettings.DEFAULT.toEngineConfig()) { actions += it }
+    private val settings = KeyboardSettings(
+        handsFree = KeyboardSettings.FACTORY_HANDS_FREE,
+        commandMode = KeyboardSettings.FACTORY_COMMAND_MODE
+    )
+    private val filter = HardwareShortcuts(settings.toEngineConfig()) { actions += it }
     private var now = 0L
 
     private fun key(action: Int, keyCode: Int, repeat: Int = 0): KeyEvent =
@@ -235,5 +239,26 @@ class HardwareShortcutsTest {
         assertFalse(filter.isCapturing)
         assertFalse(up(KeyEvent.KEYCODE_BACK, 10))
         assertNull(taken().firstOrNull())
+    }
+
+    @Test
+    fun `unbound correction and command chords pass through`() {
+        val idle = HardwareShortcuts(KeyboardSettings.DEFAULT.toEngineConfig()) { actions += it }
+        assertFalse(idle.onKeyEvent(key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SHIFT_LEFT), 0))
+        assertFalse(idle.onKeyEvent(key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_META_LEFT), 1))
+        assertTrue(taken().isEmpty())
+        assertFalse(idle.onKeyEvent(key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ALT_LEFT), 2))
+        assertTrue(taken().isEmpty())
+    }
+
+    @Test
+    fun `a bound correct chord fires on press and does not start listening`() {
+        val bound = HardwareShortcuts(
+            KeyboardSettings(correctSelection = listOf(Key.F9)).toEngineConfig()
+        ) { actions += it }
+        assertTrue(bound.onKeyEvent(key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_F9), 0))
+        assertEquals(listOf(HotkeyAction.Correct), taken())
+        assertFalse(bound.isListening)
+        assertTrue(bound.onKeyEvent(key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_F9), 10))
     }
 }

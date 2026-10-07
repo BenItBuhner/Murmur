@@ -109,6 +109,23 @@ class GoldenEngineTest {
     }
 
     @Test
+    fun `autocorrect prompts are byte-identical to the TypeScript engine`() {
+        val cases = golden.getJSONArray("autocorrect")
+        assertTrue(cases.length() >= 3)
+        for (i in 0 until cases.length()) {
+            val case = cases.getJSONObject(i)
+            val actual = Prompt.buildAutocorrectMessages(case.getString("text"))
+            val expected = case.getJSONArray("messages")
+            assertEquals("${case.getString("name")}: message count", expected.length(), actual.size)
+            for (k in 0 until expected.length()) {
+                val e = expected.getJSONObject(k)
+                assertEquals("${case.getString("name")}: role of message $k", e.getString("role"), actual[k].role)
+                assertEquals("${case.getString("name")}: content of message $k", e.getString("content"), actual[k].content)
+            }
+        }
+    }
+
+    @Test
     fun `number signatures agree`() {
         val cases = golden.getJSONArray("signatures")
         for (i in 0 until cases.length()) {

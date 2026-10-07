@@ -33,6 +33,10 @@ export async function copyShortcut(): Promise<void> {
   await runOsascript('tell application "System Events" to keystroke "c" using command down')
 }
 
+export async function selectAllShortcut(): Promise<void> {
+  await runOsascript('tell application "System Events" to keystroke "a" using command down')
+}
+
 export async function pressEnter(): Promise<void> {
   // key code 36 = Return
   await runOsascript('tell application "System Events" to key code 36')

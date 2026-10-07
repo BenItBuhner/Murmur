@@ -66,6 +66,14 @@ export {
   type CommandPromptInput
 } from './prompt'
 export {
+  AUTOCORRECT_SYSTEM_PROMPT,
+  AUTOCORRECT_TEMPERATURE,
+  splitAutocorrectInput,
+  buildAutocorrectMessages,
+  autocorrectMaxTokens,
+  type AutocorrectRequest
+} from './autocorrect'
+export {
   AUTO_LANGUAGE,
   LANGUAGES,
   LANGUAGE_OPTIONS,

@@ -144,7 +144,6 @@ export function Overlay({
   const idle = state.phase === 'idle'
   const listening = state.phase === 'listening'
   const explaining = isExplaining(state)
-  const interactive = state.phase === 'error' && (!!state.retryId || explaining)
 
   // ---- waveform: a new sample slides in on a fixed cadence, independent of the frame rate -----
   const [levels, setLevels] = useState<readonly number[]>(FLAT_LEVELS)
@@ -263,13 +262,13 @@ export function Overlay({
           if (!local) return
           const hit = edgeAt(local.x, local.y, width, height, BAR_HIT_PAD)
           if (!hit) return
-          const resizing = idle && hit !== 'body'
-          gestureKind.current = resizing ? 'resize' : 'move'
+          const edge = idle && hit !== 'body' ? hit : undefined
+          gestureKind.current = edge ? 'resize' : 'move'
           e.currentTarget.setPointerCapture(e.pointerId)
           onGesture?.({
             phase: 'start',
             kind: gestureKind.current,
-            edge: resizing && hit !== 'body' ? hit : undefined,
+            edge,
             screenX: e.screenX,
             screenY: e.screenY
           })

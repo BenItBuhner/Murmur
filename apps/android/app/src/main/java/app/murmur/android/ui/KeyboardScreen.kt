@@ -46,6 +46,8 @@ import app.murmur.android.keyboard.ShortcutRecorder
 import app.murmur.android.keyboard.describeAutoOverlay
 import app.murmur.android.keyboard.desktopOverlayOn
 import app.murmur.android.service.MurmurAccessibilityService
+import app.murmur.android.overlay.BarAnchor
+import app.murmur.android.overlay.OverlayBar
 import app.murmur.android.settings.DesktopOverlay
 import app.murmur.android.settings.HandsFreeTrigger
 import app.murmur.android.settings.KeyboardSettings
@@ -214,12 +216,79 @@ fun KeyboardScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) 
             Column(Modifier.alpha(if (desktopOn) 1f else 0.45f)) {
                 Text("Overlay position", style = Murmur.type.title, color = Murmur.colors.ink)
                 Spacer(Modifier.height(4.dp))
-                Text("Where the pill appears on the screen.", style = Murmur.type.bodySmall, color = Murmur.colors.inkSoft)
+                Text(
+                    if (k.overlayBar.anchor == BarAnchor.FREE) {
+                        "The bar is where you dragged it. Choose a preset to snap it back, or drag it again. The floating button beside the keyboard is unchanged."
+                    } else {
+                        "Where the desktop bar sits. Drag the bar to place it anywhere else. The floating button beside the keyboard is unchanged."
+                    },
+                    style = Murmur.type.bodySmall,
+                    color = Murmur.colors.inkSoft
+                )
                 Spacer(Modifier.height(12.dp))
+                val positionOptions = buildList {
+                    if (k.overlayBar.anchor == BarAnchor.FREE) add(Segment("custom", "Custom"))
+                    OverlayPosition.entries.forEach { add(Segment(it.id, it.label)) }
+                }
                 Segmented(
-                    options = OverlayPosition.entries.map { Segment(it, it.label) },
-                    selected = k.overlayPosition,
-                    onSelect = { position -> update { it.copy(overlayPosition = position) } }
+                    options = positionOptions,
+                    selected = if (k.overlayBar.anchor == BarAnchor.FREE) "custom" else k.overlayPosition.id,
+                    onSelect = { id ->
+                        if (!desktopOn || id == "custom") return@Segmented
+                        update {
+                            it.copy(
+                                overlayPosition = OverlayPosition.from(id),
+                                overlayBar = it.overlayBar.copy(anchor = BarAnchor.PRESET)
+                            )
+                        }
+                    }
+                )
+                Spacer(Modifier.height(Space.xl))
+                Text("Bar width", style = Murmur.type.title, color = Murmur.colors.ink)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "How wide the idle bar is, ${k.overlayBar.widthDp.toInt()} dp. Drag either end of the bar to change it.",
+                    style = Murmur.type.bodySmall,
+                    color = Murmur.colors.inkSoft
+                )
+                Slider(
+                    value = k.overlayBar.widthDp,
+                    onValueChange = { v ->
+                        if (desktopOn) update { it.copy(overlayBar = it.overlayBar.copy(widthDp = v)) }
+                    },
+                    valueRange = OverlayBar.MIN_WIDTH_DP..OverlayBar.MAX_WIDTH_DP,
+                    colors = barSliderColors(),
+                    modifier = Modifier.testTag("overlayBarWidth")
+                )
+                Text("Bar height", style = Murmur.type.title, color = Murmur.colors.ink)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "How tall the idle bar is, ${k.overlayBar.heightDp.toInt()} dp. Drag its top or bottom edge to change it.",
+                    style = Murmur.type.bodySmall,
+                    color = Murmur.colors.inkSoft
+                )
+                Slider(
+                    value = k.overlayBar.heightDp,
+                    onValueChange = { v ->
+                        if (desktopOn) update { it.copy(overlayBar = it.overlayBar.copy(heightDp = v)) }
+                    },
+                    valueRange = OverlayBar.MIN_HEIGHT_DP..OverlayBar.MAX_HEIGHT_DP,
+                    colors = barSliderColors(),
+                    modifier = Modifier.testTag("overlayBarHeight")
+                )
+                Spacer(Modifier.height(8.dp))
+                SecondaryButton(
+                    "Reset bar",
+                    compact = true,
+                    onClick = {
+                        if (!desktopOn) return@SecondaryButton
+                        update {
+                            it.copy(
+                                overlayPosition = OverlayPosition.BOTTOM_CENTER,
+                                overlayBar = OverlayBar.DEFAULT
+                            )
+                        }
+                    }
                 )
             }
             ToggleRow(
@@ -247,6 +316,15 @@ fun KeyboardScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) 
     }
 }
 
+@Composable
+private fun barSliderColors() = SliderDefaults.colors(
+    thumbColor = Murmur.colors.ink,
+    activeTrackColor = Murmur.colors.ink,
+    inactiveTrackColor = Murmur.colors.hairline,
+    activeTickColor = Color.Transparent,
+    inactiveTickColor = Color.Transparent
+)
+
 /** What the device is right now, and whether the service can see the keys at all. */
 @Composable
 private fun KeyboardStatus(posture: DevicePosture, k: KeyboardSettings) {
@@ -266,7 +344,12 @@ private fun KeyboardStatus(posture: DevicePosture, k: KeyboardSettings) {
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    if (desktopOverlayOn(k.desktopOverlay, posture)) "Showing the desktop pill at ${k.overlayPosition.label.lowercase()}." else "Showing the floating button beside the keyboard.",
+                    if (desktopOverlayOn(k.desktopOverlay, posture)) {
+                        if (k.overlayBar.anchor == BarAnchor.FREE) "Showing the desktop pill where you placed it."
+                        else "Showing the desktop pill at ${k.overlayPosition.label.lowercase()}."
+                    } else {
+                        "Showing the floating button beside the keyboard."
+                    },
                     style = Murmur.type.bodySmall,
                     color = c.inkSoft
                 )

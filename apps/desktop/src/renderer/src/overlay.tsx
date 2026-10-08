@@ -2,6 +2,7 @@ import './styles/globals.css'
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { OverlayState } from '@shared/types'
+import { OVERLAY_BAR_DEFAULT_HEIGHT, OVERLAY_BAR_DEFAULT_WIDTH } from '@shared/overlay-bar'
 import { buildTheme, resolveSeed } from '@shared/theme'
 import { applyTheme } from './lib/apply-theme'
 import { Overlay } from './overlay/Overlay'
@@ -15,6 +16,8 @@ function App(): React.JSX.Element {
   const [level, setLevel] = useState(0)
   const [micError, setMicError] = useState<string | undefined>()
   const [shadow, setShadow] = useState(true)
+  const [barWidth, setBarWidth] = useState(OVERLAY_BAR_DEFAULT_WIDTH)
+  const [barHeight, setBarHeight] = useState(OVERLAY_BAR_DEFAULT_HEIGHT)
 
   useEffect(() => {
     const capture = new MicCapture({
@@ -46,6 +49,10 @@ function App(): React.JSX.Element {
         )
         setShadow(t.buttonShadow !== false)
       }),
+      bridge.onBar((bar) => {
+        setBarWidth(bar.width)
+        setBarHeight(bar.height)
+      }),
       bridge.onAudioConfigure((cfg) => {
         setSoundVolume(cfg.soundVolume)
         capture.configure(cfg).catch(() => undefined)
@@ -69,7 +76,10 @@ function App(): React.JSX.Element {
       onUpgrade={(url) => bridge.openUrl(url)}
       onOwnProvider={() => bridge.openModels()}
       onHover={(over) => bridge.hover(over)}
+      onGesture={(message) => bridge.gesture(message)}
       shadow={shadow}
+      barWidth={barWidth}
+      barHeight={barHeight}
     />
   )
 }

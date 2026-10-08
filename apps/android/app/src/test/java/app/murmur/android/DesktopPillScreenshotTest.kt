@@ -125,7 +125,7 @@ class DesktopPillScreenshotTest {
 
         view.setPresentation(keyboardDesktop)
         settle()
-        assertFalse("with a keyboard the idle bar lets every tap through, as on the desktop", host.touchable)
+        assertTrue("with a keyboard the idle bar takes a drag", host.touchable)
 
         // Asked to take a tap, the bar's target is the bar and 6 dp around it, nothing more.
         view.setPresentation(keyboardDesktopTap)

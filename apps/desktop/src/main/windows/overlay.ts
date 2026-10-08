@@ -1,22 +1,42 @@
 import { join } from 'node:path'
-import { BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { BrowserWindow, ipcMain, screen, shell, type Rectangle } from 'electron'
 import { is } from '@electron-toolkit/utils'
-import type { OverlayPosition } from '@shared/settings'
+import type { OverlayBarSettings, OverlayPosition } from '@shared/settings'
+import type { OverlayGestureMessage, SoundName } from '@shared/ipc'
+import { IPC } from '@shared/ipc'
 import type { OverlayState } from '@shared/types'
-import { IPC, type SoundName } from '@shared/ipc'
+import {
+  OVERLAY_LIMIT_HEIGHT,
+  OVERLAY_LIMIT_WIDTH,
+  OVERLAY_WINDOW_HEIGHT,
+  OVERLAY_WINDOW_WIDTH,
+  barCenterFromWindow,
+  centerForFractions,
+  clampBarCenter,
+  clampBarSize,
+  defaultOverlayBar,
+  fractionsForCenter,
+  nearestPreset,
+  presetWindowOrigin,
+  resizeBar,
+  windowOriginForBarCenter,
+  type BarEdge,
+  type WorkArea
+} from '@shared/overlay-bar'
 import { createLogger } from '../logger'
 
 const log = createLogger('overlay')
 
-const WIDTH = 360
-const HEIGHT = 120
+const WIDTH = OVERLAY_WINDOW_WIDTH
+const HEIGHT = OVERLAY_WINDOW_HEIGHT
 /**
  * A plan limit has more to say (two lines and up to four buttons): the window grows for it. A
  * Murmur service that is unavailable is explained on the same two lines.
  */
-const LIMIT_WIDTH = 600
-const LIMIT_HEIGHT = 160
-const MARGIN = 28
+const LIMIT_WIDTH = OVERLAY_LIMIT_WIDTH
+const LIMIT_HEIGHT = OVERLAY_LIMIT_HEIGHT
+/** A gesture shorter than this is a click, not a move, so the bar stays where it was. */
+const GESTURE_SLOP_PX = 4
 
 /** How long results stay up. An error that can be retried waits for the user much longer. */
 const SUCCESS_HOLD_MS = 1100
@@ -45,14 +65,35 @@ export class OverlayWindow {
   private state: OverlayState = { phase: 'idle' }
   private showWhenIdle = true
   private position: OverlayPosition = 'bottom-center'
+  private bar: OverlayBarSettings = defaultOverlayBar()
   private ready: Promise<void>
   private resolveReady!: () => void
   /** The pill has buttons right now (a retryable error), so the window must take clicks. */
   private interactive = false
+  /** The pointer is over the bar or the pill, so the window takes the click that follows. */
+  private hovering = false
+  private gesture: {
+    kind: 'move' | 'resize'
+    edge: BarEdge
+    startCursor: { x: number; y: number }
+    startBounds: Rectangle
+    startSize: { width: number; height: number }
+    moved: boolean
+  } | null = null
+  /** Persists a placement once a drag or resize ends. */
+  private onCommit: ((position: OverlayPosition, bar: OverlayBarSettings) => void) | null = null
 
   constructor() {
     this.ready = new Promise((r) => (this.resolveReady = r))
     ipcMain.on(IPC.overlayHover, (_e, over: boolean) => this.onHover(!!over))
+    ipcMain.on(IPC.overlayGesture, (_e, payload: unknown) => {
+      if (isGesture(payload)) this.onGesture(payload)
+    })
+  }
+
+  /** Where a finished drag should be saved. Set once, from the process that owns the settings. */
+  setCommitHandler(handler: (position: OverlayPosition, bar: OverlayBarSettings) => void): void {
+    this.onCommit = handler
   }
 
   create(): BrowserWindow {
@@ -89,7 +130,7 @@ export class OverlayWindow {
         autoplayPolicy: 'no-user-gesture-required'
       }
     })
-    win.setIgnoreMouseEvents(true, { forward: false })
+    win.setIgnoreMouseEvents(true, { forward: true })
     win.setAlwaysOnTop(true, 'screen-saver')
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     win.setMenuBarVisibility(false)
@@ -100,6 +141,7 @@ export class OverlayWindow {
     win.webContents.on('did-finish-load', () => {
       this.resolveReady()
       this.push()
+      this.pushBar()
     })
     win.webContents.on('console-message', (event) => {
       if (event.level === 'error' || event.level === 'warning')
@@ -125,9 +167,23 @@ export class OverlayWindow {
     return this.ready
   }
 
-  configureVisibility(showWhenIdle: boolean, position: OverlayPosition): void {
+  configureVisibility(
+    showWhenIdle: boolean,
+    position: OverlayPosition,
+    bar: OverlayBarSettings = defaultOverlayBar()
+  ): void {
     this.showWhenIdle = showWhenIdle
     this.position = position
+    const size = clampBarSize(bar.width, bar.height)
+    this.bar = {
+      anchor: bar.anchor,
+      x: clampUnit(bar.x),
+      y: clampUnit(bar.y),
+      width: size.width,
+      height: size.height
+    }
+    this.pushBar()
+    if (this.gesture?.kind === 'move') return
     this.applyVisibility()
   }
 
@@ -192,18 +248,132 @@ export class OverlayWindow {
   private setInteractive(on: boolean): void {
     if (on === this.interactive) return
     this.interactive = on
+    this.applyMouse()
+  }
+
+  /**
+   * Clicks pass through the window except where the pointer is on the bar (so it can be dragged)
+   * or the pill has buttons. Moves are forwarded either way, which is how the bar learns the
+   * pointer is over it.
+   */
+  private applyMouse(): void {
     if (!this.win) return
-    if (!on) this.win.setIgnoreMouseEvents(true, { forward: false })
-    else if (process.platform === 'linux') this.win.setIgnoreMouseEvents(false)
-    else this.win.setIgnoreMouseEvents(true, { forward: true })
+    if (this.gesture || this.hovering) {
+      this.win.setIgnoreMouseEvents(false)
+      return
+    }
+    if (this.interactive && process.platform === 'linux') {
+      this.win.setIgnoreMouseEvents(false)
+      return
+    }
+    this.win.setIgnoreMouseEvents(true, { forward: true })
   }
 
   /** A pill the pointer is over is being read or aimed at: it never times out underneath the user. */
   private onHover(over: boolean): void {
-    if (!this.win || !this.interactive) return
-    if (over) this.clearHideTimer()
-    else this.armHideTimer()
-    if (process.platform !== 'linux') this.win.setIgnoreMouseEvents(!over, { forward: true })
+    this.hovering = over
+    if (this.interactive) {
+      if (over) this.clearHideTimer()
+      else this.armHideTimer()
+    }
+    this.applyMouse()
+  }
+
+  private onGesture(message: OverlayGestureMessage): void {
+    if (!this.win) return
+    if (message.phase === 'start') {
+      const edge = message.edge ?? 'e'
+      this.gesture = {
+        kind: message.kind,
+        edge,
+        startCursor: { x: message.screenX, y: message.screenY },
+        startBounds: this.win.getBounds(),
+        startSize: { width: this.bar.width, height: this.bar.height },
+        moved: false
+      }
+      this.applyMouse()
+      return
+    }
+    const gesture = this.gesture
+    if (!gesture) return
+    if (message.phase === 'cancel') {
+      this.gesture = null
+      this.bar = { ...this.bar, width: gesture.startSize.width, height: gesture.startSize.height }
+      this.pushBar()
+      this.reposition()
+      this.applyMouse()
+      return
+    }
+    const dx = message.screenX - gesture.startCursor.x
+    const dy = message.screenY - gesture.startCursor.y
+    if (!gesture.moved && Math.hypot(dx, dy) < GESTURE_SLOP_PX) {
+      if (message.phase === 'end') {
+        this.gesture = null
+        this.applyMouse()
+      }
+      return
+    }
+    gesture.moved = true
+    if (gesture.kind === 'resize') {
+      const size = resizeBar(gesture.edge, gesture.startSize, dx, dy)
+      this.bar = { ...this.bar, width: size.width, height: size.height }
+      this.pushBar()
+    } else {
+      this.win.setBounds({
+        ...gesture.startBounds,
+        x: Math.round(gesture.startBounds.x + dx),
+        y: Math.round(gesture.startBounds.y + dy)
+      })
+    }
+    if (message.phase === 'end') this.finishGesture(gesture)
+  }
+
+  /** Write the bar where the gesture left it: a nearby preset, or a free spot that can leave center. */
+  private finishGesture(gesture: NonNullable<OverlayWindow['gesture']>): void {
+    this.gesture = null
+    if (!this.win) return
+    if (gesture.kind === 'move') {
+      const area = this.workArea()
+      if (area) {
+        const bounds = this.win.getBounds()
+        const center = clampBarCenter(
+          barCenterFromWindow(bounds, this.bar.height),
+          area,
+          this.bar.width,
+          this.bar.height
+        )
+        const preset = nearestPreset(center, area, bounds.width, bounds.height, this.bar.height)
+        if (preset) {
+          this.position = preset
+          this.bar = { ...this.bar, anchor: 'preset' }
+        } else {
+          const fractions = fractionsForCenter(center, area)
+          this.bar = { ...this.bar, anchor: 'free', x: fractions.x, y: fractions.y }
+        }
+      }
+    }
+    this.onCommit?.(this.position, this.bar)
+    this.reposition()
+    this.applyMouse()
+  }
+
+  private workArea(): WorkArea | null {
+    if (!this.win) return null
+    try {
+      const bounds = this.win.getBounds()
+      const display = screen.getDisplayNearestPoint({
+        x: Math.round(bounds.x + bounds.width / 2),
+        y: Math.round(bounds.y + bounds.height / 2)
+      })
+      return display.workArea
+    } catch (err) {
+      log.warn('work area unavailable', err)
+      return null
+    }
+  }
+
+  private pushBar(): void {
+    this.win?.webContents.send(IPC.overlayBar, { width: this.bar.width, height: this.bar.height })
   }
 
   playSound(name: SoundName): void {
@@ -236,13 +406,24 @@ export class OverlayWindow {
       const display = screen.getDisplayNearestPoint(cursor)
       const area = display.workArea
       const { width, height } = this.size()
-      let x = Math.round(area.x + (area.width - width) / 2)
-      let y = Math.round(area.y + area.height - height - MARGIN)
-      if (this.position === 'top-center') y = area.y + MARGIN
-      if (this.position === 'bottom-right') x = area.x + area.width - width - MARGIN
+      const origin =
+        this.bar.anchor === 'free'
+          ? windowOriginForBarCenter(
+              clampBarCenter(
+                centerForFractions(this.bar.x, this.bar.y, area),
+                area,
+                this.bar.width,
+                this.bar.height
+              ),
+              width,
+              height,
+              this.bar.height
+            )
+          : presetWindowOrigin(this.position, area, width, height)
       const b = this.win.getBounds()
-      if (b.x !== x || b.y !== y || b.width !== width || b.height !== height)
-        this.win.setBounds({ x, y, width, height })
+      if (b.x !== origin.x || b.y !== origin.y || b.width !== width || b.height !== height) {
+        this.win.setBounds({ x: origin.x, y: origin.y, width, height })
+      }
     } catch (err) {
       log.warn('reposition failed', err)
     }
@@ -252,4 +433,32 @@ export class OverlayWindow {
     this.win?.destroy()
     this.win = null
   }
+}
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0.5
+  return Math.min(1, Math.max(0, value))
+}
+
+const EDGES: readonly BarEdge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+
+function isGesture(value: unknown): value is OverlayGestureMessage {
+  if (typeof value !== 'object' || value === null) return false
+  const gesture = value as OverlayGestureMessage
+  const phaseOk =
+    gesture.phase === 'start' ||
+    gesture.phase === 'move' ||
+    gesture.phase === 'end' ||
+    gesture.phase === 'cancel'
+  const kindOk = gesture.kind === 'move' || gesture.kind === 'resize'
+  const edgeOk = gesture.edge === undefined || EDGES.includes(gesture.edge)
+  return (
+    phaseOk &&
+    kindOk &&
+    edgeOk &&
+    typeof gesture.screenX === 'number' &&
+    typeof gesture.screenY === 'number' &&
+    Number.isFinite(gesture.screenX) &&
+    Number.isFinite(gesture.screenY)
+  )
 }

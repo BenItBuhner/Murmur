@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { describeServiceNotice, type ServiceNotice } from '@shared/inference'
 import { describeLimit, type LimitNotice } from '@shared/limits'
+import type { OverlayGestureMessage } from '@shared/ipc'
+import { edgeAt, type BarEdge } from '@shared/overlay-bar'
 import type { OverlayState } from '@shared/types'
 import { cn } from '@renderer/lib/utils'
 import { pillElevation } from './elevation'
@@ -11,6 +13,8 @@ const BAR_COUNT = 18
 const BAR_STEP_MS = 45
 const IDLE_WIDTH = 56
 const IDLE_HEIGHT = 6
+/** Padding around the idle bar that catches an edge drag. The bar itself moves. */
+const BAR_HIT_PAD = 8
 const PILL_HEIGHT = 44
 const PILL_PAD_X = 16
 /** The limit notice: two lines and a row of buttons, at the sheet radius rather than a capsule. */
@@ -36,6 +40,11 @@ interface Props {
   onHover?: (over: boolean) => void
   /** Off draws the pill flat, no drop shadow and no light catch (the "Button shadow" setting). */
   shadow?: boolean
+  /** Idle bar size. Defaults are the size the bar has always had. */
+  barWidth?: number
+  barHeight?: number
+  /** Drag the bar to move it, or an edge to resize it. */
+  onGesture?: (message: OverlayGestureMessage) => void
 }
 
 /** A refusal on a plan limit: the pill explains it instead of showing the bare error. */
@@ -126,7 +135,10 @@ export function Overlay({
   onUpgrade,
   onOwnProvider,
   onHover,
-  shadow = true
+  shadow = true,
+  barWidth = IDLE_WIDTH,
+  barHeight = IDLE_HEIGHT,
+  onGesture
 }: Props): React.JSX.Element {
   const key = contentKey(state)
   const idle = state.phase === 'idle'
@@ -204,21 +216,87 @@ export function Overlay({
   }, [key])
 
   const padX = explaining ? LIMIT_PAD_X : PILL_PAD_X
-  const width = idle ? IDLE_WIDTH : Math.max(IDLE_WIDTH, contentWidth + padX * 2)
+  const width = idle ? barWidth : Math.max(barWidth, contentWidth + padX * 2)
   const height = idle
-    ? IDLE_HEIGHT
+    ? barHeight
     : explaining
       ? LIMIT_HEIGHT
       : isSoftLimit(state)
         ? SOFT_HEIGHT
         : PILL_HEIGHT
+  const barRef = useRef<HTMLDivElement | null>(null)
+  const gestureKind = useRef<'move' | 'resize' | null>(null)
+
+  const point = (e: React.PointerEvent): { x: number; y: number } | null => {
+    const rect = barRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+
+  const sendGesture = (e: React.PointerEvent, phase: OverlayGestureMessage['phase'], edge?: BarEdge): void => {
+    const kind = gestureKind.current
+    if (!kind) return
+    onGesture?.({
+      phase,
+      kind,
+      edge,
+      screenX: e.screenX,
+      screenY: e.screenY
+    })
+  }
+
   return (
-    <div className="flex h-full w-full items-end justify-center pb-3">
+    <div className="pointer-events-none flex h-full w-full items-end justify-center pb-3">
       <div
+        className="pointer-events-auto"
+        style={{ padding: BAR_HIT_PAD, margin: -BAR_HIT_PAD }}
+        onPointerEnter={() => onHover?.(true)}
+        onPointerLeave={() => {
+          if (gestureKind.current) return
+          onHover?.(false)
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          const target = e.target as HTMLElement
+          if (target.closest('button')) return
+          const local = point(e)
+          if (!local) return
+          const hit = edgeAt(local.x, local.y, width, height, BAR_HIT_PAD)
+          if (!hit) return
+          const resizing = idle && hit !== 'body'
+          gestureKind.current = resizing ? 'resize' : 'move'
+          e.currentTarget.setPointerCapture(e.pointerId)
+          onGesture?.({
+            phase: 'start',
+            kind: gestureKind.current,
+            edge: resizing && hit !== 'body' ? hit : undefined,
+            screenX: e.screenX,
+            screenY: e.screenY
+          })
+        }}
+        onPointerMove={(e) => {
+          if (!gestureKind.current) return
+          const local = point(e)
+          const hit = local ? edgeAt(local.x, local.y, width, height, BAR_HIT_PAD) : null
+          sendGesture(e, 'move', gestureKind.current === 'resize' && hit && hit !== 'body' ? hit : undefined)
+        }}
+        onPointerUp={(e) => {
+          if (!gestureKind.current) return
+          sendGesture(e, 'end')
+          gestureKind.current = null
+          onHover?.(false)
+        }}
+        onPointerCancel={(e) => {
+          if (!gestureKind.current) return
+          sendGesture(e, 'cancel')
+          gestureKind.current = null
+          onHover?.(false)
+        }}
+      >
+      <div
+        ref={barRef}
         title={idle ? micError : undefined}
         style={{ width, height }}
-        onPointerEnter={interactive ? () => onHover?.(true) : undefined}
-        onPointerLeave={interactive ? () => onHover?.(false) : undefined}
         className={cn(
           'overlay-pill relative overflow-hidden text-note font-medium text-overlay-foreground',
           // Two lines of explanation sit better on the sheet radius than in a capsule.
@@ -257,6 +335,7 @@ export function Overlay({
             </div>
           </div>
         ))}
+      </div>
       </div>
     </div>
   )

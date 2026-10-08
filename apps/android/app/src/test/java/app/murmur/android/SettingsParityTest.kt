@@ -75,6 +75,9 @@ class SettingsParityTest {
         assertEquals(d.getDouble("soundVolume"), s.soundVolume.toDouble(), 0.0001)
         val k = s.keyboard
         assertEquals(d.getString("overlayPosition"), k.overlayPosition.id)
+        assertEquals(d.getString("overlayBarAnchor"), k.overlayBar.anchor.name.lowercase())
+        assertEquals(d.getInt("overlayBarWidth"), k.overlayBar.widthDp.toInt())
+        assertEquals(d.getInt("overlayBarHeight"), k.overlayBar.heightDp.toInt())
         assertEquals(d.getBoolean("showOverlayWhenIdle"), k.showOverlayWhenIdle)
         assertEquals(d.getJSONArray("pushToTalk").ints(), k.pushToTalk)
         assertEquals(d.getJSONArray("handsFree").ints(), k.handsFree)
@@ -106,6 +109,8 @@ class SettingsParityTest {
         assertEquals(range("sttTimeoutMs"), SettingsRanges.STT_TIMEOUT_MS)
         assertEquals(range("llmTimeoutMs"), SettingsRanges.LLM_TIMEOUT_MS)
         assertEquals(range("maxDurationSec"), SettingsRanges.MAX_DURATION_SEC)
+        assertEquals(range("overlayBarWidth"), SettingsRanges.OVERLAY_BAR_WIDTH)
+        assertEquals(range("overlayBarHeight"), SettingsRanges.OVERLAY_BAR_HEIGHT)
     }
 
     @Test

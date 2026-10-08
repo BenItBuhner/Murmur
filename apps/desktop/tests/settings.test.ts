@@ -27,6 +27,9 @@ describe('settings schema', () => {
     expect(s.general.accentColor).toBe('#ff5a36')
     expect(s.general.tintedSurfaces).toBe(false)
     expect(s.general.buttonShadow).toBe(true)
+    // The idle bar stays centered at the bottom, at the size it has always been, until it is moved.
+    expect(s.general.overlayPosition).toBe('bottom-center')
+    expect(s.general.overlayBar).toEqual({ anchor: 'preset', x: 0.5, y: 0.5, width: 56, height: 6 })
   })
 
   it('keeps the button shadow on unless the user turns it off, with no migration in between', () => {
@@ -40,6 +43,9 @@ describe('settings schema', () => {
     expect(s.general.buttonShadow).toBe(true)
     expect(s.general.theme).toBe('dark')
     expect(s.general.accent).toBe('teal')
+    expect(s.general.overlayBar.anchor).toBe('preset')
+    expect(s.general.overlayBar.width).toBe(56)
+    expect(s.general.overlayBar.height).toBe(6)
     // A broken value drops the appearance section to its defaults, nothing else is lost.
     const broken = parseSettings({ general: { buttonShadow: 'off' }, stats: { totalWords: 7 } })
     expect(broken.general.buttonShadow).toBe(true)

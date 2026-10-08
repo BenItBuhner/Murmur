@@ -17,6 +17,7 @@ import app.murmur.android.dictation.DictationMode
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.inference.LimitNotice
 import app.murmur.android.keyboard.KeyboardPresence
+import app.murmur.android.overlay.BarAnchor
 import app.murmur.android.overlay.Box
 import app.murmur.android.overlay.OverlayAnchor
 import app.murmur.android.overlay.OverlayGeometry
@@ -211,6 +212,29 @@ class KeyboardModeOverlayTest {
         return window != null
     }
 
+    /** A drag from (x0, y0) to (x1, y1), delivered like [tap]. True when the bar's center moved. */
+    private fun drag(x0: Float, y0: Float, x1: Float, y1: Float): Boolean {
+        val window = overlays().lastOrNull { takesTouches(it) && frameOf(it).contains(x0, y0) } ?: return false
+        val before = frameOf(window)
+        val t = SystemClock.uptimeMillis()
+        val steps = listOf(
+            MotionEvent.ACTION_DOWN to (x0 to y0),
+            MotionEvent.ACTION_MOVE to (x1 to y1),
+            MotionEvent.ACTION_UP to (x1 to y1)
+        )
+        steps.forEachIndexed { i, (action, point) ->
+            val target = touchWindow() ?: return false
+            val event = MotionEvent.obtain(t, t + 30L * (i + 1), action, point.first, point.second, 0)
+            event.offsetLocation(-params(target).x.toFloat(), -params(target).y.toFloat())
+            target.dispatchTouchEvent(event)
+            event.recycle()
+            settle(frames = 1)
+        }
+        settle()
+        val after = touchWindow()?.let { frameOf(it) } ?: return false
+        return abs(after.centerX - before.centerX) > dp(20f) || abs(after.centerY - before.centerY) > dp(20f)
+    }
+
     private fun dp(v: Float) = v * density
 
     /** [value], which must be there. */
@@ -224,17 +248,25 @@ class KeyboardModeOverlayTest {
     // ---- keyboard mode: the idle bar ---------------------------------------------------------------
 
     @Test
-    fun `in keyboard mode the idle bar takes no touches and a tap on it reaches the app beneath`() {
+    fun `in keyboard mode the idle bar can be dragged and a tap on it does not dictate`() {
         device(PHONE_PORTRAIT, keyboard = true)
-        val bar = present("the idle bar is up with a keyboard attached", touchWindow()).let { frameOf(it) }
+        val window = present("the idle bar is up with a keyboard attached", touchWindow())
         val canvas = present(pill())
-        assertFalse("the bar's touch window is skipped by input dispatch", takesTouches(touchWindow()!!))
+        assertTrue("the bar takes a drag", takesTouches(window))
         assertFalse(takesTouches(canvas))
+        val bar = frameOf(window)
 
-        assertFalse("on the bar", tap(bar.centerX, bar.centerY))
-        assertFalse("where the old 44 dp target reached", tap(bar.centerX, bar.centerY - dp(12f)))
-        assertEquals("both taps went to the app", 2, appTaps)
-        assertEquals("and none started a dictation", 0, micTaps)
+        assertTrue("on the bar", tap(bar.centerX, bar.centerY))
+        assertFalse("12 dp above the bar, past its edge", tap(bar.centerX, bar.centerY - dp(12f)))
+        assertEquals("only the tap outside the bar reached the app", 1, appTaps)
+        assertEquals("and neither started a dictation", 0, micTaps)
+
+        val moved = drag(bar.centerX, bar.centerY, bar.centerX - dp(140f), bar.centerY - dp(90f))
+        assertTrue("the drag landed off center", moved)
+        val after = frameOf(present(touchWindow()))
+        assertTrue("the bar left the center", abs(after.centerX - bar.centerX) > dp(40f))
+        val saved = SettingsStore.get(service).get().keyboard.overlayBar
+        assertEquals(BarAnchor.FREE, saved.anchor)
     }
 
     @Test
@@ -282,10 +314,11 @@ class KeyboardModeOverlayTest {
 
         view.render(DictationState.Idle)
         settle()
-        assertFalse("idle again: no touches", takesTouches(touchWindow()!!))
+        assertTrue("idle again: the bar can still be dragged", takesTouches(touchWindow()!!))
         val bar = frameOf(touchWindow()!!)
-        assertFalse(tap(bar.centerX, bar.centerY))
-        assertEquals(1, appTaps)
+        assertTrue(tap(bar.centerX, bar.centerY))
+        assertEquals("a tap on the idle bar still does not dictate", 0, micTaps)
+        assertEquals(0, appTaps)
     }
 
     @Test
@@ -297,7 +330,7 @@ class KeyboardModeOverlayTest {
         assertEquals("the button: 36 dp + 6 dp above and below", dp(48f), frameOf(button).height, 1.5f)
 
         device(PHONE_PORTRAIT, keyboard = true)
-        assertFalse("a keyboard attached: the idle bar, taking no touches", takesTouches(touchWindow()!!))
+        assertTrue("a keyboard attached: the idle bar, ready to be dragged", takesTouches(touchWindow()!!))
         // Turned on once the bar has settled: the bar and 6 dp around it, not reaching back to where the button was.
         SettingsStore.get(service).update { it.copy(keyboard = it.keyboard.copy(tapIdleBarToDictate = true)) }
         settle()
@@ -306,7 +339,7 @@ class KeyboardModeOverlayTest {
         assertEquals(dp(18f), frameOf(touchWindow()!!).height, 1.5f)
         SettingsStore.get(service).update { it.copy(keyboard = it.keyboard.copy(tapIdleBarToDictate = false)) }
         settle()
-        assertFalse(takesTouches(touchWindow()!!))
+        assertTrue("turning the tap off keeps the drag", takesTouches(touchWindow()!!))
 
         device(PHONE_PORTRAIT, keyboard = false)
         val again = present(touchWindow())
@@ -319,7 +352,10 @@ class KeyboardModeOverlayTest {
         assertEquals(dp(18f), frameOf(touchWindow()!!).height, 1.5f)
         SettingsStore.get(service).update { it.copy(keyboard = it.keyboard.copy(tapIdleBarToDictate = false)) }
         settle()
-        assertFalse("and none once it is turned off again", takesTouches(touchWindow()!!))
+        assertTrue("the bar can still be dragged once the tap is turned off", takesTouches(touchWindow()!!))
+        val parked = frameOf(touchWindow()!!)
+        assertTrue(tap(parked.centerX, parked.centerY))
+        assertEquals("and that tap does not dictate", 0, micTaps)
     }
 
     // ---- which mode, turned either way -----------------------------------------------------------
@@ -355,9 +391,9 @@ class KeyboardModeOverlayTest {
         present(touchWindow())
         device(PHONE_LANDSCAPE, keyboard = true)
         val bar = present("on its side with the keyboard: still the idle bar", touchWindow())
-        assertFalse(takesTouches(bar))
+        assertTrue(takesTouches(bar))
         device(PHONE_PORTRAIT, keyboard = true)
-        assertFalse(takesTouches(present(touchWindow())))
+        assertTrue(takesTouches(present(touchWindow())))
     }
 
     @Test
@@ -370,6 +406,9 @@ class KeyboardModeOverlayTest {
             assertEquals(dp(18f), frameOf(bar).height, 1.5f)
         }
         device(TABLET_LANDSCAPE, keyboard = true)
-        assertFalse("with a keyboard the bar lets taps through", takesTouches(present(touchWindow())))
+        assertTrue("with a keyboard the bar can be dragged", takesTouches(present(touchWindow())))
+        val bar = frameOf(touchWindow()!!)
+        assertTrue(tap(bar.centerX, bar.centerY))
+        assertEquals("and a tap still does not dictate", 0, micTaps)
     }
 }

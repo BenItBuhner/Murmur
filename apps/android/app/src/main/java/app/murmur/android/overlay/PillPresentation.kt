@@ -8,7 +8,7 @@ import app.murmur.android.settings.OverlayPosition
 /**
  * How the overlay presents itself. [Button] is the phone's floating dictation button: it rests on
  * one of its spots beside the keyboard and can be dragged between them. [Desktop] is the desktop
- * app's pill: parked at one of the desktop's three positions, a thin idle bar when Murmur is ready
+ * app's pill: parked at a preset or wherever the user dragged it, a thin idle bar when Murmur is ready
  * (or nothing, with the idle indicator off), grown into the listening pill by a shortcut or a tap.
  */
 sealed interface PillPresentation {
@@ -27,7 +27,9 @@ sealed interface PillPresentation {
          * Otherwise it takes no touches at all and every tap goes to what is underneath, as the
          * desktop's idle indicator lets every click through.
          */
-        val idleTap: Boolean = touchControls
+        val idleTap: Boolean = touchControls,
+        /** Size and free placement. The default is the centered bar at the size it has always had. */
+        val bar: OverlayBar = OverlayBar.DEFAULT
     ) : PillPresentation
 
     companion object {
@@ -41,7 +43,8 @@ sealed interface PillPresentation {
                     keyboard.overlayPosition,
                     keyboard.showOverlayWhenIdle,
                     touchControls = !posture.hardwareKeyboard,
-                    idleTap = keyboard.tapIdleBarToDictate || !posture.hardwareKeyboard
+                    idleTap = keyboard.tapIdleBarToDictate || !posture.hardwareKeyboard,
+                    bar = keyboard.overlayBar
                 )
             } else {
                 Button

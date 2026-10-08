@@ -192,6 +192,9 @@ async function main(): Promise<void> {
   )
 
   const overlay = new OverlayWindow()
+  overlay.setCommitHandler((position, bar) => {
+    settings.patch({ general: { overlayPosition: position, overlayBar: bar } })
+  })
   // A dev build may dictate from a clip on disk instead of the microphone (silent end-to-end runs
   // on machines that must neither record nor play audio). Packaged builds ignore the variable.
   const testAudio = resolveTestAudio(process.env, !app.isPackaged)
@@ -272,7 +275,8 @@ async function main(): Promise<void> {
     })
     overlay.configureVisibility(
       s.general.showOverlayWhenIdle && s.onboardingComplete,
-      s.general.overlayPosition
+      s.general.overlayPosition,
+      s.general.overlayBar
     )
     tray?.setHotkeyLabel(chordLabel(s.hotkeys.pushToTalk, hook.platform, s.hotkeys.sideSensitive))
     applyLaunchAtLogin(s.general.launchAtLogin)

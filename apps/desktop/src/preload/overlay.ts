@@ -7,6 +7,8 @@ import {
   type AudioStatusMessage,
   type AudioStoppedMessage,
   type SoundName,
+  type OverlayBarMessage,
+  type OverlayGestureMessage,
   type ThemeMessage
 } from '@shared/ipc'
 import type { OverlayState } from '@shared/types'
@@ -22,6 +24,7 @@ const api = {
   onState: (cb: (s: OverlayState) => void): Unsub => on(IPC.overlayState, cb),
   onPlaySound: (cb: (name: SoundName) => void): Unsub => on(IPC.overlayPlaySound, cb),
   onTheme: (cb: (theme: ThemeMessage) => void): Unsub => on(IPC.overlayTheme, cb),
+  onBar: (cb: (bar: OverlayBarMessage) => void): Unsub => on(IPC.overlayBar, cb),
   onAudioConfigure: (cb: (cfg: AudioConfigureMessage) => void): Unsub => on(IPC.audioConfigure, cb),
   onAudioStart: (cb: (m: AudioStartMessage) => void): Unsub => on(IPC.audioStart, cb),
   onAudioStop: (cb: (m: { sessionId: string }) => void): Unsub => on(IPC.audioStop, cb),
@@ -36,7 +39,9 @@ const api = {
   openUrl: (url: string): void => ipcRenderer.send(IPC.overlayOpenUrl, url),
   openModels: (): void => ipcRenderer.send(IPC.overlayOpenModels),
   /** Pointer over the pill: main lets the window take clicks only while this is true. */
-  hover: (over: boolean): void => ipcRenderer.send(IPC.overlayHover, over)
+  hover: (over: boolean): void => ipcRenderer.send(IPC.overlayHover, over),
+  /** Drag the bar to move it, or drag an edge to resize it. */
+  gesture: (message: OverlayGestureMessage): void => ipcRenderer.send(IPC.overlayGesture, message)
 }
 
 export type MurmurOverlayApi = typeof api

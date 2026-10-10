@@ -403,6 +403,48 @@ export const providerRecovered = internalMutation({
   }
 })
 
+interface UsageDelta {
+  kind: 'stt' | 'llm'
+  seconds: number
+  tokens: number
+  words: number
+  /** Requests this delta stands for (a batch folds several into one). */
+  requests: number
+}
+
+/** Add usage to the month and day rows of `at`; one read and one write per row. */
+async function addUsage(ctx: MutationCtx, userId: Id<'users'>, deltas: UsageDelta[], at: number): Promise<void> {
+  if (deltas.length === 0) return
+  const period = usagePeriod(at)
+  const day = usageDay(at)
+  const [usage, [dayRow]] = await Promise.all([monthRow(ctx, userId, period), dayRows(ctx, userId, day, day)])
+  const month = { ...toMonthUsage(usage) }
+  const days = {
+    words: dayRow?.words ?? 0,
+    sttSeconds: dayRow?.sttSeconds ?? 0,
+    dictations: dayRow?.dictations ?? 0,
+    formats: dayRow?.formats ?? 0
+  }
+  for (const d of deltas) {
+    if (d.kind === 'stt') {
+      month.sttSeconds += d.seconds
+      month.sttRequests += d.requests
+      days.words += d.words
+      days.sttSeconds += d.seconds
+      days.dictations += d.requests
+    } else {
+      month.llmTokens += d.tokens
+      month.llmRequests += d.requests
+      days.formats += d.requests
+    }
+  }
+  const now = Date.now()
+  if (usage) await ctx.db.patch('inferenceUsage', usage._id, { ...month, updatedAt: now })
+  else await ctx.db.insert('inferenceUsage', { userId, period, ...month, updatedAt: now })
+  if (dayRow) await ctx.db.patch('inferenceDays', dayRow._id, { ...days, updatedAt: now })
+  else await ctx.db.insert('inferenceDays', { userId, day, ...days, updatedAt: now })
+}
+
 /** Add what a successful upstream request consumed to the current month and day. */
 export const record = internalMutation({
   args: {
@@ -415,53 +457,122 @@ export const record = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const now = Date.now()
-    const period = usagePeriod(now)
-    const day = usageDay(now)
-    const [usage, [dayRow]] = await Promise.all([
-      monthRow(ctx, args.userId, period),
-      dayRows(ctx, args.userId, day, day)
-    ])
-    const seconds = Math.max(0, args.seconds ?? 0)
-    const tokens = Math.max(0, Math.floor(args.tokens ?? 0))
-    const words = Math.max(0, Math.floor(args.words ?? 0))
-    const delta =
-      args.kind === 'stt'
-        ? { sttSeconds: (usage?.sttSeconds ?? 0) + seconds, sttRequests: (usage?.sttRequests ?? 0) + 1 }
-        : { llmTokens: (usage?.llmTokens ?? 0) + tokens, llmRequests: (usage?.llmRequests ?? 0) + 1 }
-    if (usage) {
-      await ctx.db.patch('inferenceUsage', usage._id, { ...delta, updatedAt: now })
-    } else {
-      await ctx.db.insert('inferenceUsage', {
-        userId: args.userId,
-        period,
-        ...ZERO_MONTH,
-        ...delta,
-        updatedAt: now
-      })
-    }
-    const dayDelta =
-      args.kind === 'stt'
-        ? {
-            words: (dayRow?.words ?? 0) + words,
-            sttSeconds: (dayRow?.sttSeconds ?? 0) + seconds,
-            dictations: (dayRow?.dictations ?? 0) + 1
-          }
-        : { formats: (dayRow?.formats ?? 0) + 1 }
-    if (dayRow) {
-      await ctx.db.patch('inferenceDays', dayRow._id, { ...dayDelta, updatedAt: now })
-    } else {
-      await ctx.db.insert('inferenceDays', {
-        userId: args.userId,
-        day,
-        words: 0,
-        sttSeconds: 0,
-        dictations: 0,
-        formats: 0,
-        ...dayDelta,
-        updatedAt: now
-      })
-    }
+    await addUsage(
+      ctx,
+      args.userId,
+      [
+        {
+          kind: args.kind,
+          seconds: Math.max(0, args.seconds ?? 0),
+          tokens: Math.max(0, Math.floor(args.tokens ?? 0)),
+          words: Math.max(0, Math.floor(args.words ?? 0)),
+          requests: 1
+        }
+      ],
+      Date.now()
+    )
     return null
+  }
+})
+
+/** Largest usage report the inference Worker sends in one call. */
+export const USAGE_BATCH_MAX = 500
+
+export const usageRecordValidator = v.object({
+  clerkId: v.string(),
+  kind: inferenceKindValidator,
+  seconds: v.optional(v.number()),
+  tokens: v.optional(v.number()),
+  words: v.optional(v.number()),
+  /** When the request was answered (ms); decides the day and month it counts toward. */
+  at: v.number()
+})
+
+/**
+ * Usage the inference Worker collected over a few minutes, in one call: grouped per account and
+ * UTC day, so a busy batch is still two row writes per account-day instead of two per request.
+ * Records for accounts that do not exist (purged meanwhile) are dropped.
+ */
+export const recordBatch = internalMutation({
+  args: { records: v.array(usageRecordValidator) },
+  returns: v.object({ recorded: v.number(), dropped: v.number() }),
+  handler: async (ctx, args) => {
+    if (args.records.length > USAGE_BATCH_MAX) throw new Error(`At most ${USAGE_BATCH_MAX} usage records per call`)
+    const now = Date.now()
+    const groups = new Map<string, { clerkId: string; at: number; deltas: UsageDelta[] }>()
+    for (const r of args.records) {
+      // A clock far off (or a replay from long ago) still counts, but toward today.
+      const at = Number.isFinite(r.at) && Math.abs(now - r.at) < 35 * DAY_MS ? r.at : now
+      const key = `${r.clerkId}|${usageDay(at)}`
+      const group = groups.get(key) ?? { clerkId: r.clerkId, at, deltas: [] }
+      group.deltas.push({
+        kind: r.kind,
+        seconds: Math.max(0, r.seconds ?? 0),
+        tokens: Math.max(0, Math.floor(r.tokens ?? 0)),
+        words: Math.max(0, Math.floor(r.words ?? 0)),
+        requests: 1
+      })
+      groups.set(key, group)
+    }
+    let recorded = 0
+    let dropped = 0
+    const users = new Map<string, Doc<'users'> | null>()
+    for (const group of groups.values()) {
+      if (!users.has(group.clerkId)) users.set(group.clerkId, await findUserByClerkId(ctx, group.clerkId))
+      const user = users.get(group.clerkId)
+      if (!user) {
+        dropped += group.deltas.length
+        continue
+      }
+      await addUsage(ctx, user._id, group.deltas, group.at)
+      recorded += group.deltas.length
+    }
+    return { recorded, dropped }
+  }
+})
+
+const grantRefusalValidator = v.union(refusalValidator, v.null())
+
+/**
+ * What the inference Worker may do for an account for the next few minutes, in one call it caches:
+ * the same plan, trial and limit rules `authorize` applies, checked once for speech and for
+ * formatting instead of once per request. Provisions the account like `authorize` (which also
+ * starts a trial) but writes nothing else; usage arrives later through `recordBatch`.
+ */
+export const workerGrant = internalMutation({
+  args: identityArgs,
+  returns: v.union(
+    v.object({
+      ok: v.literal(true),
+      plan: planValidator,
+      planState: accessStateValidator,
+      stt: grantRefusalValidator,
+      llm: grantRefusalValidator,
+      /** For `/v1/format`, which answers with rule-based text instead of refusing. */
+      format: v.object({ refusal: grantRefusalValidator, paused: v.union(meterValidator, v.null()) })
+    }),
+    v.object({ ok: v.literal(false), denied: v.literal('private_testing') })
+  ),
+  handler: async (ctx, args) => {
+    const now = Date.now()
+    const user = await upsertUser(ctx, args.clerkId, { email: args.email }, now)
+    const planState = accessStateOf(process.env, planStateOf(user), args, user.email)
+    if (planState === 'testing') return { ok: false as const, denied: 'private_testing' as const }
+    const plan = tierOf(planState)
+    const limits = planLimits(plan)
+    const snapshot = await snapshotFor(ctx, user._id, usageDay(now))
+    const check = { plan, state: planState, limits, snapshot, now }
+    const strict = checkFormatting(check, false)
+    const degradable = checkFormatting(check, true)
+    return {
+      ok: true as const,
+      plan,
+      planState,
+      stt: checkTranscription(check, 0),
+      llm: strict.ok ? null : strict.refusal,
+      format: degradable.ok
+        ? { refusal: null, paused: degradable.paused }
+        : { refusal: degradable.refusal, paused: null }
+    }
   }
 })

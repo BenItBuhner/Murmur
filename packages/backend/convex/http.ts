@@ -3,6 +3,7 @@ import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
 import { stripeWebhook } from './billing'
 import { chatCompletions, format, models, transcriptions } from './gateway'
+import { parseUsageRecords, workerAuthorized } from './lib/worker'
 import { verifyClerkWebhook, WebhookVerificationError } from './lib/clerkWebhook'
 
 const http = httpRouter()
@@ -16,6 +17,52 @@ http.route({ path: '/v1/audio/transcriptions', method: 'POST', handler: transcri
 http.route({ path: '/v1/chat/completions', method: 'POST', handler: chatCompletions })
 /** Murmur-native: the transcript in, the text to insert out (see gateway.ts `format`). */
 http.route({ path: '/v1/format', method: 'POST', handler: format })
+
+/**
+ * The inference Worker (apps/inference-worker) -> Convex. The Worker serves /v1/* itself and only
+ * asks Convex for an account's allowance (cached for minutes) and reports usage in batches, both
+ * with MURMUR_WORKER_SECRET as the bearer token. Without the secret set these answer 503.
+ */
+http.route({
+  path: '/worker/grant',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = workerAuthorized(request, process.env.MURMUR_WORKER_SECRET)
+    if (denied) return denied
+    let body: { clerkId?: unknown; email?: unknown; emailVerified?: unknown }
+    try {
+      body = (await request.json()) as typeof body
+    } catch {
+      return new Response('Body must be JSON', { status: 400 })
+    }
+    if (typeof body?.clerkId !== 'string' || !body.clerkId) return new Response('"clerkId" is required', { status: 400 })
+    const grant = await ctx.runMutation(internal.inference.workerGrant, {
+      clerkId: body.clerkId,
+      email: typeof body.email === 'string' ? body.email : undefined,
+      emailVerified: typeof body.emailVerified === 'boolean' ? body.emailVerified : undefined
+    })
+    return new Response(JSON.stringify(grant), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
+
+http.route({
+  path: '/worker/usage',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = workerAuthorized(request, process.env.MURMUR_WORKER_SECRET)
+    if (denied) return denied
+    let body: { records?: unknown }
+    try {
+      body = (await request.json()) as typeof body
+    } catch {
+      return new Response('Body must be JSON', { status: 400 })
+    }
+    const records = parseUsageRecords(body?.records)
+    if (!records) return new Response('"records" must be an array of usage records', { status: 400 })
+    const result = await ctx.runMutation(internal.inference.recordBatch, { records })
+    return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
 
 /** Stripe -> Convex subscription sync (see billing.ts `stripeWebhook` for the events and secret). */
 http.route({ path: '/stripe/webhook', method: 'POST', handler: stripeWebhook })

@@ -30,7 +30,10 @@ async function setHistoryCount(ctx: AuthedMutationCtx, count: number): Promise<v
   await ctx.db.patch('users', ctx.user._id, { historyCount: Math.max(0, count) })
 }
 
-/** Most recent dictations across all of the account's devices (history sync is opt-in). */
+/**
+ * Most recent dictations across all of the account's devices (history sync is opt-in). Kept for
+ * clients from before `since`; new clients do not subscribe to it.
+ */
 export const recent = authedQuery({
   args: { limit: v.optional(v.number()) },
   returns: v.array(historyEntryDtoValidator),
@@ -50,6 +53,56 @@ export const recent = authedQuery({
     ])
     const names = new Map(devices.map((d) => [d.deviceId, d.name]))
     return docs.map((doc) => toDto(doc, names.get(doc.deviceId)))
+  }
+})
+
+const DEFAULT_SINCE = 20
+const MAX_SINCE = 100
+
+/**
+ * Entries that reached the server after `cursor`, oldest first, at most `limit` (default 20), and
+ * the cursor to pass next time. Without a cursor: the newest `limit` entries. Meant for one-shot
+ * `client.query` calls when something changed (a device's stats moved, the app connected), not for
+ * a live subscription: a subscription to a 200-entry list re-sent all of it to every device after
+ * every dictation, which is most of what put Murmur over the Convex free plan.
+ * `more` says another page is waiting; the cursor is the server's insertion time, so entries a
+ * device pushes late (offline queue) are still picked up.
+ */
+export const since = authedQuery({
+  args: { cursor: v.optional(v.number()), limit: v.optional(v.number()) },
+  returns: v.object({ entries: v.array(historyEntryDtoValidator), cursor: v.number(), more: v.boolean() }),
+  handler: async (ctx, args) => {
+    if (!ctx.user) return { entries: [], cursor: args.cursor ?? 0, more: false }
+    const userId = ctx.user._id
+    const limit = Math.min(MAX_SINCE, Math.max(1, Math.floor(args.limit ?? DEFAULT_SINCE)))
+    let docs: Doc<'historyEntries'>[]
+    let more = false
+    if (args.cursor === undefined) {
+      docs = (
+        await ctx.db
+          .query('historyEntries')
+          .withIndex('by_user', (q) => q.eq('userId', userId))
+          .order('desc')
+          .take(limit)
+      ).reverse()
+    } else {
+      const cursor = args.cursor
+      const page = await ctx.db
+        .query('historyEntries')
+        .withIndex('by_user', (q) => q.eq('userId', userId).gt('_creationTime', cursor))
+        .order('asc')
+        .take(limit + 1)
+      more = page.length > limit
+      docs = page.slice(0, limit)
+    }
+    const next = docs.length ? docs[docs.length - 1]._creationTime : (args.cursor ?? 0)
+    if (!docs.length) return { entries: [], cursor: next, more: false }
+    const devices = await ctx.db
+      .query('devices')
+      .withIndex('by_user', (q) => q.eq('userId', userId))
+      .collect()
+    const names = new Map(devices.map((d) => [d.deviceId, d.name]))
+    return { entries: docs.map((doc) => toDto(doc, names.get(doc.deviceId))), cursor: next, more }
   }
 })
 

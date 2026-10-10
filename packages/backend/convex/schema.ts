@@ -188,4 +188,7 @@ export default defineSchema({
   })
     .index('by_user_and_createdAt', ['userId', 'createdAt'])
     .index('by_user_and_entryId', ['userId', 'entryId'])
+    // Insertion order (`_creationTime` is implicit): the cursor `history.since` pages along, so a
+    // device fetches only what arrived since it last asked instead of re-reading a backlog.
+    .index('by_user', ['userId'])
 })

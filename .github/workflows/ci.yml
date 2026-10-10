@@ -55,6 +55,24 @@ jobs:
       # Includes the offline eval corpus and the golden contract the Android port is pinned to.
       - run: npm test
 
+  inference-worker-check:
+    name: Inference Worker typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # The Worker runs the backend's gateway handlers (packages/backend/convex/lib/gatewayCore.ts).
+      - run: npm ci
+        working-directory: packages/backend
+      - run: npm ci
+        working-directory: apps/inference-worker
+      - run: npm run typecheck
+        working-directory: apps/inference-worker
+      - run: npm test
+        working-directory: apps/inference-worker
+
   backend-check:
     name: Backend typecheck, lint, test
     runs-on: ubuntu-latest

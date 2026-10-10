@@ -1,0 +1,19 @@
+{
+  "name": "@murmur/inference-worker",
+  "version": "0.1.0",
+  "description": "Murmur's managed inference gateway as a Cloudflare Worker: verifies the Clerk session, forwards to the model providers and runs the text engine, so dictation audio never passes through Convex.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0",
+    "wrangler": "^4.149.0"
+  }
+}

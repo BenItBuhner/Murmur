@@ -91,7 +91,7 @@ object Inference {
         "murmur_signed_out", "murmur_no_token"
     )
 
-    /** Base URL of the instance's OpenAI-compatible gateway, given its HTTP actions origin. */
+    /** Base URL of the instance's OpenAI-compatible gateway, given its origin ([CloudConfig.managedOrigin]). */
     fun gatewayUrl(convexSiteUrl: String): String = convexSiteUrl.trim().trimEnd('/') + "/v1"
 
     /**
@@ -162,7 +162,7 @@ class InferenceRouter(
 ) {
     val cloudEnabled: Boolean get() = config.managedModels
 
-    private val gatewayUrl: String get() = Inference.gatewayUrl(config.convexSiteUrl)
+    private val gatewayUrl: String get() = Inference.gatewayUrl(config.managedOrigin)
 
     fun routing(): InferenceRouting = Inference.resolveSources(settings(), cloudEnabled, managedAvailable())
 

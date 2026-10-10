@@ -51,6 +51,18 @@ describe('HistoryStore', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it("appendRemote() adds other devices' entries without dropping earlier ones", () => {
+    store.add(entry('a'))
+    store.appendRemote([entry('r', { remote: true })])
+    store.appendRemote([entry('s', { remote: true }), entry('r', { remote: true })])
+    expect(
+      store
+        .list(10, 0)
+        .entries.map((e) => e.id)
+        .sort()
+    ).toEqual(['a', 'r', 's'])
+  })
+
   it('replace() keeps the entry where it was and swaps its outcome', () => {
     store.add(entry('a', { finalText: '', error: 'Timed out', recording: 'a.wav' }))
     store.add(entry('b'))

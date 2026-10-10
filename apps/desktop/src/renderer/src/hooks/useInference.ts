@@ -81,7 +81,8 @@ export function useInference(): InferenceView {
   const user = cloud.status?.user ?? null
   const signedIn = cloud.enabled && cloud.clerk.signedIn
   return useMemo(() => {
-    const cloudEnabled = cloud.enabled && !!cloud.config?.convexSiteUrl
+    const cloudEnabled =
+      cloud.enabled && !!(cloud.config?.inferenceUrl || cloud.config?.convexSiteUrl)
     const managedAvailable = status?.available ?? true
     const routing = resolveInferenceSources(settings, { cloudEnabled, managedAvailable })
     const period = currentUsagePeriod()
@@ -117,7 +118,15 @@ export function useInference(): InferenceView {
           : null,
       tokensUsed: thisMonth?.llmTokens ?? 0
     }
-  }, [settings, cloud.enabled, cloud.config?.convexSiteUrl, user, status, signedIn])
+  }, [
+    settings,
+    cloud.enabled,
+    cloud.config?.convexSiteUrl,
+    cloud.config?.inferenceUrl,
+    user,
+    status,
+    signedIn
+  ])
 }
 
 export function planLabel(plan: Plan): string {

@@ -49,6 +49,23 @@ describe('resolveCloudConfig', () => {
     expect(warnings).toEqual([])
   })
 
+  it('takes the inference Worker origin when one is configured', () => {
+    const build = {
+      convexUrl: 'https://happy-otter-123.convex.cloud',
+      clerkPublishableKey: LIVE_KEY
+    }
+    expect(resolveCloudConfig({}, build).config.inferenceUrl).toBeUndefined()
+    const worker = resolveCloudConfig(
+      {},
+      { ...build, inferenceUrl: 'https://murmur-inference.example.workers.dev/' }
+    )
+    expect(worker.config.inferenceUrl).toBe('https://murmur-inference.example.workers.dev')
+    expect(worker.config.convexSiteUrl).toBe('https://happy-otter-123.convex.site')
+    const bad = resolveCloudConfig({ MURMUR_INFERENCE_URL: 'ftp://x' }, build)
+    expect(bad.config.inferenceUrl).toBeUndefined()
+    expect(bad.warnings.join(' ')).toMatch(/MURMUR_INFERENCE_URL/)
+  })
+
   it('derives the HTTP actions origin for the managed-model gateway, or takes an explicit one', () => {
     expect(deriveConvexSiteUrl('https://happy-otter-123.convex.cloud')).toBe(
       'https://happy-otter-123.convex.site'

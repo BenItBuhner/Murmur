@@ -113,6 +113,12 @@ class InferenceTest {
         assertFalse(underivable.managedModels)
         assertFalse(local.managedModels)
         assertEquals(gateway, Inference.gatewayUrl("https://happy-otter-123.convex.site/"))
+        // The inference Worker, when the build has one, serves managed models instead of Convex.
+        val worker = CloudConfig.resolve("https://happy-otter-123.convex.cloud", key, "", "", "https://murmur-inference.example.workers.dev/")
+        assertEquals("https://murmur-inference.example.workers.dev", worker.managedOrigin)
+        assertEquals("https://happy-otter-123.convex.site", worker.convexSiteUrl)
+        assertTrue(worker.managedModels)
+        assertEquals(cloud.convexSiteUrl, cloud.managedOrigin)
     }
 
     @Test

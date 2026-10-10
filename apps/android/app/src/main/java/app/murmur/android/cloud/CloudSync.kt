@@ -27,11 +27,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -46,13 +45,27 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "MurmurCloud"
 private const val RETRY_MS = 15_000L
+/** Ceiling of the outbox's exponential backoff: 15 s, 30 s, 1 min, ... 30 min. */
+private const val RETRY_MAX_MS = 30 * 60_000L
+/** An op that failed this many times in a row while connected is dropped instead of blocking the queue forever. */
+private const val MAX_ATTEMPTS = 8
+/** Entries per history fetch: the newest page first, then only what is new since the cursor. */
+private const val HISTORY_PAGE = 20
+private const val HISTORY_MAX_PAGES = 10
+/** Finished dictations sent per `stats:recordMany` call. */
+private const val STATS_BATCH = 50
+/** A one-shot read that gets no answer in this long is given up until the next cue. */
+private const val ONE_SHOT_TIMEOUT_MS = 30_000L
+/** Quiet time after dictations before the status and the history are asked again. */
+private const val STATUS_REFRESH_DEBOUNCE_MS = 30_000L
+private const val HISTORY_FETCH_DEBOUNCE_MS = 2_000L
 private const val ONBOARDING_VERSION = 1.0
 
 /** A failed attempt to authenticate with Convex is tried again after this long, doubling each time up to [AUTH_RETRY_MAX_MS]. */
 private const val AUTH_RETRY_FIRST_MS = 2_000L
 private const val AUTH_RETRY_MAX_MS = 60_000L
 
-/** How many dictations follow the account: the newest this many are pushed when sync is turned on and mirrored from `history:recent`. */
+/** How many of the phone's own dictations are pushed when sync is turned on. */
 private const val HISTORY_BACKLOG = 200
 
 /** A burst of dictations is sent as one request once it has settled for this long. */
@@ -149,8 +162,20 @@ class CloudSync internal constructor(
     private var preferencesLoaded = false
     private var mirrorPrefs: StylePreferences = StylePreferences.of(settings.get())
     private var subscriptions: Job? = null
-    /** The `history:recent` subscription, running only while history sync is on. */
-    private var historySubscription: Job? = null
+    /** History sync is on and fetched on demand (`history:since`); there is no live history subscription. */
+    private var historyActive = false
+    /** Server insertion time of the newest remote entry this phone has; null before the first fetch. */
+    private var historyCursor: Double? = null
+    private var historyJob: Job? = null
+    /** The one pending `inference:status` read, and the timer that asks again when the UTC day turns. */
+    private var statusJob: Job? = null
+    /** The instance predates `history:since` / `stats:recordMany`: the old calls are used. */
+    @Volatile private var legacyHistory = false
+    @Volatile private var legacyStats = false
+    /** Consecutive failed flushes, for the backoff; any success resets it. */
+    private var flushFailures = 0
+    /** Failed attempts per op id while connected (in memory: a restart gives every op a fresh start). */
+    private val attempts = mutableMapOf<String, Int>()
     private var generation = 0
     @Volatile private var applying = false
 
@@ -170,6 +195,7 @@ class CloudSync internal constructor(
                 CloudDiagnostics.socket(if (connected) "connected" else if (everConnected) "reconnecting" else "connecting")
                 if (connected && !was) {
                     error = null
+                    flushFailures = 0
                     // Back on the wire: whatever waited goes now, and an unauthenticated client tries again at once.
                     nudge("websocket connected")
                     launch { flush() }
@@ -354,7 +380,11 @@ class CloudSync internal constructor(
         flushRetry = null
         subscriptions?.cancel()
         subscriptions = null
+        statusJob?.cancel()
+        statusJob = null
         stopHistorySubscription()
+        attempts.clear()
+        flushFailures = 0
         authenticated = false
         authStale = false
         authError = null
@@ -564,7 +594,10 @@ class CloudSync internal constructor(
                     if (gen != generation) return@collect
                     result.onSuccess {
                         delivered("users:me")
+                        val before = user
                         user = it
+                        // A plan or trial change moves the allowance: ask for the status again.
+                        if (before != null && it != null && (before.plan != it.plan || before.trialEndsAt != it.trialEndsAt)) refreshStatus(gen)
                     }.onFailure { noteFailure("users:me", it) }
                     publish()
                 }
@@ -584,89 +617,151 @@ class CloudSync internal constructor(
                     if (gen != generation) return@collect
                     result.onSuccess {
                         delivered("stats:get")
+                        // Stats move when any device finishes a dictation: the cue to look for new
+                        // history, instead of keeping a 200-entry history query live on every device.
+                        val moved = serverStats != null && it?.totalSessions != serverStats?.totalSessions
                         serverStats = it
+                        if (moved) {
+                            fetchHistory(gen, HISTORY_FETCH_DEBOUNCE_MS)
+                            refreshStatus(gen, STATUS_REFRESH_DEBOUNCE_MS)
+                        }
                     }.onFailure { noteFailure("stats:get", it) }
                     publish()
                 }
             }
-            launch { subscribeStatus(gen) }
+            refreshStatus(gen)
+            // The rolling windows are per UTC day: ask again when it turns.
+            launch {
+                while (gen == generation) {
+                    delay(InferenceStatusDto.msUntilNextUtcDay())
+                    if (!statusWithoutDay) refreshStatus(gen)
+                }
+            }
         }
         stopHistorySubscription()
         updateHistorySubscription(gen)
     }
 
     /**
-     * The managed-model status for today (UTC), asked again when the day changes so the rolling
-     * windows (words this week, dictations today) and their reset times stay right. An instance
-     * that does not accept the `day` argument yet answers with an argument error; then the status
-     * is asked the old way, without windows.
+     * One answer to a query, then the subscription is dropped: the Android client has no one-shot
+     * query, and a live subscription re-sends its whole result after every write it depends on.
+     * Null when no answer came within [ONE_SHOT_TIMEOUT_MS].
      */
-    private suspend fun subscribeStatus(gen: Int) = coroutineScope {
-        val convex = client ?: return@coroutineScope
-        while (gen == generation) {
+    private suspend inline fun <reified T> once(
+        convex: ConvexClientWithAuth<ClerkCredentials>,
+        name: String,
+        args: Map<String, Any?> = emptyMap()
+    ): Result<T>? = withTimeoutOrNull(ONE_SHOT_TIMEOUT_MS) { convex.subscribe<T>(name, args).first() }
+
+    /**
+     * The managed-model status for today (UTC), asked once after [delayMs] (not subscribed: a live
+     * `inference:status` re-ran on every usage write). Asked on connect, when the day turns, when the
+     * plan changes, after dictations and on Sync now. An instance that does not accept the `day`
+     * argument yet answers with an argument error; then the status is asked the old way.
+     */
+    private fun refreshStatus(gen: Int = generation, delayMs: Long = 0) {
+        val convex = client ?: return
+        statusJob?.cancel()
+        statusJob = scope.launch {
+            if (delayMs > 0) delay(delayMs)
+            if (gen != generation || !authenticated) return@launch
             val withDay = !statusWithoutDay
             val args: Map<String, Any?> = if (withDay) mapOf("day" to InferenceStatusDto.currentUtcDay()) else emptyMap()
-            val refused = CompletableDeferred<Unit>()
-            val subscription = launch {
-                convex.subscribe<InferenceStatusDto>("inference:status", args).collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess {
-                        delivered("inference:status")
-                        inference = it
-                    }.onFailure { e ->
-                        if (withDay && e.message?.contains("ArgumentValidationError", ignoreCase = true) == true) {
-                            Log.i(TAG, "instance does not take a day for inference:status; asking without it")
-                            statusWithoutDay = true
-                            refused.complete(Unit)
-                        } else {
-                            Log.w(TAG, "inference status: ${e.message}")
-                            CloudDiagnostics.convexError("inference:status", e.message)
-                            if (isAuthError(e)) authLost("inference:status")
-                        }
-                    }
-                    publish()
+            val result = once<InferenceStatusDto>(convex, "inference:status", args) ?: return@launch
+            if (gen != generation) return@launch
+            result.onSuccess {
+                delivered("inference:status")
+                inference = it
+            }.onFailure { e ->
+                if (withDay && e.message?.contains("ArgumentValidationError", ignoreCase = true) == true) {
+                    Log.i(TAG, "instance does not take a day for inference:status; asking without it")
+                    statusWithoutDay = true
+                    refreshStatus(gen)
+                    return@launch
                 }
+                Log.w(TAG, "inference status: ${e.message}")
+                CloudDiagnostics.convexError("inference:status", e.message)
+                if (isAuthError(e)) authLost("inference:status")
             }
-            // Until the day turns or the argument is refused (without the day there is no turning:
-            // the wait only ends with the scope, on sign-out or a new generation).
-            if (withDay) withTimeoutOrNull(InferenceStatusDto.msUntilNextUtcDay()) { refused.await() } else refused.await()
-            subscription.cancel()
+            publish()
         }
     }
 
     /**
-     * Mirror the account's recent dictations while the user has opted in and the account is
-     * connected (desktop: `updateHistorySubscription`). The phone's own entries come back with its
-     * device id and are left out: the local copies carry the timings and the recording. Off, the
+     * Mirror the account's dictations while the user has opted in and the account is connected
+     * (desktop: `updateHistorySubscription`): the newest page now, then only what reached the server
+     * since the cursor, fetched when the account's stats move. The phone's own entries come back with
+     * its device id and are left out: the local copies carry the timings and the recording. Off, the
      * mirror is dropped; the account keeps its copies until a device clears them.
      */
     private fun updateHistorySubscription(gen: Int = generation) {
         val convex = client
         val wanted = convex != null && authenticated && signedIn && settings.get().historySync
         if (!wanted) {
-            if (historySubscription != null) {
+            if (historyActive) {
                 stopHistorySubscription()
                 history.removeRemote()
             }
             return
         }
-        if (historySubscription != null || convex == null) return
-        val mine = settings.get().deviceId
-        historySubscription = scope.launch {
-            convex.subscribe<List<HistoryEntryDto>>("history:recent", mapOf("limit" to HISTORY_BACKLOG.toDouble())).collect { result ->
-                if (gen != generation) return@collect
+        if (historyActive || convex == null) return
+        historyActive = true
+        historyCursor = null
+        fetchHistory(gen)
+    }
+
+    /** Fetch what other devices added since the cursor, after [delayMs]; a newer request replaces a pending one. */
+    private fun fetchHistory(gen: Int = generation, delayMs: Long = 0) {
+        val convex = client ?: return
+        if (!historyActive) return
+        historyJob?.cancel()
+        historyJob = scope.launch {
+            if (delayMs > 0) delay(delayMs)
+            if (gen != generation || !historyActive) return@launch
+            val mine = settings.get().deviceId
+            if (legacyHistory) {
+                val result = once<List<HistoryEntryDto>>(convex, "history:recent", mapOf("limit" to HISTORY_PAGE.toDouble())) ?: return@launch
+                if (gen != generation || !historyActive) return@launch
                 result.onSuccess { list ->
                     delivered("history:recent")
-                    history.mergeRemote(list.filter { it.deviceId != mine }.map(SyncReducers::historyFromRemote))
+                    history.appendRemote(list.filter { it.deviceId != mine }.map(SyncReducers::historyFromRemote))
                 }.onFailure { noteFailure("history:recent", it) }
                 publish()
+                return@launch
             }
+            for (page in 0 until HISTORY_MAX_PAGES) {
+                val args = buildMap<String, Any?> {
+                    historyCursor?.let { put("cursor", it) }
+                    put("limit", HISTORY_PAGE.toDouble())
+                }
+                val result = once<HistorySinceDto>(convex, "history:since", args) ?: break
+                if (gen != generation || !historyActive) return@launch
+                val res = result.getOrElse { e ->
+                    if (isMissingFunction(e)) {
+                        Log.i(TAG, "instance has no history:since; fetching recent history the old way")
+                        legacyHistory = true
+                        fetchHistory(gen)
+                    } else {
+                        noteFailure("history:since", e)
+                        publish()
+                    }
+                    return@launch
+                }
+                delivered("history:since")
+                historyCursor = res.cursor
+                val theirs = res.entries.filter { it.deviceId != mine }.map(SyncReducers::historyFromRemote)
+                if (theirs.isNotEmpty()) history.appendRemote(theirs)
+                if (!res.more) break
+            }
+            publish()
         }
     }
 
     private fun stopHistorySubscription() {
-        historySubscription?.cancel()
-        historySubscription = null
+        historyJob?.cancel()
+        historyJob = null
+        historyActive = false
+        historyCursor = null
     }
 
     private fun applyDerived() {
@@ -887,7 +982,10 @@ class CloudSync internal constructor(
                 else -> {
                     CloudDiagnostics.syncRequest("flushing ${outbox.pending} pending" + (if (!connected) " (websocket reconnecting)" else ""))
                     error = null
+                    flushFailures = 0
                     publish()
+                    refreshStatus()
+                    fetchHistory()
                     flush()
                 }
             }
@@ -926,8 +1024,9 @@ class CloudSync internal constructor(
     /**
      * Replays the outbox head to tail. An op the server refused for good is dropped; one whose
      * mutation ran but whose answer could not be read is finished too (the server has it); any
-     * other failure stops the flush and books one retry in [RETRY_MS], replacing the one before
-     * it, so a long outage never builds up a crowd of retries.
+     * other failure stops the flush and books one retry, replacing the one before it, so a long
+     * outage never builds up a crowd of retries. The retry backs off from [RETRY_MS] doubling up to
+     * [RETRY_MAX_MS]; an op that failed [MAX_ATTEMPTS] times in a row while connected is dropped.
      */
     private suspend fun flush() {
         val convex = client ?: return
@@ -943,9 +1042,10 @@ class CloudSync internal constructor(
             while (gen == generation && authenticated) {
                 val op = outbox.ops.firstOrNull { !it.isAcked } ?: break
                 try {
-                    send(convex, op)
+                    sent += send(convex, op)
                     if (gen != generation) break
-                    sent++
+                    attempts.remove(op.id)
+                    flushFailures = 0
                     error = null
                     applyDerived()
                 } catch (e: CancellationException) {
@@ -971,14 +1071,31 @@ class CloudSync internal constructor(
                     }
                     failure = e.message ?: CloudBootstrap.describe(e)
                     error = failure
-                    Log.w(TAG, "sync failed, retrying in ${RETRY_MS / 1000}s: ${e.message}")
                     if (isAuthError(e)) {
+                        Log.w(TAG, "sync failed, logging in again: ${e.message}")
                         authLost("flush of ${op::class.simpleName}")
-                    } else {
-                        flushRetry = scope.launch {
-                            delay(RETRY_MS)
-                            flush()
+                        break
+                    }
+                    // Only failures while connected count toward dropping: offline is not the op's fault.
+                    if (connected) {
+                        val tries = (attempts[op.id] ?: 0) + 1
+                        attempts[op.id] = tries
+                        if (tries >= MAX_ATTEMPTS) {
+                            Log.w(TAG, "dropping ${op::class.simpleName} after $tries failed attempts: ${e.message}")
+                            CloudDiagnostics.event("${op::class.simpleName} failed $tries times, dropped: ${e.message}")
+                            attempts.remove(op.id)
+                            outbox.remove(op.id)
+                            dropped++
+                            applyDerived()
+                            continue
                         }
+                    }
+                    flushFailures++
+                    val wait = retryDelay(flushFailures)
+                    Log.w(TAG, "sync failed, retrying in ${wait / 1000}s: ${e.message}")
+                    flushRetry = scope.launch {
+                        delay(wait)
+                        flush()
                     }
                     break
                 }
@@ -990,7 +1107,8 @@ class CloudSync internal constructor(
         }
     }
 
-    private suspend fun send(convex: ConvexClientWithAuth<ClerkCredentials>, op: SyncOp) {
+    /** Send [op] (and, for stats, the run of stats ops behind it); returns how many ops went. */
+    private suspend fun send(convex: ConvexClientWithAuth<ClerkCredentials>, op: SyncOp): Int {
         when (op) {
             is SyncOp.DictionaryUpsert -> {
                 val id = convex.mutation<String>("dictionary:upsert", buildMap {
@@ -1001,7 +1119,7 @@ class CloudSync internal constructor(
                     if (op.entry.createdAt > 0) put("createdAt", op.entry.createdAt.toDouble())
                 })
                 outbox.update { SyncReducers.ack(it, op.id, id) }
-                return
+                return 1
             }
             is SyncOp.DictionaryRemove ->
                 convex.mutation<Boolean>("dictionary:remove", mapOf("id" to op.remoteId))
@@ -1011,7 +1129,7 @@ class CloudSync internal constructor(
                     putAll(snippetArgs(op.snippet))
                 })
                 outbox.update { SyncReducers.ack(it, op.id, id) }
-                return
+                return 1
             }
             is SyncOp.SnippetRemove ->
                 convex.mutation<Boolean>("snippets:remove", mapOf("id" to op.remoteId))
@@ -1021,13 +1139,42 @@ class CloudSync internal constructor(
                     putAll(appRuleArgs(op.rule))
                 })
                 outbox.update { SyncReducers.ack(it, op.id, id) }
-                return
+                return 1
             }
             is SyncOp.AppRuleRemove ->
                 convex.mutation<Boolean>("appRules:remove", mapOf("id" to op.remoteId))
             is SyncOp.PreferencesUpdate ->
                 convex.mutation<PreferencesDto>("preferences:update", op.prefs.patchArgs(null))
             is SyncOp.StatsRecord -> {
+                // The run of stats ops at the head of the queue goes in one call: an offline backlog
+                // of hundreds of dictations drains in a handful of mutations, not one per dictation.
+                val run = outbox.ops.filter { !it.isAcked }.takeWhile { it is SyncOp.StatsRecord }
+                    .take(STATS_BATCH).filterIsInstance<SyncOp.StatsRecord>()
+                if (!legacyStats && run.size > 1) {
+                    try {
+                        val totals = convex.mutation<StatsDto?>("stats:recordMany", mapOf(
+                            "sessions" to run.map {
+                                mapOf(
+                                    "words" to it.words.toDouble(),
+                                    "speechMs" to it.speechMs.toDouble(),
+                                    "day" to it.day,
+                                    "sessionId" to it.sessionId
+                                )
+                            }
+                        ))
+                        if (totals != null) serverStats = totals
+                        val ids = run.map { it.id }.toSet()
+                        outbox.update { ops -> ops.filterNot { it.id in ids } }
+                        refreshStatus(generation, STATUS_REFRESH_DEBOUNCE_MS)
+                        return run.size
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (!isMissingFunction(e)) throw e
+                        Log.i(TAG, "instance has no stats:recordMany; recording sessions one by one")
+                        legacyStats = true
+                    }
+                }
                 // The answer is the account's totals (StatsDto, with the last day as a string):
                 // read as such, it refreshes the stats shown; read as numbers only it failed to
                 // decode after every send and wedged the outbox at this op for good.
@@ -1038,6 +1185,7 @@ class CloudSync internal constructor(
                     "sessionId" to op.sessionId
                 ))
                 serverStats = totals
+                refreshStatus(generation, STATUS_REFRESH_DEBOUNCE_MS)
             }
             is SyncOp.CompleteOnboarding ->
                 convex.mutation<UserDto>("users:completeOnboarding", mapOf("version" to ONBOARDING_VERSION))
@@ -1049,6 +1197,7 @@ class CloudSync internal constructor(
                 convex.mutation<Double>("history:clear")
         }
         outbox.remove(op.id)
+        return 1
     }
 
     private suspend fun heartbeat() {
@@ -1163,6 +1312,17 @@ class CloudSync internal constructor(
          */
         fun isDecodeError(e: Throwable): Boolean =
             e is InternalError && e.message?.startsWith("Failed to decode JSON") == true
+
+        /** The instance does not have the function yet (an older backend): fall back to the old call. */
+        fun isMissingFunction(e: Throwable): Boolean =
+            e.message?.contains("Could not find public function", ignoreCase = true) == true
+
+        /** How long a failed flush waits after its [failures]th failure in a row: 15 s doubling up to 30 min. */
+        fun retryDelay(failures: Int): Long {
+            var delay = RETRY_MS
+            repeat((failures - 1).coerceIn(0, 20)) { delay = (delay * 2).coerceAtMost(RETRY_MAX_MS) }
+            return delay.coerceAtMost(RETRY_MAX_MS)
+        }
 
         /** How long the auth loop waits after its [attempt]th failure in a row. */
         fun authRetryDelay(attempt: Int): Long {

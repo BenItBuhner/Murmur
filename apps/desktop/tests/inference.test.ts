@@ -173,6 +173,22 @@ function harness(
 afterEach(() => vi.unstubAllGlobals())
 
 describe('InferenceRouter', () => {
+  it('sends managed requests to the inference Worker when the build has one', async () => {
+    const worker = { ...CLOUD, inferenceUrl: 'https://murmur-inference.example.workers.dev' }
+    const { router } = harness(worker, parseSettings({}), { token: () => 'jwt' })
+    expect(router.cloudEnabled).toBe(true)
+    const stt = await router.stt()
+    expect(stt.source).toBe('murmur')
+    expect(stt.cfg).toMatchObject({
+      baseUrl: 'https://murmur-inference.example.workers.dev/v1',
+      apiKey: 'jwt'
+    })
+    expect(router.isMurmur({ baseUrl: 'https://murmur-inference.example.workers.dev/v1' })).toBe(
+      true
+    )
+    expect(router.isMurmur({ baseUrl: GATEWAY })).toBe(false)
+  })
+
   it("serves the user's own provider with the device secret in local builds", async () => {
     const { router, requests } = harness(LOCAL, own(), { token: () => 'should-not-be-asked' })
     expect(router.cloudEnabled).toBe(false)

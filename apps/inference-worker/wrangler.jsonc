@@ -1,0 +1,25 @@
+// Murmur's managed inference gateway (see src/index.ts). Fits the Workers Free plan: no bindings,
+// no Durable Objects, no KV. NOT deployed yet; see README.md for the steps and the secrets to set.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "murmur-inference",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "minify": true,
+  "observability": { "enabled": true },
+  "vars": {
+    // Same value as CLERK_JWT_ISSUER_DOMAIN in the Convex deployment (https://<instance>.clerk.accounts.dev).
+    "CLERK_JWT_ISSUER_DOMAIN": "",
+    // The Convex deployment's HTTP actions origin (https://<name>.convex.site); /worker/* lives there.
+    "CONVEX_SITE_URL": "",
+    // Provider endpoints and models: the same MURMUR_INFERENCE_* values the Convex deployment has.
+    "MURMUR_INFERENCE_STT_URL": "",
+    "MURMUR_INFERENCE_STT_MODEL": "",
+    "MURMUR_INFERENCE_LLM_URL": "",
+    "MURMUR_INFERENCE_LLM_MODEL": ""
+  }
+  // Secrets (wrangler secret put <NAME>): MURMUR_WORKER_SECRET, MURMUR_INFERENCE_STT_KEY,
+  // MURMUR_INFERENCE_LLM_KEY. Optional vars: MURMUR_INFERENCE_STT_PRO_MODEL, _STT_FAST_MODEL,
+  // _LLM_PRO_MODEL, MURMUR_SITE_URL, MURMUR_BILLING_ENABLED (leave unset: billing stays off).
+}

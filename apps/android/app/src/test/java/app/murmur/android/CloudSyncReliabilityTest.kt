@@ -31,6 +31,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -368,21 +369,27 @@ class CloudSyncReliabilityTest {
         val clerk = FlakyClerk("user_1", failures = 0)
         val engine = signIn(clerk)
         var broken = true
-        convex.results["stats:recordSession"] = { if (broken) throw ClientException.InternalException("InternalError: WebSocket closed") else statsJson }
+        val flaky: (kotlinx.serialization.json.JsonObject) -> String =
+            { if (broken) throw ClientException.InternalException("InternalError: WebSocket closed") else statsJson }
+        convex.results["stats:recordSession"] = flaky
+        convex.results["stats:recordMany"] = flaky
         engine.recordSession("s1", words = 5, speechMs = 1800)
         engine.recordSession("s2", words = 5, speechMs = 1800)
         engine.recordSession("s3", words = 5, speechMs = 1800)
         settle()
         assertEquals(SyncPhase.ERROR, engine.status.value.phase)
         assertEquals(3, engine.status.value.pendingOps)
-        val failedSends = convex.calls("stats:recordSession").size
+        val sends = { convex.calls("stats:recordSession").size + convex.calls("stats:recordMany").size }
+        val failedSends = sends()
         assertTrue(failedSends in 1..3)
-        // One retry timer, not one per dictation: fifteen seconds later exactly one more attempt.
-        settle(15_000)
-        assertEquals(failedSends + 1, convex.calls("stats:recordSession").size)
+        // One retry timer, not one per dictation, and it backs off: nothing within 15 s of the last failure.
+        settle(14_000)
+        assertEquals(failedSends, sends())
         broken = false
-        settle(15_000)
-        assertEquals(failedSends + 1 + 3, convex.calls("stats:recordSession").size)
+        // The one retry that comes sends all three dictations in a single stats:recordMany.
+        settle(30 * 60_000L)
+        assertEquals(failedSends + 1, sends())
+        assertEquals(3, convex.calls("stats:recordMany").last().args["sessions"]!!.jsonArray.size)
         assertEquals(0, engine.status.value.pendingOps)
         assertEquals(SyncPhase.SYNCED, engine.status.value.phase)
 
@@ -470,5 +477,13 @@ class CloudSyncReliabilityTest {
         settle(60_000)
         assertEquals(1, clerk.calls)
         assertEquals(SyncPhase.SIGNED_OUT, engine.status.value.phase)
+    }
+
+    @Test
+    fun `the outbox backs off from 15 seconds to half an hour`() {
+        assertEquals(15_000L, CloudSync.retryDelay(1))
+        assertEquals(30_000L, CloudSync.retryDelay(2))
+        assertEquals(240_000L, CloudSync.retryDelay(5))
+        assertEquals(1_800_000L, CloudSync.retryDelay(50))
     }
 }

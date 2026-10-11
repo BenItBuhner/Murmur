@@ -3,6 +3,7 @@ import { defaultSettings, type DictionaryEntry } from '@shared/settings'
 import type { HistoryEntry } from '@shared/types'
 import {
   ackUpsert,
+  retryDelayMs,
   appRuleFromRemote,
   appRuleToInput,
   appRulesSpec,
@@ -380,5 +381,14 @@ describe('history mapping', () => {
       deviceId: 'phone',
       deviceName: 'Pixel'
     })
+  })
+})
+
+describe('retryDelayMs', () => {
+  it('backs off exponentially from 15 s to a 30 min ceiling', () => {
+    expect(retryDelayMs(1)).toBe(15_000)
+    expect(retryDelayMs(2)).toBe(30_000)
+    expect(retryDelayMs(5)).toBe(240_000)
+    expect(retryDelayMs(50)).toBe(30 * 60_000)
   })
 })

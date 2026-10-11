@@ -85,6 +85,12 @@ export interface CloudConfig {
    * inference gateway lives. Empty in local builds.
    */
   convexSiteUrl: string
+  /**
+   * Origin of the inference Worker (apps/inference-worker), which serves the same `/v1` gateway
+   * without routing audio through Convex. When set, managed models go there instead of
+   * `convexSiteUrl`; unset keeps the Convex HTTP actions.
+   */
+  inferenceUrl?: string
   /** Empty when a test token file stands in for Clerk. */
   clerkPublishableKey: string
   /** Clerk Frontend API host derived from the publishable key, e.g. clerk.murmur.app. */

@@ -82,6 +82,9 @@ android {
         // gateway. Derived from CONVEX_URL for Convex Cloud and the local backend; set it only for
         // a self-hosted deployment on another host.
         buildConfigField("String", "CONVEX_SITE_URL", "\"${envOrProp("MURMUR_CONVEX_SITE_URL")}\"")
+        // Origin of the inference Worker (apps/inference-worker). When set, managed models are served
+        // there and dictation audio never goes through Convex; empty keeps the Convex gateway.
+        buildConfigField("String", "INFERENCE_URL", "\"${envOrProp("MURMUR_INFERENCE_URL")}\"")
         buildConfigField(
             "String", "CLERK_PUBLISHABLE_KEY", "\"${envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY")}\""
         )

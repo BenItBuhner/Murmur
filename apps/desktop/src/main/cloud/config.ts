@@ -10,6 +10,7 @@ import {
 export interface CloudEnv {
   MURMUR_CONVEX_URL?: string
   MURMUR_CONVEX_SITE_URL?: string
+  MURMUR_INFERENCE_URL?: string
   MURMUR_CLERK_PUBLISHABLE_KEY?: string
   MURMUR_ACCOUNT_MODE?: string
   MURMUR_DEEP_LINK_SCHEME?: string
@@ -20,6 +21,7 @@ export interface CloudEnv {
 export interface CloudBuildConfig {
   convexUrl?: string
   convexSiteUrl?: string
+  inferenceUrl?: string
   clerkPublishableKey?: string
   accountMode?: string
   deepLinkScheme?: string
@@ -183,11 +185,20 @@ export function resolveCloudConfig(
       )
   }
 
+  const requestedInferenceUrl = (env.MURMUR_INFERENCE_URL ?? build.inferenceUrl ?? '').trim()
+  let inferenceUrl = ''
+  if (requestedInferenceUrl) {
+    if (isHttpUrl(requestedInferenceUrl)) inferenceUrl = requestedInferenceUrl.replace(/\/+$/, '')
+    else
+      warnings.push(`Ignoring MURMUR_INFERENCE_URL "${requestedInferenceUrl}": not an http(s) URL`)
+  }
+
   return {
     config: {
       accountMode,
       convexUrl: convexUrl.replace(/\/+$/, ''),
       convexSiteUrl,
+      ...(inferenceUrl ? { inferenceUrl } : {}),
       clerkPublishableKey: testAuth ? '' : clerkPublishableKey,
       clerkFrontendApiHost,
       deepLinkScheme,
@@ -204,6 +215,7 @@ export function buildTimeCloudConfig(): CloudBuildConfig {
   return {
     convexUrl: env.VITE_CONVEX_URL,
     convexSiteUrl: env.VITE_CONVEX_SITE_URL,
+    inferenceUrl: env.VITE_MURMUR_INFERENCE_URL,
     clerkPublishableKey: env.VITE_CLERK_PUBLISHABLE_KEY,
     accountMode: env.VITE_MURMUR_ACCOUNT_MODE,
     deepLinkScheme: env.VITE_MURMUR_DEEP_LINK_SCHEME

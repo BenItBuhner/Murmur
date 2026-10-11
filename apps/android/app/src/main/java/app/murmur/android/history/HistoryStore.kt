@@ -219,6 +219,19 @@ class HistoryStore(
         commit((kept + additions).sortedByDescending { it.createdAt })
     }
 
+    /**
+     * Add entries from other devices without dropping the ones already here (incremental history
+     * sync: each fetch carries only what is new since the last one).
+     */
+    @Synchronized
+    fun appendRemote(remote: List<HistoryEntry>) {
+        val current = _entries.value
+        val known = current.map { it.id }.toSet()
+        val additions = remote.filter { it.id !in known }
+        if (additions.isEmpty()) return
+        commit((current + additions).sortedByDescending { it.createdAt })
+    }
+
     /** Drop the entries that came from other devices (history sync turned off, or signed out). */
     @Synchronized
     fun removeRemote() {

@@ -562,3 +562,13 @@ export function localDay(date = new Date()): string {
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
 }
+
+/** First retry of a failed outbox flush; doubles per consecutive failure. */
+export const OUTBOX_RETRY_MS = 15_000
+/** Ceiling of the outbox's exponential backoff (15 s, 30 s, 1 min, ... 30 min). */
+export const OUTBOX_MAX_RETRY_MS = 30 * 60_000
+
+/** Exponential backoff for the outbox: 15 s doubling up to 30 min. */
+export function retryDelayMs(failures: number): number {
+  return Math.min(OUTBOX_MAX_RETRY_MS, OUTBOX_RETRY_MS * 2 ** Math.max(0, failures - 1))
+}

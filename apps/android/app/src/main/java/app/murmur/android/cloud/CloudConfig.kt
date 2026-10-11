@@ -18,12 +18,20 @@ data class CloudConfig(
      * Origin of the deployment's HTTP actions (`https://<name>.convex.site`), where the managed
      * inference gateway lives. Empty when it cannot be derived and was not given explicitly.
      */
-    val convexSiteUrl: String = ""
+    val convexSiteUrl: String = "",
+    /**
+     * Origin of the inference Worker (apps/inference-worker), which serves the same `/v1` gateway
+     * without routing audio through Convex. Empty keeps the Convex HTTP actions.
+     */
+    val inferenceUrl: String = ""
 ) {
     val enabled: Boolean get() = accountMode != AccountMode.OFF
 
     /** The build can offer the instance's managed models at all. */
-    val managedModels: Boolean get() = enabled && convexSiteUrl.isNotEmpty()
+    val managedModels: Boolean get() = enabled && managedOrigin.isNotEmpty()
+
+    /** Where managed models are served: the inference Worker when the build has one, else the Convex HTTP actions. */
+    val managedOrigin: String get() = inferenceUrl.ifEmpty { convexSiteUrl }
 
     companion object {
         /** Name of the Clerk JWT template that mints Convex tokens. */
@@ -36,14 +44,16 @@ data class CloudConfig(
                 BuildConfig.CONVEX_URL,
                 BuildConfig.CLERK_PUBLISHABLE_KEY,
                 BuildConfig.ACCOUNT_MODE,
-                BuildConfig.CONVEX_SITE_URL
+                BuildConfig.CONVEX_SITE_URL,
+                BuildConfig.INFERENCE_URL
             )
 
         fun resolve(
             convexUrl: String,
             clerkPublishableKey: String,
             requestedMode: String,
-            convexSiteUrl: String = ""
+            convexSiteUrl: String = "",
+            inferenceUrl: String = ""
         ): CloudConfig {
             val mode = requestedMode.trim().lowercase()
             if (mode == "off") return OFF
@@ -58,7 +68,9 @@ data class CloudConfig(
             val explicitSite = convexSiteUrl.trim().trimEnd('/')
             val site = if (explicitSite.startsWith("https://") || explicitSite.startsWith("http://")) explicitSite
             else deriveSiteUrl(url) ?: ""
-            return CloudConfig(accountMode, url, key, site)
+            val worker = inferenceUrl.trim().trimEnd('/')
+            val inference = if (worker.startsWith("https://") || worker.startsWith("http://")) worker else ""
+            return CloudConfig(accountMode, url, key, site, inference)
         }
 
         /**

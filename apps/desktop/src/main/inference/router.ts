@@ -14,6 +14,7 @@ import {
   MURMUR_LLM_MODEL,
   MURMUR_PROVIDER,
   MURMUR_STT_MODEL,
+  managedOrigin,
   murmurGatewayUrl,
   resolveInferenceSources,
   type InferenceRouting,
@@ -82,7 +83,7 @@ export class InferenceRouter {
   constructor(private readonly deps: RouterDeps) {}
 
   get cloudEnabled(): boolean {
-    return this.deps.config.accountMode !== 'off' && !!this.deps.config.convexSiteUrl
+    return this.deps.config.accountMode !== 'off' && !!managedOrigin(this.deps.config)
   }
 
   routing(): InferenceRouting {
@@ -93,7 +94,7 @@ export class InferenceRouter {
   }
 
   private get gatewayUrl(): string {
-    return murmurGatewayUrl(this.deps.config.convexSiteUrl)
+    return murmurGatewayUrl(managedOrigin(this.deps.config))
   }
 
   /** True for a configuration that points at this instance's gateway. */

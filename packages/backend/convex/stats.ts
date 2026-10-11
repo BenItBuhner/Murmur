@@ -88,6 +88,77 @@ export const recordSession = authedMutation({
   }
 })
 
+/** Largest batch `recordMany` accepts. */
+export const RECORD_MANY_MAX = 100
+
+/**
+ * Many finished dictations in one call (an outbox draining after time offline): the same rules as
+ * `recordSession`, applied in order, with one read and one write of the stats row.
+ */
+export const recordMany = authedMutation({
+  args: {
+    sessions: v.array(
+      v.object({ words: v.number(), speechMs: v.number(), day: v.string(), sessionId: v.optional(v.string()) })
+    )
+  },
+  returns: v.union(statsDtoValidator, v.null()),
+  handler: async (ctx, args) => {
+    if (args.sessions.length > RECORD_MANY_MAX) throw new Error(`Record at most ${RECORD_MANY_MAX} sessions per call`)
+    const now = Date.now()
+    const existing = await loadStats(ctx)
+    let state = existing
+      ? {
+          totalWords: existing.totalWords,
+          totalSessions: existing.totalSessions,
+          totalSpeechMs: existing.totalSpeechMs,
+          streakDays: existing.streakDays,
+          lastSessionDay: existing.lastSessionDay,
+          recentSessionIds: existing.recentSessionIds ?? [],
+          updatedAt: existing.updatedAt
+        }
+      : null
+    let changed = false
+    for (const session of args.sessions) {
+      const day = requireDay(session.day)
+      const words = Math.max(0, Math.floor(session.words))
+      const speechMs = Math.max(0, Math.floor(session.speechMs))
+      if (state) {
+        if (session.sessionId && state.recentSessionIds.includes(session.sessionId)) continue
+        state = {
+          totalWords: state.totalWords + words,
+          totalSessions: state.totalSessions + 1,
+          totalSpeechMs: state.totalSpeechMs + speechMs,
+          streakDays: nextStreak(state, day),
+          lastSessionDay: daysBetween(state.lastSessionDay || day, day) >= 0 ? day : state.lastSessionDay,
+          recentSessionIds: session.sessionId
+            ? [...state.recentSessionIds, session.sessionId].slice(-RECENT_SESSION_IDS)
+            : state.recentSessionIds,
+          updatedAt: now
+        }
+      } else {
+        state = {
+          totalWords: words,
+          totalSessions: 1,
+          totalSpeechMs: speechMs,
+          streakDays: 1,
+          lastSessionDay: day,
+          recentSessionIds: session.sessionId ? [session.sessionId] : [],
+          updatedAt: now
+        }
+      }
+      changed = true
+    }
+    if (!state) return null
+    const fields = { ...state, recentSessionIds: state.recentSessionIds.length ? state.recentSessionIds : undefined }
+    if (existing) {
+      if (changed) await ctx.db.patch('stats', existing._id, fields)
+      return toDto({ ...existing, ...fields })
+    }
+    const id = await ctx.db.insert('stats', { userId: ctx.user._id, ...fields })
+    return toDto({ ...fields, userId: ctx.user._id, _id: id, _creationTime: now })
+  }
+})
+
 /** Fold the totals a device accumulated before it had an account into the account. */
 export const importLocal = authedMutation({
   args: {

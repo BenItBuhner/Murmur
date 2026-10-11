@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   log.info(
     cloudConfig.accountMode === 'off'
       ? "accounts: off (local mode); models: the user's own provider only"
-      : `accounts: ${cloudConfig.accountMode} (convex ${cloudConfig.convexUrl}, clerk ${cloudConfig.clerkFrontendApiHost}); managed models via ${cloudConfig.convexSiteUrl || 'n/a'}`
+      : `accounts: ${cloudConfig.accountMode} (convex ${cloudConfig.convexUrl}, clerk ${cloudConfig.clerkFrontendApiHost}); managed models via ${cloudConfig.inferenceUrl || cloudConfig.convexSiteUrl || 'n/a'}`
   )
 
   // The settings window is served from a stable origin in packaged builds (Clerk requires one; it

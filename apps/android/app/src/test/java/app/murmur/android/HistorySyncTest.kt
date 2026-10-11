@@ -101,6 +101,9 @@ class HistorySyncTest {
         append(""""appName":"Slack","provider":"openai-compatible","model":"whisper-1","llmUsed":true}""")
     }
 
+    /** A `history:since` answer: the entries, a cursor past them, nothing more waiting. */
+    private fun since(vararg entries: String) = """{"entries":[${entries.joinToString(",")}],"cursor":9000,"more":false}"""
+
     /** The engine on the test's scheduler, its Convex client talking to [convex]. */
     private fun TestScope.engine(): CloudSync {
         val client = ConvexClientWithAuth(config.convexUrl, FakeClerk("user_1"), backgroundScope, convex.factory())
@@ -142,7 +145,7 @@ class HistorySyncTest {
         settle()
 
         assertTrue("no history function was called: ${convex.calls.map { it.name }}", convex.calls.none { it.name.startsWith("history:") })
-        assertFalse(convex.subscribed("history:recent"))
+        assertFalse(convex.subscribed("history:since"))
         // The phone's own preferences went up on first contact, with the opt-in off.
         val prefs = convex.calls("preferences:update").single().args
         assertEquals("false", prefs["sync"]!!.jsonObject["history"]!!.jsonPrimitive.content)
@@ -176,9 +179,10 @@ class HistorySyncTest {
             setOf("entryId", "createdAt", "mode", "rawText", "finalText", "wordCount", "speechMs", "appName", "provider", "model", "llmUsed"),
             sent.keys
         )
-        // The account's recent dictations are wanted from now on, the desktop's 200 of them.
-        assertTrue(convex.subscribed("history:recent"))
-        assertEquals("200.0", convex.subscriptionArgs("history:recent")!!["limit"])
+        // The account's newest page is asked for once (no live 200-entry subscription), no cursor yet.
+        assertTrue(convex.subscribed("history:since"))
+        assertEquals("20.0", convex.subscriptionArgs("history:since")!!["limit"])
+        assertNull(convex.subscriptionArgs("history:since")!!["cursor"])
 
         // A new dictation follows on its own; a burst is one request.
         history.add(entry("b", 3_000))
@@ -187,16 +191,18 @@ class HistorySyncTest {
         assertEquals(listOf(listOf("a"), listOf("b", "c")), pushedIds())
         assertEquals(SyncPhase.SYNCED, engine.status.value.phase)
 
-        // The server answers with everything it has: this phone's own entry among the others'.
+        // The server answers with its newest page: this phone's own entry among the others'.
         convex.send(
-            "history:recent",
-            "[" + listOf(
+            "history:since",
+            since(
                 remoteJson("d1", "desk", "Ben's desk", 5_000, "Hello from the desk."),
                 remoteJson("a", mine, "Phone", 1_000, "Hello from the phone a."),
                 remoteJson("d2", "gone", null, 2_500, "From a device since removed.")
-            ).joinToString(",") + "]"
+            )
         )
         settle()
+        // One answer was all it wanted: the read is over until something new happens.
+        assertFalse(convex.subscribed("history:since"))
         assertEquals(listOf("d1", "c", "b", "d2", "f", "a"), history.entries.value.map { it.id })
         val desk = history.get("d1")!!
         assertTrue(desk.remote)
@@ -223,11 +229,11 @@ class HistorySyncTest {
     }
 
     @Test
-    fun `a delete or a clear here reaches the account, and an entry gone upstream leaves the phone`() = runTest {
+    fun `a delete or a clear here reaches the account`() = runTest {
         settings.update { it.copy(historySync = true) }
         history.add(entry("a", 1_000))
         signIn()
-        convex.send("history:recent", "[" + remoteJson("d1", "desk", "Ben's desk", 5_000, "One.") + "," + remoteJson("d2", "desk", "Ben's desk", 6_000, "Two.") + "]")
+        convex.send("history:since", since(remoteJson("d1", "desk", "Ben's desk", 5_000, "One."), remoteJson("d2", "desk", "Ben's desk", 6_000, "Two.")))
         settle()
         assertEquals(listOf("d2", "d1", "a"), history.entries.value.map { it.id })
 
@@ -238,10 +244,8 @@ class HistorySyncTest {
         assertEquals(listOf("d1", "a"), convex.calls("history:remove").map { it.args["entryId"]!!.jsonPrimitive.content })
         assertEquals(listOf("d2"), history.entries.value.map { it.id })
 
-        // Deleted on the desk: the account's list no longer has it, and neither does the phone.
-        convex.send("history:recent", "[]")
-        settle()
-        assertTrue(history.entries.value.isEmpty())
+        // History is fetched incrementally now (only what is new since the cursor), so an entry
+        // deleted on another device stays on the phone until history is cleared or sync turned off.
 
         // Clear all: the pushes still waiting are pointless, one clear goes instead.
         history.add(entry("b", 7_000))
@@ -256,15 +260,15 @@ class HistorySyncTest {
     fun `the opt-in is the account's, flipped on another device it is followed here`() = runTest {
         history.add(entry("a", 1_000))
         signIn()
-        assertFalse(convex.subscribed("history:recent"))
+        assertFalse(convex.subscribed("history:since"))
 
         // The desktop turned it on: the phone's backlog goes up and the mirror starts.
         convex.send("preferences:get", """{"sync":{"history":true},"updatedAt":2}""")
         settle()
         assertTrue(settings.get().historySync)
         assertEquals(listOf(listOf("a")), pushedIds())
-        assertTrue(convex.subscribed("history:recent"))
-        convex.send("history:recent", "[" + remoteJson("d1", "desk", "Ben's desk", 5_000, "One.") + "]")
+        assertTrue(convex.subscribed("history:since"))
+        convex.send("history:since", since(remoteJson("d1", "desk", "Ben's desk", 5_000, "One.")))
         settle()
         assertEquals(listOf("d1", "a"), history.entries.value.map { it.id })
 
@@ -273,7 +277,7 @@ class HistorySyncTest {
         convex.send("preferences:get", """{"sync":{"history":false},"updatedAt":3}""")
         settle()
         assertFalse(settings.get().historySync)
-        assertFalse(convex.subscribed("history:recent"))
+        assertFalse(convex.subscribed("history:since"))
         assertEquals(listOf("a"), history.entries.value.map { it.id })
         assertTrue(convex.calls.none { it.name == "history:clear" || it.name == "history:remove" })
         history.add(entry("b", 8_000))
@@ -286,14 +290,14 @@ class HistorySyncTest {
         settings.update { it.copy(historySync = true) }
         history.add(entry("a", 1_000))
         val engine = signIn()
-        convex.send("history:recent", "[" + remoteJson("d1", "desk", "Ben's desk", 5_000, "One.") + "]")
+        convex.send("history:since", since(remoteJson("d1", "desk", "Ben's desk", 5_000, "One.")))
         settle()
         assertEquals(listOf("d1", "a"), history.entries.value.map { it.id })
 
         settings.update { it.copy(historySync = false) }
         settle()
         assertEquals("false", convex.calls("preferences:update").last().args["sync"]!!.jsonObject["history"]!!.jsonPrimitive.content)
-        assertFalse(convex.subscribed("history:recent"))
+        assertFalse(convex.subscribed("history:since"))
         assertEquals(listOf("a"), history.entries.value.map { it.id })
         assertTrue(convex.calls.none { it.name == "history:clear" || it.name == "history:remove" })
         assertEquals(SyncPhase.SYNCED, engine.status.value.phase)
@@ -304,7 +308,7 @@ class HistorySyncTest {
         settings.update { it.copy(historySync = true) }
         history.add(entry("a", 1_000))
         val engine = signIn()
-        convex.send("history:recent", "[" + remoteJson("d1", "desk", "Ben's desk", 5_000, "One.") + "]")
+        convex.send("history:since", since(remoteJson("d1", "desk", "Ben's desk", 5_000, "One.")))
         settle()
         val before = convex.calls.size
 
@@ -313,7 +317,7 @@ class HistorySyncTest {
         assertEquals(SyncPhase.SIGNED_OUT, engine.status.value.phase)
         assertFalse(settings.get().historySync)
         assertTrue(history.entries.value.isEmpty())
-        assertFalse(convex.subscribed("history:recent"))
+        assertFalse(convex.subscribed("history:since"))
         // Nothing was sent on the way out: the clear is the phone's, not the account's.
         assertEquals(before, convex.calls.size)
         assertEquals(0, engine.status.value.pendingOps)

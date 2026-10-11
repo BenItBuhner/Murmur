@@ -275,6 +275,14 @@ data class FormattingPreferencesDto(
 data class SyncPreferencesDto(val history: Boolean? = null)
 
 /** The account's dictation totals across every device (`stats:get`). */
+/** `history:since`: entries that reached the server after the cursor, the next cursor, and whether more wait. */
+@Serializable
+data class HistorySinceDto(
+    val entries: List<HistoryEntryDto> = emptyList(),
+    val cursor: Double = 0.0,
+    val more: Boolean = false
+)
+
 @Serializable
 data class StatsDto(
     val totalWords: Double = 0.0,

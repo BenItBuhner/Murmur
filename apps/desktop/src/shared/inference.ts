@@ -159,7 +159,15 @@ export function resolveInferenceSources(
   }
 }
 
-/** Base URL of the instance's OpenAI-compatible gateway, given its HTTP actions origin. */
+/**
+ * Where the instance's managed models are served: the inference Worker when the build knows one,
+ * otherwise the Convex deployment's HTTP actions. Empty in local builds.
+ */
+export function managedOrigin(config: { convexSiteUrl: string; inferenceUrl?: string }): string {
+  return (config.inferenceUrl || config.convexSiteUrl || '').trim()
+}
+
+/** Base URL of the instance's OpenAI-compatible gateway, given its origin (see `managedOrigin`). */
 export function murmurGatewayUrl(convexSiteUrl: string): string {
   return `${convexSiteUrl.trim().replace(/\/+$/, '')}/v1`
 }

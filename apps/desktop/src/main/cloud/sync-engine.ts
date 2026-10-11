@@ -46,6 +46,7 @@ import {
   queueHistoryPush,
   queueRemove,
   queueUpsert,
+  retryDelayMs,
   sameAppRule,
   sameDictionaryEntry,
   samePreferences,
@@ -66,14 +67,28 @@ const log = createLogger('cloud:sync')
 
 const HEARTBEAT_MS = 15 * 60_000
 const RETRY_MS = 15_000
+/**
+ * An op that failed this many times in a row while connected is dropped: something about it is
+ * wrong that a retry will not fix, and it must not hold the rest of the queue hostage forever.
+ */
+const MAX_ATTEMPTS = 8
+/** Local history pushed when sync is first turned on (the server keeps its own cap). */
 const HISTORY_BACKLOG = 200
+/** Entries per history fetch: the newest page first, then only what is new since the cursor. */
+const HISTORY_PAGE = 20
+const HISTORY_MAX_PAGES = 10
+/** Finished dictations sent per `stats.recordMany` call. */
+const STATS_BATCH = 50
+/** Quiet time after a burst of dictations before the status and history are asked again. */
+const STATUS_REFRESH_DEBOUNCE_MS = 30_000
+const HISTORY_FETCH_DEBOUNCE_MS = 2_000
 const IMPORT_CHUNK = 500
 
 /**
  * The account's managed-model status. It takes the client's UTC calendar day so the instance can
  * compute the rolling windows (words this week, dictations today) and their reset times; spelled
  * out here with the contract's shape because the committed generated API predates the argument.
- * An instance that does not know the argument yet gets the plain call (see `subscribeStatus`).
+ * An instance that does not know the argument yet gets the plain call (see `refreshStatus`).
  */
 const inferenceStatus = makeFunctionReference<'query', { day?: string }, InferenceStatus>(
   'inference:status'
@@ -85,7 +100,7 @@ type Platform = 'win32' | 'darwin' | 'linux'
 export type SettingsSource = Pick<SettingsStore, 'get' | 'patch' | 'on' | 'off'>
 export type HistorySource = Pick<
   HistoryStore,
-  'on' | 'off' | 'list' | 'mergeRemote' | 'removeRemote' | 'replaceAll'
+  'on' | 'off' | 'list' | 'mergeRemote' | 'appendRemote' | 'removeRemote' | 'replaceAll'
 >
 export type TokenSource = Pick<TokenBridge, 'request'>
 
@@ -198,6 +213,11 @@ function toCloudUser(u: {
   }
 }
 
+/** A function the instance does not have yet (an older backend): fall back to the old call. */
+function isMissingFunction(err: unknown): boolean {
+  return err instanceof Error && /Could not find public function/i.test(err.message)
+}
+
 /**
  * Keeps this device's local mirror in step with the account's data in Convex.
  *
@@ -214,9 +234,22 @@ export class CloudSync extends EventEmitter {
   private readonly outbox: Outbox
   private server = emptyServer()
   private subscriptions: Array<() => void> = []
-  private historySubscription: (() => void) | null = null
-  private statusSubscription: (() => void) | null = null
+  /** History sync is on and fetched on demand (no live subscription; see `fetchHistory`). */
+  private historyActive = false
+  /** Server insertion time of the newest remote entry this device has (`history.since`). */
+  private historyCursor: number | undefined
+  private historyFetching = false
+  private historyAgain = false
+  private historyTimer: NodeJS.Timeout | null = null
+  /** The instance predates `history.since` / `stats.recordMany`: use the old calls. */
+  private legacyHistory = false
+  private legacyStats = false
   private statusDayTimer: NodeJS.Timeout | null = null
+  private statusRefreshTimer: NodeJS.Timeout | null = null
+  /** Consecutive failed flushes, for the backoff; reset by any success. */
+  private flushFailures = 0
+  /** Failed attempts per op id while connected (in memory: a restart gives every op a fresh start). */
+  private readonly attempts = new Map<string, number>()
   /** The instance rejected the `day` argument: an older backend, asked the old way from then on. */
   private statusWithoutDay = false
   private connectionUnsub: (() => void) | null = null
@@ -276,6 +309,7 @@ export class CloudSync extends EventEmitter {
       }
       if (this.connected && !was) {
         this.error = undefined
+        this.flushFailures = 0
         this.scheduleFlush(0)
       }
       this.emitStatus()
@@ -480,7 +514,13 @@ export class CloudSync extends EventEmitter {
       client.onUpdate(
         api.users.me,
         {},
-        guard((u) => (this.server.user = u ? toCloudUser(u) : null)),
+        guard((u) => {
+          const before = this.server.user
+          this.server.user = u ? toCloudUser(u) : null
+          // A plan or trial change moves the allowance: ask for the status again.
+          if (before && u && (before.plan !== u.plan || before.trialEndsAt !== u.trialEndsAt))
+            this.scheduleStatusRefresh(0)
+        }),
         onError
       ),
       client.onUpdate(
@@ -519,7 +559,18 @@ export class CloudSync extends EventEmitter {
       client.onUpdate(
         api.stats.get,
         {},
-        guard((st) => (this.server.stats = st)),
+        guard((st) => {
+          // Stats move when any device finishes a dictation: the cue to look for new history,
+          // instead of keeping a 200-entry history query live on every device.
+          const moved =
+            this.server.stats !== undefined &&
+            st?.totalSessions !== this.server.stats?.totalSessions
+          this.server.stats = st
+          if (moved) {
+            this.scheduleHistoryFetch(HISTORY_FETCH_DEBOUNCE_MS)
+            this.scheduleStatusRefresh(STATUS_REFRESH_DEBOUNCE_MS)
+          }
+        }),
         onError
       ),
       client.onUpdate(
@@ -540,98 +591,158 @@ export class CloudSync extends EventEmitter {
         onError
       )
     )
-    this.subscribeStatus(generation)
+    this.refreshStatus(generation)
     this.updateHistorySubscription(generation)
   }
 
   /**
-   * The managed-model status for today (UTC), asked again when the day changes so the rolling
-   * windows and their reset times stay right. An instance that does not accept the `day` argument
-   * yet answers with an argument error; then the status is asked the old way, without windows.
+   * The managed-model status for today (UTC), asked once (not subscribed: a live `inference.status`
+   * re-ran on every usage write). Asked again when the day changes, when the plan changes, after a
+   * burst of dictations, and on `syncNow`. An instance that does not accept the `day` argument yet
+   * answers with an argument error; then the status is asked the old way, without windows.
    */
-  private subscribeStatus(generation: number): void {
+  private refreshStatus(generation = this.generation): void {
     const client = this.client
-    if (!client) return
-    this.stopStatusSubscription()
+    if (!client || !this.authenticated) return
+    if (this.statusDayTimer) clearTimeout(this.statusDayTimer)
+    this.statusDayTimer = null
     const args = this.statusWithoutDay ? {} : { day: currentUtcDay() }
-    this.statusSubscription = client.onUpdate(
-      inferenceStatus,
-      args,
-      (status) => {
+    client
+      .query(inferenceStatus, args)
+      .then((status) => {
         if (generation !== this.generation) return
         this.server.inference = status
         this.lastSyncedAt = Date.now()
         this.emitStatus()
-      },
-      (err) => {
+      })
+      .catch((err: unknown) => {
         if (generation !== this.generation) return
         if (!this.statusWithoutDay && /ArgumentValidationError/i.test(errorMessage(err))) {
           log.info('instance does not take a day for inference.status; asking without it')
           this.statusWithoutDay = true
-          this.subscribeStatus(generation)
+          this.refreshStatus(generation)
           return
         }
         this.error = errorMessage(err)
         log.warn(`inference status error: ${this.error}`)
         this.emitStatus()
-      }
-    )
+      })
     if (!this.statusWithoutDay) {
       this.statusDayTimer = setTimeout(() => {
         this.statusDayTimer = null
-        if (generation === this.generation && this.authenticated) this.subscribeStatus(generation)
+        if (generation === this.generation && this.authenticated) this.refreshStatus(generation)
       }, msUntilNextUtcDay())
     }
   }
 
-  private stopStatusSubscription(): void {
-    if (this.statusDayTimer) clearTimeout(this.statusDayTimer)
-    this.statusDayTimer = null
-    if (this.statusSubscription) {
-      this.statusSubscription()
-      this.statusSubscription = null
-    }
+  /** Ask for the status again after `delayMs` of quiet (a burst of dictations asks once). */
+  private scheduleStatusRefresh(delayMs: number): void {
+    if (this.statusRefreshTimer) clearTimeout(this.statusRefreshTimer)
+    const generation = this.generation
+    this.statusRefreshTimer = setTimeout(() => {
+      this.statusRefreshTimer = null
+      if (generation === this.generation) this.refreshStatus(generation)
+    }, delayMs)
   }
 
+  private stopStatusRefresh(): void {
+    if (this.statusDayTimer) clearTimeout(this.statusDayTimer)
+    this.statusDayTimer = null
+    if (this.statusRefreshTimer) clearTimeout(this.statusRefreshTimer)
+    this.statusRefreshTimer = null
+  }
+
+  /**
+   * History sync on or off. On: fetch the newest page now and, from then on, only what is new
+   * since the cursor whenever the account's stats move. Off: drop other devices' entries.
+   */
   private updateHistorySubscription(generation = this.generation): void {
     const client = this.client
     const wanted = !!client && this.authenticated && this.deps.settings.get().cloud.historySync
     if (!wanted) {
-      if (this.historySubscription) {
-        this.historySubscription()
-        this.historySubscription = null
+      if (this.historyActive) {
+        this.historyActive = false
+        this.historyCursor = undefined
         this.deps.history.removeRemote()
       }
       return
     }
-    if (this.historySubscription || !client) return
+    if (this.historyActive) return
+    this.historyActive = true
+    this.historyCursor = undefined
+    void this.fetchHistory(generation)
+  }
+
+  private scheduleHistoryFetch(delayMs: number): void {
+    if (!this.historyActive) return
+    if (this.historyTimer) clearTimeout(this.historyTimer)
+    const generation = this.generation
+    this.historyTimer = setTimeout(() => {
+      this.historyTimer = null
+      if (generation === this.generation) void this.fetchHistory(generation)
+    }, delayMs)
+  }
+
+  /** One-shot fetch of the entries other devices added since the cursor (pages of 20). */
+  private async fetchHistory(generation: number): Promise<void> {
+    const client = this.client
+    if (!client || !this.historyActive) return
+    if (this.historyFetching) {
+      this.historyAgain = true
+      return
+    }
+    this.historyFetching = true
     const mine = this.deviceId
-    this.historySubscription = client.onUpdate(
-      api.history.recent,
-      { limit: HISTORY_BACKLOG },
-      (list: RemoteHistoryEntry[]) => {
-        if (generation !== this.generation) return
-        this.deps.history.mergeRemote(
+    try {
+      if (this.legacyHistory) {
+        const list: RemoteHistoryEntry[] = await client.query(api.history.recent, {
+          limit: HISTORY_PAGE
+        })
+        if (generation !== this.generation || !this.historyActive) return
+        this.deps.history.appendRemote(
           list.filter((e) => e.deviceId !== mine).map(historyFromRemote)
         )
-        this.lastSyncedAt = Date.now()
-        this.emitStatus()
-      },
-      (err) => {
-        if (generation !== this.generation) return
+      } else {
+        for (let page = 0; page < HISTORY_MAX_PAGES; page++) {
+          const res = await client.query(api.history.since, {
+            cursor: this.historyCursor,
+            limit: HISTORY_PAGE
+          })
+          if (generation !== this.generation || !this.historyActive) return
+          this.historyCursor = res.cursor
+          const theirs = res.entries.filter((e) => e.deviceId !== mine).map(historyFromRemote)
+          if (theirs.length) this.deps.history.appendRemote(theirs)
+          if (!res.more) break
+        }
+      }
+      this.lastSyncedAt = Date.now()
+      this.emitStatus()
+    } catch (err) {
+      if (generation !== this.generation) return
+      if (!this.legacyHistory && isMissingFunction(err)) {
+        log.info('instance has no history.since; fetching recent history the old way')
+        this.legacyHistory = true
+        this.historyAgain = true
+      } else {
         this.error = errorMessage(err)
         this.emitStatus()
       }
-    )
+    } finally {
+      this.historyFetching = false
+      if (this.historyAgain && generation === this.generation) {
+        this.historyAgain = false
+        void this.fetchHistory(generation)
+      }
+    }
   }
 
   private stopSubscriptions(): void {
     for (const unsub of this.subscriptions.splice(0)) unsub()
-    this.stopStatusSubscription()
-    if (this.historySubscription) {
-      this.historySubscription()
-      this.historySubscription = null
-    }
+    this.stopStatusRefresh()
+    if (this.historyTimer) clearTimeout(this.historyTimer)
+    this.historyTimer = null
+    this.historyActive = false
+    this.historyCursor = undefined
   }
 
   // ---- derive server + outbox -> local mirror ----------------------------------------------
@@ -890,7 +1001,10 @@ export class CloudSync extends EventEmitter {
   // ---- outbox flush ------------------------------------------------------------------------
 
   syncNow(): void {
+    this.flushFailures = 0
     this.scheduleFlush(0)
+    this.refreshStatus()
+    this.scheduleHistoryFetch(0)
   }
 
   private scheduleFlush(delayMs: number): void {
@@ -913,6 +1027,8 @@ export class CloudSync extends EventEmitter {
         try {
           await this.send(op)
           if (generation !== this.generation) break
+          this.attempts.delete(op.id)
+          this.flushFailures = 0
           this.error = undefined
           // The server snapshot may already include this change; recompute without the op so a
           // pending increment is never counted twice.
@@ -926,8 +1042,24 @@ export class CloudSync extends EventEmitter {
             continue
           }
           this.error = errorMessage(err)
-          log.warn(`sync of ${op.kind} failed, retrying in ${RETRY_MS / 1000}s: ${this.error}`)
-          this.scheduleFlush(RETRY_MS)
+          // Only failures while connected count toward dropping: offline is not the op's fault.
+          if (this.connected) {
+            const tries = (this.attempts.get(op.id) ?? 0) + 1
+            this.attempts.set(op.id, tries)
+            if (tries >= MAX_ATTEMPTS) {
+              log.warn(`dropping ${op.kind} after ${tries} failed attempts: ${this.error}`)
+              this.attempts.delete(op.id)
+              this.outbox.remove(op.id)
+              this.applyDerived()
+              continue
+            }
+          }
+          this.flushFailures++
+          const delay = retryDelayMs(this.flushFailures)
+          log.warn(
+            `sync of ${op.kind} failed, retrying in ${Math.round(delay / 1000)}s: ${this.error}`
+          )
+          this.scheduleFlush(delay)
           break
         }
       }
@@ -1002,7 +1134,34 @@ export class CloudSync extends EventEmitter {
           sync: op.patch.sync
         })
         break
-      case 'stats.record':
+      case 'stats.record': {
+        // The run of stats ops at the head of the queue goes in one call (an offline backlog of
+        // hundreds of dictations drains in a handful of mutations instead of one per dictation).
+        const run: Array<Extract<OutboxOp, { kind: 'stats.record' }>> = []
+        for (const o of this.outbox.ops) {
+          if ('acked' in o && o.acked) continue
+          if (o.kind !== 'stats.record' || run.length >= STATS_BATCH) break
+          run.push(o)
+        }
+        if (!this.legacyStats && run.length > 1) {
+          try {
+            await client.mutation(api.stats.recordMany, {
+              sessions: run.map((o) => ({
+                words: o.words,
+                speechMs: o.speechMs,
+                day: o.day,
+                sessionId: o.sessionId
+              }))
+            })
+            const sent = new Set(run.map((o) => o.id))
+            this.outbox.update((ops) => ops.filter((o) => !sent.has(o.id)))
+            return
+          } catch (err) {
+            if (!isMissingFunction(err)) throw err
+            log.info('instance has no stats.recordMany; recording sessions one by one')
+            this.legacyStats = true
+          }
+        }
         await client.mutation(api.stats.recordSession, {
           words: op.words,
           speechMs: op.speechMs,
@@ -1010,6 +1169,7 @@ export class CloudSync extends EventEmitter {
           sessionId: op.sessionId
         })
         break
+      }
       case 'history.push':
         await client.mutation(api.history.push, { deviceId: this.deviceId, entries: op.entries })
         break

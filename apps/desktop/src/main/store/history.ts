@@ -146,6 +146,22 @@ export class HistoryStore extends EventEmitter {
     this.emit('changed')
   }
 
+  /**
+   * Add entries from other devices without dropping the ones already here (incremental history
+   * sync: each fetch carries only what is new since the last one).
+   */
+  appendRemote(remote: readonly HistoryEntry[]): void {
+    const current = this.store.get()
+    const known = new Set(current.map((e) => e.id))
+    const additions = remote.filter((e) => !known.has(e.id))
+    if (!additions.length) return
+    const next = [...current, ...additions]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, MAX_ENTRIES)
+    this.commit(next, current)
+    this.emit('changed')
+  }
+
   /** Drop entries that came from other devices (history sync turned off or user signed out). */
   removeRemote(): void {
     const current = this.store.get()

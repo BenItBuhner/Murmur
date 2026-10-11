@@ -183,7 +183,6 @@ class HistorySyncTest {
         assertTrue(convex.subscribed("history:since"))
         assertEquals("20.0", convex.subscriptionArgs("history:since")!!["limit"])
         assertNull(convex.subscriptionArgs("history:since")!!["cursor"])
-        assertFalse(convex.subscribed("history:since"))
 
         // A new dictation follows on its own; a burst is one request.
         history.add(entry("b", 3_000))

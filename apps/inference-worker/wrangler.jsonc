@@ -1,5 +1,7 @@
 // Murmur's managed inference gateway (see src/index.ts). Fits the Workers Free plan: no bindings,
-// no Durable Objects, no KV. NOT deployed yet; see README.md for the steps and the secrets to set.
+// no Durable Objects, no KV. Deployed from main by .github/workflows/deploy-inference-worker.yml;
+// the public values live here, the secrets (MURMUR_WORKER_SECRET, MURMUR_INFERENCE_STT_KEY,
+// MURMUR_INFERENCE_LLM_KEY) are applied from the repository's Actions secrets by that workflow.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "murmur-inference",
@@ -9,17 +11,21 @@
   "minify": true,
   "observability": { "enabled": true },
   "vars": {
-    // Same value as CLERK_JWT_ISSUER_DOMAIN in the Convex deployment (https://<instance>.clerk.accounts.dev).
-    "CLERK_JWT_ISSUER_DOMAIN": "",
-    // The Convex deployment's HTTP actions origin (https://<name>.convex.site); /worker/* lives there.
-    "CONVEX_SITE_URL": "",
+    // Same value as CLERK_JWT_ISSUER_DOMAIN in the Convex deployment hardy-fish-542.
+    "CLERK_JWT_ISSUER_DOMAIN": "https://clerk.murmur.techlitnow.com",
+    // The Convex deployment's HTTP actions origin; /worker/* lives there.
+    "CONVEX_SITE_URL": "https://hardy-fish-542.convex.site",
     // Provider endpoints and models: the same MURMUR_INFERENCE_* values the Convex deployment has.
-    "MURMUR_INFERENCE_STT_URL": "",
-    "MURMUR_INFERENCE_STT_MODEL": "",
-    "MURMUR_INFERENCE_LLM_URL": "",
-    "MURMUR_INFERENCE_LLM_MODEL": ""
+    "MURMUR_INFERENCE_STT_URL": "https://infer.techlitnow.com/v1",
+    "MURMUR_INFERENCE_STT_MODEL": "transcribe-1",
+    "MURMUR_INFERENCE_STT_FAST_MODEL": "transcribe-1-fast",
+    "MURMUR_INFERENCE_LLM_URL": "https://infer.techlitnow.com/v1",
+    "MURMUR_INFERENCE_LLM_MODEL": "complete",
+    // Where limit errors link to; same value as MURMUR_SITE_URL in the Convex deployment.
+    "MURMUR_SITE_URL": "https://murmur.techlitnow.com"
   }
-  // Secrets (wrangler secret put <NAME>): MURMUR_WORKER_SECRET, MURMUR_INFERENCE_STT_KEY,
-  // MURMUR_INFERENCE_LLM_KEY. Optional vars: MURMUR_INFERENCE_STT_PRO_MODEL, _STT_FAST_MODEL,
-  // _LLM_PRO_MODEL, MURMUR_SITE_URL, MURMUR_BILLING_ENABLED (leave unset: billing stays off).
+  // Secrets, applied by the deploy workflow from the repository's Actions secrets (the same
+  // values the Convex deployment carries): MURMUR_WORKER_SECRET, MURMUR_INFERENCE_STT_KEY,
+  // MURMUR_INFERENCE_LLM_KEY. Optional vars left unset, like in Convex: MURMUR_INFERENCE_STT_PRO_MODEL,
+  // _LLM_PRO_MODEL and MURMUR_BILLING_ENABLED (billing stays off).
 }

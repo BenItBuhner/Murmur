@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.8': [
+    '**Much lighter on the account server.** History no longer streams the last 200 entries to every device after each dictation: devices fetch only new entries since they last looked, 20 at a time. Your daily allowance is checked when it matters (connect, a new day, after dictations, Sync now) instead of kept open.',
+    '**A stuck sync queue drains on its own.** Waiting changes go up in batches of up to 50, retries back off from 15 seconds to 30 minutes, and an item that keeps failing while you are online is dropped after 8 tries instead of blocking the rest.',
+    '**Known change:** an entry deleted on another device stays on this one until you clear history or turn history sync off and on.'
+  ],
   '0.6.7': [
     "**A dictation you can feel, on Android.** Each moment has its own touch: a click when recording starts, a tick when it switches to transcribing, a light-then-firm pulse when the text lands, and a double click for a problem (a limit reached, a Murmur service unavailable, nothing heard). It happens whatever started the dictation: the floating button, the desktop-style pill's confirm and cancel, a hardware shortcut, Retry on the pill or in History. The **Haptics** switch on the Dictation button screen (on by default, beside Sounds) governs all of it, and the patterns follow the system's Touch feedback setting and intensity, like the keyboard's own taps; the pill preview on that screen plays them so the switch can be tried where it lives. A phone without a vibrator stays still.",
     '**The haptics that were already there never vibrated; fixed.** The light tap added with the sound cues in 0.5.x asked the vibrator without the `VIBRATE` permission, which Android refused quietly, so on a real phone those taps never happened. The permission is declared now.'

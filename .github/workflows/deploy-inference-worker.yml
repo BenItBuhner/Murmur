@@ -1,0 +1,84 @@
+name: Deploy inference worker
+
+# The managed inference gateway (apps/inference-worker) is a Cloudflare Worker on the Workers Free
+# plan. A push to main that touches the Worker, the backend gateway handlers it runs
+# (packages/backend/convex/lib) or this workflow deploys it with wrangler; pull requests get the
+# typecheck and tests in ci.yml (inference-worker-check). Nothing here needs the Cloudflare
+# dashboard: the first run creates the Worker, as a draft, when it uploads the first secret.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN      shared with deploy-web.yml (made from the "Edit Cloudflare Workers"
+#                            template, scoped to the one account)
+#   CLOUDFLARE_ACCOUNT_ID     shared with deploy-web.yml
+#   MURMUR_WORKER_SECRET      the bearer the Worker and the Convex deployment check each other's
+#                            /worker/* calls with; the same value as the Convex deployment's
+#                            env var (a random string of at least 32 characters)
+#   MURMUR_INFERENCE_STT_KEY  the speech provider's key; the same value as in Convex
+#   MURMUR_INFERENCE_LLM_KEY  the formatting provider's key; the same value as in Convex
+# The rest of the Worker's configuration (Clerk issuer, the Convex site origin, the provider URLs
+# and models) is public and lives in apps/inference-worker/wrangler.jsonc.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/inference-worker/**'
+      - 'packages/backend/convex/lib/**'
+      - '.github/workflows/deploy-inference-worker.yml'
+  workflow_dispatch:
+
+# One deploy at a time, in order; a queued deploy is never cancelled, so main always ends up live.
+concurrency:
+  group: deploy-inference-worker
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/inference-worker
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/inference-worker/package-lock.json
+      - name: Check the secrets exist
+        env:
+          MURMUR_WORKER_SECRET: ${{ secrets.MURMUR_WORKER_SECRET }}
+          MURMUR_INFERENCE_STT_KEY: ${{ secrets.MURMUR_INFERENCE_STT_KEY }}
+          MURMUR_INFERENCE_LLM_KEY: ${{ secrets.MURMUR_INFERENCE_LLM_KEY }}
+        run: |
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID MURMUR_WORKER_SECRET MURMUR_INFERENCE_STT_KEY MURMUR_INFERENCE_LLM_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Add the $name repository secret (see the comment at the top of this workflow)."
+              exit 1
+            fi
+          done
+      # The Worker runs the backend's gateway handlers (packages/backend/convex/lib/gatewayCore.ts),
+      # and the bundle imports convex/values, so the backend's dependencies must be installed too.
+      - run: npm ci
+        working-directory: packages/backend
+      - run: npm ci
+      # Secrets persist across deploys; re-applying them on every run makes rotating one a matter
+      # of updating the repository secret and pushing. On the first run each `secret put` creates
+      # the Worker as a draft; the deploy below then ships the code and the secrets stay bound.
+      - name: Set the Worker secrets
+        env:
+          MURMUR_WORKER_SECRET: ${{ secrets.MURMUR_WORKER_SECRET }}
+          MURMUR_INFERENCE_STT_KEY: ${{ secrets.MURMUR_INFERENCE_STT_KEY }}
+          MURMUR_INFERENCE_LLM_KEY: ${{ secrets.MURMUR_INFERENCE_LLM_KEY }}
+        run: |
+          printf '%s' "$MURMUR_WORKER_SECRET" | npx wrangler secret put MURMUR_WORKER_SECRET --config wrangler.jsonc
+          printf '%s' "$MURMUR_INFERENCE_STT_KEY" | npx wrangler secret put MURMUR_INFERENCE_STT_KEY --config wrangler.jsonc
+          printf '%s' "$MURMUR_INFERENCE_LLM_KEY" | npx wrangler secret put MURMUR_INFERENCE_LLM_KEY --config wrangler.jsonc
+      - name: Deploy
+        run: npx wrangler deploy --config wrangler.jsonc

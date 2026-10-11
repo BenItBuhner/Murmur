@@ -24,27 +24,29 @@ How it decides who may do what:
 
 Both `/worker/*` calls carry `Authorization: Bearer <MURMUR_WORKER_SECRET>`.
 
-## Deploy (not done yet)
+## Deploy
 
-Nothing here has been deployed. When ready:
+Deployed from `main` by `.github/workflows/deploy-inference-worker.yml`: a push that touches this
+folder or the backend gateway handlers it runs (`packages/backend/convex/lib`), or a manual
+`workflow_dispatch`, installs, re-applies the repository secrets and deploys with wrangler. The
+first run creates the Worker (as a draft with its secrets, then the code); secrets persist across
+deploys, so rotating one is a matter of updating the repository secret and pushing.
 
-1. Deploy the backend first (it adds `/worker/grant`, `/worker/usage`, `history.since`,
-   `stats.recordMany`, the `historyEntries.by_user` index) and set in the Convex deployment:
-   `MURMUR_WORKER_SECRET` = a random string of at least 32 characters (`openssl rand -hex 32`).
-2. In this folder: `npm ci`, fill the `vars` in `wrangler.jsonc` (`CLERK_JWT_ISSUER_DOMAIN`,
-   `CONVEX_SITE_URL`, the `MURMUR_INFERENCE_*_URL` / `_MODEL` values the Convex deployment uses), then
-   set the secrets:
-   ```sh
-   npx wrangler secret put MURMUR_WORKER_SECRET      # same value as in Convex
-   npx wrangler secret put MURMUR_INFERENCE_STT_KEY  # provider key (e.g. Groq)
-   npx wrangler secret put MURMUR_INFERENCE_LLM_KEY
-   ```
-   Optional vars: `MURMUR_INFERENCE_STT_PRO_MODEL`, `MURMUR_INFERENCE_STT_FAST_MODEL`,
-   `MURMUR_INFERENCE_LLM_PRO_MODEL`, `MURMUR_SITE_URL`. Leave `MURMUR_BILLING_ENABLED` unset.
-3. `npx wrangler deploy` (Workers Free plan is enough: no bindings, ~25 KB gzipped).
-4. Build the apps with `VITE_MURMUR_INFERENCE_URL` (desktop) / `MURMUR_INFERENCE_URL` (Android) set
+- Repository secrets (the same values the Convex deployment carries): `MURMUR_WORKER_SECRET`,
+  `MURMUR_INFERENCE_STT_KEY`, `MURMUR_INFERENCE_LLM_KEY`.
+- Public configuration (`CLERK_JWT_ISSUER_DOMAIN`, `CONVEX_SITE_URL`, the `MURMUR_INFERENCE_*_URL` /
+  `_MODEL` values, `MURMUR_SITE_URL`) lives in `wrangler.jsonc`. Leave `MURMUR_BILLING_ENABLED` unset.
+- The Workers Free plan is enough: no bindings, ~25 KB gzipped.
+
+The Convex side must already be deployed (it provides `/worker/grant`, `/worker/usage`,
+`history.since`, `stats.recordMany`, the `historyEntries.by_user` index) and carry the same
+`MURMUR_WORKER_SECRET` in its environment.
+
+Left for the client switch, when the time comes:
+
+1. Build the apps with `VITE_MURMUR_INFERENCE_URL` (desktop) / `MURMUR_INFERENCE_URL` (Android) set
    to the Worker's origin. Older app builds keep using the Convex routes.
-5. Once no supported build uses them, set `MURMUR_CONVEX_GATEWAY=off` in Convex to switch the old
+2. Once no supported build uses them, set `MURMUR_CONVEX_GATEWAY=off` in Convex to switch the old
    `/v1/*` HTTP actions off (they stay in the code).
 
 ## Checks

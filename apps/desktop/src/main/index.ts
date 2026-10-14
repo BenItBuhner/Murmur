@@ -46,6 +46,8 @@ import {
   showMainWindow
 } from './windows/main-window'
 import { OverlayWindow } from './windows/overlay'
+import { setCompactUploadEncoder } from '@core/stt/openai-compatible'
+import { wavToOggOpus } from './audio/opus'
 import { IPC, type ThemeMessage } from '@shared/ipc'
 
 // Transparent overlay on Linux needs these before `ready`; harmless elsewhere.
@@ -98,6 +100,8 @@ if (!gotLock) {
 
 async function main(): Promise<void> {
   await app.whenReady()
+  // Murmur's gateway gets 16 kbit/s Opus instead of PCM WAV: ~19x less to upload.
+  setCompactUploadEncoder(wavToOggOpus)
   electronApp.setAppUserModelId('app.murmur.dictation')
   const userData = userDataPath
   const logPath = initLogger(

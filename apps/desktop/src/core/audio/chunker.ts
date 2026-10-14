@@ -9,33 +9,58 @@ import { rmsDb } from './vad'
 export interface ChunkPlan {
   /** A piece is cut once at least this much new audio is waiting. */
   minSec: number
-  /** Without a pause, a piece is cut at the quietest frame by this length. */
+  /** Without a clean pause, a piece is cut by this length at the longest pause seen. */
   maxSec: number
-  /** A pause at least this long is a clean cut point. */
+  /** A pause at least this long is a clean cut point (a sentence end, not a breath). */
   pauseMs: number
+  /** At `maxSec`, a pause at least this long still beats cutting through speech. */
+  fallbackPauseMs: number
 }
 
-export const DEFAULT_CHUNK_PLAN: ChunkPlan = { minSec: 15, maxSec: 28, pauseMs: 300 }
+/**
+ * Oct 2026: 300 ms pauses cut mid-sentence (a breath before "be picked up"), and each piece came
+ * back as its own sentence. Only pauses of 700 ms and more are taken now; pieces may run to 30 s.
+ * Release latency grows a little (a longer tail), which Bennett prefers to broken sentences.
+ */
+export const DEFAULT_CHUNK_PLAN: ChunkPlan = {
+  minSec: 18,
+  maxSec: 30,
+  pauseMs: 700,
+  fallbackPauseMs: 240
+}
 
 const FRAME_MS = 20
 
+export interface Cut {
+  /** Sample index of the cut in the audio passed in. */
+  at: number
+  /** Length of the pause the cut sits in, in ms (0 when it cuts through sound). */
+  pauseMs: number
+  /** No usable pause: the cut may split a word, so the next piece should overlap it. */
+  forced: boolean
+}
+
 /**
- * The sample index to cut at in `pcm` (audio from the last cut on), or null to keep listening.
- * Cuts land in the middle of the first pause of `pauseMs` below `thresholdDb` after `minSec`;
- * at `maxSec` with no pause, at the quietest frame between the two.
+ * Where to cut `pcm` (audio from the last cut on), or null to keep listening. Cuts land in the
+ * middle of the first pause of `pauseMs` below `thresholdDb` after `minSec`. At `maxSec` with no
+ * such pause: the middle of the longest pause seen, if at least `fallbackPauseMs`, else the
+ * quietest frame (forced).
  */
-export function findCut(
+export function findCutDetail(
   pcm: Int16Array,
   sampleRate: number,
   thresholdDb: number,
   plan: ChunkPlan = DEFAULT_CHUNK_PLAN
-): number | null {
+): Cut | null {
   const frame = Math.floor((sampleRate * FRAME_MS) / 1000)
   const from = Math.floor(plan.minSec * sampleRate)
   if (pcm.length < from + frame) return null
   const need = Math.ceil(plan.pauseMs / FRAME_MS)
-  const limit = Math.min(pcm.length, Math.floor(plan.maxSec * sampleRate))
+  const maxAt = Math.floor(plan.maxSec * sampleRate)
+  const limit = Math.min(pcm.length, maxAt)
   let run = 0
+  let best = 0
+  let bestEnd = -1
   let quietest = -1
   let quietestDb = Infinity
   for (let at = from; at + frame <= limit; at += frame) {
@@ -46,10 +71,31 @@ export function findCut(
     }
     if (db < thresholdDb) {
       run++
-      if (run >= need) return at + frame - Math.floor((run * frame) / 2)
+      if (run > best) {
+        best = run
+        bestEnd = at + frame
+      }
+      if (run >= need)
+        return {
+          at: at + frame - Math.floor((run * frame) / 2),
+          pauseMs: run * FRAME_MS,
+          forced: false
+        }
     } else run = 0
   }
-  if (pcm.length >= Math.floor(plan.maxSec * sampleRate) && quietest >= 0)
-    return quietest + Math.floor(frame / 2)
-  return null
+  if (pcm.length < maxAt) return null
+  if (best * FRAME_MS >= plan.fallbackPauseMs)
+    return { at: bestEnd - Math.floor((best * frame) / 2), pauseMs: best * FRAME_MS, forced: false }
+  if (quietest < 0) return null
+  return { at: quietest + Math.floor(frame / 2), pauseMs: 0, forced: true }
+}
+
+/** findCutDetail, the sample index only. */
+export function findCut(
+  pcm: Int16Array,
+  sampleRate: number,
+  thresholdDb: number,
+  plan: ChunkPlan = DEFAULT_CHUNK_PLAN
+): number | null {
+  return findCutDetail(pcm, sampleRate, thresholdDb, plan)?.at ?? null
 }

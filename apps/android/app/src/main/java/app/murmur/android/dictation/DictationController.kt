@@ -53,6 +53,9 @@ import app.murmur.android.text.buildSttPrompt
 import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
+import app.murmur.android.text.joinPieces
+import app.murmur.android.text.seamContext
+import app.murmur.android.text.stripEcho
 import app.murmur.android.text.resolveStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -481,7 +484,10 @@ object DictationController {
         val target = scope.async(start = CoroutineStart.LAZY) { router.stt(speed = styleAt.await().third.speed) }
         val formats = java.util.Collections.synchronizedList(ArrayList<Deferred<PieceFormat>>())
         pieceFormats = formats
-        val onPiece: (Int, Deferred<String>) -> Unit = { _, textJob ->
+        val textJobs = java.util.Collections.synchronizedList(ArrayList<Deferred<String>>())
+        val onPiece: (Int, Deferred<String>) -> Unit = { index, textJob ->
+            textJobs.add(textJob)
+            val before = if (index > 0) textJobs[index - 1] else null
             formats.add(scope.async {
                 try {
                     val text = textJob.await()
@@ -489,9 +495,14 @@ object DictationController {
                     val (pkg, app, style) = styleAt.await()
                     if (style.effectiveMode != FormattingMode.SMART || !murmurFormatting(context)) return@async PieceFormat.Unavailable
                     val started = System.currentTimeMillis()
-                    val out = router.formatter().format(formatInputFor(text, FormattingMode.SMART, style, app, pkg, s, context, precedingText = null))
+                    // The piece continues the one before it (seen as the text before the cursor), and
+                    // may itself stop mid-sentence.
+                    val prior = seamContext(before?.let { runCatching { it.await() }.getOrNull() }.orEmpty())
+                    val base = formatInputFor(text, FormattingMode.SMART, style, app, pkg, s, context, precedingText = prior.ifEmpty { null })
+                    val out = router.formatter().format(base.copy(context = base.context.copy(instructions = listOfNotNull(base.context.instructions, PIECE_NOTE).joinToString(" "))))
                     Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording")
-                    if (out.status.outcome == FormatOutcome.FAILED) PieceFormat.Unavailable else PieceFormat.Done(out)
+                    if (out.status.outcome == FormatOutcome.FAILED) PieceFormat.Unavailable
+                    else PieceFormat.Done(out.copy(text = stripEcho(out.text, prior)))
                 } catch (e: Exception) {
                     PieceFormat.Unavailable
                 }
@@ -561,20 +572,27 @@ object DictationController {
         if (texts == null || tail == null || specs.size != texts.size) return null
         val formatter = router.formatter()
         if (formatter.source != InferenceSource.MURMUR) return null
-        val tailJob = if (tail.isNotEmpty()) scope.async { runCatching { formatter.format(input.copy(transcript = tail)) } } else null
+        val lastPiece = seamContext(texts.lastOrNull().orEmpty())
+        val tailInput = input.copy(
+            transcript = tail,
+            context = input.context.copy(
+                precedingText = listOfNotNull(input.context.precedingText, lastPiece.ifEmpty { null }).joinToString(" ").ifEmpty { null }
+            )
+        )
+        val tailJob = if (tail.isNotEmpty()) scope.async { runCatching { formatter.format(tailInput) } } else null
         val done = specs.awaitAll()
         if (done.any { it is PieceFormat.Unavailable }) return null
         val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
-        if (tailJob != null) parts.add(tailJob.await().getOrElse { return null })
+        if (tailJob != null) parts.add(tailJob.await().getOrElse { return null }.let { it.copy(text = stripEcho(it.text, lastPiece)) })
         if (parts.isEmpty()) return null
         Log.i(TAG, "${done.size} piece(s) formatted while speaking; tail formatted at release")
         val worst = parts.maxBy { it.status.outcome.ordinal.let { o -> listOf(0, 2, 1, 3, 4)[o] } }
         val stages = LinkedHashSet<String>().apply { parts.forEach { addAll(it.stages) } }.toList()
         return FormatResult(
-            text = parts.map { it.text.trim() }.filter { it.isNotEmpty() }.joinToString(" "),
+            text = joinPieces(parts.map { it.text }).text,
             pressEnter = parts.last().pressEnter,
             status = if (worst.status.outcome == FormatOutcome.USED) worst.status.copy(detail = "${parts.size} pieces, formatted while speaking") else worst.status,
-            modelText = if (parts.all { it.modelText != null }) parts.joinToString(" ") { it.modelText!!.trim() } else null,
+            modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
             llmMs = parts.last().llmMs,
             stages = stages,
             limit = parts.firstNotNullOfOrNull { it.limit }
@@ -638,7 +656,7 @@ object DictationController {
                 }
                 streamedTexts = texts.getOrThrow()
                 streamedTail = last?.output?.text?.trim() ?: ""
-                val joined = (texts.getOrThrow() + listOfNotNull(last?.output?.text)).map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
+                val joined = joinPieces(texts.getOrThrow() + listOfNotNull(last?.output?.text)).text
                 Log.i(TAG, "${texts.getOrThrow().size} piece(s) sent while recording; tail ${rest.size / SAMPLE_RATE} s")
                 val base = last ?: CompleteResult(TranscribeOutput(text = "", latencyMs = 0), 0, 0.0, Coverage(null, 0.0, false))
                 base.copy(output = base.output.copy(text = joined, spans = null))
@@ -978,3 +996,7 @@ object DictationController {
         else -> err.message ?: "Something went wrong"
     }
 }
+
+/** What the formatter is told about a piece of a longer dictation that is not the last. */
+private const val PIECE_NOTE =
+    "This transcript is one part of a longer dictation and may stop mid-sentence; if it does, leave the end unpunctuated."

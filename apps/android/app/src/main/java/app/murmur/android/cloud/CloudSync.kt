@@ -543,7 +543,9 @@ class CloudSync internal constructor(
         val convex = client ?: return
         subscriptions?.cancel()
         subscriptions = scope.launch {
-            if (!legacyBootstrap) fetchBootstrap(gen, force = true)
+            // Detached: the snapshot read must not hold back the status read and the day loop
+            // while it waits for its answer (an instance that never answers must not stall them).
+            if (!legacyBootstrap) scope.launch { fetchBootstrap(gen, force = true) }
             if (legacyBootstrap) legacySubscriptions(convex, gen)
             refreshStatus(gen)
             // The rolling windows are per UTC day: ask again when it turns.
@@ -567,7 +569,9 @@ class CloudSync internal constructor(
      */
     private suspend fun fetchBootstrap(gen: Int, force: Boolean = false) {
         val convex = client ?: return
-        if (!authenticated) return
+        // No `authenticated` guard here: the connect path fetches the moment the account
+        // connection starts (mirroring the subscriptions it replaces, which never waited for
+        // the flag), and every other caller has already checked it.
         if (!force && System.currentTimeMillis() - lastBootstrapAt < BOOTSTRAP_FOCUS_DEBOUNCE_MS) return
         if (bootstrapFetching) {
             bootstrapAgain = true
@@ -1083,8 +1087,8 @@ class CloudSync internal constructor(
                     publish()
                     refreshStatus()
                     fetchHistory()
-                    fetchBootstrap(generation, force = true)
                     flush()
+                    scope.launch { fetchBootstrap(generation, force = true) }
                 }
             }
         }
@@ -1202,7 +1206,9 @@ class CloudSync internal constructor(
             flushMutex.unlock()
             // Own mutations applied: ask for one fresh snapshot, which also prunes the ops the
             // server has folded in (the work the subscriptions used to do on every invalidation).
-            if (sent > 0 && gen == generation) fetchBootstrap(gen, force = true)
+            // Detached: the flush must return and publish its result without waiting for the
+            // snapshot's answer.
+            if (sent > 0 && gen == generation) scope.launch { fetchBootstrap(gen, force = true) }
             CloudDiagnostics.flush(sent, dropped, failure)
             publish()
         }

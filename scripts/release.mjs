@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.13': [
+    '**Long dictations are ready the moment you stop.** Murmur now recognises what you said in pieces while you are still talking, so letting go only waits for the last few seconds. Fast mode returns text in about a third of a second even after five minutes of speech, and precision mode in about two seconds.'
+  ],
   '0.6.12': [
     '**Long dictations finish several times faster.** Audio goes up as compact Opus, about 19 times smaller than before, and long transcripts are cleaned up in parallel pieces. A five-minute dictation now comes back in about 3 to 4 seconds instead of 15 to 30, with the same accuracy.'
   ],

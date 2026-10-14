@@ -4,8 +4,8 @@ import { authedMutation, authedQuery, type AuthedMutationCtx } from './lib/funct
 import { LIMITS } from './lib/limits'
 import { historyEntryDtoValidator, historyEntryInputValidator, type HistoryEntryDto } from './lib/validators'
 
-const DEFAULT_RECENT = 200
-const MAX_RECENT = 500
+const DEFAULT_RECENT = 50
+const MAX_RECENT = 100
 
 function toDto(doc: Doc<'historyEntries'>, deviceName: string | undefined): HistoryEntryDto {
   return {
@@ -26,13 +26,35 @@ function toDto(doc: Doc<'historyEntries'>, deviceName: string | undefined): Hist
   }
 }
 
-async function setHistoryCount(ctx: AuthedMutationCtx, count: number): Promise<void> {
-  await ctx.db.patch('users', ctx.user._id, { historyCount: Math.max(0, count) })
+async function historyMetaFor(ctx: AuthedMutationCtx): Promise<Doc<'historyMeta'> | null> {
+  return await ctx.db
+    .query('historyMeta')
+    .withIndex('by_user', (q) => q.eq('userId', ctx.user._id))
+    .unique()
+}
+
+/**
+ * Keep the per-account entry count in its own table. It used to live on the users row, but every
+ * authenticated query reads that row, so the patch on every push re-ran all of a user's live
+ * subscriptions (devices, preferences, dictionary, snippets, app rules, stats) after every
+ * dictation — the subscription re-run storm behind most of Murmur's Convex function calls.
+ */
+async function setHistoryCount(
+  ctx: AuthedMutationCtx,
+  meta: Doc<'historyMeta'> | null,
+  count: number
+): Promise<void> {
+  const value = Math.max(0, count)
+  if (meta) await ctx.db.patch('historyMeta', meta._id, { count: value })
+  else await ctx.db.insert('historyMeta', { userId: ctx.user._id, count: value })
 }
 
 /**
  * Most recent dictations across all of the account's devices (history sync is opt-in). Kept for
- * clients from before `since`; new clients do not subscribe to it.
+ * clients from before `since`; new clients do not subscribe to it. Pre-`since` clients subscribed
+ * with a 200-entry limit, and a subscription re-reads and re-sends its whole result after every
+ * change it can see, so the cap here is deliberately small: this endpoint must stay cheap to
+ * re-run, it is the single biggest Database I/O line on the Convex free plan.
  */
 export const recent = authedQuery({
   args: { limit: v.optional(v.number()) },
@@ -40,17 +62,16 @@ export const recent = authedQuery({
   handler: async (ctx, args) => {
     if (!ctx.user) return []
     const limit = Math.min(MAX_RECENT, Math.max(1, Math.floor(args.limit ?? DEFAULT_RECENT)))
-    const [docs, devices] = await Promise.all([
-      ctx.db
-        .query('historyEntries')
-        .withIndex('by_user_and_createdAt', (q) => q.eq('userId', ctx.user!._id))
-        .order('desc')
-        .take(limit),
-      ctx.db
-        .query('devices')
-        .withIndex('by_user', (q) => q.eq('userId', ctx.user!._id))
-        .collect()
-    ])
+    const docs = await ctx.db
+      .query('historyEntries')
+      .withIndex('by_user_and_createdAt', (q) => q.eq('userId', ctx.user!._id))
+      .order('desc')
+      .take(limit)
+    if (!docs.length) return []
+    const devices = await ctx.db
+      .query('devices')
+      .withIndex('by_user', (q) => q.eq('userId', ctx.user!._id))
+      .collect()
     const names = new Map(devices.map((d) => [d.deviceId, d.name]))
     return docs.map((doc) => toDto(doc, names.get(doc.deviceId)))
   }
@@ -112,7 +133,8 @@ export const push = authedMutation({
   returns: v.object({ inserted: v.number(), pruned: v.number() }),
   handler: async (ctx, args) => {
     if (args.entries.length > LIMITS.batch) throw new Error(`Push at most ${LIMITS.batch} entries per call`)
-    let count = ctx.user.historyCount ?? 0
+    const meta = await historyMetaFor(ctx)
+    let count = meta?.count ?? ctx.user.historyCount ?? 0
     let inserted = 0
     for (const entry of args.entries) {
       if (!entry.entryId.trim() || !entry.finalText.trim()) continue
@@ -150,7 +172,7 @@ export const push = authedMutation({
       pruned = oldest.length
       count -= pruned
     }
-    if (inserted || pruned || ctx.user.historyCount === undefined) await setHistoryCount(ctx, count)
+    if (inserted || pruned || !meta) await setHistoryCount(ctx, meta, count)
     return { inserted, pruned }
   }
 })
@@ -165,7 +187,8 @@ export const remove = authedMutation({
       .unique()
     if (!doc) return false
     await ctx.db.delete('historyEntries', doc._id)
-    await setHistoryCount(ctx, (ctx.user.historyCount ?? 1) - 1)
+    const meta = await historyMetaFor(ctx)
+    await setHistoryCount(ctx, meta, (meta?.count ?? ctx.user.historyCount ?? 1) - 1)
     return true
   }
 })
@@ -180,7 +203,7 @@ export const clear = authedMutation({
       .withIndex('by_user_and_createdAt', (q) => q.eq('userId', ctx.user._id))
       .collect()
     for (const doc of docs) await ctx.db.delete('historyEntries', doc._id)
-    await setHistoryCount(ctx, 0)
+    await setHistoryCount(ctx, await historyMetaFor(ctx), 0)
     return docs.length
   }
 })

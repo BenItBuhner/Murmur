@@ -38,9 +38,9 @@ export default defineSchema({
     subscription: v.optional(subscriptionValidator),
     /** Account-level onboarding. Device-level steps (microphone, shortcut) are repeated per device. */
     onboardingCompletedAt: v.optional(v.number()),
-    onboardingVersion: v.optional(v.number()),
-    /** Number of rows in historyEntries, maintained by history mutations so pruning never scans. */
+    /** Deprecated: the entry count moved to historyMeta. Kept so existing rows still validate; read once to seed historyMeta. */
     historyCount: v.optional(v.number()),
+    onboardingVersion: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
   })
@@ -190,5 +190,17 @@ export default defineSchema({
     .index('by_user_and_entryId', ['userId', 'entryId'])
     // Insertion order (`_creationTime` is implicit): the cursor `history.since` pages along, so a
     // device fetches only what arrived since it last asked instead of re-reading a backlog.
-    .index('by_user', ['userId'])
+    .index('by_user', ['userId']),
+
+  /**
+   * One row per account: the number of its historyEntries, maintained by the history mutations so
+   * pruning never scans. The count lives here and not on the users row because every authenticated
+   * query reads the account row: patching it on every push re-ran all of a user's live
+   * subscriptions (devices, preferences, dictionary, snippets, app rules, stats) after every
+   * dictation, which was most of Murmur's function-call load on the Convex free plan.
+   */
+  historyMeta: defineTable({
+    userId: v.id('users'),
+    count: v.number()
+  }).index('by_user', ['userId'])
 })

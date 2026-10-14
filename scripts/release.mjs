@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.17': [
+    'No more phantom Thank you at the end of a dictation, and updates are checked hourly.'
+  ],
   '0.6.16': [
     'Precision formatting no longer repeats text or adds line breaks you did not dictate.'
   ],

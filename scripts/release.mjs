@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.11': [
+    '**Fast dictation through the Murmur inference service.** The service that failed in 0.6.9 is fixed, so dictations no longer go through the account server: speech and formatting answer in about a second.',
+    '**Lighter on the account server.** A dictation no longer re-runs every synced setting on every device.'
+  ],
   '0.6.10': [
     '**Dictation works again.** 0.6.9 sent dictations to a new inference service that refused signed-in accounts; this release goes back to the account server, which is now fast on its own.'
   ],

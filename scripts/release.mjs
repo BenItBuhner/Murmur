@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.14': [
+    '**Quicker to start and lighter on your account.** The app loads your settings, dictionary and devices in one request instead of seven live connections, and checks in with the server far less often.'
+  ],
   '0.6.13': [
     '**Long dictations are ready the moment you stop.** Murmur now recognises what you said in pieces while you are still talking, so letting go only waits for the last few seconds. Fast mode returns text in about a third of a second even after five minutes of speech, and precision mode in about two seconds.'
   ],

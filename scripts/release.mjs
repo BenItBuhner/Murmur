@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.12': [
+    '**Long dictations finish several times faster.** Audio goes up as compact Opus, about 19 times smaller than before, and long transcripts are cleaned up in parallel pieces. A five-minute dictation now comes back in about 3 to 4 seconds instead of 15 to 30, with the same accuracy.'
+  ],
   '0.6.11': [
     '**Fast dictation through the Murmur inference service.** The service that failed in 0.6.9 is fixed, so dictations no longer go through the account server: speech and formatting answer in about a second.',
     '**Lighter on the account server.** A dictation no longer re-runs every synced setting on every device.'

@@ -45,9 +45,26 @@ describe('history', () => {
 
     expect(await asAda.query(api.history.recent, { limit: 1 })).toHaveLength(1)
     await t.run(async (ctx) => {
-      const [user] = await ctx.db.query('users').collect()
-      expect(user.historyCount).toBe(3)
+      const [meta] = await ctx.db.query('historyMeta').collect()
+      expect(meta?.count).toBe(3)
     })
+  })
+
+  it('pushes without touching the account row, so no other subscription re-runs', async () => {
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await asAda.mutation(api.devices.heartbeat, {
+      deviceId: 'desk',
+      name: 'Desk',
+      platform: 'linux',
+      appVersion: '0.1.0'
+    })
+    const before = await t.run((ctx) => ctx.db.query('users').collect())
+    await asAda.mutation(api.history.push, { deviceId: 'desk', entries: [entry('a', 1)] })
+    const after = await t.run((ctx) => ctx.db.query('users').collect())
+    // Every authenticated query reads the account row; a patch here would re-run all of a
+    // user's live subscriptions after every dictation.
+    expect(after).toEqual(before)
   })
 
   it('removes and clears, keeping the counter in step, and isolates users', async () => {
@@ -60,8 +77,11 @@ describe('history', () => {
     expect(await asAda.mutation(api.history.remove, { entryId: 'a' })).toBe(true)
     expect(await asAda.mutation(api.history.remove, { entryId: 'a' })).toBe(false)
     await t.run(async (ctx) => {
-      const user = (await ctx.db.query('users').collect()).find((u) => u.clerkId === 'user_ada')
-      expect(user?.historyCount).toBe(1)
+      const ada = (await ctx.db.query('users').collect()).find((u) => u.clerkId === 'user_ada')
+      const metas = await ctx.db.query('historyMeta').collect()
+      expect(metas).toHaveLength(1)
+      expect(metas[0].userId).toBe(ada!._id)
+      expect(metas[0].count).toBe(1)
     })
     expect(await asAda.mutation(api.history.clear, {})).toBe(1)
     expect(await asAda.query(api.history.recent, {})).toEqual([])

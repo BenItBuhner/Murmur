@@ -139,7 +139,7 @@ object Engine {
             } catch (e: Exception) {
                 return fallback(FormatOutcome.FAILED, e.message ?: e.toString(), attempts, firstReason, System.currentTimeMillis() - started, lastModelText)
             }
-            val text = Verify.cleanModelOutput(answer.text, prepared.text)
+            val text = Verify.repairOutput(prepared.text, Verify.cleanModelOutput(answer.text, prepared.text))
             lastModelText = text
             val verdict = if (answer.finishReason == "length") Verify.Verdict(false, "too-long")
             else Verify.verifyOutput(prepared.text, text, language = input.context.language, keepVerbatim = input.context.keepVerbatim)

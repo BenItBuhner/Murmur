@@ -47,6 +47,8 @@ import type { RetryResult, SoundName } from '@shared/ipc'
 import { createLogger } from '../logger'
 import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
+import { ChunkStreamer } from './streaming'
+import { MURMUR_PROVIDER } from '@shared/inference'
 import type { HookService } from '../hotkeys/hook'
 import type { FormatOutcome, InferenceRouter, ResolvedStt } from '../inference/router'
 import type { SettingsStore } from '../store/settings'
@@ -67,6 +69,15 @@ interface ActiveSession {
   maxTimer: NodeJS.Timeout | null
   /** The stand-in clip (MURMUR_TEST_AUDIO_FILE) is spent; a microphone never says so. */
   inputEnded: boolean
+  /** Long dictations to Murmur's gateway go up in pieces while they are spoken. */
+  stream?: ChunkStreamer
+  streamListener?: (id: string, samples: number) => void
+}
+
+/** What was already transcribed while the user spoke: the samples covered and their texts. */
+interface StreamedPrefix {
+  samples: number
+  texts: Promise<string[]>
 }
 
 /** One run of the pipeline: a dictation that was just spoken, or a stored one sent again. */
@@ -189,6 +200,8 @@ export class DictationController extends EventEmitter {
     this.active = session
     // Audio first: every millisecond before capture starts is a clipped first word.
     this.deps.recorder.start(id, mode !== 'command' && s.audio.preBufferMs > 0)
+    if (mode !== 'command' && process.env.MURMUR_NO_STREAMING !== '1')
+      this.startStreaming(session, s)
     this.deps.overlay.setState({ phase: 'listening', mode, locked: session.locked, elapsedSec: 0 })
     if (s.general.sounds) this.deps.overlay.playSound(mode === 'command' ? 'lock' : 'start')
     session.elapsedTimer = setInterval(() => {
@@ -253,6 +266,7 @@ export class DictationController extends EventEmitter {
     if (!session) return
     this.clearTimers(session)
     this.active = null
+    this.stopStreaming(session)
     this.deps.recorder.cancel(session.id)
     this.deps.overlay.setState({ phase: 'idle' })
     if (this.deps.settings.get().general.sounds) this.deps.overlay.playSound('cancel')
@@ -280,10 +294,11 @@ export class DictationController extends EventEmitter {
     }
     try {
       const pcm = await this.deps.recorder.stop(session.id)
+      const streamed = this.stopStreaming(session)
       // Store the audio before anything can go wrong with it: a failed request is retried from
       // this file, and a kept recording is what History plays back.
       job.recording = await this.storeRecording(session.id, pcm)
-      await this.process(job, pcm, stopAt, s)
+      await this.process(job, pcm, stopAt, s, streamed)
     } catch (err) {
       log.error('session processing crashed', err)
       this.showError(friendlyError(err))
@@ -366,6 +381,77 @@ export class DictationController extends EventEmitter {
     if (entry?.recording !== job.recording) this.deps.recordings.delete(job.recording)
   }
 
+  /**
+   * Transcribe finished 15-30 s stretches while the user keeps talking, so release only waits
+   * for the last stretch. Murmur's gateway only: a piece for any other provider fails before a
+   * request is made, and the dictation is then transcribed whole as before.
+   */
+  private startStreaming(session: ActiveSession, s: Settings): void {
+    const recorder = this.deps.recorder as Partial<Recorder>
+    if (typeof recorder.read !== 'function' || typeof recorder.removeListener !== 'function') return
+    const tag = session.id.slice(0, 8)
+    let target: Promise<{ resolved: ResolvedStt; prompt?: string; keyterms: string[] }> | null =
+      null
+    const resolveTarget = (): typeof target =>
+      (target ??= (async () => {
+        const w = await session.windowInfo
+        const style = resolveStyle(s.formatting, s.formatting.appRules, classifyApp(w.app, w.title))
+        const resolved = await this.deps.inference.stt({
+          speed: effectiveSpeed(s.stt.speed, style.rule)
+        })
+        if (resolved.provider !== MURMUR_PROVIDER) throw new Error('streaming is for Murmur only')
+        const prompt = s.stt.useDictionaryPrompt
+          ? buildSttPrompt(
+              s.dictionary,
+              s.snippets.map((x) => x.trigger)
+            )
+          : undefined
+        return { resolved, prompt, keyterms: s.dictionary.map((d) => d.word) }
+      })())
+    const transcribePiece = async (pcm: Int16Array, index: number): Promise<string> => {
+      const t = (await resolveTarget())!
+      const threshold = adaptiveThreshold(pcm, SAMPLE_RATE, s.audio.silenceThresholdDb)
+      const a = analyze(pcm, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
+      if (!a.hasSpeech) return ''
+      const started = performance.now()
+      const out = await transcribeComplete(
+        (wav, p) => this.transcribeWithFallback(wav, p, t.keyterms, t.resolved),
+        {
+          pcm,
+          sampleRate: SAMPLE_RATE,
+          speechEndSec: a.lastVoicedMs / 1000,
+          thresholdDb: threshold,
+          prompt: t.prompt,
+          tailPrompt: t.prompt ? STT_BASE_PROMPT : undefined,
+          log: (m) => log.warn(`session ${tag} piece ${index}: ${m}`)
+        }
+      )
+      log.info(
+        `session ${tag}: piece ${index} (${(pcm.length / SAMPLE_RATE).toFixed(1)} s) transcribed in ${Math.round(performance.now() - started)} ms while recording`
+      )
+      return out.text.trim()
+    }
+    session.stream = new ChunkStreamer(
+      (from) => this.deps.recorder.read(session.id, from),
+      transcribePiece,
+      SAMPLE_RATE,
+      s.audio.silenceThresholdDb
+    )
+    session.streamListener = (id, samples) => {
+      if (id === session.id) session.stream?.onSamples(samples)
+    }
+    this.deps.recorder.on('chunk', session.streamListener)
+  }
+
+  private stopStreaming(session: ActiveSession): StreamedPrefix | undefined {
+    if (session.streamListener) this.deps.recorder.removeListener('chunk', session.streamListener)
+    session.streamListener = undefined
+    const stream = session.stream
+    session.stream = undefined
+    if (!stream || stream.piecesSent === 0) return undefined
+    return stream.finish()
+  }
+
   private clearTimers(session: ActiveSession): void {
     if (session.elapsedTimer) clearInterval(session.elapsedTimer)
     if (session.maxTimer) clearTimeout(session.maxTimer)
@@ -379,7 +465,8 @@ export class DictationController extends EventEmitter {
     job: ProcessJob,
     pcm: Int16Array,
     stopAt: number,
-    s: Settings
+    s: Settings,
+    streamed?: StreamedPrefix
   ): Promise<ProcessOutcome> {
     const timings: StageTimings = {
       recordMs: Math.round((pcm.length / SAMPLE_RATE) * 1000),
@@ -461,21 +548,24 @@ export class DictationController extends EventEmitter {
       : undefined
     const keyterms = s.dictionary.map((d) => d.word)
     let stt: CompleteResult
+    const run = (clip: Int16Array, endSec: number): Promise<CompleteResult> =>
+      transcribeComplete((wav, p) => this.transcribeWithFallback(wav, p, keyterms, resolved), {
+        pcm: clip,
+        sampleRate: SAMPLE_RATE,
+        speechEndSec: endSec,
+        thresholdDb: threshold,
+        prompt,
+        // Resumed tails keep the style hint but never the vocabulary: a prompt that ends with a
+        // term the speaker says next is exactly what makes Whisper stop early.
+        tailPrompt: prompt ? STT_BASE_PROMPT : undefined,
+        log: (m) => log.warn(`session ${tag}: ${m}`)
+      })
     try {
-      stt = await transcribeComplete(
-        (wav, p) => this.transcribeWithFallback(wav, p, keyterms, resolved),
-        {
-          pcm: audio,
-          sampleRate: SAMPLE_RATE,
-          speechEndSec,
-          thresholdDb: threshold,
-          prompt,
-          // Resumed tails keep the style hint but never the vocabulary: a prompt that ends with a
-          // term the speaker says next is exactly what makes Whisper stop early.
-          tailPrompt: prompt ? STT_BASE_PROMPT : undefined,
-          log: (m) => log.warn(`session ${tag}: ${m}`)
-        }
-      )
+      stt = streamed
+        ? await this.withStreamedPrefix(streamed, pcm, threshold, run, tag, () =>
+            run(audio, speechEndSec)
+          )
+        : await run(audio, speechEndSec)
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
       return failure('', resolved, err)
@@ -691,6 +781,54 @@ export class DictationController extends EventEmitter {
    * token the gateway no longer accepts is refreshed once (`resolved.cfg` is updated so the next
    * resume round uses it too), and a user's own model that errors falls back to their fallback model.
    */
+  /**
+   * The rest of a streamed dictation: only the audio after the pieces is sent now, alongside
+   * waiting for the pieces. If any piece failed, the whole clip is transcribed as before.
+   */
+  private async withStreamedPrefix(
+    streamed: StreamedPrefix,
+    pcm: Int16Array,
+    threshold: number,
+    run: (clip: Int16Array, endSec: number) => Promise<CompleteResult>,
+    tag: string,
+    whole: () => Promise<CompleteResult>
+  ): Promise<CompleteResult> {
+    const rest = pcm.subarray(streamed.samples)
+    const a = analyze(rest, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
+    let tail: Promise<CompleteResult | null> = Promise.resolve(null)
+    if (a.hasSpeech) {
+      const trimmed = trimSilence(rest, {
+        sampleRate: SAMPLE_RATE,
+        thresholdDb: threshold,
+        paddingMs: 300
+      })
+      tail = run(trimmed.pcm, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
+    }
+    tail.catch(() => undefined)
+    let texts: string[]
+    try {
+      texts = await streamed.texts
+    } catch (err) {
+      log.warn(`session ${tag}: a streamed piece failed; transcribing the whole dictation`, err)
+      return whole()
+    }
+    const last = await tail
+    const text = [...texts, last?.text ?? '']
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .join(' ')
+    log.info(
+      `session ${tag}: ${texts.length} piece(s) sent while recording; tail ${(rest.length / SAMPLE_RATE).toFixed(1)} s`
+    )
+    return {
+      ...(last ?? { latencyMs: 0, resumed: 0, recoveredSec: 0 }),
+      text,
+      // The pieces carry their own timings; spans of the tail alone would mislead coverage checks.
+      spans: undefined,
+      coverage: last?.coverage ?? { transcribedSec: null, missingSec: 0, truncated: false }
+    } as CompleteResult
+  }
+
   private async transcribeWithFallback(
     wav: Uint8Array,
     prompt: string | undefined,

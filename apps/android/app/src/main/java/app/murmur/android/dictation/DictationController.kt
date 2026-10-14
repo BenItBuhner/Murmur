@@ -27,7 +27,10 @@ import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
+import app.murmur.android.stt.CompleteResult
+import app.murmur.android.stt.Coverage
 import app.murmur.android.stt.SttException
+import app.murmur.android.stt.TranscribeOutput
 import app.murmur.android.stt.adaptiveThreshold
 import app.murmur.android.stt.lastVoicedSec
 import app.murmur.android.stt.transcribeComplete
@@ -50,6 +53,7 @@ import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
 import app.murmur.android.text.resolveStyle
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -177,6 +181,8 @@ object DictationController {
     @Volatile var sink: TextSink? = null
 
     private var listeningJob: Job? = null
+    /** Long dictations to Murmur go up in pieces while they are spoken. */
+    @Volatile private var streamer: ChunkStreamer? = null
     /** Cancelled from the UI thread, replaced from the pipeline: a stale read lets an old job blank the pill early. */
     @Volatile private var resetJob: Job? = null
     @Volatile private var startedAt = 0L
@@ -281,10 +287,12 @@ object DictationController {
                 return
             }
             _state.value = DictationState.Listening(0, 0f, mode, locked)
+            streamer = if (mode != DictationMode.COMMAND && murmurSpeech(appContext)) newStreamer(appContext, settings) else null
             listeningJob = scope.launch {
                 while (isActive) {
                     val elapsed = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
                     _state.value = DictationState.Listening(elapsed, recorder.level, this@DictationController.mode, locked)
+                    streamer?.let { st -> runCatching { st.poll(recorder.sampleCount()) } }
                     delay(80)
                 }
             }
@@ -310,6 +318,7 @@ object DictationController {
         if (!isListening) return
         listeningJob?.cancel()
         listeningJob = null
+        streamer = null
         recorder.cancel()
         RecordingService.stop(context.applicationContext)
         _state.value = DictationState.Idle
@@ -333,11 +342,14 @@ object DictationController {
         scope.launch {
             val id = sessionId
             var run: Run? = null
+            var streamed: Streamed? = null
             try {
                 val pcm: ShortArray = if (fixtureMode(settings)) {
                     loadFixture(appContext)
                 } else {
                     val recorded = recorder.stop()
+                    streamed = streamer?.takeIf { it.piecesSent > 0 }?.finish()
+                    streamer = null
                     RecordingService.stop(appContext)
                     if (recorded.size < SAMPLE_RATE * 15 / 100) {
                         showNotice(appContext, "Too short")
@@ -359,7 +371,7 @@ object DictationController {
                     selection = selectionJob?.await()
                 )
                 run = started
-                process(started, pcm, settings, appContext, InferenceRouter.get(appContext))
+                process(started, pcm, settings, appContext, InferenceRouter.get(appContext), streamed)
             } catch (e: Exception) {
                 Log.e(TAG, "dictation failed", e)
                 RecordingService.stop(appContext)
@@ -443,7 +455,45 @@ object DictationController {
         if (HistoryStore.get(context).get(run.id)?.recording != name) RecordingStore.get(context).delete(name)
     }
 
-    private suspend fun process(run: Run, pcm: ShortArray, s: MurmurSettings, context: Context, router: InferenceRouter) {
+    /**
+     * Transcribe finished 15-30 s stretches while the user keeps talking, so release only waits
+     * for the last one. A piece that fails makes the dictation go up whole, as before.
+     */
+    private fun newStreamer(context: Context, s: MurmurSettings): ChunkStreamer {
+        val router = InferenceRouter.get(context)
+        val target = scope.async(start = CoroutineStart.LAZY) {
+            val pkg = sink?.focusedPackage() ?: ""
+            val style = resolveStyle(s, classifyPackage(pkg, appLabel(context, pkg)))
+            router.stt(speed = style.speed)
+        }
+        val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
+        return ChunkStreamer(scope, { from -> recorder.read(from) }, SAMPLE_RATE, -48.0) { pcm, index ->
+            val resolved = target.await()
+            if (Wav.peakDb(pcm) < -48.0) return@ChunkStreamer ""
+            val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
+            val started = System.currentTimeMillis()
+            val out = transcribeComplete(
+                pcm = pcm,
+                sampleRate = SAMPLE_RATE,
+                speechEndSec = lastVoicedSec(pcm, SAMPLE_RATE, threshold),
+                thresholdDb = threshold,
+                prompt = prompt,
+                tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
+                log = { Log.w(TAG, "piece $index: $it") }
+            ) { wav, p -> router.transcribe(resolved, wav, p) }
+            Log.i(TAG, "piece $index (${pcm.size / SAMPLE_RATE} s) transcribed in ${System.currentTimeMillis() - started} ms while recording")
+            out.output.text.trim()
+        }
+    }
+
+    private suspend fun process(
+        run: Run,
+        pcm: ShortArray,
+        s: MurmurSettings,
+        context: Context,
+        router: InferenceRouter,
+        streamed: Streamed? = null
+    ) {
         val recordMs = run.recordMs
         // The destination's style is settled before the speech request: a per-app rule may pick the
         // speed, which the speech model is asked for and which decides whether the formatting model runs.
@@ -460,10 +510,10 @@ object DictationController {
         // the bias off (then no prompt goes at all, as on the desktop).
         val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
         val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
-        val complete = transcribeComplete(
-            pcm = pcm,
+        suspend fun runStt(clip: ShortArray) = transcribeComplete(
+            pcm = clip,
             sampleRate = SAMPLE_RATE,
-            speechEndSec = lastVoicedSec(pcm, SAMPLE_RATE, threshold),
+            speechEndSec = lastVoicedSec(clip, SAMPLE_RATE, threshold),
             thresholdDb = threshold,
             prompt = prompt,
             // Resumed tails keep the style hint but never the vocabulary: a prompt that ends with a
@@ -471,6 +521,23 @@ object DictationController {
             tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
             log = { Log.w(TAG, it) }
         ) { wav, p -> router.transcribe(resolved, wav, p) }
+        val complete = if (streamed != null && streamed.samples in 1 until pcm.size) {
+            // Only the audio after the pieces goes up now, alongside waiting for the pieces.
+            val rest = pcm.copyOfRange(streamed.samples, pcm.size)
+            val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async { runCatching { runStt(rest) } }
+            val texts = runCatching { streamed.texts() }
+            val tailResult = tail?.await()
+            if (texts.isFailure || tailResult?.isFailure == true) {
+                Log.w(TAG, "a streamed piece failed; transcribing the whole dictation", texts.exceptionOrNull() ?: tailResult?.exceptionOrNull())
+                runStt(pcm)
+            } else {
+                val last = tailResult?.getOrNull()
+                val joined = (texts.getOrThrow() + listOfNotNull(last?.output?.text)).map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
+                Log.i(TAG, "${texts.getOrThrow().size} piece(s) sent while recording; tail ${rest.size / SAMPLE_RATE} s")
+                val base = last ?: CompleteResult(TranscribeOutput(text = "", latencyMs = 0), 0, 0.0, Coverage(null, 0.0, false))
+                base.copy(output = base.output.copy(text = joined, spans = null))
+            }
+        } else runStt(pcm)
         val stt = complete.output
         if (complete.resumed > 0) {
             Log.i(TAG, "transcript recovered ${"%.1f".format(complete.recoveredSec)}s of speech in ${complete.resumed} extra request(s)")

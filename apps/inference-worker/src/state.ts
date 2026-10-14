@@ -66,7 +66,8 @@ export function resetState(): void {
 }
 
 async function post(link: ConvexLink, path: string, body: unknown): Promise<Response> {
-  return await link.fetcher(`${link.siteUrl.replace(/\/+$/, '')}${path}`, {
+  const fetcher = link.fetcher
+  return await fetcher(`${link.siteUrl.replace(/\/+$/, '')}${path}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${link.secret}`, 'content-type': 'application/json' },
     body: JSON.stringify(body)

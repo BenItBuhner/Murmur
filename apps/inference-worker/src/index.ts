@@ -85,7 +85,14 @@ function hooksFor(env: Env, link: ConvexLink, ctx: Ctx): GatewayHooks {
   }
 }
 
-export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: typeof fetch = fetch): Promise<Response> {
+/**
+ * workerd's global fetch must be called with no receiver: stored on an object and called as
+ * link.fetcher(...) it throws "Illegal invocation: function called with incorrect this
+ * reference", which failed every /worker/grant call in 0.6.9. Wrap it so it never travels detached.
+ */
+const boundFetch: typeof fetch = (input, init) => fetch(input, init)
+
+export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: typeof fetch = boundFetch): Promise<Response> {
   const url = new URL(request.url)
   const path = url.pathname.replace(/\/+$/, '')
   if (path === '' || path === '/health') return new Response('ok', { status: 200 })

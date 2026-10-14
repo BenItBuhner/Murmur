@@ -28,6 +28,7 @@ import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
 import app.murmur.android.stt.CompleteResult
+import app.murmur.android.stt.Coverage
 import app.murmur.android.stt.SttException
 import app.murmur.android.stt.TranscribeOutput
 import app.murmur.android.stt.adaptiveThreshold
@@ -52,6 +53,7 @@ import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
 import app.murmur.android.text.resolveStyle
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -459,7 +461,7 @@ object DictationController {
      */
     private fun newStreamer(context: Context, s: MurmurSettings): ChunkStreamer {
         val router = InferenceRouter.get(context)
-        val target = scope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+        val target = scope.async(start = CoroutineStart.LAZY) {
             val pkg = sink?.focusedPackage() ?: ""
             val style = resolveStyle(s, classifyPackage(pkg, appLabel(context, pkg)))
             router.stt(speed = style.speed)
@@ -532,7 +534,7 @@ object DictationController {
                 val last = tailResult?.getOrNull()
                 val joined = (texts.getOrThrow() + listOfNotNull(last?.output?.text)).map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
                 Log.i(TAG, "${texts.getOrThrow().size} piece(s) sent while recording; tail ${rest.size / SAMPLE_RATE} s")
-                val base = last ?: CompleteResult(TranscribeOutput(text = "", latencyMs = 0), 0, 0.0, app.murmur.android.stt.Coverage(null, 0.0, false))
+                val base = last ?: CompleteResult(TranscribeOutput(text = "", latencyMs = 0), 0, 0.0, Coverage(null, 0.0, false))
                 base.copy(output = base.output.copy(text = joined, spans = null))
             }
         } else runStt(pcm)

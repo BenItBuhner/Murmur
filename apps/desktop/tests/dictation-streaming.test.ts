@@ -148,7 +148,22 @@ const inference = {
   complete: async () => {
     throw new Error('no formatting model')
   },
-  refreshedStt: async () => null
+  refreshedStt: async () => null,
+  formatCalls: [] as string[],
+  formatter: async () => ({
+    source: 'murmur',
+    format: async (input: { transcript: string }) => {
+      inference.formatCalls.push(input.transcript)
+      await new Promise((r) => setTimeout(r, 2))
+      return {
+        text: `[${input.transcript}]`,
+        pressEnter: false,
+        llmMs: 3,
+        status: { outcome: 'used', attempts: 1 },
+        stages: ['llm']
+      }
+    }
+  })
 }
 
 describe('streaming a long dictation while it is spoken', () => {
@@ -219,5 +234,55 @@ describe('streaming a long dictation while it is spoken', () => {
     controller.handle({ type: 'stop' })
     await settle()
     expect(provider.requests).toBe(1)
+  })
+})
+
+describe('precision mode formats pieces while the user speaks', () => {
+  let dir: string
+  let history: HistoryStore
+  let controller: DictationController
+  let recorder: FakeRecorder
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 400 && controller.isBusy; i++) await new Promise((r) => setTimeout(r, 5))
+  }
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'murmur-spec-'))
+    const recordings = new RecordingStore(join(dir, 'recordings'))
+    history = new HistoryStore(dir, recordings)
+    provider.requests = 0
+    provider.sizes = []
+    provider.failFirst = false
+    provider.outcome = 'ok'
+    provider.text = 'piece'
+    inference.formatCalls.length = 0
+    recorder = new FakeRecorder()
+    const settings = new FakeSettings()
+    settings.value.formatting.mode = 'smart'
+    controller = new DictationController({
+      settings: settings as never,
+      history,
+      recorder: recorder as never,
+      recordings,
+      hook: hook as never,
+      inference: inference as never,
+      overlay: { setState: () => undefined, playSound: () => undefined },
+      getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
+    })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('formats each piece during recording and only the tail at release', async () => {
+    controller.handle({ type: 'start', mode: 'hold' })
+    recorder.feedAll()
+    await new Promise((r) => setTimeout(r, 30))
+    const before = inference.formatCalls.length
+    expect(before).toBeGreaterThanOrEqual(2)
+    controller.handle({ type: 'stop' })
+    await settle()
+    // One more call at release, for the tail alone; never the whole transcript.
+    expect(inference.formatCalls.length).toBe(before + 1)
+    expect(inference.formatCalls.at(-1)).toBe(`piece ${provider.requests}`)
+    const text = history.list().entries[0].finalText
+    for (let i = 1; i <= provider.requests; i++) expect(text).toContain(`[piece ${i}]`)
   })
 })

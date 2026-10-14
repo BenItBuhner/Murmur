@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { basicCleanup, finish, prepareTranscript } from '../src/cleanup'
 import { applyDictionary } from '../src/dictionary'
-import { formatTranscript } from '../src/format'
+import { CHUNK_ABOVE_WORDS, formatTranscript, splitForFormatting } from '../src/format'
 import type { ChatMessage, Complete, FormatContext } from '../src/types'
 
 const ctx: FormatContext = {
@@ -334,5 +334,71 @@ describe('apostrophes, quotes and non-ASCII punctuation', () => {
     expect(failed.text).toBe("I don't recall, it's fine, we'll see, Bennett said so")
     const off = await formatTranscript({ transcript, mode: 'off', context: withDictionary }, null)
     expect(off.text).toBe(transcript)
+  })
+})
+
+describe('long dictations', () => {
+  const words = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel']
+  const sentence = (i: number): string =>
+    `This is sentence ${words[i % 8]} about the ${words[(i + 3) % 8]} plan for the team.`
+  const long = Array.from({ length: 60 }, (_, i) => sentence(i)).join(' ')
+
+  it('splits at sentence ends, keeps every word, and folds a short tail into the last piece', () => {
+    const { pieces, joins } = splitForFormatting(long, 120)
+    expect(pieces.length).toBeGreaterThan(2)
+    expect(joins).toHaveLength(pieces.length - 1)
+    expect(pieces.every((p) => p.endsWith('.'))).toBe(true)
+    expect(pieces.map((p, i) => p + (joins[i] ?? '')).join('')).toBe(long)
+    const lastWords = pieces.at(-1)!.split(/\s+/).length
+    expect(lastWords).toBeGreaterThanOrEqual(40)
+  })
+
+  it('keeps a dictated line break at a cut', () => {
+    const text = 'One two three four five.\nSix seven eight nine ten. Eleven twelve.'
+    const { pieces, joins } = splitForFormatting(text, 5)
+    expect(pieces.map((p, i) => p + (joins[i] ?? '')).join('')).toBe(text)
+    expect(joins[0]).toBe('\n')
+  })
+
+  it('formats pieces in parallel and rejoins them in order', async () => {
+    const { pieces } = splitForFormatting(long)
+    let inFlight = 0
+    let peak = 0
+    const complete: Complete = async (messages) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 5))
+      inFlight--
+      const last = messages[messages.length - 1].content
+      const piece = pieces.find((p) => last.includes(p))
+      return { text: piece ?? '' }
+    }
+    const out = await formatTranscript({ transcript: long, mode: 'smart', context: ctx }, complete)
+    expect(long.split(' ').length).toBeGreaterThan(CHUNK_ABOVE_WORDS)
+    expect(out.status.outcome).toBe('used')
+    expect(out.status.detail).toBe(`${pieces.length} pieces`)
+    expect(peak).toBe(pieces.length)
+    expect(out.text).toBe(long)
+  })
+
+  it('a piece the model fails on falls back alone; the rest stay formatted', async () => {
+    const { pieces } = splitForFormatting(long)
+    const complete: Complete = async (messages) => {
+      const last = messages[messages.length - 1].content
+      if (last.includes(pieces[1])) throw new Error('upstream 503')
+      return { text: pieces.find((p) => last.includes(p))! }
+    }
+    const out = await formatTranscript({ transcript: long, mode: 'smart', context: ctx }, complete)
+    expect(out.status.outcome).toBe('failed')
+    expect(out.text.split(/\s+/).length).toBe(long.split(/\s+/).length)
+  })
+
+  it('short dictations still make one call', async () => {
+    const complete = answering('Hey, can we move the sync to Friday?')
+    await formatTranscript(
+      { transcript: 'hey can we move the sync to friday', mode: 'smart', context: ctx },
+      complete
+    )
+    expect(complete.calls).toHaveLength(1)
   })
 })

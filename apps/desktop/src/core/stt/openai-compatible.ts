@@ -56,6 +56,20 @@ export function spansFromVerbose(json: VerboseJson | undefined): TimedSpan[] | u
   return segments.length ? segments : undefined
 }
 
+/** Turns a 16 kHz WAV into a smaller upload (Ogg Opus); null means send the WAV as it is. */
+export type CompactUploadEncoder = (wav: Uint8Array) => Uint8Array | null
+let compactEncoder: CompactUploadEncoder | null = null
+/** Gateways that refused a compact upload once; they get WAV from then on. */
+const compactUnsupported = new Set<string>()
+
+/**
+ * Register the Opus encoder (main process only). Used for Murmur's gateway alone: the user's own
+ * provider always gets the WAV it got before.
+ */
+export function setCompactUploadEncoder(encoder: CompactUploadEncoder | null): void {
+  compactEncoder = encoder
+}
+
 /**
  * Works with OpenAI, Groq, Mistral, whisper.cpp `server`, faster-whisper-server/Speaches,
  * LocalAI, and any proxy that speaks `POST /audio/transcriptions`.
@@ -70,10 +84,21 @@ export class OpenAiCompatibleStt implements SttProvider {
     const url = `${base}/audio/transcriptions`
     const wantVerbose = !verboseUnsupported.has(base)
     const started = performance.now()
+    let compact: Uint8Array | null = null
+    if (cfg.speed && compactEncoder && !compactUnsupported.has(base)) {
+      try {
+        compact = compactEncoder(input.wav)
+      } catch {
+        compact = null
+      }
+    }
 
     const attempt = async (verbose: boolean, wordTimestamps: boolean): Promise<Response> => {
       const form = new FormData()
-      form.append('file', new Blob([input.wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
+      if (compact)
+        form.append('file', new Blob([compact as BlobPart], { type: 'audio/ogg' }), 'audio.ogg')
+      else
+        form.append('file', new Blob([input.wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
       form.append('model', cfg.model)
       form.append('response_format', verbose ? 'verbose_json' : 'json')
       form.append('temperature', '0')
@@ -99,6 +124,16 @@ export class OpenAiCompatibleStt implements SttProvider {
     try {
       const wantWords = wantVerbose && !wordTimestampsUnsupported.has(base)
       let res = await attempt(wantVerbose, wantWords)
+      if (!res.ok && compact && (res.status === 400 || res.status === 415 || res.status === 422)) {
+        // A gateway that cannot take Ogg Opus gets the WAV, now and from then on. A 400 about the
+        // response format is left to the checks below.
+        const body = await res.clone().text()
+        if (!/timestamp_granularities|granularit|response_format|verbose/i.test(body)) {
+          compactUnsupported.add(base)
+          compact = null
+          res = await attempt(wantVerbose, wantWords)
+        }
+      }
       if (!res.ok && res.status === 400 && wantWords) {
         // Word timestamps are the newest thing we ask for, so they are the first suspect for a
         // rejected request: try once without them before judging the error. A server that names

@@ -8,6 +8,8 @@ import {
   SPEED_HEADER,
   chooseSttModel,
   clipSeconds,
+  measuredSeconds,
+  oggOpusSeconds,
   describeUpstreamFailure,
   modelsPayload,
   multipartBoundary,
@@ -1091,5 +1093,20 @@ describe('POST /v1/format', () => {
     const quota = await asAda.fetch('/v1/format', body('hello there everyone'))
     expect(quota.status).toBe(429)
     expect((await quota.json()).error.code).toBe('quota_exceeded')
+  })
+})
+
+describe('Ogg Opus clips', () => {
+  // Encoded by the desktop app's Opus upload path; ffprobe reads 11.0065 s.
+  const ogg = new Uint8Array(readFileSync(new URL('./fixtures/jfk.ogg', import.meta.url)))
+  it('measures length from the last granule, not the byte count', () => {
+    expect(oggOpusSeconds(ogg)).toBeCloseTo(11.0, 1)
+    expect(clipSeconds(ogg)).toBeCloseTo(11.0, 1)
+    expect(measuredSeconds(ogg)).toBeCloseTo(11.0, 1)
+  })
+  it('is null for anything that is not Ogg Opus', () => {
+    expect(oggOpusSeconds(makeWav(1))).toBeNull()
+    expect(oggOpusSeconds(new TextEncoder().encode('OggS but far too short'))).toBeNull()
+    expect(measuredSeconds(new Uint8Array(100))).toBeNull()
   })
 })

@@ -11,6 +11,7 @@ import {
   STT_PASSTHROUGH_FIELDS,
   chooseSttModel,
   clipSeconds,
+  measuredSeconds,
   describeUpstreamOutcome,
   gatewayError,
   limitDetail,
@@ -29,7 +30,6 @@ import {
   upstreamFailureResponse,
   upstreamModelFor,
   upstreamRejectedModel,
-  wavInfo,
   type Env,
   type GatewayIdentity,
   type InferenceKind,
@@ -271,7 +271,7 @@ export async function handleTranscriptions(
   } catch {
     json = undefined
   }
-  const measured = wavInfo(file.data)?.durationSec
+  const measured = measuredSeconds(file.data)
   const billed = measured ?? (typeof json?.duration === 'number' ? json.duration : seconds)
   const upstreamType = res.headers.get('content-type') ?? 'application/json'
   const words = transcriptWords(text, upstreamType)

@@ -557,7 +557,42 @@ export function wavInfo(bytes: Uint8Array): WavInfo | null {
 export function clipSeconds(bytes: Uint8Array): number {
   const info = wavInfo(bytes)
   if (info) return info.durationSec
+  const ogg = oggOpusSeconds(bytes)
+  if (ogg !== null) return ogg
   return bytes.length / 32_000
+}
+
+/** Exact length of a measurable clip (PCM WAV or Ogg Opus); null for anything else. */
+export function measuredSeconds(bytes: Uint8Array): number | null {
+  return wavInfo(bytes)?.durationSec ?? oggOpusSeconds(bytes)
+}
+
+/**
+ * Length of an Ogg Opus file: the last page's granule position (48 kHz samples) less the
+ * OpusHead pre-skip. Null when the bytes are not Ogg Opus. Opus is roughly 19x smaller than
+ * 16 kHz PCM, so the old byte-count estimate would under-count it badly.
+ */
+export function oggOpusSeconds(bytes: Uint8Array): number | null {
+  const isPage = (at: number): boolean =>
+    at + 27 <= bytes.length &&
+    bytes[at] === 0x4f && bytes[at + 1] === 0x67 && bytes[at + 2] === 0x67 && bytes[at + 3] === 0x53
+  if (!isPage(0)) return null
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const headAt = 27 + bytes[26]
+  if (headAt + 19 > bytes.length) return null
+  const magic = String.fromCharCode(...bytes.subarray(headAt, headAt + 8))
+  if (magic !== 'OpusHead') return null
+  const preSkip = view.getUint16(headAt + 10, true)
+  // Scan back for the final page header; a granule of -1 means no packet ends on that page.
+  for (let at = bytes.length - 27; at >= 0; at--) {
+    if (!isPage(at)) continue
+    const lo = view.getUint32(at + 6, true)
+    const hi = view.getUint32(at + 10, true)
+    if (hi === 0xffffffff && lo === 0xffffffff) continue
+    const granule = hi * 2 ** 32 + lo
+    return Math.max(0, granule - preSkip) / 48_000
+  }
+  return null
 }
 
 /** Tokens a chat completion consumed, from the upstream `usage` block or a rough estimate. */

@@ -255,6 +255,10 @@ object SttClient {
     private val verboseUnsupported = ConcurrentHashMap.newKeySet<String>()
     /** Servers that rejected word-level timestamps; they still get verbose_json for segment timings. */
     private val wordTimestampsUnsupported = ConcurrentHashMap.newKeySet<String>()
+    /** Gateways that refused an Ogg Opus upload once; they get WAV from then on. */
+    private val compactUnsupported = ConcurrentHashMap.newKeySet<String>()
+    /** Turns the 16 kHz WAV into Ogg Opus for Murmur's gateway; null result means send the WAV. Swappable in tests. */
+    @Volatile internal var compactEncoder: ((ByteArray) -> ByteArray?)? = app.murmur.android.audio.OggOpus::fromWav
 
     private fun client(timeoutMs: Int): OkHttpClient = baseClient.newBuilder()
         .callTimeout(timeoutMs.toLong().coerceAtLeast(1000), TimeUnit.MILLISECONDS)
@@ -295,10 +299,17 @@ object SttClient {
         val url = "$base/audio/transcriptions"
         val wantVerbose = base !in verboseUnsupported
         val started = System.nanoTime()
+        // Murmur's gateway (the only server that gets a speed mode) takes Ogg Opus: ~19x less to upload.
+        var compact: ByteArray? =
+            if (cfg.speed != null && base !in compactUnsupported) runCatching { compactEncoder?.invoke(wav) }.getOrNull() else null
 
         fun attempt(verbose: Boolean, wordTimestamps: Boolean): okhttp3.Response {
+            val upload = compact
             val form = MultipartBody.Builder().setType(MultipartBody.FORM)
-                .addFormDataPart("file", "audio.wav", wav.toRequestBody("audio/wav".toMediaType()))
+                .apply {
+                    if (upload != null) addFormDataPart("file", "audio.ogg", upload.toRequestBody("audio/ogg".toMediaType()))
+                    else addFormDataPart("file", "audio.wav", wav.toRequestBody("audio/wav".toMediaType()))
+                }
                 .addFormDataPart("model", cfg.model)
                 .addFormDataPart("response_format", if (verbose) "verbose_json" else "json")
                 .addFormDataPart("temperature", "0")
@@ -320,6 +331,17 @@ object SttClient {
         val granularityRejected = Regex("timestamp_granularities|granularit", RegexOption.IGNORE_CASE)
         val wantWords = wantVerbose && base !in wordTimestampsUnsupported
         var res = attempt(wantVerbose, wantWords)
+        if (!res.isSuccessful && compact != null && res.code in setOf(400, 415, 422)) {
+            // A gateway that cannot take Ogg Opus gets the WAV, now and from then on. A 400 about the
+            // response format is left to the checks below.
+            val body = res.peekBody(64 * 1024).string()
+            if (!granularityRejected.containsMatchIn(body) && !verboseRejected.containsMatchIn(body)) {
+                res.close()
+                compactUnsupported.add(base)
+                compact = null
+                res = attempt(wantVerbose, wantWords)
+            }
+        }
         if (!res.isSuccessful && res.code == 400 && wantWords) {
             // Word timestamps are the newest thing we ask for, so they are the first suspect for a
             // rejected request: try once without them before judging the error. A server that names

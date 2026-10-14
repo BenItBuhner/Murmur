@@ -469,20 +469,36 @@ async function upstreamChat(
   opts: ChatOptions,
   budgetMs: number
 ): Promise<{ ok: true; result: ChatResult; tokens: number } | { ok: false; failure: UpstreamFailure }> {
-  const body = JSON.stringify({
-    model,
-    messages,
-    temperature: opts.temperature ?? 0,
-    max_tokens: Math.max(1, Math.min(MAX_COMPLETION_TOKENS, Math.floor(opts.maxTokens ?? 1024))),
-    stream: false
-  })
+  const bodyWith = (reasoning: boolean): string =>
+    JSON.stringify({
+      model,
+      messages,
+      temperature: opts.temperature ?? 0,
+      max_tokens: Math.max(1, Math.min(MAX_COMPLETION_TOKENS, Math.floor(opts.maxTokens ?? 1024))),
+      ...(reasoning && upstream.reasoningEffort ? { reasoning_effort: upstream.reasoningEffort } : {}),
+      stream: false
+    })
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
-  const outcome = await callUpstream(
+  const started = Date.now()
+  let outcome = await callUpstream(
     `${upstream.baseUrl}/chat/completions`,
-    () => ({ method: 'POST', headers, body }),
+    () => ({ method: 'POST', headers, body: bodyWith(true) }),
     budgetMs
   )
+  // An upstream that does not know reasoning_effort gets the call again without it.
+  if (
+    upstream.reasoningEffort &&
+    outcome.kind === 'response' &&
+    outcome.res.status === 400 &&
+    /reasoning/i.test(outcome.text)
+  ) {
+    outcome = await callUpstream(
+      `${upstream.baseUrl}/chat/completions`,
+      () => ({ method: 'POST', headers, body: bodyWith(false) }),
+      Math.max(1000, budgetMs - (Date.now() - started))
+    )
+  }
   if (outcome.kind !== 'response' || !outcome.res.ok)
     return { ok: false, failure: describeUpstreamOutcome('llm', outcome) }
   const text = outcome.text
@@ -504,6 +520,6 @@ async function upstreamChat(
   return {
     ok: true,
     result: { text: answer, finishReason: choice?.finish_reason, model, usage: json.usage },
-    tokens: tokensUsed(json.usage, body.length, text.length)
+    tokens: tokensUsed(json.usage, bodyWith(false).length, text.length)
   }
 }

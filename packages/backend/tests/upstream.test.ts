@@ -399,6 +399,39 @@ describe('the gateway when its provider is slow or down', () => {
     expect((await health(t, 'stt'))?.openUntil).toBeUndefined()
   })
 
+  it('formatting asks for low reasoning, and drops it for an upstream that refuses the field', async () => {
+    quiet()
+    stubEnv({ ...LLM_ENV })
+    const bodies: Array<Record<string, unknown>> = []
+    const answer = (text: string): Response =>
+      new Response(JSON.stringify({ choices: [{ message: { content: text }, finish_reason: 'stop' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    let refuse = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        bodies.push(body)
+        if (refuse && 'reasoning_effort' in body)
+          return new Response('{"error":{"message":"Unknown parameter: reasoning_effort"}}', { status: 400 })
+        return answer('Hello there everyone, how are you?')
+      })
+    )
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const res = await asAda.fetch('/v1/format', formatRequest('hello there everyone how are you'))
+    expect((await res.json()).status).toMatchObject({ outcome: 'used' })
+    expect(bodies[0].reasoning_effort).toBe('low')
+
+    refuse = true
+    bodies.length = 0
+    const again = await asAda.fetch('/v1/format', formatRequest('hello there everyone how are you'))
+    expect((await again.json()).status).toMatchObject({ outcome: 'used' })
+    expect(bodies.map((b) => 'reasoning_effort' in b)).toEqual([true, false])
+  })
+
   it('a formatting provider that is down never fails a dictation: rule-based text, the sentence as the reason, nothing billed', async () => {
     quiet()
     stubEnv({ ...LLM_ENV, MURMUR_INFERENCE_LLM_TIMEOUT_MS: '200' })

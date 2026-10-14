@@ -50,6 +50,8 @@ class ChunkStreamer(
     private val sampleRate: Int,
     private val floorDb: Double,
     private val plan: ChunkPlan = ChunkPlan(),
+    /** Told about each piece as it is sent, in order (for formatting it once its text is in). */
+    private val onPiece: (index: Int, text: Deferred<String>) -> Unit = { _, _ -> },
     private val transcribe: suspend (pcm: ShortArray, index: Int) -> String
 ) {
     private var committed = 0
@@ -68,7 +70,9 @@ class ChunkStreamer(
         }
         val piece = pending.copyOfRange(0, cut)
         val index = pieces.size
-        pieces.add(scope.async { transcribe(piece, index) })
+        val text = scope.async { transcribe(piece, index) }
+        pieces.add(text)
+        onPiece(index, text)
         committed += cut
         nextCheck = (plan.minSec * sampleRate).toInt()
     }

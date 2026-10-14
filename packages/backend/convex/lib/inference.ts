@@ -41,6 +41,13 @@ export interface Upstream {
    * a trade the account makes within its own tier, not a tier of its own.
    */
   fastModel?: string
+  /**
+   * `reasoning_effort` sent with formatting calls (MURMUR_INFERENCE_LLM_REASONING; default `low`,
+   * `off` sends none). Cleanup needs little thought: on gpt-oss-120b, low answered the eval corpus
+   * in 353 ms mean vs 563-996 ms at the provider default, passing 48/61 vs 42-45/61, with ~4x
+   * fewer output tokens (so fewer provider rate limits).
+   */
+  reasoningEffort?: string
 }
 
 export interface Upstreams {
@@ -59,6 +66,12 @@ export type Env = Record<string, string | undefined>
  * A kind is offered only when its URL and model are both set; the key is optional for upstreams
  * that do not need one. `_FAST_MODEL` exists for speech only.
  */
+function reasoningFrom(raw: string | undefined): string | undefined {
+  const value = (raw ?? '').trim().toLowerCase()
+  if (!value) return 'low'
+  return value === 'off' || value === 'none' ? undefined : value
+}
+
 export function readUpstreams(env: Env): Upstreams {
   const read = (prefix: string, speedModes: boolean): Upstream | null => {
     const baseUrl = (env[`${prefix}_URL`] ?? '').trim().replace(/\/+$/, '')
@@ -71,7 +84,8 @@ export function readUpstreams(env: Env): Upstreams {
       apiKey: (env[`${prefix}_KEY`] ?? '').trim(),
       model,
       proModel: proModel || undefined,
-      fastModel: fastModel || undefined
+      fastModel: fastModel || undefined,
+      reasoningEffort: speedModes ? undefined : reasoningFrom(env[`${prefix}_REASONING`])
     }
   }
   return { stt: read('MURMUR_INFERENCE_STT', true), llm: read('MURMUR_INFERENCE_LLM', false) }

@@ -43,6 +43,7 @@ import app.murmur.android.text.FormatContext
 import app.murmur.android.text.FormatInput
 import app.murmur.android.text.FormatOutcome
 import app.murmur.android.text.FormatResult
+import app.murmur.android.text.FormatStyle
 import app.murmur.android.text.FormatStatus
 import app.murmur.android.text.Prompt
 import app.murmur.android.text.STT_BASE_PROMPT
@@ -54,10 +55,12 @@ import app.murmur.android.text.finish
 import app.murmur.android.text.resolveStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -183,6 +186,14 @@ object DictationController {
     private var listeningJob: Job? = null
     /** Long dictations to Murmur go up in pieces while they are spoken. */
     @Volatile private var streamer: ChunkStreamer? = null
+    /** Precision mode: each streamed piece formatted on the gateway while the user keeps talking. */
+    private var pieceFormats: MutableList<Deferred<PieceFormat>> = java.util.Collections.synchronizedList(ArrayList())
+
+    private sealed interface PieceFormat {
+        data object Empty : PieceFormat
+        data object Unavailable : PieceFormat
+        data class Done(val result: FormatResult) : PieceFormat
+    }
     /** Cancelled from the UI thread, replaced from the pipeline: a stale read lets an old job blank the pill early. */
     @Volatile private var resetJob: Job? = null
     @Volatile private var startedAt = 0L
@@ -461,13 +472,32 @@ object DictationController {
      */
     private fun newStreamer(context: Context, s: MurmurSettings): ChunkStreamer {
         val router = InferenceRouter.get(context)
-        val target = scope.async(start = CoroutineStart.LAZY) {
+        val styleAt = scope.async(start = CoroutineStart.LAZY) {
             val pkg = sink?.focusedPackage() ?: ""
-            val style = resolveStyle(s, classifyPackage(pkg, appLabel(context, pkg)))
-            router.stt(speed = style.speed)
+            val app = classifyPackage(pkg, appLabel(context, pkg))
+            Triple(pkg, app, resolveStyle(s, app))
+        }
+        val target = scope.async(start = CoroutineStart.LAZY) { router.stt(speed = styleAt.await().third.speed) }
+        val formats = java.util.Collections.synchronizedList(ArrayList<Deferred<PieceFormat>>())
+        pieceFormats = formats
+        val onPiece: (Int, Deferred<String>) -> Unit = { _, textJob ->
+            formats.add(scope.async {
+                try {
+                    val text = textJob.await()
+                    if (text.isEmpty()) return@async PieceFormat.Empty
+                    val (pkg, app, style) = styleAt.await()
+                    if (style.effectiveMode != FormattingMode.SMART || !murmurFormatting(context)) return@async PieceFormat.Unavailable
+                    val started = System.currentTimeMillis()
+                    val out = router.formatter().format(formatInputFor(text, FormattingMode.SMART, style, app, pkg, s, context, precedingText = null))
+                    Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording")
+                    if (out.status.outcome == FormatOutcome.FAILED) PieceFormat.Unavailable else PieceFormat.Done(out)
+                } catch (e: Exception) {
+                    PieceFormat.Unavailable
+                }
+            })
         }
         val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
-        return ChunkStreamer(scope, { from -> recorder.read(from) }, SAMPLE_RATE, -48.0) { pcm, index ->
+        return ChunkStreamer(scope, { from -> recorder.read(from) }, SAMPLE_RATE, -48.0, onPiece = onPiece) { pcm, index ->
             val resolved = target.await()
             if (Wav.peakDb(pcm) < -48.0) return@ChunkStreamer ""
             val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
@@ -484,6 +514,70 @@ object DictationController {
             Log.i(TAG, "piece $index (${pcm.size / SAMPLE_RATE} s) transcribed in ${System.currentTimeMillis() - started} ms while recording")
             out.output.text.trim()
         }
+    }
+
+    private fun murmurFormatting(context: Context): Boolean =
+        InferenceRouter.get(context).routing().llm == InferenceSource.MURMUR
+
+    private fun formatInputFor(
+        transcript: String,
+        mode: FormattingMode,
+        style: FormatStyle,
+        app: AppContext,
+        focusedPackage: String,
+        s: MurmurSettings,
+        context: Context,
+        precedingText: String?
+    ) = FormatInput(
+        transcript = transcript,
+        mode = mode,
+        context = FormatContext(
+            category = app.category,
+            tone = style.tone,
+            app = focusedPackage.takeIf { it.isNotBlank() && it != context.packageName },
+            language = s.language,
+            precedingText = precedingText,
+            instructions = style.instructions.takeIf { it.isNotEmpty() },
+            dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) },
+            // Snippet triggers are expanded after the model; it must leave them alone.
+            keepVerbatim = s.snippetTriggers
+        ),
+        dictionary = s.dictionaryEntries
+    )
+
+    /**
+     * A streamed precision dictation whose pieces were all formatted while it was spoken: only the
+     * tail is formatted now and the parts are joined. Null to format the whole text as before.
+     */
+    private suspend fun formatWithSpeculation(
+        router: InferenceRouter,
+        input: FormatInput,
+        texts: List<String>?,
+        tail: String?
+    ): FormatResult? {
+        val specs = pieceFormats.toList()
+        pieceFormats = java.util.Collections.synchronizedList(ArrayList())
+        if (texts == null || tail == null || specs.size != texts.size) return null
+        val formatter = router.formatter()
+        if (formatter.source != InferenceSource.MURMUR) return null
+        val tailJob = if (tail.isNotEmpty()) scope.async { runCatching { formatter.format(input.copy(transcript = tail)) } } else null
+        val done = specs.awaitAll()
+        if (done.any { it is PieceFormat.Unavailable }) return null
+        val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
+        if (tailJob != null) parts.add(tailJob.await().getOrElse { return null })
+        if (parts.isEmpty()) return null
+        Log.i(TAG, "${done.size} piece(s) formatted while speaking; tail formatted at release")
+        val worst = parts.maxBy { it.status.outcome.ordinal.let { o -> listOf(0, 2, 1, 3, 4)[o] } }
+        val stages = LinkedHashSet<String>().apply { parts.forEach { addAll(it.stages) } }.toList()
+        return FormatResult(
+            text = parts.map { it.text.trim() }.filter { it.isNotEmpty() }.joinToString(" "),
+            pressEnter = parts.last().pressEnter,
+            status = if (worst.status.outcome == FormatOutcome.USED) worst.status.copy(detail = "${parts.size} pieces, formatted while speaking") else worst.status,
+            modelText = if (parts.all { it.modelText != null }) parts.joinToString(" ") { it.modelText!!.trim() } else null,
+            llmMs = parts.last().llmMs,
+            stages = stages,
+            limit = parts.firstNotNullOfOrNull { it.limit }
+        )
     }
 
     private suspend fun process(
@@ -521,6 +615,8 @@ object DictationController {
             tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
             log = { Log.w(TAG, it) }
         ) { wav, p -> router.transcribe(resolved, wav, p) }
+        var streamedTexts: List<String>? = null
+        var streamedTail: String? = null
         val complete = if (streamed != null && streamed.samples in 1 until pcm.size) {
             // Only the audio after the pieces goes up now, alongside waiting for the pieces.
             val rest = pcm.copyOfRange(streamed.samples, pcm.size)
@@ -532,6 +628,8 @@ object DictationController {
                 runStt(pcm)
             } else {
                 val last = tailResult?.getOrNull()
+                streamedTexts = texts.getOrThrow()
+                streamedTail = last?.output?.text?.trim() ?: ""
                 val joined = (texts.getOrThrow() + listOfNotNull(last?.output?.text)).map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
                 Log.i(TAG, "${texts.getOrThrow().size} piece(s) sent while recording; tail ${rest.size / SAMPLE_RATE} s")
                 val base = last ?: CompleteResult(TranscribeOutput(text = "", latencyMs = 0), 0, 0.0, Coverage(null, 0.0, false))
@@ -615,23 +713,9 @@ object DictationController {
             // Fast is the quick path: the speech model's text gets the rule-based Light cleanup and
             // goes in, the formatting model is never asked, and History says that is why.
             val mode = style.effectiveMode
-            val input = FormatInput(
-                transcript = raw,
-                mode = mode,
-                context = FormatContext(
-                    category = app.category,
-                    tone = style.tone,
-                    app = focusedPackage.takeIf { it.isNotBlank() && it != context.packageName },
-                    language = s.language,
-                    // A copy-only retry has no target field; what is focused is Murmur's own screen.
-                    precedingText = if (run.insert && mode == FormattingMode.SMART) runCatching { sink?.precedingText() }.getOrNull() else null,
-                    instructions = style.instructions.takeIf { it.isNotEmpty() },
-                    dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) },
-                    // Snippet triggers are expanded after the model; it must leave them alone.
-                    keepVerbatim = s.snippetTriggers
-                ),
-                dictionary = s.dictionaryEntries
-            )
+            // A copy-only retry has no target field; what is focused is Murmur's own screen.
+            val preceding = if (run.insert && mode == FormattingMode.SMART) runCatching { sink?.precedingText() }.getOrNull() else null
+            val input = formatInputFor(raw, mode, style, app, focusedPackage, s, context, preceding)
             var formatted: FormatResult
             if (mode != FormattingMode.SMART) {
                 formatted = Engine.formatTranscript(input, null)
@@ -643,7 +727,8 @@ object DictationController {
                 // text goes in and History says why. A Murmur instance past the fair-use cap answers
                 // with the rule-based text itself and says which limit paused the model.
                 formatted = try {
-                    router.formatter().format(input).also { softLimit = it.limit }
+                    (formatWithSpeculation(router, input, streamedTexts, streamedTail) ?: router.formatter().format(input))
+                        .also { softLimit = it.limit }
                 } catch (e: Exception) {
                     Log.w(TAG, "formatting unavailable, using rule-based text: ${e.message}")
                     softLimit = planLimitOf(e)

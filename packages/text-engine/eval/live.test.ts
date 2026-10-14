@@ -34,6 +34,7 @@ async function complete(messages: ChatMessage[], opts: ChatOptions): Promise<Cha
       messages,
       temperature: opts.temperature ?? 0,
       max_tokens: opts.maxTokens ?? 1024,
+      ...(process.env.MURMUR_REASONING ? { reasoning_effort: process.env.MURMUR_REASONING } : {}),
       stream: false
     })
   })

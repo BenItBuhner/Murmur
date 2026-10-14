@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.10': [
+    '**Dictation works again.** 0.6.9 sent dictations to a new inference service that refused signed-in accounts; this release goes back to the account server, which is now fast on its own.'
+  ],
   '0.6.9': [
     '**Dictation is fast again.** Managed models are now served by the Murmur inference service instead of the account server, and speech recognition answers in well under a second. The fast speed mode really is faster now.',
     '**No more stray line breaks.** Line breaks the speech model put in at pauses become spaces; a spoken "new line" or "new paragraph" still breaks the line.'

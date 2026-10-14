@@ -40,9 +40,10 @@ env:
   VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
   MURMUR_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
   # Managed models are served by the inference Worker (apps/inference-worker), so dictation audio
-  # never passes through Convex. Without this the apps fall back to the Convex /v1 gateway.
-  VITE_MURMUR_INFERENCE_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && (vars.MURMUR_INFERENCE_URL || 'https://murmur-inference.benprobennett.workers.dev') || '' }}
-  MURMUR_INFERENCE_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && (vars.MURMUR_INFERENCE_URL || 'https://murmur-inference.benprobennett.workers.dev') || '' }}
+  # never passes through Convex. Unset (the default) keeps the Convex /v1 gateway: 0.6.9 shipped the
+  # Worker by default and it refused signed-in apps, so the Worker is opt-in via the repo variable.
+  VITE_MURMUR_INFERENCE_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_INFERENCE_URL || '' }}
+  MURMUR_INFERENCE_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_INFERENCE_URL || '' }}
   MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
   MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
   # The in-app updater (desktop and Android) follows this repository's GitHub Releases, so a fork

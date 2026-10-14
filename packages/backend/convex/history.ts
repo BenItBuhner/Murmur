@@ -134,7 +134,7 @@ export const push = authedMutation({
   handler: async (ctx, args) => {
     if (args.entries.length > LIMITS.batch) throw new Error(`Push at most ${LIMITS.batch} entries per call`)
     const meta = await historyMetaFor(ctx)
-    let count = meta?.count ?? 0
+    let count = meta?.count ?? ctx.user.historyCount ?? 0
     let inserted = 0
     for (const entry of args.entries) {
       if (!entry.entryId.trim() || !entry.finalText.trim()) continue
@@ -188,7 +188,7 @@ export const remove = authedMutation({
     if (!doc) return false
     await ctx.db.delete('historyEntries', doc._id)
     const meta = await historyMetaFor(ctx)
-    await setHistoryCount(ctx, meta, (meta?.count ?? 1) - 1)
+    await setHistoryCount(ctx, meta, (meta?.count ?? ctx.user.historyCount ?? 1) - 1)
     return true
   }
 })

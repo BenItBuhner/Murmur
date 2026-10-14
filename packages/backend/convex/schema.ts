@@ -38,6 +38,8 @@ export default defineSchema({
     subscription: v.optional(subscriptionValidator),
     /** Account-level onboarding. Device-level steps (microphone, shortcut) are repeated per device. */
     onboardingCompletedAt: v.optional(v.number()),
+    /** Deprecated: the entry count moved to historyMeta. Kept so existing rows still validate; read once to seed historyMeta. */
+    historyCount: v.optional(v.number()),
     onboardingVersion: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()

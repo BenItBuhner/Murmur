@@ -113,6 +113,9 @@ object Verify {
             if (shared.toDouble() / outSet.size < 0.45) return Verdict(false, "diverged")
         }
 
+        // Content said twice that the speaker said once (a looping or padding model).
+        if (repeatedRuns(raw, text, 4).isNotEmpty()) return Verdict(false, "repeated")
+
         for (phrase in keepVerbatim) {
             val p = phrase.trim().lowercase()
             if (p.isNotEmpty() && raw.lowercase().contains(p) && !text.lowercase().contains(p)) {
@@ -132,5 +135,58 @@ object Verify {
         }
         if (withoutMarkers != expected && withMarkers != expected) return Verdict(false, "numbers-changed", expected, withoutMarkers)
         return Verdict(true)
+    }
+
+    // ---- repetition and layout (mirrors verify.ts) -------------------------------------------
+
+    private val RUN_STRIP = Regex("[^\\p{L}\\p{N}' ]+")
+    private fun runWords(s: String): List<String> =
+        RUN_STRIP.replace(s.lowercase(), " ").split(Regex("\\s+")).filter { it.isNotEmpty() }
+
+    private fun runCounts(w: List<String>, n: Int): Map<String, Int> {
+        val m = HashMap<String, Int>()
+        for (i in 0..(w.size - n)) {
+            if (i < 0) break
+            val k = w.subList(i, i + n).joinToString(" ")
+            m[k] = (m[k] ?: 0) + 1
+        }
+        return m
+    }
+
+    /** Word runs the answer repeats more often than the transcript did (see verify.ts). */
+    fun repeatedRuns(transcript: String, text: String, n: Int = 3): List<String> {
+        val a = runWords(transcript)
+        val b = runWords(text)
+        val out = ArrayList<String>()
+        val inA = if (a.size >= n) runCounts(a, n) else emptyMap()
+        if (b.size >= n) for ((k, v) in runCounts(b, n)) if (v >= 2 && v > (inA[k] ?: 0)) out.add(k)
+        val doubledInA = HashSet<String>()
+        for (i in 1 until a.size) if (a[i] == a[i - 1]) doubledInA.add(a[i])
+        for (i in 1 until b.size) if (b[i] == b[i - 1] && b[i].length > 2 && b[i] !in doubledInA) out.add("${b[i]} ${b[i]}")
+        return out
+    }
+
+    private val LAYOUT_CUE = Regex(
+        "\\n|\\b(?:new|next) (?:line|paragraph)\\b|\\b(?:bullet|number) (?:one|two|1|2)\\b|\\b(?:first(?:ly)?|second(?:ly)?)\\b[\\s\\S]*\\b(?:second(?:ly)?|third(?:ly)?|finally|lastly)\\b|:\\s*\\S",
+        RegexOption.IGNORE_CASE
+    )
+    private val LIST_LINE = Regex("^\\s*(?:[-*•]|\\d{1,2}[.)])\\s+", RegexOption.MULTILINE)
+    private val DOUBLED_RUN = Regex(
+        "(?<![\\p{L}\\p{N}])((?:[\\p{L}\\p{N}][\\p{L}\\p{N}'’.@/-]*[\\s,]+){0,5}[\\p{L}\\p{N}][\\p{L}\\p{N}'’.@/-]*)(?:[\\s,.;]+\\1)+(?![\\p{L}\\p{N}])",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Repairs that cost no round trip, applied before the invariants (see verify.ts). */
+    fun repairOutput(transcript: String, text: String): String {
+        val inInput = runWords(transcript).joinToString(" ")
+        var out = DOUBLED_RUN.replace(text) { m ->
+            val run = m.groupValues[1]
+            if (Regex("\\d").containsMatchIn(run)) return@replace m.value
+            val key = runWords(run).joinToString(" ")
+            if (inInput.contains("$key $key")) m.value else run
+        }
+        if (out.contains('\n') && !LAYOUT_CUE.containsMatchIn(transcript) && !LIST_LINE.containsMatchIn(out))
+            out = out.replace(Regex("[ \\t]*\\n+[ \\t]*"), " ")
+        return out.trim()
     }
 }

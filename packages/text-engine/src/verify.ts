@@ -72,6 +72,7 @@ export type VerifyReason =
   | 'diverged'
   | 'numbers-changed'
   | 'verbatim-lost'
+  | 'repeated'
 
 export interface Verdict {
   ok: boolean
@@ -135,6 +136,9 @@ export function verifyOutput(transcript: string, text: string, opts: VerifyOptio
     if (shared / outSet.size < 0.45) return { ok: false, reason: 'diverged' }
   }
 
+  // Content said twice that the speaker said once (a looping or padding model).
+  if (repeatedRuns(raw, text, 4).length) return { ok: false, reason: 'repeated' }
+
   // Phrases the caller needs verbatim (a snippet trigger the client expands afterwards).
   for (const phrase of opts.keepVerbatim ?? []) {
     const p = phrase.trim().toLowerCase()
@@ -158,4 +162,70 @@ export function verifyOutput(transcript: string, text: string, opts: VerifyOptio
   if (withoutMarkers !== expected && withMarkers !== expected)
     return { ok: false, reason: 'numbers-changed', expected, actual: withoutMarkers }
   return { ok: true }
+}
+
+// ---- repetition and layout ------------------------------------------------------------------
+
+const runWords = (s: string): string[] =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}' ]+/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+
+function runCounts(w: readonly string[], n: number): Map<string, number> {
+  const m = new Map<string, number>()
+  for (let i = 0; i + n <= w.length; i++) {
+    const k = w.slice(i, i + n).join(' ')
+    m.set(k, (m.get(k) ?? 0) + 1)
+  }
+  return m
+}
+
+/**
+ * Word runs the answer repeats more often than the transcript did: any three-word run, or a word
+ * doubled in place ("LibriVox.org LibriVox.org"). A model that loops, or pads a short piece by
+ * saying part of it twice, shows up here; a speaker who repeated themselves does not.
+ */
+export function repeatedRuns(transcript: string, text: string, n = 3): string[] {
+  const a = runWords(transcript)
+  const b = runWords(text)
+  const out: string[] = []
+  const inA = runCounts(a, n)
+  for (const [k, v] of runCounts(b, n)) if (v >= 2 && v > (inA.get(k) ?? 0)) out.push(k)
+  const doubledInA = new Set<string>()
+  for (let i = 1; i < a.length; i++) if (a[i] === a[i - 1]) doubledInA.add(a[i])
+  for (let i = 1; i < b.length; i++)
+    if (b[i] === b[i - 1] && b[i].length > 2 && !doubledInA.has(b[i])) out.push(`${b[i]} ${b[i]}`)
+  return out
+}
+
+/** The speaker asked for layout: a dictated break, a break already in the text, or a list. */
+const LAYOUT_CUE =
+  /\n|\b(?:new|next) (?:line|paragraph)\b|\b(?:bullet|number) (?:one|two|1|2)\b|\b(?:first(?:ly)?|second(?:ly)?)\b[\s\S]*\b(?:second(?:ly)?|third(?:ly)?|finally|lastly)\b|:\s*\S/i
+const LIST_LINE = /^\s*(?:[-*•]|\d{1,2}[.)])\s+/m
+
+/**
+ * Repairs that cost no round trip, applied before the invariants:
+ *   - a word or short run the model said twice in a row, where the transcript did not, is said once;
+ *   - line breaks in a dictation that asked for no layout become spaces (lists are kept).
+ */
+export function repairOutput(transcript: string, text: string): string {
+  let out = text
+  {
+    // Immediate repeats of 1–6 words ("a b c a b c" -> "a b c"), only where the transcript has none.
+    out = out.replace(
+      /(?<![\p{L}\p{N}])((?:[\p{L}\p{N}][\p{L}\p{N}'’.@/-]*[\s,]+){0,5}[\p{L}\p{N}][\p{L}\p{N}'’.@/-]*)(?:[\s,.;]+\1)+(?![\p{L}\p{N}])/giu,
+      (match, run: string) => {
+        // Numbers are the speaker's: a repeated amount was read out on purpose (see numbers.ts).
+        if (/\d/.test(run)) return match
+        const key = runWords(run).join(' ')
+        const inInput = runWords(transcript).join(' ')
+        return inInput.includes(`${key} ${key}`) ? match : run
+      }
+    )
+  }
+  if (out.includes('\n') && !LAYOUT_CUE.test(transcript) && !LIST_LINE.test(out))
+    out = out.replace(/[ \t]*\n+[ \t]*/g, ' ')
+  return out.trim()
 }

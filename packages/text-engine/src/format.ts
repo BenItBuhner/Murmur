@@ -3,7 +3,7 @@ import { basicCleanup, prepareTranscript } from './cleanup'
 import { buildFormatMessages, maxTokensFor } from './prompt'
 import { countWords, isMeaningful } from './text'
 import type { ChatResult, Complete, FormatContext, FormatResult, FormattingMode } from './types'
-import { cleanModelOutput, verifyOutput } from './verify'
+import { cleanModelOutput, verifyOutput, repairOutput } from './verify'
 
 export interface FormatInput {
   /** The transcript as the speech model returned it. */
@@ -201,7 +201,7 @@ export async function formatTranscript(
         firstReason
       )
     }
-    const text = cleanModelOutput(res.text, prepared.text)
+    const text = repairOutput(prepared.text, cleanModelOutput(res.text, prepared.text))
     lastModelText = text
     const verdict =
       res.finishReason === 'length'

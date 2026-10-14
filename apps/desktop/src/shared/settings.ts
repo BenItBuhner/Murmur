@@ -287,7 +287,7 @@ export const settingsSchema = z.object({
   /** Device-local update preferences (never synced; each install decides for itself). */
   updates: z
     .object({
-      /** Look for new releases on start and every few hours. */
+      /** Look for new releases on start and every hour. */
       autoCheck: z.boolean().default(true),
       /**
        * Download updates in the background and install them without asking once no dictation is

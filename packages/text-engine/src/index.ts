@@ -106,3 +106,4 @@ export {
   type NotCleanReason
 } from './clean'
 export { formatTranscript, type FormatInput } from './format'
+export { dropSilentSegments, isSilenceHallucination } from './hallucination'

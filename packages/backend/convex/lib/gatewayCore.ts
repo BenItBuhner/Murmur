@@ -1,4 +1,5 @@
 import { formatTranscript } from '../../../text-engine/src/format'
+import { dropSilentSegments } from '../../../text-engine/src/hallucination'
 import { sttLanguageField } from '../../../text-engine/src/languages'
 import type { ChatMessage, ChatOptions, ChatResult } from '../../../text-engine/src/types'
 import {
@@ -211,6 +212,10 @@ export async function handleTranscriptions(
   })
   if (!gate.ok) return gateRefusal(hooks, gate, 'stt')
 
+  // A stock phrase said to silence ("Thank you.") is dropped by segment, so the model is asked for
+  // its verbose answer whenever the client wants JSON; the client still gets the shape it asked for.
+  const asked = (fields.response_format?.[0] ?? 'json').trim().toLowerCase()
+  let upstreamFormat = asked === 'json' ? 'verbose_json' : asked
   const buildForm = (upstreamModel: string): FormData => {
     const form = new FormData()
     form.append(
@@ -220,12 +225,13 @@ export async function handleTranscriptions(
     )
     form.append('model', upstreamModel)
     for (const [key, values] of Object.entries(fields)) {
-      if (!STT_PASSTHROUGH_FIELDS.has(key)) continue
+      if (!STT_PASSTHROUGH_FIELDS.has(key) || key === 'response_format') continue
       // Clients speak to the Murmur alias and send the singular `language`; an OpenAI gpt-transcribe
       // upstream takes `languages[]` instead.
       const upstreamKey = key === 'language' ? sttLanguageField(upstreamModel) : key
       for (const value of values) form.append(upstreamKey, value)
     }
+    form.append('response_format', upstreamFormat)
     return form
   }
   const headers: Record<string, string> = {}
@@ -246,6 +252,7 @@ export async function handleTranscriptions(
   const choice = chooseSttModel(upstream, gate.plan, speed)
   let ran: SpeedMode = choice.speed
   let fallback: SpeedFallback | undefined = choice.fallback
+  let usedModel = choice.model
   let attempt = await transcribe(choice.model)
   if (attempt.kind !== 'response')
     return providerFailure(hooks, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
@@ -259,19 +266,53 @@ export async function handleTranscriptions(
     )
     ran = 'normal'
     fallback = 'model_not_found'
+    usedModel = choice.normalModel
     attempt = await transcribe(choice.normalModel)
     if (attempt.kind !== 'response')
       return providerFailure(hooks, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
   }
-  const { res, text } = attempt
+  // An upstream without verbose answers: ask again for exactly what the client asked for.
+  if (
+    !attempt.res.ok &&
+    upstreamFormat !== asked &&
+    attempt.res.status === 400 &&
+    /response_format|verbose/i.test(attempt.text)
+  ) {
+    upstreamFormat = asked
+    attempt = await transcribe(usedModel)
+    if (attempt.kind !== 'response')
+      return providerFailure(hooks, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
+  }
+  const { res } = attempt
+  let text = attempt.text
   if (!res.ok) return providerFailure(hooks, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
-  let json: { duration?: number } | undefined
+  let json: { duration?: number; text?: unknown; segments?: unknown } | undefined
   try {
-    json = JSON.parse(text) as { duration?: number }
+    json = JSON.parse(text) as { duration?: number; text?: unknown; segments?: unknown }
   } catch {
     json = undefined
   }
   const measured = measuredSeconds(file.data)
+  let silenced = 0
+  if (json && (upstreamFormat === 'verbose_json' || upstreamFormat === 'json')) {
+    const clipSec = measured ?? (typeof json.duration === 'number' ? json.duration : seconds)
+    const dropped = dropSilentSegments(json, clipSec)
+    if (dropped) {
+      silenced = (Array.isArray(json.segments) ? json.segments.length : 1) - (dropped.segments?.length ?? 0)
+      json = { ...json, text: dropped.text, ...(dropped.segments ? { segments: dropped.segments } : {}) }
+    }
+    // The client asked for JSON: the plain answer, as before.
+    const verbose = Array.isArray(json.segments)
+    if (asked === 'json' && verbose) {
+      const { segments: _segments, ...rest } = json
+      void _segments
+      // The plain answer, as before: the text (and whatever the upstream adds) without segments.
+      text = JSON.stringify({
+        text: typeof rest.text === 'string' ? rest.text : '',
+        ...(typeof rest.duration === 'number' ? { duration: rest.duration } : {})
+      })
+    } else if (dropped) text = JSON.stringify(json)
+  }
   const billed = measured ?? (typeof json?.duration === 'number' ? json.duration : seconds)
   const upstreamType = res.headers.get('content-type') ?? 'application/json'
   const words = transcriptWords(text, upstreamType)
@@ -279,7 +320,7 @@ export async function handleTranscriptions(
   await providerAnswered(hooks, 'stt', gate)
   const speedNote = fallback ? `${ran} (asked ${speed}, ${fallback})` : ran
   console.log(
-    `[gateway] stt plan=${gate.plan} speed=${speedNote} seconds=${billed.toFixed(1)} words=${words} upstreamMs=${Date.now() - started}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}`
+    `[gateway] stt plan=${gate.plan} speed=${speedNote} seconds=${billed.toFixed(1)} words=${words}${silenced ? ` silenced=${silenced}` : ''} upstreamMs=${Date.now() - started}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}`
   )
   const responseHeaders: Record<string, string> = { 'content-type': upstreamType, [SPEED_HEADER]: ran }
   if (fallback) responseHeaders[SPEED_FALLBACK_HEADER] = fallback

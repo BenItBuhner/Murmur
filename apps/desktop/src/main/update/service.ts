@@ -71,7 +71,7 @@ export interface UpdateServiceDeps {
   checksumRetryDelaysMs?: number[]
 }
 
-export const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+export const DEFAULT_CHECK_INTERVAL_MS = 60 * 60 * 1000
 export const DEFAULT_INITIAL_DELAY_MS = 20_000
 export const DEFAULT_AUTO_INSTALL_DELAY_MS = 4_000
 export const DEFAULT_CHECKSUM_RETRY_DELAYS_MS = [1_000, 3_000]
@@ -81,7 +81,7 @@ export const DEFAULT_CHECKSUM_RETRY_DELAYS_MS = [1_000, 3_000]
  *
  *   idle -> checking -> up-to-date | available -> downloading -> ready -> installing -> (relaunch)
  *
- * Checks run shortly after start and every few hours when `updates.autoCheck` is on, and whenever
+ * Checks run shortly after start and every hour when `updates.autoCheck` is on, and whenever
  * the user asks. With `updates.autoInstall` the asset is downloaded in the background and, once
  * verified against the checksum the release carries for it, installed as soon as no dictation is
  * running. Installs that cannot replace themselves stop at `ready` and hand the file to the user.

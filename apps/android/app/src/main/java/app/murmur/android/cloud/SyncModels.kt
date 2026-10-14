@@ -301,6 +301,18 @@ data class PreferencesDto(
     val updatedAt: Double = 0.0
 )
 
+/** `bootstrap:get`: the whole account in one answer, fetched on connect, focus, after mutations and on Sync now. */
+@Serializable
+data class BootstrapDto(
+    val me: UserDto? = null,
+    val preferences: PreferencesDto? = null,
+    val appRules: List<AppRuleDto> = emptyList(),
+    val snippets: List<SnippetDto> = emptyList(),
+    val dictionary: List<DictionaryEntryDto> = emptyList(),
+    val devices: List<DeviceDto> = emptyList(),
+    val stats: StatsDto? = null
+)
+
 /**
  * The preferences that follow the user across devices (desktop: `SyncedPreferences`): the style
  * section, the language and whether dictation history is kept in the account. The last one is an

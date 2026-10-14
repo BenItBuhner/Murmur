@@ -12,7 +12,7 @@ import {
   type AppRuleInput
 } from './lib/validators'
 
-function toDto(doc: Doc<'appRules'>): AppRuleDto {
+export function toDto(doc: Doc<'appRules'>): AppRuleDto {
   return {
     id: doc._id,
     match: doc.match,

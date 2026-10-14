@@ -10,7 +10,7 @@ import {
   type PreferencesDto
 } from './lib/validators'
 
-function toDto(doc: Doc<'preferences'>): PreferencesDto {
+export function toDto(doc: Doc<'preferences'>): PreferencesDto {
   return { formatting: doc.formatting, language: doc.language, sync: doc.sync, updatedAt: doc.updatedAt }
 }
 

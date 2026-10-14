@@ -123,6 +123,7 @@ export async function upsertUser(
 export async function purgeUserData(ctx: MutationCtx, userId: Id<'users'>): Promise<void> {
   const [
     devices,
+    deviceLiveness,
     dictionaryEntries,
     snippets,
     appRules,
@@ -135,6 +136,10 @@ export async function purgeUserData(ctx: MutationCtx, userId: Id<'users'>): Prom
     ctx.db
       .query('devices')
       .withIndex('by_user', (q) => q.eq('userId', userId))
+      .collect(),
+    ctx.db
+      .query('deviceLiveness')
+      .withIndex('by_user_and_deviceId', (q) => q.eq('userId', userId))
       .collect(),
     ctx.db
       .query('dictionaryEntries')
@@ -170,6 +175,7 @@ export async function purgeUserData(ctx: MutationCtx, userId: Id<'users'>): Prom
       .collect()
   ])
   for (const doc of devices) await ctx.db.delete('devices', doc._id)
+  for (const doc of deviceLiveness) await ctx.db.delete('deviceLiveness', doc._id)
   for (const doc of dictionaryEntries) await ctx.db.delete('dictionaryEntries', doc._id)
   for (const doc of snippets) await ctx.db.delete('snippets', doc._id)
   for (const doc of appRules) await ctx.db.delete('appRules', doc._id)

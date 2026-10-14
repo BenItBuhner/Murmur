@@ -10,6 +10,7 @@
 
 import type * as appRules from "../appRules.js";
 import type * as billing from "../billing.js";
+import type * as bootstrap from "../bootstrap.js";
 import type * as devices from "../devices.js";
 import type * as dictionary from "../dictionary.js";
 import type * as entitlements from "../entitlements.js";
@@ -46,6 +47,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   appRules: typeof appRules;
   billing: typeof billing;
+  bootstrap: typeof bootstrap;
   devices: typeof devices;
   dictionary: typeof dictionary;
   entitlements: typeof entitlements;

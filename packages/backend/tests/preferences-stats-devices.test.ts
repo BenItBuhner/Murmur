@@ -160,7 +160,11 @@ describe('devices', () => {
 
     const list = await asAda.query(api.devices.list, {})
     expect(list).toHaveLength(2)
-    expect(list[0].deviceId).toBe('desk')
+    // lastSeenAt is joined from deviceLiveness, which the rename heartbeat did not refresh
+    // (it is inside the ten-minute throttle), so the order here is the last written liveness,
+    // not the most recent call: phone registered after desk.
+    expect(list.map((d) => d.deviceId).sort()).toEqual(['desk', 'phone'])
+    expect(list.every((d) => d.lastSeenAt > 0)).toBe(true)
     expect(await t.withIdentity(bob).query(api.devices.list, {})).toEqual([])
     expect(await t.withIdentity(bob).mutation(api.devices.remove, { deviceId: 'desk' })).toBe(false)
     expect(await asAda.mutation(api.devices.remove, { deviceId: 'phone' })).toBe(true)
@@ -173,5 +177,48 @@ describe('devices', () => {
         appVersion: '1'
       })
     ).rejects.toThrow(/deviceId/)
+  })
+
+  it('throttles liveness and leaves the devices row alone on a routine heartbeat', async () => {
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    await asAda.mutation(api.devices.heartbeat, {
+      deviceId: 'desk',
+      name: 'Desk',
+      platform: 'win32',
+      appVersion: '0.1.0'
+    })
+    const devicesBefore = await t.run((ctx) => ctx.db.query('devices').collect())
+    const livenessBefore = await t.run((ctx) => ctx.db.query('deviceLiveness').collect())
+    expect(livenessBefore).toHaveLength(1)
+
+    // Seconds later, nothing changed: the heartbeat must be read-only, so no doc that
+    // devices.list or any other subscription reads is patched and nothing re-runs.
+    const dto = await asAda.mutation(api.devices.heartbeat, {
+      deviceId: 'desk',
+      name: 'Desk',
+      platform: 'win32',
+      appVersion: '0.1.0'
+    })
+    expect(await t.run((ctx) => ctx.db.query('devices').collect())).toEqual(devicesBefore)
+    expect(await t.run((ctx) => ctx.db.query('deviceLiveness').collect())).toEqual(livenessBefore)
+    expect(dto.lastSeenAt).toBe(livenessBefore[0].lastSeenAt)
+
+    // A rename applies at once (a registration change is what devices.list exists to show), but
+    // it still does not refresh liveness inside the throttle window.
+    const renamed = await asAda.mutation(api.devices.heartbeat, {
+      deviceId: 'desk',
+      name: 'Desk (renamed)',
+      platform: 'win32',
+      appVersion: '0.1.0'
+    })
+    expect(renamed.name).toBe('Desk (renamed)')
+    expect((await t.run((ctx) => ctx.db.query('deviceLiveness').collect()))[0].lastSeenAt).toBe(
+      livenessBefore[0].lastSeenAt
+    )
+
+    // Removing the device cleans up its liveness row too.
+    expect(await asAda.mutation(api.devices.remove, { deviceId: 'desk' })).toBe(true)
+    expect(await t.run((ctx) => ctx.db.query('deviceLiveness').collect())).toEqual([])
   })
 })

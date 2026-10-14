@@ -5,7 +5,7 @@ import { LIMITS } from './lib/limits'
 import { normalizeKey, requireMaxLength, requireNonEmpty } from './lib/normalize'
 import { snippetDtoValidator, snippetInputValidator, type SnippetDto, type SnippetInput } from './lib/validators'
 
-function toDto(doc: Doc<'snippets'>): SnippetDto {
+export function toDto(doc: Doc<'snippets'>): SnippetDto {
   return {
     id: doc._id,
     trigger: doc.trigger,

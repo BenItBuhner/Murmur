@@ -56,6 +56,8 @@ private const val HISTORY_MAX_PAGES = 10
 private const val STATS_BATCH = 50
 /** A one-shot read that gets no answer in this long is given up until the next cue. */
 private const val ONE_SHOT_TIMEOUT_MS = 30_000L
+/** Quiet time after a bootstrap fetch before app visibility asks for another. */
+private const val BOOTSTRAP_FOCUS_DEBOUNCE_MS = 15_000L
 /** Quiet time after dictations before the status and the history are asked again. */
 private const val STATUS_REFRESH_DEBOUNCE_MS = 30_000L
 private const val HISTORY_FETCH_DEBOUNCE_MS = 2_000L
@@ -172,6 +174,11 @@ class CloudSync internal constructor(
     /** The instance predates `history:since` / `stats:recordMany`: the old calls are used. */
     @Volatile private var legacyHistory = false
     @Volatile private var legacyStats = false
+    /** The instance predates `bootstrap:get`: the seven live subscriptions are held instead. */
+    @Volatile private var legacyBootstrap = false
+    private var bootstrapFetching = false
+    private var bootstrapAgain = false
+    private var lastBootstrapAt = 0L
     /** Consecutive failed flushes, for the backoff; any success resets it. */
     private var flushFailures = 0
     /** Failed attempts per op id while connected (in memory: a restart gives every op a fresh start). */
@@ -279,7 +286,10 @@ class CloudSync internal constructor(
     fun onAppVisible() {
         if (!config.enabled || !signedIn) return
         nudge("app visible")
-        if (authenticated) scope.launch { flush() }
+        if (authenticated) scope.launch {
+            flush()
+            fetchBootstrap(generation)
+        }
     }
 
     // ---- auth ---------------------------------------------------------------------------------
@@ -527,108 +537,16 @@ class CloudSync internal constructor(
         settings.update(SettingsOrigin.CLOUD) { it.copy(importedForUserId = userId) }
     }
 
-    // ---- subscriptions ------------------------------------------------------------------------
+    // ---- the account snapshot -------------------------------------------------------------------
 
     private fun subscribe(gen: Int) {
         val convex = client ?: return
         subscriptions?.cancel()
         subscriptions = scope.launch {
-            launch {
-                convex.subscribe<List<DictionaryEntryDto>>("dictionary:list").collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess { list ->
-                        delivered("dictionary:list")
-                        serverDictionary = list
-                        outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
-                        applyDerived()
-                    }.onFailure { noteFailure("dictionary:list", it) }
-                    publish()
-                }
-            }
-            launch {
-                convex.subscribe<List<SnippetDto>>("snippets:list").collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess { list ->
-                        delivered("snippets:list")
-                        serverSnippets = list
-                        outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
-                        applyDerived()
-                    }.onFailure { noteFailure("snippets:list", it) }
-                    publish()
-                }
-            }
-            launch {
-                convex.subscribe<List<AppRuleDto>>("appRules:list").collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess { list ->
-                        delivered("appRules:list")
-                        serverAppRules = list
-                        outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
-                        applyDerived()
-                    }.onFailure { noteFailure("appRules:list", it) }
-                    publish()
-                }
-            }
-            launch {
-                convex.subscribe<PreferencesDto?>("preferences:get").collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess { prefs ->
-                        delivered("preferences:get")
-                        serverPreferences = prefs
-                        if (!preferencesLoaded) {
-                            preferencesLoaded = true
-                            // First contact: a device without account preferences pushes its own.
-                            if (prefs == null) {
-                                val local = StylePreferences.of(settings.get())
-                                outbox.update { SyncReducers.queuePreferences(it, local, newOpId()) }
-                                launch { flush() }
-                            }
-                        }
-                        applyDerived()
-                    }.onFailure { noteFailure("preferences:get", it) }
-                    publish()
-                }
-            }
-            launch {
-                convex.subscribe<UserDto?>("users:me").collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess {
-                        delivered("users:me")
-                        val before = user
-                        user = it
-                        // A plan or trial change moves the allowance: ask for the status again.
-                        if (before != null && it != null && (before.plan != it.plan || before.trialEndsAt != it.trialEndsAt)) refreshStatus(gen)
-                    }.onFailure { noteFailure("users:me", it) }
-                    publish()
-                }
-            }
-            launch {
-                convex.subscribe<List<DeviceDto>>("devices:list").collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess {
-                        delivered("devices:list")
-                        devices = it
-                    }.onFailure { noteFailure("devices:list", it) }
-                    publish()
-                }
-            }
-            launch {
-                convex.subscribe<StatsDto?>("stats:get").collect { result ->
-                    if (gen != generation) return@collect
-                    result.onSuccess {
-                        delivered("stats:get")
-                        // Stats move when any device finishes a dictation: the cue to look for new
-                        // history, instead of keeping a 200-entry history query live on every device.
-                        val moved = serverStats != null && it?.totalSessions != serverStats?.totalSessions
-                        serverStats = it
-                        if (moved) {
-                            fetchHistory(gen, HISTORY_FETCH_DEBOUNCE_MS)
-                            refreshStatus(gen, STATUS_REFRESH_DEBOUNCE_MS)
-                        }
-                    }.onFailure { noteFailure("stats:get", it) }
-                    publish()
-                }
-            }
+            // Detached: the snapshot read must not hold back the status read and the day loop
+            // while it waits for its answer (an instance that never answers must not stall them).
+            if (!legacyBootstrap) scope.launch { fetchBootstrap(gen, force = true) }
+            if (legacyBootstrap) legacySubscriptions(convex, gen)
             refreshStatus(gen)
             // The rolling windows are per UTC day: ask again when it turns.
             launch {
@@ -640,6 +558,189 @@ class CloudSync internal constructor(
         }
         stopHistorySubscription()
         updateHistorySubscription(gen)
+    }
+
+    /**
+     * Everything the account holds, in one answer (`bootstrap:get`). Fetched on connect, when the
+     * app comes to the front, after the outbox drains and on Sync now, and kept in the server
+     * mirror — instead of seven live subscriptions that each re-read and re-sent their whole
+     * result after every write they could see, which was most of Murmur's Convex function-call
+     * load. An instance from before the endpoint falls back to those subscriptions.
+     */
+    private suspend fun fetchBootstrap(gen: Int, force: Boolean = false) {
+        val convex = client ?: return
+        // No `authenticated` guard here: the connect path fetches the moment the account
+        // connection starts (mirroring the subscriptions it replaces, which never waited for
+        // the flag), and every other caller has already checked it.
+        if (!force && System.currentTimeMillis() - lastBootstrapAt < BOOTSTRAP_FOCUS_DEBOUNCE_MS) return
+        if (bootstrapFetching) {
+            bootstrapAgain = true
+            return
+        }
+        bootstrapFetching = true
+        try {
+            val answer = once<BootstrapDto>(convex, "bootstrap:get") ?: return
+            answer.onSuccess { boot ->
+                if (gen != generation) return@onSuccess
+                lastBootstrapAt = System.currentTimeMillis()
+                delivered("bootstrap:get")
+                applyBootstrap(boot, gen)
+            }.onFailure { e ->
+                if (gen != generation) return@onFailure
+                if (isMissingFunction(e)) {
+                    Log.i(TAG, "instance has no bootstrap:get; holding the live subscriptions instead")
+                    legacyBootstrap = true
+                } else {
+                    noteFailure("bootstrap:get", e)
+                }
+                publish()
+            }
+        } finally {
+            bootstrapFetching = false
+            if (bootstrapAgain && gen == generation) {
+                bootstrapAgain = false
+                fetchBootstrap(gen, force = true)
+            }
+        }
+    }
+
+    /** One answer applied: the same writes the seven subscriptions made, minus the re-runs. */
+    private fun applyBootstrap(boot: BootstrapDto, gen: Int) {
+        val before = user
+        val prevStats = serverStats
+        user = boot.me
+        serverPreferences = boot.preferences
+        if (!preferencesLoaded) {
+            preferencesLoaded = true
+            // First contact: a device without account preferences pushes its own.
+            if (boot.preferences == null) {
+                val local = StylePreferences.of(settings.get())
+                outbox.update { SyncReducers.queuePreferences(it, local, newOpId()) }
+                scope.launch { flush() }
+            }
+        }
+        serverDictionary = boot.dictionary
+        outbox.update { SyncReducers.pruneAcked(it, boot.dictionary.map { d -> d.id }.toSet()) }
+        serverSnippets = boot.snippets
+        outbox.update { SyncReducers.pruneAcked(it, boot.snippets.map { d -> d.id }.toSet()) }
+        serverAppRules = boot.appRules
+        outbox.update { SyncReducers.pruneAcked(it, boot.appRules.map { d -> d.id }.toSet()) }
+        serverStats = boot.stats
+        devices = boot.devices
+        // A plan or trial change moves the allowance: ask for the status again.
+        val me = boot.me
+        if (before != null && me != null && (before.plan != me.plan || before.trialEndsAt != me.trialEndsAt))
+            refreshStatus(gen)
+        // Stats move when any device finishes a dictation: the cue to look for new history,
+        // instead of keeping a 200-entry history query live on every device.
+        if (prevStats != null && boot.stats?.totalSessions != prevStats?.totalSessions) {
+            fetchHistory(gen, HISTORY_FETCH_DEBOUNCE_MS)
+            refreshStatus(gen, STATUS_REFRESH_DEBOUNCE_MS)
+        }
+        applyDerived()
+        publish()
+    }
+
+    // ---- legacy subscriptions --------------------------------------------------------------------
+
+    /** From before `bootstrap:get`: the seven live subscriptions this engine used to hold. */
+    private fun CoroutineScope.legacySubscriptions(convex: ConvexClientWithAuth<ClerkCredentials>, gen: Int) {
+        launch {
+            convex.subscribe<List<DictionaryEntryDto>>("dictionary:list").collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess { list ->
+                    delivered("dictionary:list")
+                    serverDictionary = list
+                    outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
+                    applyDerived()
+                }.onFailure { noteFailure("dictionary:list", it) }
+                publish()
+            }
+        }
+        launch {
+            convex.subscribe<List<SnippetDto>>("snippets:list").collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess { list ->
+                    delivered("snippets:list")
+                    serverSnippets = list
+                    outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
+                    applyDerived()
+                }.onFailure { noteFailure("snippets:list", it) }
+                publish()
+            }
+        }
+        launch {
+            convex.subscribe<List<AppRuleDto>>("appRules:list").collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess { list ->
+                    delivered("appRules:list")
+                    serverAppRules = list
+                    outbox.update { SyncReducers.pruneAcked(it, list.map { d -> d.id }.toSet()) }
+                    applyDerived()
+                }.onFailure { noteFailure("appRules:list", it) }
+                publish()
+            }
+        }
+        launch {
+            convex.subscribe<PreferencesDto?>("preferences:get").collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess { prefs ->
+                    delivered("preferences:get")
+                    serverPreferences = prefs
+                    if (!preferencesLoaded) {
+                        preferencesLoaded = true
+                        // First contact: a device without account preferences pushes its own.
+                        if (prefs == null) {
+                            val local = StylePreferences.of(settings.get())
+                            outbox.update { SyncReducers.queuePreferences(it, local, newOpId()) }
+                            launch { flush() }
+                        }
+                    }
+                    applyDerived()
+                }.onFailure { noteFailure("preferences:get", it) }
+                publish()
+            }
+        }
+        launch {
+            convex.subscribe<UserDto?>("users:me").collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess {
+                    delivered("users:me")
+                    val before = user
+                    user = it
+                    // A plan or trial change moves the allowance: ask for the status again.
+                    if (before != null && it != null && (before.plan != it.plan || before.trialEndsAt != it.trialEndsAt)) refreshStatus(gen)
+                }.onFailure { noteFailure("users:me", it) }
+                publish()
+            }
+        }
+        launch {
+            convex.subscribe<List<DeviceDto>>("devices:list").collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess {
+                    delivered("devices:list")
+                    devices = it
+                }.onFailure { noteFailure("devices:list", it) }
+                publish()
+            }
+        }
+        launch {
+            convex.subscribe<StatsDto?>("stats:get").collect { result ->
+                if (gen != generation) return@collect
+                result.onSuccess {
+                    delivered("stats:get")
+                    // Stats move when any device finishes a dictation: the cue to look for new
+                    // history, instead of keeping a 200-entry history query live on every device.
+                    val moved = serverStats != null && it?.totalSessions != serverStats?.totalSessions
+                    serverStats = it
+                    if (moved) {
+                        fetchHistory(gen, HISTORY_FETCH_DEBOUNCE_MS)
+                        refreshStatus(gen, STATUS_REFRESH_DEBOUNCE_MS)
+                    }
+                }.onFailure { noteFailure("stats:get", it) }
+                publish()
+            }
+        }
     }
 
     /**
@@ -987,6 +1088,7 @@ class CloudSync internal constructor(
                     refreshStatus()
                     fetchHistory()
                     flush()
+                    scope.launch { fetchBootstrap(generation, force = true) }
                 }
             }
         }
@@ -1102,6 +1204,11 @@ class CloudSync internal constructor(
             }
         } finally {
             flushMutex.unlock()
+            // Own mutations applied: ask for one fresh snapshot, which also prunes the ops the
+            // server has folded in (the work the subscriptions used to do on every invalidation).
+            // Detached: the flush must return and publish its result without waiting for the
+            // snapshot's answer.
+            if (sent > 0 && gen == generation) scope.launch { fetchBootstrap(gen, force = true) }
             CloudDiagnostics.flush(sent, dropped, failure)
             publish()
         }

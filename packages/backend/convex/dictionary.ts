@@ -10,7 +10,7 @@ import {
   type DictionaryEntryInput
 } from './lib/validators'
 
-function toDto(doc: Doc<'dictionaryEntries'>): DictionaryEntryDto {
+export function toDto(doc: Doc<'dictionaryEntries'>): DictionaryEntryDto {
   return {
     id: doc._id,
     word: doc.word,

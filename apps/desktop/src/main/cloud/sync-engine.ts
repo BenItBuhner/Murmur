@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { ConvexClient } from 'convex/browser'
-import { makeFunctionReference } from 'convex/server'
+import { makeFunctionReference, type FunctionReturnType } from 'convex/server'
 import { ConvexError } from 'convex/values'
 import type { Id } from '@backend/_generated/dataModel'
 import {
@@ -244,6 +244,11 @@ export class CloudSync extends EventEmitter {
   /** The instance predates `history.since` / `stats.recordMany`: use the old calls. */
   private legacyHistory = false
   private legacyStats = false
+  /** The instance predates `bootstrap.get`: hold the seven live subscriptions instead. */
+  private legacyBootstrap = false
+  private bootstrapFetching = false
+  private bootstrapAgain = false
+  private lastBootstrapAt = 0
   private statusDayTimer: NodeJS.Timeout | null = null
   private statusRefreshTimer: NodeJS.Timeout | null = null
   /** Consecutive failed flushes, for the backoff; reset by any success. */
@@ -404,7 +409,9 @@ export class CloudSync extends EventEmitter {
       await this.heartbeat()
       await this.importLocalData(userId, generation)
       if (generation !== this.generation) return
-      this.subscribeAll(generation)
+      this.fetchBootstrap(generation)
+      this.refreshStatus(generation)
+      this.updateHistorySubscription(generation)
       this.startHeartbeat()
       this.error = undefined
       this.scheduleFlush(0)
@@ -489,9 +496,110 @@ export class CloudSync extends EventEmitter {
     this.mirror = snapshot(this.deps.settings.get())
   }
 
-  // ---- subscriptions -----------------------------------------------------------------------
+  // ---- the account snapshot ------------------------------------------------------------------
 
-  private subscribeAll(generation: number): void {
+  /** Quiet time after a bootstrap fetch before a focus event asks for another. */
+  private static readonly BOOTSTRAP_FOCUS_DEBOUNCE_MS = 15_000
+
+  /**
+   * Everything the account holds, in one answer (see backend `bootstrap.get`). Fetched on connect,
+   * when the app comes to the front, after the outbox drains and on Sync now, and cached in the
+   * server mirror — instead of seven live subscriptions that each re-read and re-sent their whole
+   * result after every write they could see, which was most of Murmur's function-call load on the
+   * Convex free plan. An instance from before the endpoint falls back to those subscriptions.
+   */
+  private fetchBootstrap(generation = this.generation): void {
+    const client = this.client
+    if (!client || !this.authenticated || this.legacyBootstrap) return
+    void this.doFetchBootstrap(generation)
+  }
+
+  private async doFetchBootstrap(generation: number): Promise<void> {
+    const client = this.client
+    if (!client || !this.authenticated) return
+    if (this.bootstrapFetching) {
+      this.bootstrapAgain = true
+      return
+    }
+    this.bootstrapFetching = true
+    try {
+      const boot = await client.query(api.bootstrap.get, {})
+      if (generation !== this.generation) return
+      this.lastBootstrapAt = Date.now()
+      this.applyBootstrap(boot)
+    } catch (err) {
+      if (generation !== this.generation) return
+      if (isMissingFunction(err)) {
+        log.info('instance has no bootstrap.get; falling back to live subscriptions')
+        this.legacyBootstrap = true
+        this.legacySubscribeAll(generation)
+        return
+      }
+      this.error = errorMessage(err)
+      log.warn(`bootstrap fetch failed: ${this.error}`)
+      this.emitStatus()
+    } finally {
+      this.bootstrapFetching = false
+      if (this.bootstrapAgain && generation === this.generation) {
+        this.bootstrapAgain = false
+        void this.doFetchBootstrap(generation)
+      }
+    }
+  }
+
+  /** One answer applied: the same writes the seven subscriptions made, minus the re-runs. */
+  private applyBootstrap(boot: FunctionReturnType<typeof api.bootstrap.get>): void {
+    const prevUser = this.server.user
+    const prevStats = this.server.stats
+    this.server.user = boot.me ? toCloudUser(boot.me) : null
+    this.server.preferences = boot.preferences
+    this.server.dictionary = boot.dictionary
+    this.outbox.update((ops) => pruneAcked(ops, new Set(boot.dictionary.map((x) => x.id))))
+    this.server.snippets = boot.snippets
+    this.outbox.update((ops) => pruneAcked(ops, new Set(boot.snippets.map((x) => x.id))))
+    this.server.appRules = boot.appRules
+    this.outbox.update((ops) => pruneAcked(ops, new Set(boot.appRules.map((x) => x.id))))
+    this.server.stats = boot.stats
+    const mine = this.deviceId
+    this.server.devices = boot.devices.map((d) => ({
+      deviceId: d.deviceId,
+      name: d.name,
+      platform: d.platform,
+      appVersion: d.appVersion,
+      lastSeenAt: d.lastSeenAt,
+      createdAt: d.createdAt,
+      current: d.deviceId === mine
+    }))
+    this.lastSyncedAt = Date.now()
+    this.applyDerived()
+    this.emitStatus()
+    // The cues the subscriptions carried:
+    // A plan or trial change moves the allowance: ask for the status again.
+    const u = boot.me
+    if (prevUser && u && (prevUser.plan !== u.plan || prevUser.trialEndsAt !== u.trialEndsAt))
+      this.scheduleStatusRefresh(0)
+    // Stats move when any device finishes a dictation: the cue to look for new history,
+    // instead of keeping a 200-entry history query live on every device.
+    if (prevStats !== undefined && boot.stats?.totalSessions !== prevStats?.totalSessions) {
+      this.scheduleHistoryFetch(HISTORY_FETCH_DEBOUNCE_MS)
+      this.scheduleStatusRefresh(STATUS_REFRESH_DEBOUNCE_MS)
+    }
+  }
+
+  /**
+   * The app window gained focus (or the system woke): the account snapshot may be stale by now,
+   * so ask for it again — unless one arrived moments ago, or the account is not connected.
+   */
+  onAppFocus(): void {
+    if (!this.enabled || !this.authenticated) return
+    if (Date.now() - this.lastBootstrapAt < CloudSync.BOOTSTRAP_FOCUS_DEBOUNCE_MS) return
+    this.fetchBootstrap()
+  }
+
+  // ---- legacy subscriptions ------------------------------------------------------------------
+
+  /** From before `bootstrap.get`: the seven live subscriptions this engine used to hold. */
+  private legacySubscribeAll(generation: number): void {
     const client = this.client
     if (!client) return
     this.stopSubscriptions()
@@ -591,8 +699,6 @@ export class CloudSync extends EventEmitter {
         onError
       )
     )
-    this.refreshStatus(generation)
-    this.updateHistorySubscription(generation)
   }
 
   /**
@@ -1003,6 +1109,8 @@ export class CloudSync extends EventEmitter {
   syncNow(): void {
     this.flushFailures = 0
     this.scheduleFlush(0)
+    this.lastBootstrapAt = 0
+    this.fetchBootstrap()
     this.refreshStatus()
     this.scheduleHistoryFetch(0)
   }
@@ -1019,6 +1127,7 @@ export class CloudSync extends EventEmitter {
     if (this.flushing || !this.client || !this.authenticated || this.disposed) return
     this.flushing = true
     const generation = this.generation
+    let sent = false
     try {
       for (;;) {
         if (generation !== this.generation || !this.authenticated) break
@@ -1026,6 +1135,7 @@ export class CloudSync extends EventEmitter {
         if (!op) break
         try {
           await this.send(op)
+          sent = true
           if (generation !== this.generation) break
           this.attempts.delete(op.id)
           this.flushFailures = 0
@@ -1068,6 +1178,9 @@ export class CloudSync extends EventEmitter {
         !this.outbox.ops.some((o) => !('acked' in o && o.acked))
       ) {
         this.lastSyncedAt = Date.now()
+        // Own mutations applied: ask for one fresh snapshot, which also prunes the ops the
+        // server has folded in (the work the subscriptions used to do on every invalidation).
+        if (sent) this.fetchBootstrap(generation)
       }
     } finally {
       this.flushing = false

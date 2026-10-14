@@ -116,6 +116,10 @@ class HistorySyncTest {
         runCurrent()
     }
 
+    /** A `bootstrap:get` answer: the account in one object, as the apps read it. */
+    private fun bootstrap(prefs: String) =
+        """{"me":{"id":"u1","clerkId":"user_1","plan":"free","createdAt":1},"preferences":$prefs,"appRules":[],"snippets":[],"dictionary":[],"devices":[],"stats":null}"""
+
     /** Sign in, connect, and let the account answer with no preferences yet (the phone pushes its own). */
     private fun TestScope.signIn(): CloudSync {
         val engine = engine()
@@ -123,7 +127,7 @@ class HistorySyncTest {
         settle()
         convex.connect()
         settle()
-        convex.send("preferences:get", "null")
+        convex.send("bootstrap:get", bootstrap(prefs = "null"))
         settle()
         return engine
     }
@@ -259,11 +263,15 @@ class HistorySyncTest {
     @Test
     fun `the opt-in is the account's, flipped on another device it is followed here`() = runTest {
         history.add(entry("a", 1_000))
-        signIn()
+        val engine = signIn()
         assertFalse(convex.subscribed("history:since"))
 
-        // The desktop turned it on: the phone's backlog goes up and the mirror starts.
-        convex.send("preferences:get", """{"sync":{"history":true},"updatedAt":2}""")
+        // The desktop turned it on: the phone notices on its next snapshot of the account (Sync
+        // now here; app focus or its own mutations in production), the backlog goes up, the
+        // mirror starts.
+        engine.syncNow()
+        settle()
+        convex.send("bootstrap:get", bootstrap(prefs = """{"sync":{"history":true},"updatedAt":2}"""))
         settle()
         assertTrue(settings.get().historySync)
         assertEquals(listOf(listOf("a")), pushedIds())
@@ -274,7 +282,9 @@ class HistorySyncTest {
 
         // Turned off again there: the other devices' entries leave this phone, the phone's own stay,
         // the account keeps its copies, and nothing new goes up.
-        convex.send("preferences:get", """{"sync":{"history":false},"updatedAt":3}""")
+        engine.syncNow()
+        settle()
+        convex.send("bootstrap:get", bootstrap(prefs = """{"sync":{"history":false},"updatedAt":3}"""))
         settle()
         assertFalse(settings.get().historySync)
         assertFalse(convex.subscribed("history:since"))

@@ -113,6 +113,19 @@ export default defineSchema({
     .index('by_user', ['userId'])
     .index('by_user_and_deviceId', ['userId', 'deviceId']),
 
+  /**
+   * Per-device liveness, kept apart from the devices rows: a heartbeat used to patch `lastSeenAt`
+   * on the device row, and every `devices.list` subscription re-read its whole result after every
+   * heartbeat of every device. Heartbeats write here, at most once per ten minutes per device;
+   * `devices.list` and `bootstrap.get` join it for the live last-seen time, so a liveness write
+   * re-runs the subscriptions that read it only at the throttle's pace.
+   */
+  deviceLiveness: defineTable({
+    userId: v.id('users'),
+    deviceId: v.string(),
+    lastSeenAt: v.number()
+  }).index('by_user_and_deviceId', ['userId', 'deviceId']),
+
   dictionaryEntries: defineTable({
     userId: v.id('users'),
     word: v.string(),

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, net, powerMonitor, protocol, shell } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import type { ClerkBridge } from '@clerk/electron'
 import { chordLabel } from '@core/hotkey/keys'
@@ -396,6 +396,12 @@ async function main(): Promise<void> {
     if (!getMainWindow()) createMainWindow(defaultChrome(resolvedTheme(settings.get())))
     showMainWindow()
   })
+  // The account snapshot is fetched on demand now (bootstrap.get), so the window gaining focus
+  // and the system waking are the cues to ask for a fresh one.
+  app.on('browser-window-focus', (_e, window) => {
+    if (window === getMainWindow()) cloudSync.onAppFocus()
+  })
+  powerMonitor.on('resume', () => cloudSync.onAppFocus())
   app.on('browser-window-created', (_e, window) => optimizer.watchWindowShortcuts(window))
   app.on('window-all-closed', () => {
     // Tray app: keep running.

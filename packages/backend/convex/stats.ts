@@ -4,7 +4,7 @@ import { authedMutation, authedQuery, type AuthedMutationCtx } from './lib/funct
 import { daysBetween, nextStreak, requireDay } from './lib/streak'
 import { statsDtoValidator, type StatsDto } from './lib/validators'
 
-function toDto(doc: Doc<'stats'>): StatsDto {
+export function toDto(doc: Doc<'stats'>): StatsDto {
   return {
     totalWords: doc.totalWords,
     totalSessions: doc.totalSessions,

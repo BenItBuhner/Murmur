@@ -115,14 +115,18 @@ class CloudSyncReliabilityTest {
         runCurrent()
     }
 
-    /** Sign in on a working Clerk, raise the socket, answer the first preferences read. */
+    /** A `bootstrap:get` answer: the account in one object, as the apps read it. */
+    private val bootstrapJson =
+        """{"me":{"id":"u1","clerkId":"user_1","plan":"free","createdAt":1},"preferences":{"updatedAt":1},"appRules":[],"snippets":[],"dictionary":[],"devices":[],"stats":null}"""
+
+    /** Sign in on a working Clerk, raise the socket, answer the account snapshot read. */
     private fun TestScope.signIn(clerk: AuthProvider<ClerkCredentials> = FakeClerk("user_1")): CloudSync {
         val engine = engine(clerk)
         account.value = "user_1"
         settle(0)
         convex.connect()
         settle()
-        convex.send("preferences:get", """{"updatedAt":1}""")
+        convex.send("bootstrap:get", bootstrapJson)
         settle()
         assertEquals(SyncPhase.SYNCED, engine.status.value.phase)
         return engine
@@ -156,7 +160,7 @@ class CloudSyncReliabilityTest {
         assertEquals(1, convex.calls("users:ensure").size)
         assertEquals(1, convex.calls("devices:heartbeat").size)
         assertTrue(convex.subscribed("inference:status"))
-        assertTrue(convex.subscribed("devices:list"))
+        assertTrue(convex.subscribed("bootstrap:get"))
         // The socket has not reported itself up yet: connecting, not offline.
         assertEquals(SyncPhase.CONNECTING, engine.status.value.phase)
         convex.connect()
@@ -273,22 +277,26 @@ class CloudSyncReliabilityTest {
         assertEquals(1, convex.authCallbacksSet)
         assertEquals(1, convex.calls("users:ensure").size)
         // A token refresh on a reconnect failed inside the Rust client: the server now runs the
-        // subscriptions as nobody, and our functions refuse.
-        convex.fail("users:me", "[Request ID: 6f1] Server Error Uncaught Error: Not authenticated at getCurrentUser")
+        // next account snapshot as nobody, and our functions refuse.
+        engine.syncNow()
+        settle(0)
+        convex.fail("bootstrap:get", "[Request ID: 6f1] Server Error Uncaught Error: Not authenticated at getCurrentUser")
         settle(0)
         assertEquals("a fresh login, at once", 2, clerk.calls)
         assertEquals("the client got a new token callback", 2, convex.authCallbacksSet)
         assertEquals("the account connection ran again", 2, convex.calls("users:ensure").size)
-        assertTrue(convex.subscribed("users:me"))
+        assertTrue(convex.subscribed("bootstrap:get"))
         assertTrue(engine.status.value.authenticated)
-        convex.send("preferences:get", """{"updatedAt":1}""")
+        convex.send("bootstrap:get", bootstrapJson)
         settle()
         assertEquals(SyncPhase.SYNCED, engine.status.value.phase)
-        assertTrue(CloudDiagnostics.report(context).contains("server says not authenticated (users:me)"))
+        assertTrue(CloudDiagnostics.report(context).contains("server says not authenticated (bootstrap:get)"))
 
         // The same, but Clerk is down when asked: the issue is shown, the loop keeps trying, and it heals.
         clerk.failures = 1
-        convex.fail("stats:get", "[Request ID: 6f2] Server Error Uncaught Error: Not authenticated at getCurrentUser")
+        engine.syncNow()
+        settle(0)
+        convex.fail("bootstrap:get", "[Request ID: 6f2] Server Error Uncaught Error: Not authenticated at getCurrentUser")
         settle(0)
         assertEquals(3, clerk.calls)
         assertEquals(SyncPhase.ERROR, engine.status.value.phase)

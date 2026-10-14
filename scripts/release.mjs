@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.9': [
+    '**Dictation is fast again.** Managed models are now served by the Murmur inference service instead of the account server, and speech recognition answers in well under a second. The fast speed mode really is faster now.',
+    '**No more stray line breaks.** Line breaks the speech model put in at pauses become spaces; a spoken "new line" or "new paragraph" still breaks the line.'
+  ],
   '0.6.8': [
     '**Much lighter on the account server.** History no longer streams the last 200 entries to every device after each dictation: devices fetch only new entries since they last looked, 20 at a time. Your daily allowance is checked when it matters (connect, a new day, after dictations, Sync now) instead of kept open.',
     '**A stuck sync queue drains on its own.** Waiting changes go up in batches of up to 50, retries back off from 15 seconds to 30 minutes, and an item that keeps failing while you are online is dropped after 8 tries instead of blocking the rest.',

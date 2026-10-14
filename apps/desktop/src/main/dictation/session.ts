@@ -23,7 +23,8 @@ import {
   type AppContext,
   type FormatContext,
   type FormatInput,
-  type ResolvedStyle
+  type ResolvedStyle,
+  isSilenceHallucination
 } from '@engine'
 import {
   FAST_SKIP_DETAIL,
@@ -144,6 +145,9 @@ type ProcessOutcome =
   | { ok: true; entry: HistoryEntry }
   /** `recorded`: the failure is in History (with the audio) and can be sent again. */
   | { ok: false; error: string; recorded: boolean }
+
+/** Voiced time below which a tail that reads as a stock phrase is taken for silence. */
+const TAIL_PHRASE_MIN_SPEECH_MS = 600
 
 export interface SessionDeps {
   settings: SettingsStore
@@ -682,7 +686,8 @@ export class DictationController extends EventEmitter {
     const raw = stt.text.trim()
     if (
       !raw ||
-      (stt.noSpeechProb !== undefined && stt.noSpeechProb > 0.85 && countWords(raw) <= 2)
+      (stt.noSpeechProb !== undefined && stt.noSpeechProb > 0.85 && countWords(raw) <= 2) ||
+      (analysis.speechMs < TAIL_PHRASE_MIN_SPEECH_MS && isSilenceHallucination(raw))
     ) {
       return notice('Nothing heard')
     }
@@ -915,7 +920,13 @@ export class DictationController extends EventEmitter {
       log.warn(`session ${tag}: a streamed piece failed; transcribing the whole dictation`, err)
       return whole()
     }
-    const last = await tail
+    let last = await tail
+    // A quiet tail (a breath, the key release) can come back as a stock phrase like "Thank you."
+    // that nobody said: with under 0.6 s of voiced audio it is dropped.
+    if (last && a.speechMs < TAIL_PHRASE_MIN_SPEECH_MS && isSilenceHallucination(last.text)) {
+      log.info(`session ${tag}: dropped a stock phrase from a quiet tail (${a.speechMs} ms voiced)`)
+      last = { ...last, text: '' }
+    }
     const text = [...texts, last?.text ?? '']
       .map((x) => x.trim())
       .filter(Boolean)

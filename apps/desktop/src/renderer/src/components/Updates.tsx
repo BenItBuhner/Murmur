@@ -246,7 +246,7 @@ export function UpdatesSection(): React.JSX.Element {
       )}
       <SettingRow
         title="Check automatically"
-        description="Look for new releases when Murmur starts and every few hours."
+        description="Look for new releases when Murmur starts and every hour."
       >
         <Switch
           checked={prefs.autoCheck}

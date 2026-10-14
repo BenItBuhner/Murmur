@@ -76,6 +76,21 @@ object Wav {
         return out
     }
 
+    /** Milliseconds of 20 ms frames at or above [thresholdDb] RMS (dBFS). */
+    fun voicedMs(pcm: ShortArray, sampleRate: Int, thresholdDb: Double = -40.0): Int {
+        val frame = maxOf(1, sampleRate / 50)
+        var voiced = 0
+        var i = 0
+        while (i + frame <= pcm.size) {
+            var sum = 0.0
+            for (j in i until i + frame) { val x = pcm[j] / 32768.0; sum += x * x }
+            val rms = Math.sqrt(sum / frame)
+            if (rms > 1e-9 && 20 * Math.log10(rms) >= thresholdDb) voiced++
+            i += frame
+        }
+        return voiced * 20
+    }
+
     fun peakDb(pcm: ShortArray): Double {
         var peak = 0
         for (s in pcm) {

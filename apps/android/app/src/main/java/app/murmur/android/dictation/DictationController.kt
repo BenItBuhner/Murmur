@@ -39,6 +39,7 @@ import app.murmur.android.text.CommandPromptInput
 import app.murmur.android.text.DictionaryTerm
 import app.murmur.android.text.Engine
 import app.murmur.android.text.FAST_SKIP_DETAIL
+import app.murmur.android.text.Hallucination
 import app.murmur.android.text.FormatContext
 import app.murmur.android.text.FormatInput
 import app.murmur.android.text.FormatOutcome
@@ -627,7 +628,14 @@ object DictationController {
                 Log.w(TAG, "a streamed piece failed; transcribing the whole dictation", texts.exceptionOrNull() ?: tailResult?.exceptionOrNull())
                 runStt(pcm)
             } else {
-                val last = tailResult?.getOrNull()
+                var last = tailResult?.getOrNull()
+                // A quiet tail can come back as a stock phrase nobody said ("Thank you.").
+                if (last != null && Hallucination.isSilencePhrase(last.output.text) &&
+                    Wav.voicedMs(rest, SAMPLE_RATE) < Hallucination.MIN_SPEECH_MS
+                ) {
+                    Log.i(TAG, "dropped a stock phrase from a quiet tail")
+                    last = last.copy(output = last.output.copy(text = ""))
+                }
                 streamedTexts = texts.getOrThrow()
                 streamedTail = last?.output?.text?.trim() ?: ""
                 val joined = (texts.getOrThrow() + listOfNotNull(last?.output?.text)).map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
@@ -647,7 +655,8 @@ object DictationController {
         } ?: ""
         Log.i(TAG, "stt done in ${stt.latencyMs}ms$speedNote: ${raw.take(80)}")
         if (raw.isEmpty() ||
-            (stt.noSpeechProb != null && stt.noSpeechProb > 0.85 && countWords(raw) <= 2)
+            (stt.noSpeechProb != null && stt.noSpeechProb > 0.85 && countWords(raw) <= 2) ||
+            (Hallucination.isSilencePhrase(raw) && Wav.voicedMs(pcm, SAMPLE_RATE) < Hallucination.MIN_SPEECH_MS)
         ) {
             recordFailure(
                 context, s, run, raw, "Nothing heard", StageTimings(recordMs = recordMs, sttMs = sttMs),

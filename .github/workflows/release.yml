@@ -39,6 +39,10 @@ env:
   VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
   VITE_MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
   MURMUR_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
+  # Managed models are served by the inference Worker (apps/inference-worker), so dictation audio
+  # never passes through Convex. Without this the apps fall back to the Convex /v1 gateway.
+  VITE_MURMUR_INFERENCE_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && (vars.MURMUR_INFERENCE_URL || 'https://murmur-inference.benprobennett.workers.dev') || '' }}
+  MURMUR_INFERENCE_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && (vars.MURMUR_INFERENCE_URL || 'https://murmur-inference.benprobennett.workers.dev') || '' }}
   MURMUR_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
   MURMUR_ACCOUNT_MODE: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_ACCOUNT_MODE || '' }}
   # The in-app updater (desktop and Android) follows this repository's GitHub Releases, so a fork

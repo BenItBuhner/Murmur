@@ -323,7 +323,10 @@ data class PreparedTranscript(val text: String, val pressEnter: Boolean, val sta
 /** Before the model: the structural commands that are exact or have side effects. */
 fun prepareTranscript(raw: String): PreparedTranscript {
     val stages = ArrayList<String>()
-    var text = normalizeWhitespace(raw)
+    // A line break in the recognizer's own text is never something the speaker dictated: speech
+    // models break lines at pauses or segment boundaries. Dictated breaks arrive as words ("new
+    // line", "new paragraph") and are applied below, so raw breaks become spaces here.
+    var text = normalizeWhitespace(raw.replace(Regex("[ \\t]*[\\r\\n]+[ \\t]*"), " "))
     val enter = extractPressEnter(text)
     if (enter.pressEnter) {
         stages.add("press-enter")

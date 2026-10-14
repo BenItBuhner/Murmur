@@ -38,7 +38,10 @@ export interface PreparedTranscript {
 
 export function prepareTranscript(raw: string): PreparedTranscript {
   const stages: string[] = []
-  let text = normalizeWhitespace(raw)
+  // A line break in the recognizer's own text is never something the speaker dictated: speech
+  // models break lines at pauses or segment boundaries. Dictated breaks arrive as words ("new
+  // line", "new paragraph") and are applied below, so raw breaks become spaces here.
+  let text = normalizeWhitespace(raw.replace(/[ \t]*[\r\n]+[ \t]*/g, ' '))
   const enter = extractPressEnter(text)
   if (enter.pressEnter) {
     stages.push('press-enter')

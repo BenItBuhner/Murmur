@@ -21,6 +21,97 @@ export interface FormatInput {
   retry?: boolean
   /** Include the worked examples in the prompt (default true). */
   examples?: boolean
+  /**
+   * Longer than this many words, the transcript is formatted as sentence-aligned pieces of about
+   * {@link CHUNK_WORDS} words in parallel (default {@link CHUNK_ABOVE_WORDS}; 0 never splits).
+   */
+  chunkAboveWords?: number
+}
+
+/** Target piece size for parallel formatting of long dictations. */
+export const CHUNK_WORDS = 120
+/**
+ * One completion over a five-minute dictation takes ~6.6 s (close to the gateway's 8 s format
+ * budget) and very long ones overflow the token cap; seven parallel pieces take ~2 s with the
+ * same words out (bench: Murmur speed notes, Oct 2026).
+ */
+export const CHUNK_ABOVE_WORDS = 200
+
+/**
+ * Split at sentence ends into pieces of at least `target` words (a short tail joins the last
+ * piece). Returns the pieces and the original whitespace at each cut, so line breaks survive.
+ */
+export function splitForFormatting(
+  text: string,
+  target = CHUNK_WORDS
+): { pieces: string[]; joins: string[] } {
+  const parts = text.split(/(?<=[.!?…])(\s+)(?=\S)/u)
+  const pieces: string[] = []
+  const joins: string[] = []
+  let cur = ''
+  let words = 0
+  for (let i = 0; i < parts.length; i += 2) {
+    cur += parts[i]
+    words += countWords(parts[i])
+    const sep = parts[i + 1]
+    if (sep === undefined) break
+    if (words >= target) {
+      pieces.push(cur)
+      joins.push(sep)
+      cur = ''
+      words = 0
+    } else cur += sep
+  }
+  if (cur) {
+    if (pieces.length && words < target / 3) pieces[pieces.length - 1] += joins.pop()! + cur
+    else pieces.push(cur)
+  }
+  return { pieces, joins }
+}
+
+const OUTCOME_RANK: Record<FormatResult['status']['outcome'], number> = {
+  used: 0,
+  'skipped-clean': 1,
+  skipped: 2,
+  rejected: 3,
+  failed: 4
+}
+
+async function formatInPieces(
+  input: FormatInput,
+  { pieces, joins }: { pieces: string[]; joins: string[] },
+  pressEnter: boolean,
+  prepStages: string[],
+  complete: Complete
+): Promise<FormatResult> {
+  const results = await Promise.all(
+    pieces.map((piece) =>
+      formatTranscript(
+        { ...input, transcript: piece, chunkAboveWords: 0, cleanMaxWords: 0, minWords: 0 },
+        complete
+      )
+    )
+  )
+  const worst = results.reduce((a, b) =>
+    OUTCOME_RANK[b.status.outcome] > OUTCOME_RANK[a.status.outcome] ? b : a
+  )
+  const stages = [...prepStages]
+  for (const r of results) for (const st of r.stages) if (!stages.includes(st)) stages.push(st)
+  return {
+    // Pieces were cut at sentence ends; they rejoin with the whitespace that was there.
+    text: results.map((r, i) => r.text.trim() + (joins[i] ?? '')).join(''),
+    pressEnter,
+    modelText: results.every((r) => r.modelText !== undefined)
+      ? results.map((r, i) => r.modelText!.trim() + (joins[i] ?? '')).join('')
+      : undefined,
+    llmMs: Math.max(...results.map((r) => r.llmMs)),
+    status: {
+      ...worst.status,
+      attempts: Math.max(...results.map((r) => r.status.attempts)),
+      detail: worst.status.outcome === 'used' ? `${pieces.length} pieces` : worst.status.detail
+    },
+    stages
+  }
 }
 
 const now = (): number => Date.now()
@@ -76,6 +167,13 @@ export async function formatTranscript(
   // change, is finished by the rules alone: the same text, no round trip, no tokens.
   if (alreadyClean(prepared, input.context, { maxWords: input.cleanMaxWords ?? CLEAN_MAX_WORDS }).clean)
     return fallback('skipped-clean', 'already clean')
+
+  const chunkAbove = input.chunkAboveWords ?? CHUNK_ABOVE_WORDS
+  if (chunkAbove > 0 && countWords(prepared.text) > chunkAbove) {
+    const split = splitForFormatting(prepared.text)
+    if (split.pieces.length > 1)
+      return formatInPieces(input, split, prepared.pressEnter, prepared.stages, complete)
+  }
 
   const started = now()
   let attempts = 0

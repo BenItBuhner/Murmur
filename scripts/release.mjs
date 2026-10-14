@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.15': [
+    '**Precision dictation finishes in under a second.** Murmur formats each recognised piece while you are still speaking and uses low reasoning effort for formatting, so releasing the key only waits for the final piece.'
+  ],
   '0.6.14': [
     '**Quicker to start and lighter on your account.** The app loads your settings, dictionary and devices in one request instead of seven live connections, and checks in with the server far less often.'
   ],

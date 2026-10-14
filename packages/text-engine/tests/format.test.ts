@@ -23,6 +23,12 @@ const answering = (...answers: string[]): Complete & { calls: ChatMessage[][] } 
 }
 
 describe('prepareTranscript', () => {
+  it('turns line breaks the speech model added at pauses into spaces, keeping dictated ones', () => {
+    expect(prepareTranscript('so I was thinking\nwe should move the deadline\r\n  to Friday').text).toBe(
+      'so I was thinking we should move the deadline to Friday'
+    )
+    expect(prepareTranscript('first part\n\nnew line second part').text).toBe('first part\nSecond part')
+  })
   it('extracts press enter and applies line commands before the model', () => {
     const p = prepareTranscript('thanks a lot new line see you tomorrow press enter')
     expect(p.pressEnter).toBe(true)

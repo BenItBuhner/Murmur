@@ -151,6 +151,25 @@ export class Recorder extends EventEmitter {
     this.captures.delete(sessionId)
   }
 
+  /** The samples captured so far from `from` on (a copy), for streaming a long dictation. */
+  read(sessionId: string, from: number): Int16Array {
+    const cap = this.captures.get(sessionId)
+    if (!cap) return new Int16Array(0)
+    const out = new Int16Array(Math.max(0, cap.samples - from))
+    let pos = 0
+    let at = 0
+    for (const c of cap.chunks) {
+      const end = pos + c.length
+      if (end > from) {
+        const start = Math.max(0, from - pos)
+        out.set(c.subarray(start), at)
+        at += c.length - start
+      }
+      pos = end
+    }
+    return out
+  }
+
   samplesFor(sessionId: string): number {
     return this.captures.get(sessionId)?.samples ?? 0
   }

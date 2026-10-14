@@ -25,6 +25,27 @@ class Recorder {
 
     val isRecording: Boolean get() = running
 
+    /** The samples captured so far from [from] on (a copy), for streaming a long dictation. */
+    fun read(from: Int): ShortArray = synchronized(chunks) {
+        val total = chunks.sumOf { it.size }
+        val out = ShortArray(maxOf(0, total - from))
+        var pos = 0
+        var at = 0
+        for (c in chunks) {
+            val end = pos + c.size
+            if (end > from) {
+                val start = maxOf(0, from - pos)
+                System.arraycopy(c, start, out, at, c.size - start)
+                at += c.size - start
+            }
+            pos = end
+        }
+        out
+    }
+
+    /** Samples captured so far in this session. */
+    fun sampleCount(): Int = synchronized(chunks) { chunks.sumOf { it.size } }
+
     /** How many samples are buffered so far; for tests that watch a capture run. */
     @androidx.annotation.VisibleForTesting
     fun peekSampleCount(): Long = synchronized(chunks) { chunks.sumOf { it.size.toLong() } }

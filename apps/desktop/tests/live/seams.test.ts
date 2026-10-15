@@ -1,11 +1,12 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { describe, it } from 'vitest'
-import { DEFAULT_CHUNK_PLAN, findCutDetail, type ChunkPlan } from '@core/audio/chunker'
+import { DEFAULT_CHUNK_PLAN, findCutDetail, findSpecCut, type ChunkPlan } from '@core/audio/chunker'
 import { adaptiveThreshold } from '@core/audio/vad'
 import { encodeWavPcm16 } from '@core/audio/wav'
 import {
   formatTranscript,
   joinPieces,
+  lastSentenceStart,
   seamContext,
   stripEcho,
   type ChatMessage,
@@ -13,7 +14,13 @@ import {
   type ChatResult
 } from '@engine'
 import type { FormatContext } from '@engine'
-import { FORCED_OVERLAP_SEC, PAUSE_LEAD_IN_SEC } from '../../src/main/dictation/streaming'
+import {
+  FORCED_OVERLAP_SEC,
+  PAUSE_LEAD_IN_SEC,
+  SPEC_MIN_GAIN_SEC,
+  SPEC_PAUSE_MS
+} from '../../src/main/dictation/streaming'
+import { countWords } from '@engine'
 
 /**
  * Seam regression eval for streamed precision dictation: long recordings with natural pauses,
@@ -43,6 +50,10 @@ const runs = Number(process.env.MURMUR_SEAM_RUNS ?? 1)
 const only = process.env.MURMUR_SEAM_ONLY // clip/pipeline filter, a regex
 const dump = process.env.MURMUR_SEAM_DUMP // a file to append every piece's texts to
 const RATE = 16000
+/** Speculation lands only on pauses that ended this long before release (its own STT + format). */
+const SPEC_LAG_SEC = Number(process.env.MURMUR_SPEC_LAG_SEC ?? 1)
+const SHORT_REST_WORDS = Number(process.env.MURMUR_SHORT_REST_WORDS ?? 0)
+const tailModel = process.env.MURMUR_TAIL_STT_MODEL ?? sttModel
 
 const OLD_PLAN: ChunkPlan = { minSec: 15, maxSec: 28, pauseMs: 300, fallbackPauseMs: Infinity }
 const PIECE_NOTE =
@@ -63,21 +74,44 @@ function readWav(path: string): Int16Array {
   throw new Error(`no data chunk in ${path}`)
 }
 
-async function retry<T>(f: () => Promise<T>, n = 4): Promise<T> {
+/**
+ * This bench shares the model proxy with production (infer.techlitnow.com), so it must never
+ * become a load problem: LLM calls are paced to MURMUR_SEAM_LLM_RPM (default 20/min), and the first
+ * rate limit or busy answer stops the whole run instead of retrying into it.
+ */
+const LLM_RPM = Number(process.env.MURMUR_SEAM_LLM_RPM ?? 20)
+let nextLlmAt = 0
+let busyStop: Error | null = null
+async function paceLlm(): Promise<void> {
+  if (busyStop) throw busyStop
+  const now = Date.now()
+  const at = Math.max(now, nextLlmAt)
+  nextLlmAt = at + 60_000 / LLM_RPM
+  if (at > now) await new Promise((r) => setTimeout(r, at - now))
+}
+class ProxyBusy extends Error {}
+function checkBusy(status: number): void {
+  if (status === 429 || status === 503) {
+    busyStop = new ProxyBusy(`proxy answered HTTP ${status}; bench stopped so it does not add load`)
+    throw busyStop
+  }
+}
+
+async function retry<T>(f: () => Promise<T>, n = 2): Promise<T> {
   for (let i = 0; ; i++) {
     try {
       return await f()
     } catch (e) {
-      if (i >= n) throw e
+      if (e instanceof ProxyBusy || i >= n) throw e
       await new Promise((r) => setTimeout(r, 800 * (i + 1)))
     }
   }
 }
 
-async function stt(pcm: Int16Array): Promise<string> {
+async function stt(pcm: Int16Array, model = sttModel): Promise<string> {
   return retry(async () => {
     const form = new FormData()
-    form.append('model', sttModel)
+    form.append('model', model)
     form.append('response_format', 'json')
     form.append('file', new Blob([encodeWavPcm16(pcm, RATE)], { type: 'audio/wav' }), 'a.wav')
     const res = await fetch(`${baseUrl}/audio/transcriptions`, {
@@ -85,6 +119,7 @@ async function stt(pcm: Int16Array): Promise<string> {
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form
     })
+    checkBusy(res.status)
     if (!res.ok) throw new Error(`STT HTTP ${res.status}`)
     return (((await res.json()) as { text?: string }).text ?? '').trim()
   })
@@ -92,6 +127,7 @@ async function stt(pcm: Int16Array): Promise<string> {
 
 async function complete(messages: ChatMessage[], opts: ChatOptions): Promise<ChatResult> {
   return retry(async () => {
+    await paceLlm()
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -104,6 +140,7 @@ async function complete(messages: ChatMessage[], opts: ChatOptions): Promise<Cha
         stream: false
       })
     })
+    checkBusy(res.status)
     if (!res.ok) throw new Error(`LLM HTTP ${res.status}`)
     const json = (await res.json()) as {
       choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
@@ -122,7 +159,7 @@ const CTX: FormatContext = {
   language: 'auto'
 }
 
-async function format(text: string, before: string, note: boolean): Promise<string> {
+async function format(text: string, before: string, note: boolean, light = false): Promise<string> {
   if (!text.trim()) return ''
   const prior = seamContext(before)
   const context: FormatContext = {
@@ -130,7 +167,10 @@ async function format(text: string, before: string, note: boolean): Promise<stri
     precedingText: prior || undefined,
     instructions: note ? PIECE_NOTE : undefined
   }
-  const r = await formatTranscript({ transcript: text, mode: 'smart', context }, complete)
+  const r = await formatTranscript(
+    { transcript: text, mode: light ? 'light' : 'smart', context },
+    complete
+  )
   return prior ? stripEcho(r.text, prior) : r.text
 }
 
@@ -372,7 +412,9 @@ describe.skipIf(!metaFile || !baseUrl)('seam eval', () => {
       >)
     : {}
   for (const [name, m] of Object.entries(meta)) {
-    for (const pipeline of ['v0.6.16', 'seam-aware'] as const) {
+    for (const pipeline of (
+      process.env.MURMUR_SEAM_PIPELINES ?? 'v0.6.16,seam-aware,spec-tail'
+    ).split(',')) {
       it.skipIf(only !== undefined && !new RegExp(only).test(`${name} ${pipeline}`))(
         `${name} ${pipeline}`,
         { timeout: 900_000 },
@@ -385,7 +427,8 @@ describe.skipIf(!metaFile || !baseUrl)('seam eval', () => {
             m.ref = existsSync(cache) ? readFileSync(cache, 'utf8') : await stt(pcm)
             writeFileSync(cache, m.ref)
           }
-          const isNew = pipeline === 'seam-aware'
+          const spec = pipeline === 'spec-tail'
+          const isNew = pipeline !== 'v0.6.16'
           const { pieces, tailFrom } = cutPieces(pcm, isNew ? DEFAULT_CHUNK_PLAN : OLD_PLAN, isNew)
           const join = isNew ? seamed : plain
           for (let run = 0; run < runs; run++) {
@@ -394,17 +437,60 @@ describe.skipIf(!metaFile || !baseUrl)('seam eval', () => {
               format(t, isNew && i > 0 ? texts[i - 1] : '', isNew)
             )
             const tail = pcm.subarray(tailFrom)
+            const before = isNew ? (texts[texts.length - 1] ?? '') : ''
+            // Speculation: the tail up to its last pause that ended SPEC_LAG_SEC before release was
+            // transcribed and formatted while the user spoke; only the rest waits for release.
+            let specText = ''
+            let specFormatted = ''
+            let restFrom = 0
+            if (spec) {
+              // As the streamer schedules it: a check every second, a new speculation at a
+              // 400 ms pause with at least 4 s more audio; the newest one started SPEC_LAG_SEC or
+              // more before release is the one release uses.
+              const threshold = adaptiveThreshold(tail, RATE, -48)
+              let cut: ReturnType<typeof findSpecCut> = null
+              for (let t = RATE; t <= tail.length - SPEC_LAG_SEC * RATE; t += RATE) {
+                const c = findSpecCut(tail.subarray(0, t), RATE, threshold, SPEC_PAUSE_MS)
+                if (c && (!cut || c.at >= cut.at + SPEC_MIN_GAIN_SEC * RATE)) cut = c
+              }
+              if (cut) {
+                specText = await stt(tail.subarray(0, cut.at))
+                specFormatted = await format(specText, before, true)
+                restFrom = Math.max(
+                  0,
+                  cut.at - Math.floor(Math.min(PAUSE_LEAD_IN_SEC, cut.pauseMs / 2000 - 0.05) * RATE)
+                )
+              }
+            }
+            const rest = tail.subarray(restFrom)
             const t0 = performance.now()
-            const tailText = await stt(tail)
+            const restText = await stt(rest, spec ? tailModel : sttModel)
             const sttMs = performance.now() - t0
-            const tailFormatted = await format(
-              tailText,
-              isNew ? (texts[texts.length - 1] ?? '') : '',
-              false
-            )
+            // With a speculation, its last sentence is formatted again together with what
+            // followed, so the model decides that one sentence boundary with the whole sentence.
+            const specHead =
+              spec && specText
+                ? specFormatted.slice(0, lastSentenceStart(specFormatted)).trim()
+                : ''
+            const specLast =
+              spec && specText ? specFormatted.slice(lastSentenceStart(specFormatted)) : ''
+            const short = spec && countWords(restText) <= SHORT_REST_WORDS
+            const restInput = spec && specText ? joinPieces([specLast, restText]).text : restText
+            const restBefore = spec && specText ? (specHead ? specHead : before) : before
+            const restFormatted = !restText.trim()
+              ? specLast
+              : await format(restInput, restBefore, false, short)
             const releaseMs = performance.now() - t0
-            const sttParts = [...texts, tailText]
-            const finalParts = [...formatted, tailFormatted]
+            const tailText = spec && specText ? joinPieces([specText, restText]).text : restText
+            const tailFormatted =
+              spec && specText ? joinPieces([specHead, restFormatted]).text : restFormatted
+            // The speculation's own seam is scored like any other.
+            const sttParts =
+              spec && specText ? [...texts, specText, restText] : [...texts, tailText]
+            const finalParts =
+              spec && specText
+                ? [...formatted, ...(specHead ? [specHead] : []), restFormatted]
+                : [...formatted, tailFormatted]
             const row = {
               clip: name,
               kind: m.kind,
@@ -413,6 +499,8 @@ describe.skipIf(!metaFile || !baseUrl)('seam eval', () => {
               durSec: Math.round(pcm.length / RATE),
               pieces: pieces.length + 1,
               tailSec: +(tail.length / RATE).toFixed(1),
+              restSec: +(rest.length / RATE).toFixed(1),
+              restLight: short,
               tailSttMs: Math.round(sttMs),
               releaseMs: Math.round(releaseMs),
               ...score(m.ref, m.kind, sttParts, finalParts, join)

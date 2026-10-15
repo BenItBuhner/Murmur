@@ -2,6 +2,7 @@ package app.murmur.android
 
 import app.murmur.android.dictation.ChunkStreamer
 import app.murmur.android.dictation.findChunkCut
+import app.murmur.android.dictation.findSpecCut
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,5 +49,39 @@ class ChunkStreamerTest {
         assertTrue(streamed.samples <= sizes.sum())
         assertTrue(sizes.sum() - streamed.samples <= texts.size * (0.3 * rate).toInt())
         assertTrue(clip.size - streamed.samples < 30 * rate)
+    }
+
+    @Test
+    fun `finds the last pause that has ended, for speculation`() {
+        val p = loud(12.0)
+        p.fill(0, 3 * rate, (3.5 * rate).toInt())
+        p.fill(0, 8 * rate, (8.6 * rate).toInt())
+        val c = findSpecCut(p, rate, -30.0)!!
+        assertTrue(kotlin.math.abs(c.at.toDouble() / rate - 8.3) < 0.05)
+        val q = loud(12.0)
+        q.fill(0, 4 * rate, (4.2 * rate).toInt())
+        q.fill(0, 11 * rate, 12 * rate)
+        assertNull(findSpecCut(q, rate, -30.0))
+    }
+
+    @Test
+    fun `speculates on the tail and says where the rest starts`() = runBlocking {
+        val clip = loud(12.0)
+        // Long enough pauses that the adaptive threshold (20th-percentile noise floor) sees them.
+        clip.fill(0, 3 * rate, (5.6 * rate).toInt())
+        clip.fill(0, 8 * rate, (10.6 * rate).toInt())
+        var fed = 0
+        var specs = 0
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val streamer = ChunkStreamer(scope, { from -> clip.copyOfRange(from, fed) }, rate, -48.0, onSpec = { _, _ -> specs++ }) { pcm, i -> "s$i:${pcm.size}" }
+        while (fed < clip.size) {
+            fed = minOf(clip.size, fed + 1600)
+            streamer.poll(fed)
+        }
+        val streamed = streamer.finish()
+        assertTrue(specs >= 1)
+        val at = streamed.specSamples!!
+        assertTrue(at > 8 * rate && at < 10.6 * rate)
+        assertTrue(streamed.specText!!.await().startsWith("s0:"))
     }
 }

@@ -57,6 +57,35 @@ fun findChunkCutDetail(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, pl
     return if (quietest >= 0) ChunkCut(quietest + frame / 2, 0, true) else null
 }
 
+/** How often the stretch after the last piece is checked for a pause to speculate up to. */
+const val SPEC_CHECK_SEC = 1.0
+/** A new speculation needs at least this much more audio than the last one covered. */
+const val SPEC_MIN_GAIN_SEC = 4.0
+/** Pauses at least this long are speculation points (the join repairs mid-sentence ones). */
+const val SPEC_PAUSE_MS = 400
+
+/**
+ * The last pause of at least [minPauseMs] in `pcm` that has ended, at least [minSec] in; mirrors
+ * findSpecCut in apps/desktop/src/core/audio/chunker.ts.
+ */
+fun findSpecCut(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, minPauseMs: Int = SPEC_PAUSE_MS, minSec: Double = 2.0): ChunkCut? {
+    val frame = sampleRate * FRAME_MS / 1000
+    val need = (minPauseMs + FRAME_MS - 1) / FRAME_MS
+    val from = (minSec * sampleRate).toInt()
+    var run = 0
+    var best: ChunkCut? = null
+    var at = 0
+    while (at + frame <= pcm.size) {
+        if (rmsDb(pcm, at, at + frame) < thresholdDb) run++
+        else {
+            if (run >= need && at >= from) best = ChunkCut(at - run * frame / 2, run * FRAME_MS, false)
+            run = 0
+        }
+        at += frame
+    }
+    return best
+}
+
 /** Sample index to cut `pcm` at, or null to keep listening. */
 fun findChunkCut(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, plan: ChunkPlan = ChunkPlan()): Int? =
     findChunkCutDetail(pcm, sampleRate, thresholdDb, plan)?.at
@@ -73,6 +102,11 @@ class ChunkStreamer(
     private val plan: ChunkPlan = ChunkPlan(),
     /** Told about each piece as it is sent, in order (for formatting it once its text is in). */
     private val onPiece: (index: Int, text: Deferred<String>) -> Unit = { _, _ -> },
+    /**
+     * Speculates on the stretch after the last piece, up to a pause, while the user keeps talking
+     * (null: never). Told about it like [onPiece], with the number of pieces before it.
+     */
+    private val onSpec: ((pieces: Int, text: Deferred<String>) -> Unit)? = null,
     private val transcribe: suspend (pcm: ShortArray, index: Int) -> String
 ) {
     private var committed = 0
@@ -81,10 +115,16 @@ class ChunkStreamer(
     private val pieces = ArrayList<Deferred<String>>()
     private var nextCheck = (plan.minSec * sampleRate).toInt()
     @Volatile private var closed = false
+    private var specAt = -1
+    private var specRestFrom = 0
+    private var specText: Deferred<String>? = null
+    private var nextSpecCheck = 0
 
     @Synchronized
     fun poll(totalSamples: Int) {
-        if (closed || totalSamples - committed < nextCheck) return
+        if (closed) return
+        maybeSpeculate(totalSamples)
+        if (totalSamples - committed < nextCheck) return
         val pending = read(committed)
         val found = findChunkCutDetail(pending, sampleRate, adaptiveThreshold(pending, sampleRate, floorDb), plan)
         if (found == null) {
@@ -98,20 +138,50 @@ class ChunkStreamer(
         pieces.add(text)
         onPiece(index, text)
         committed += cut
+        specText = null // the piece covers it
+        specAt = -1
+        nextSpecCheck = 0
         val leadIn = if (found.forced) FORCED_OVERLAP_SEC else minOf(PAUSE_LEAD_IN_SEC, maxOf(0.0, found.pauseMs / 2000.0 - 0.05))
         overlap = minOf(cut, (leadIn * sampleRate).toInt())
         nextCheck = (plan.minSec * sampleRate).toInt()
     }
 
+    private fun maybeSpeculate(total: Int) {
+        val notify = onSpec ?: return
+        if (total - committed < nextSpecCheck) return
+        nextSpecCheck = total - committed + (SPEC_CHECK_SEC * sampleRate).toInt()
+        val pending = read(committed)
+        val cut = findSpecCut(pending, sampleRate, adaptiveThreshold(pending, sampleRate, floorDb)) ?: return
+        if (specAt >= 0 && cut.at < specAt + SPEC_MIN_GAIN_SEC * sampleRate) return
+        val pcm = if (overlap > 0) read(committed - overlap).copyOfRange(0, overlap + cut.at) else pending.copyOfRange(0, cut.at)
+        val index = pieces.size
+        val text = scope.async { transcribe(pcm, index) }
+        val lead = (minOf(PAUSE_LEAD_IN_SEC, maxOf(0.0, cut.pauseMs / 2000.0 - 0.05)) * sampleRate).toInt()
+        specAt = cut.at
+        specRestFrom = cut.at - lead
+        specText = text
+        notify(index, text)
+    }
+
     val piecesSent: Int @Synchronized get() = pieces.size
+
+    /** Whether there is anything to hand over at release: a piece or a tail speculation. */
+    val hasWork: Boolean @Synchronized get() = pieces.isNotEmpty() || specText != null
 
     @Synchronized
     fun finish(): Streamed {
         closed = true
         val all = ArrayList(pieces)
-        return Streamed(committed - overlap) { all.awaitAll() }
+        val spec = specText
+        return Streamed(committed - overlap, spec?.let { committed + specRestFrom }, spec) { all.awaitAll() }
     }
 }
 
 /** What was transcribed while the user spoke: samples covered, and the pieces' texts. */
-class Streamed(val samples: Int, val texts: suspend () -> List<String>)
+class Streamed(
+    val samples: Int,
+    /** Where the audio after the tail speculation starts, when there is one. */
+    val specSamples: Int? = null,
+    val specText: Deferred<String>? = null,
+    val texts: suspend () -> List<String>
+)

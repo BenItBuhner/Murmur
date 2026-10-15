@@ -107,4 +107,11 @@ export {
 } from './clean'
 export { formatTranscript, type FormatInput } from './format'
 export { dropSilentSegments, isSilenceHallucination } from './hallucination'
-export { joinSeam, joinPieces, seamContext, stripEcho, type SeamJoin } from './seam'
+export {
+  joinSeam,
+  joinPieces,
+  lastSentenceStart,
+  seamContext,
+  stripEcho,
+  type SeamJoin
+} from './seam'

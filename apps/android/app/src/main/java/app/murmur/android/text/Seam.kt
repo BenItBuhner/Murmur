@@ -103,8 +103,7 @@ fun joinPieces(pieces: List<String>): PiecesJoin {
 fun seamContext(prev: String, maxWords: Int = 12): String {
     val t = prev.trim()
     if (t.isEmpty()) return ""
-    val starts = listOf(0) + Regex("""[.!?…]["')\]]*\s+""").findAll(t).map { it.range.last + 1 }.toList()
-    val tail = t.substring(starts.last())
+    val tail = t.substring(lastSentenceStart(t))
     val ws = seamWords(tail)
     return if (ws.size <= maxWords) tail else tail.substring(ws[ws.size - maxWords].start)
 }
@@ -120,4 +119,12 @@ fun stripEcho(output: String, before: String): String {
         if (same) return output.substring(ow[k - 1].end).replace(Regex("""^[\s,;:.!?…-]+"""), "")
     }
     return output
+}
+
+/** Where the last (or unfinished) sentence of [text] starts; mirrors lastSentenceStart in seam.ts. */
+fun lastSentenceStart(text: String): Int {
+    val t = text.trimEnd()
+    var start = 0
+    for (m in Regex("""[.!?…]["')\]]*\s+""").findAll(t)) start = m.range.last + 1
+    return start
 }

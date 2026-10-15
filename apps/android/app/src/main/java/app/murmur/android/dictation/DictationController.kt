@@ -54,6 +54,8 @@ import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
 import app.murmur.android.text.joinPieces
+import app.murmur.android.text.joinSeam
+import app.murmur.android.text.lastSentenceStart
 import app.murmur.android.text.seamContext
 import app.murmur.android.text.stripEcho
 import app.murmur.android.text.resolveStyle
@@ -192,6 +194,8 @@ object DictationController {
     @Volatile private var streamer: ChunkStreamer? = null
     /** Precision mode: each streamed piece formatted on the gateway while the user keeps talking. */
     private var pieceFormats: MutableList<Deferred<PieceFormat>> = java.util.Collections.synchronizedList(ArrayList())
+    /** The newest tail speculation's text job and its formatting, while recording. */
+    @Volatile private var tailSpecFormat: Pair<Deferred<String>, Deferred<PieceFormat>>? = null
 
     private sealed interface PieceFormat {
         data object Empty : PieceFormat
@@ -363,7 +367,7 @@ object DictationController {
                     loadFixture(appContext)
                 } else {
                     val recorded = recorder.stop()
-                    streamed = streamer?.takeIf { it.piecesSent > 0 }?.finish()
+                    streamed = streamer?.takeIf { it.hasWork }?.finish()
                     streamer = null
                     RecordingService.stop(appContext)
                     if (recorded.size < SAMPLE_RATE * 15 / 100) {
@@ -485,31 +489,37 @@ object DictationController {
         val formats = java.util.Collections.synchronizedList(ArrayList<Deferred<PieceFormat>>())
         pieceFormats = formats
         val textJobs = java.util.Collections.synchronizedList(ArrayList<Deferred<String>>())
+        tailSpecFormat = null
+        fun formatPiece(textJob: Deferred<String>, before: Deferred<String>?): Deferred<PieceFormat> = scope.async {
+            try {
+                val text = textJob.await()
+                if (text.isEmpty()) return@async PieceFormat.Empty
+                val (pkg, app, style) = styleAt.await()
+                if (style.effectiveMode != FormattingMode.SMART || !murmurFormatting(context)) return@async PieceFormat.Unavailable
+                val started = System.currentTimeMillis()
+                // The piece continues the one before it (seen as the text before the cursor), and
+                // may itself stop mid-sentence.
+                val prior = seamContext(before?.let { runCatching { it.await() }.getOrNull() }.orEmpty())
+                val base = formatInputFor(text, FormattingMode.SMART, style, app, pkg, s, context, precedingText = prior.ifEmpty { null })
+                val out = router.formatter().format(base.copy(context = base.context.copy(instructions = listOfNotNull(base.context.instructions, PIECE_NOTE).joinToString(" "))))
+                Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording")
+                if (out.status.outcome == FormatOutcome.FAILED) PieceFormat.Unavailable
+                else PieceFormat.Done(out.copy(text = stripEcho(out.text, prior)))
+            } catch (e: Exception) {
+                PieceFormat.Unavailable
+            }
+        }
         val onPiece: (Int, Deferred<String>) -> Unit = { index, textJob ->
             textJobs.add(textJob)
-            val before = if (index > 0) textJobs[index - 1] else null
-            formats.add(scope.async {
-                try {
-                    val text = textJob.await()
-                    if (text.isEmpty()) return@async PieceFormat.Empty
-                    val (pkg, app, style) = styleAt.await()
-                    if (style.effectiveMode != FormattingMode.SMART || !murmurFormatting(context)) return@async PieceFormat.Unavailable
-                    val started = System.currentTimeMillis()
-                    // The piece continues the one before it (seen as the text before the cursor), and
-                    // may itself stop mid-sentence.
-                    val prior = seamContext(before?.let { runCatching { it.await() }.getOrNull() }.orEmpty())
-                    val base = formatInputFor(text, FormattingMode.SMART, style, app, pkg, s, context, precedingText = prior.ifEmpty { null })
-                    val out = router.formatter().format(base.copy(context = base.context.copy(instructions = listOfNotNull(base.context.instructions, PIECE_NOTE).joinToString(" "))))
-                    Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording")
-                    if (out.status.outcome == FormatOutcome.FAILED) PieceFormat.Unavailable
-                    else PieceFormat.Done(out.copy(text = stripEcho(out.text, prior)))
-                } catch (e: Exception) {
-                    PieceFormat.Unavailable
-                }
-            })
+            formats.add(formatPiece(textJob, if (index > 0) textJobs[index - 1] else null))
+        }
+        // The stretch after the last piece, up to its latest pause: release then only waits for
+        // the words after that pause.
+        val onSpec: (Int, Deferred<String>) -> Unit = { index, textJob ->
+            tailSpecFormat = textJob to formatPiece(textJob, if (index > 0) textJobs[index - 1] else null)
         }
         val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
-        return ChunkStreamer(scope, { from -> recorder.read(from) }, SAMPLE_RATE, -48.0, onPiece = onPiece) { pcm, index ->
+        return ChunkStreamer(scope, { from -> recorder.read(from) }, SAMPLE_RATE, -48.0, onPiece = onPiece, onSpec = onSpec) { pcm, index ->
             val resolved = target.await()
             if (Wav.peakDb(pcm) < -48.0) return@ChunkStreamer ""
             val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
@@ -565,24 +575,50 @@ object DictationController {
         router: InferenceRouter,
         input: FormatInput,
         texts: List<String>?,
-        tail: String?
+        tail: String?,
+        spec: Deferred<String>? = null
     ): FormatResult? {
         val specs = pieceFormats.toList()
         pieceFormats = java.util.Collections.synchronizedList(ArrayList())
+        val specFormat = tailSpecFormat
+        tailSpecFormat = null
         if (texts == null || tail == null || specs.size != texts.size) return null
         val formatter = router.formatter()
         if (formatter.source != InferenceSource.MURMUR) return null
-        val lastPiece = seamContext(texts.lastOrNull().orEmpty())
+        // A formatted tail speculation: its last sentence is formatted again with the words that
+        // followed, so the model sees that sentence whole; the rest of it stands.
+        var specHead: FormatResult? = null
+        var tailText = tail
+        var tailBefore = texts.lastOrNull().orEmpty()
+        if (spec != null) {
+            if (specFormat == null || specFormat.first !== spec) return null
+            when (val f = specFormat.second.await()) {
+                PieceFormat.Unavailable -> return null
+                PieceFormat.Empty -> Unit
+                is PieceFormat.Done -> {
+                    val at = lastSentenceStart(f.result.text)
+                    val head = f.result.text.substring(0, at).trim()
+                    if (tail.isEmpty()) specHead = f.result
+                    else {
+                        if (head.isNotEmpty()) specHead = f.result.copy(text = head)
+                        tailText = joinSeam(f.result.text.substring(at), tail).text
+                        tailBefore = head.ifEmpty { tailBefore }
+                    }
+                }
+            }
+        }
+        val lastPiece = seamContext(tailBefore)
         val tailInput = input.copy(
-            transcript = tail,
+            transcript = tailText,
             context = input.context.copy(
                 precedingText = listOfNotNull(input.context.precedingText, lastPiece.ifEmpty { null }).joinToString(" ").ifEmpty { null }
             )
         )
-        val tailJob = if (tail.isNotEmpty()) scope.async { runCatching { formatter.format(tailInput) } } else null
+        val tailJob = if (tailText.isNotEmpty()) scope.async { runCatching { formatter.format(tailInput) } } else null
         val done = specs.awaitAll()
         if (done.any { it is PieceFormat.Unavailable }) return null
         val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
+        specHead?.let { parts.add(it) }
         if (tailJob != null) parts.add(tailJob.await().getOrElse { return null }.let { it.copy(text = stripEcho(it.text, lastPiece)) })
         if (parts.isEmpty()) return null
         Log.i(TAG, "${done.size} piece(s) formatted while speaking; tail formatted at release")
@@ -636,9 +672,14 @@ object DictationController {
         ) { wav, p -> router.transcribe(resolved, wav, p) }
         var streamedTexts: List<String>? = null
         var streamedTail: String? = null
-        val complete = if (streamed != null && streamed.samples in 1 until pcm.size) {
+        var streamedSpec: Deferred<String>? = null
+        // With a tail speculation, only the audio after its pause goes up now; if it failed, the
+        // whole stretch after the pieces does.
+        val specOk = streamed?.specText?.let { runCatching { it.await() }.isSuccess } == true
+        val from = if (specOk) streamed!!.specSamples!! else streamed?.samples ?: 0
+        val complete = if (streamed != null && (from in 1 until pcm.size)) {
             // Only the audio after the pieces goes up now, alongside waiting for the pieces.
-            val rest = pcm.copyOfRange(streamed.samples, pcm.size)
+            val rest = pcm.copyOfRange(from, pcm.size)
             val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async { runCatching { runStt(rest) } }
             val texts = runCatching { streamed.texts() }
             val tailResult = tail?.await()
@@ -654,10 +695,12 @@ object DictationController {
                     Log.i(TAG, "dropped a stock phrase from a quiet tail")
                     last = last.copy(output = last.output.copy(text = ""))
                 }
+                val specText = if (specOk) streamed.specText!!.await() else null
+                if (specOk) streamedSpec = streamed.specText
                 streamedTexts = texts.getOrThrow()
                 streamedTail = last?.output?.text?.trim() ?: ""
-                val joined = joinPieces(texts.getOrThrow() + listOfNotNull(last?.output?.text)).text
-                Log.i(TAG, "${texts.getOrThrow().size} piece(s) sent while recording; tail ${rest.size / SAMPLE_RATE} s")
+                val joined = joinPieces(texts.getOrThrow() + listOfNotNull(specText, last?.output?.text)).text
+                Log.i(TAG, "${texts.getOrThrow().size} piece(s) sent while recording${if (specOk) " + tail speculation" else ""}; ${rest.size / SAMPLE_RATE} s sent at release")
                 val base = last ?: CompleteResult(TranscribeOutput(text = "", latencyMs = 0), 0, 0.0, Coverage(null, 0.0, false))
                 base.copy(output = base.output.copy(text = joined, spans = null))
             }
@@ -754,7 +797,7 @@ object DictationController {
                 // text goes in and History says why. A Murmur instance past the fair-use cap answers
                 // with the rule-based text itself and says which limit paused the model.
                 formatted = try {
-                    (formatWithSpeculation(router, input, streamedTexts, streamedTail) ?: router.formatter().format(input))
+                    (formatWithSpeculation(router, input, streamedTexts, streamedTail, streamedSpec) ?: router.formatter().format(input))
                         .also { softLimit = it.limit }
                 } catch (e: Exception) {
                     Log.w(TAG, "formatting unavailable, using rule-based text: ${e.message}")

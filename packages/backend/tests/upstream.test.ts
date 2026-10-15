@@ -9,6 +9,8 @@ import {
 } from '../convex/lib/inference'
 import {
   BREAKER_COOLDOWN_MS,
+  BREAKER_MAX_COOLDOWN_MS,
+  breakerCooldownMs,
   BREAKER_THRESHOLD,
   DEFAULT_BUDGETS,
   RETRY_PAUSE_MS,
@@ -238,9 +240,16 @@ describe('the provider_unavailable contract', () => {
     expect(breakerOpenFor(state, now)).toBe(BREAKER_COOLDOWN_MS)
     expect(breakerOpenFor(state, now + BREAKER_COOLDOWN_MS - 1)).toBe(1)
     expect(breakerOpenFor(state, now + BREAKER_COOLDOWN_MS)).toBeNull()
-    // Failing again while half-open re-opens it for a full cooldown.
+    // Failing again while half-open re-opens it for twice as long, up to the cap.
     const later = now + BREAKER_COOLDOWN_MS + 5_000
-    expect(breakerAfterFailure(state, later)).toEqual({ failures: BREAKER_THRESHOLD + 1, openUntil: later + BREAKER_COOLDOWN_MS })
+    expect(breakerAfterFailure(state, later)).toEqual({ failures: BREAKER_THRESHOLD + 1, openUntil: later + 2 * BREAKER_COOLDOWN_MS })
+    expect(breakerCooldownMs(BREAKER_THRESHOLD + 2)).toBe(4 * BREAKER_COOLDOWN_MS)
+    expect(breakerCooldownMs(BREAKER_THRESHOLD + 20)).toBe(BREAKER_MAX_COOLDOWN_MS)
+  })
+
+  it('a provider rate limit counts against the breaker like an outage', () => {
+    const f = describeUpstreamFailure(429, 'slow down', 'llm', new Headers({ 'retry-after': '30' }))
+    expect(f).toMatchObject({ status: 503, code: 'upstream_busy', unavailable: { service: 'formatting', reason: 'unavailable', retryAfterSec: 30 } })
   })
 })
 
@@ -467,6 +476,21 @@ describe('the gateway when its provider is slow or down', () => {
     expect(chat.status).toBe(503)
     expect((await chat.json()).error).toMatchObject({ code: 'provider_unavailable', service: 'formatting' })
     expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('a formatting provider that rate-limits trips the breaker: a burst of dictations asks it three times, then gets rule-based text at once', async () => {
+    quiet()
+    stubEnv(LLM_ENV)
+    const limited = stubFetch(() => new Response('{"error":{"message":"rate limit"}}', { status: 429 }))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    for (let i = 0; i < 10; i++) {
+      const res = await asAda.fetch('/v1/format', formatRequest(`hello there everyone how are you number ${i}`))
+      expect(res.status).toBe(200)
+      expect((await res.json()).status).toMatchObject({ outcome: 'failed' })
+    }
+    expect(limited).toHaveLength(BREAKER_THRESHOLD)
+    expect(await health(t, 'llm')).toMatchObject({ failures: BREAKER_THRESHOLD })
   })
 
   it('a chat completion behind an empty 502 is tried once more, then reported unavailable for the formatting service', async () => {

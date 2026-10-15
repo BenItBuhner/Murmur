@@ -702,11 +702,19 @@ export function describeUpstreamFailure(
       code: 'upstream_auth',
       message: `The ${serviceOf(kind)} provider behind this Murmur instance rejected its credentials`
     }
+  // A rate limit counts against the provider like an outage: the breaker opens, and requests
+  // get rule-based text at once instead of hammering a provider that already said no.
   if (status === 429)
     return {
       status: 503,
       code: 'upstream_busy',
-      message: 'The model provider is busy; try again in a moment'
+      message: 'The model provider is busy; try again in a moment',
+      unavailable: {
+        service: serviceOf(kind),
+        reason: 'unavailable',
+        retryAfterSec: upstreamRetryAfter(headers) ?? PROVIDER_RETRY_AFTER_SEC
+      },
+      detail: detail || undefined
     }
   if (status === 400 || status === 404 || status === 422)
     return {

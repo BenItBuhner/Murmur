@@ -21,6 +21,7 @@ import type * as inference from "../inference.js";
 import type * as lib_access from "../lib/access.js";
 import type * as lib_clerkWebhook from "../lib/clerkWebhook.js";
 import type * as lib_entitlements from "../lib/entitlements.js";
+import type * as lib_formatGuard from "../lib/formatGuard.js";
 import type * as lib_functions from "../lib/functions.js";
 import type * as lib_gatewayCore from "../lib/gatewayCore.js";
 import type * as lib_inference from "../lib/inference.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   "lib/access": typeof lib_access;
   "lib/clerkWebhook": typeof lib_clerkWebhook;
   "lib/entitlements": typeof lib_entitlements;
+  "lib/formatGuard": typeof lib_formatGuard;
   "lib/functions": typeof lib_functions;
   "lib/gatewayCore": typeof lib_gatewayCore;
   "lib/inference": typeof lib_inference;

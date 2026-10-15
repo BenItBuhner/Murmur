@@ -212,8 +212,21 @@ export function breakerAfterFailure(state: BreakerState, now: number): BreakerSt
   const failures = state.failures + 1
   return {
     failures,
-    openUntil: failures >= BREAKER_THRESHOLD ? now + BREAKER_COOLDOWN_MS : null
+    openUntil: failures >= BREAKER_THRESHOLD ? now + breakerCooldownMs(failures) : null
   }
+}
+
+/** Longest the breaker stays open after repeated failures. */
+export const BREAKER_MAX_COOLDOWN_MS = 120_000
+
+/**
+ * The cooldown after `failures` consecutive failures: BREAKER_COOLDOWN_MS when the breaker first
+ * opens, doubling for each failed probe after it, up to BREAKER_MAX_COOLDOWN_MS, so a provider that
+ * stays down is asked about once a minute or two rather than every few seconds.
+ */
+export function breakerCooldownMs(failures: number): number {
+  const over = Math.max(0, failures - BREAKER_THRESHOLD)
+  return Math.min(BREAKER_MAX_COOLDOWN_MS, BREAKER_COOLDOWN_MS * 2 ** over)
 }
 
 /** Seconds a client should wait before asking again, never less than one. */

@@ -42,6 +42,7 @@ import {
 } from './inference'
 import type { Meter, Refusal } from './entitlements'
 import type { AccessState, Plan } from './plans'
+import { admitFormat, dedupeFormat, releaseFormat } from './formatGuard'
 import { callUpstream, readUpstreamBudgets, sttBudgetMs, type UnavailableReason } from './upstream'
 
 /**
@@ -364,6 +365,29 @@ export async function handleChatCompletions(
   const gate = await hooks.authorize({ identity, kind: 'llm' })
   if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
 
+  // The same per-user caps as /v1/format; a raw completion has no rule-based answer, so over the
+  // cap the client is told to wait.
+  const admitted = admitFormat(gate.userId)
+  if (!admitted.ok) {
+    console.warn(`[gateway] llm over the per-user ${admitted.reason} cap; refused`)
+    return gatewayError(429, 'rate_limited', 'Too many formatting requests at once; try again in a moment', {
+      'retry-after': '5'
+    })
+  }
+  try {
+    return await chatCompletionOnce(hooks, upstream, gate, identity, input)
+  } finally {
+    releaseFormat(gate.userId)
+  }
+}
+
+async function chatCompletionOnce(
+  hooks: GatewayHooks,
+  upstream: Upstream,
+  gate: Allowed,
+  identity: GatewayIdentity,
+  input: Record<string, unknown>
+): Promise<Response> {
   const outbound: Record<string, unknown> = { model: upstreamModelFor(upstream, gate.plan), stream: false }
   for (const key of CHAT_PASSTHROUGH) if (input[key] !== undefined) outbound[key] = input[key]
   const requestedMax = typeof input.max_tokens === 'number' ? input.max_tokens : 1024
@@ -438,6 +462,23 @@ export async function handleFormat(
   })
   if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
 
+  // Identical requests from one user already in flight share one answer, so a client that
+  // re-sends cannot multiply the provider calls.
+  const key = `${gate.userId}\u0000${JSON.stringify(parsed.request)}`
+  const { value: body, shared } = await dedupeFormat(key, () =>
+    formatOnce(hooks, upstream, gate, identity, parsed.request)
+  )
+  if (shared) console.log('[gateway] format deduped (identical request in flight)')
+  return new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
+}
+
+async function formatOnce(
+  hooks: GatewayHooks,
+  upstream: Upstream,
+  gate: Allowed,
+  identity: GatewayIdentity,
+  request: Extract<ReturnType<typeof parseFormatRequest>, { ok: true }>['request']
+): Promise<Record<string, unknown>> {
   const model = upstreamModelFor(upstream, gate.plan)
   const budgetMs = readUpstreamBudgets(hooks.env).formatMs
   let tokens = 0
@@ -447,6 +488,9 @@ export async function handleFormat(
   let unavailable = null as UpstreamFailure | null
   const started = Date.now()
   const complete = async (messages: ChatMessage[], opts: ChatOptions): Promise<ChatResult> => {
+    // Once the provider said it is busy or down, the rest of this request (other pieces, the
+    // strict retry) does not ask it again.
+    if (unavailable) throw new UpstreamError(unavailable.message, unavailable.status, unavailable.code)
     const answer = await upstreamChat(upstream, model, messages, opts, budgetMs)
     if (!answer.ok) {
       if (answer.failure.unavailable) unavailable = answer.failure
@@ -462,10 +506,22 @@ export async function handleFormat(
     throw new UpstreamError(unavailableMessage('llm'), 503, 'provider_unavailable')
   }
   // Past Pro's soft fair-use cap the engine runs without a model: rule-based text, never an error.
-  const formatted = await formatTranscript(
-    { transcript: parsed.request.transcript, mode: 'smart', context: parsed.request.context },
-    gate.paused ? null : gate.provider.openForSec !== null ? breakerOpen : complete
-  )
+  // Per-user caps: over them the engine runs without the model (rule-based text, at once).
+  const wantsModel = !gate.paused && gate.provider.openForSec === null
+  const admitted = wantsModel ? admitFormat(gate.userId) : null
+  if (admitted && !admitted.ok)
+    console.warn(`[gateway] format over the per-user ${admitted.reason} cap; rule-based text sent`)
+  let formatted: Awaited<ReturnType<typeof formatTranscript>>
+  try {
+    formatted = await formatTranscript(
+      { transcript: request.transcript, mode: 'smart', context: request.context },
+      gate.paused ? null : !wantsModel ? breakerOpen : admitted?.ok ? complete : null
+    )
+  } finally {
+    if (admitted?.ok) releaseFormat(gate.userId)
+  }
+  if (admitted && !admitted.ok)
+    formatted = { ...formatted, status: { ...formatted.status, detail: 'rate_limited' } }
   if (answered > 0) await hooks.record({ userId: gate.userId, identity, kind: 'llm', tokens })
   if (unavailable?.unavailable) {
     const state = await hooks.providerFailed('llm', unavailable.unavailable.reason)
@@ -478,7 +534,7 @@ export async function handleFormat(
   console.log(
     `[gateway] format plan=${gate.plan} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} tokens=${tokens} paused=${gate.paused !== null} breakerOpen=${gate.provider.openForSec !== null} ms=${Date.now() - started}`
   )
-  const body = gate.paused
+  return gate.paused
     ? {
         ...formatted,
         status: { ...formatted.status, detail: 'fair use' },
@@ -486,7 +542,6 @@ export async function handleFormat(
         model: MURMUR_MODELS.llm
       }
     : { ...formatted, model: MURMUR_MODELS.llm }
-  return new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
 }
 
 class UpstreamError extends Error {

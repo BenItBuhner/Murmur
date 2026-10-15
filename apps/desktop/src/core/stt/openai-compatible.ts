@@ -205,3 +205,108 @@ export class OpenAiCompatibleStt implements SttProvider {
     }
   }
 }
+
+// ---- Murmur gateway: one-call release and prewarm -------------------------------------------------
+
+/** Gateways without `/v1/dictate/release` (older instances, Convex); they get two calls. */
+const releaseUnsupported = new Set<string>()
+
+export interface ReleaseAnswer {
+  stt: TranscribeOutput
+  /** The text the gateway formatted (the prefix seam-joined with the transcript). */
+  transcript: string
+  /** The `/v1/format` answer for that text, or null when none was asked or it failed. */
+  format: unknown
+  /** The short-tail rules ran instead of the model. */
+  rules: boolean
+}
+
+/**
+ * The end of a dictation in one round trip to Murmur's gateway: speech, then (with `format`)
+ * formatting of `prefix` + the transcript on the edge. Null when the gateway has no such route.
+ */
+export async function dictateRelease(
+  input: TranscribeInput,
+  cfg: SttConfig,
+  prefix: string | undefined,
+  format: Record<string, unknown> | undefined
+): Promise<ReleaseAnswer | null> {
+  const base = normalizeBaseUrl(cfg.baseUrl)
+  if (!base || releaseUnsupported.has(base)) return null
+  const started = performance.now()
+  let compact: Uint8Array | null = null
+  if (compactEncoder && !compactUnsupported.has(base)) {
+    try {
+      compact = compactEncoder(input.wav)
+    } catch {
+      compact = null
+    }
+  }
+  const form = new FormData()
+  if (compact) form.append('file', new Blob([compact as BlobPart], { type: 'audio/ogg' }), 'audio.ogg')
+  else form.append('file', new Blob([input.wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
+  form.append('model', cfg.model)
+  form.append('response_format', 'json')
+  form.append('temperature', '0')
+  if (cfg.language && cfg.language !== 'auto') form.append(sttLanguageField(cfg.model), cfg.language)
+  if (input.prompt) form.append('prompt', input.prompt)
+  if (cfg.speed) form.append(MURMUR_SPEED_FIELD, cfg.speed)
+  if (prefix?.trim()) form.append('prefix', prefix)
+  if (format) form.append('format', JSON.stringify(format))
+  const headers: Record<string, string> = {}
+  if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`
+  try {
+    const res = await fetch(`${base}/dictate/release`, {
+      method: 'POST',
+      body: form,
+      headers,
+      signal: combineSignals(cfg.timeoutMs, input.signal)
+    })
+    if (res.status === 404 || res.status === 405) {
+      releaseUnsupported.add(base)
+      return null
+    }
+    if (!res.ok) throw errorFromResponse(res.status, await res.text())
+    const body = (await res.json()) as {
+      stt?: VerboseJson
+      transcript?: string
+      format?: unknown
+      rules?: boolean
+    }
+    const json = body.stt ?? {}
+    return {
+      stt: {
+        text: (json.text ?? '').trim(),
+        language: languageFromResponse(json),
+        durationSec: json.duration,
+        latencyMs: Math.round(performance.now() - started),
+        speed: readSpeedOutcome(res.headers, cfg.speed),
+        raw: json
+      },
+      transcript: body.transcript ?? '',
+      format: body.format ?? null,
+      rules: body.rules === true
+    }
+  } catch (err) {
+    throw toSttError(err)
+  }
+}
+
+/**
+ * Open a connection to Murmur's gateway while the user starts speaking (`GET /v1/warm`): the
+ * release then skips the handshake, and the gateway warms its upstream and the account's grant.
+ * Best effort; never throws.
+ */
+export async function prewarmGateway(baseUrl: string, token: string): Promise<void> {
+  const base = normalizeBaseUrl(baseUrl)
+  if (!base) return
+  try {
+    const res = await fetch(`${base}/warm`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(3_000)
+    })
+    await res.body?.cancel()
+  } catch {
+    // best effort
+  }
+}

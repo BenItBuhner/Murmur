@@ -322,6 +322,8 @@ object DictationController {
             }
             _state.value = DictationState.Listening(0, 0f, mode, locked)
             streamer = if (mode != DictationMode.COMMAND && murmurSpeech(appContext)) newStreamer(appContext, settings) else null
+            // Open the connections to the gateway now, so the release does not pay for them.
+            if (murmurSpeech(appContext)) scope.launch { runCatching { InferenceRouter.get(appContext).prewarm() } }
             listeningJob = scope.launch {
                 while (isActive) {
                     val elapsed = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
@@ -599,7 +601,8 @@ object DictationController {
         input: FormatInput,
         texts: List<String>?,
         tail: String?,
-        spec: Deferred<String>? = null
+        spec: Deferred<String>? = null,
+        preformatted: Pair<String, FormatResult>? = null
     ): FormatResult? {
         val specs = pieceFormats.toList()
         pieceFormats = java.util.Collections.synchronizedList(ArrayList())
@@ -637,7 +640,15 @@ object DictationController {
                 precedingText = listOfNotNull(input.context.precedingText, lastPiece.ifEmpty { null }).joinToString(" ").ifEmpty { null }
             )
         )
-        val tailJob = if (tailText.isNotEmpty()) scope.async { runCatching { formatter.format(tailInput) } } else null
+        val ready = preformatted?.takeIf { it.first == tailText }?.second
+        val tailJob = when {
+            tailText.isEmpty() -> null
+            ready != null -> kotlinx.coroutines.CompletableDeferred(Result.success(ready))
+            // A few words after formatted text: rule-based formatting, no model round trip.
+            countWords(tail) in 1..SHORT_TAIL_WORDS && (specHead != null || texts.isNotEmpty()) ->
+                scope.async { runCatching { Engine.formatTranscript(tailInput, null) } }
+            else -> scope.async { runCatching { formatter.format(tailInput) } }
+        }
         val done = withTimeoutOrNull(STREAM_WAIT_MS) { specs.awaitAll() } ?: return null
         if (done.any { it is PieceFormat.Unavailable }) return null
         val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
@@ -656,6 +667,31 @@ object DictationController {
             stages = stages,
             limit = parts.firstNotNullOfOrNull { it.limit }
         )
+    }
+
+    /**
+     * What the one-call release needs, known at release without waiting: the speculation's formatted
+     * last sentence (the prefix the tail continues) and the formatting request for the tail. Null
+     * when the speculation is not formatted yet (the two-call path handles it).
+     */
+    private suspend fun releasePlan(
+        streamed: Streamed,
+        specOk: Boolean,
+        style: FormatStyle,
+        app: AppContext,
+        focusedPackage: String,
+        s: MurmurSettings,
+        context: Context
+    ): Pair<String?, org.json.JSONObject>? {
+        if (!specOk) return null
+        val spec = tailSpecFormat ?: return null
+        if (spec.first !== streamed.specText || !spec.second.isCompleted) return null
+        val f = spec.second.await() as? PieceFormat.Done ?: return null
+        val at = lastSentenceStart(f.result.text)
+        val head = f.result.text.substring(0, at).trim()
+        if (head.isEmpty()) return null
+        val input = formatInputFor("", FormattingMode.SMART, style, app, focusedPackage, s, context, precedingText = seamContext(head).ifEmpty { null })
+        return f.result.text.substring(at) to input.toJson().apply { remove("transcript") }
     }
 
     private suspend fun process(
@@ -694,6 +730,8 @@ object DictationController {
             log = { Log.w(TAG, it) }
         ) { wav, p -> router.transcribe(resolved, wav, p) }
         var streamedTexts: List<String>? = null
+        // The tail formatted on the gateway in the same call as its speech (text it formatted, result).
+        var preformatted: Pair<String, FormatResult>? = null
         var streamedTail: String? = null
         var streamedSpec: Deferred<String>? = null
         // With a tail speculation, only the audio after its pause goes up now; if it failed, the
@@ -706,7 +744,24 @@ object DictationController {
         val complete = if (streamed != null && (from in 1 until pcm.size)) {
             // Only the audio after the pieces goes up now, alongside waiting for the pieces.
             val rest = pcm.copyOfRange(from, pcm.size)
-            val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async { runCatching { runStt(rest) } }
+            // One call for the tail when the rest is formatted already: speech, then formatting of the
+            // speculation's last sentence + the tail, on the gateway (no second phone round trip).
+            val plan = if (run.mode != DictationMode.COMMAND && style.effectiveMode == FormattingMode.SMART && murmurFormatting(context))
+                releasePlan(streamed, specOk, style, app, focusedPackage, s, context) else null
+            val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async {
+                runCatching {
+                    val answer = plan?.let { p ->
+                        runCatching { router.dictateRelease(resolved, Wav.encodePcm16(rest, SAMPLE_RATE), prompt, p.first, p.second) }
+                            .onFailure { Log.w(TAG, "one-call release failed; using two calls", it) }.getOrNull()
+                    }
+                    if (answer == null) runStt(rest)
+                    else {
+                        answer.format?.let { preformatted = answer.transcript to FormatResult.fromJson(it) }
+                        Log.i(TAG, "tail in one call: ${answer.stt.latencyMs} ms${if (answer.rules) " (short tail, rules)" else ""}")
+                        CompleteResult(answer.stt, 0, 0.0, Coverage(null, 0.0, false))
+                    }
+                }
+            }
             val texts = runCatching { withTimeout(streamLeft()) { streamed.texts() } }
             // The tail is new audio, not a stalled piece: it gets the stream wait plus its own STT time.
             val tailResult = tail?.let { t -> withTimeoutOrNull(streamLeft() + 10_000) { t.await() } ?: Result.failure(ReleaseTimeoutException()) }
@@ -824,7 +879,7 @@ object DictationController {
                 // text goes in and History says why. A Murmur instance past the fair-use cap answers
                 // with the rule-based text itself and says which limit paused the model.
                 formatted = try {
-                    (formatWithSpeculation(router, input, streamedTexts, streamedTail, streamedSpec) ?: router.formatter().format(input))
+                    (formatWithSpeculation(router, input, streamedTexts, streamedTail, streamedSpec, preformatted) ?: router.formatter().format(input))
                         .also { softLimit = it.limit }
                 } catch (e: Exception) {
                     Log.w(TAG, "formatting unavailable, using rule-based text: ${e.message}")
@@ -1067,6 +1122,9 @@ object DictationController {
         else -> err.message ?: "Something went wrong"
     }
 }
+
+/** A release tail of at most this many words is formatted by rules (mirrors SHORT_TAIL_WORDS in the gateway). */
+const val SHORT_TAIL_WORDS = 6
 
 /** What the formatter is told about a piece of a longer dictation that is not the last. */
 private const val PIECE_NOTE =

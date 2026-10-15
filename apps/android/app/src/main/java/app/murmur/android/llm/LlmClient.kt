@@ -38,6 +38,15 @@ object LlmClient {
         .connectTimeout(10, TimeUnit.SECONDS)
         .build()
 
+    /** Opens this client's connection to Murmur's gateway ahead of the release (see SttClient.prewarm). */
+    fun prewarm(gatewayUrl: String, token: String) {
+        runCatching {
+            val req = Request.Builder().url("${gatewayUrl.trim().trimEnd('/')}/warm").get()
+                .apply { if (token.isNotEmpty()) header("Authorization", "Bearer $token") }.build()
+            client(3_000).newCall(req).execute().close()
+        }
+    }
+
     private fun client(timeoutMs: Int): OkHttpClient = baseClient.newBuilder()
         .callTimeout(timeoutMs.toLong().coerceAtLeast(1000), TimeUnit.MILLISECONDS)
         .readTimeout(timeoutMs.toLong().coerceAtLeast(1000), TimeUnit.MILLISECONDS)

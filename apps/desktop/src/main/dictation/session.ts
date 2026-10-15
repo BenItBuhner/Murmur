@@ -56,6 +56,8 @@ import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
 import { DEFAULT_CHUNK_PLAN } from '@core/audio/chunker'
 import { ChunkStreamer, type TailSpeculation } from './streaming'
+import { dictateRelease, prewarmGateway } from '@core/stt/openai-compatible'
+import { encodeWavPcm16 } from '@core/audio/wav'
 import { MURMUR_PROVIDER } from '@shared/inference'
 import type { HookService } from '../hotkeys/hook'
 import type { FormatOutcome, Formatter, InferenceRouter, ResolvedStt } from '../inference/router'
@@ -514,6 +516,8 @@ export class DictationController extends EventEmitter {
           speed: effectiveSpeed(s.stt.speed, style.rule)
         })
         if (resolved.provider !== MURMUR_PROVIDER) throw new Error('streaming is for Murmur only')
+        // Open the connection to Murmur's gateway now, so the release does not pay for it.
+        if (resolved.source === 'murmur') void prewarmGateway(resolved.cfg.baseUrl, resolved.cfg.apiKey).catch(() => undefined)
         const app = classifyApp(w.app, w.title)
         const speed = effectiveSpeed(s.stt.speed, style.rule)
         const smart = formattingModeAt(style.mode, speed) === 'smart'
@@ -743,6 +747,14 @@ export class DictationController extends EventEmitter {
       : undefined
     const keyterms = s.dictionary.map((d) => d.word)
     let stt: StreamedStt
+    // The tail formatted on the gateway in the same call as its speech: [text it formatted, result].
+    let preformatted: [string, FormatOutcome] | undefined
+    const smartRelease =
+      job.mode !== 'command' &&
+      style.mode !== 'off' &&
+      formattingModeAt(style.mode, speed) === 'smart' &&
+      this.deps.inference.routing?.().llm === 'murmur' &&
+      resolved.source === 'murmur'
     const run = (clip: Int16Array, endSec: number): Promise<CompleteResult> =>
       transcribeComplete((wav, p) => this.transcribeWithFallback(wav, p, keyterms, resolved), {
         pcm: clip,
@@ -756,8 +768,36 @@ export class DictationController extends EventEmitter {
         log: (m) => log.warn(`session ${tag}: ${m}`)
       })
     try {
+      // One call for the tail when the speculation before it is formatted already: speech, then
+      // formatting of its last sentence + the tail, on the gateway.
+      const runTail = async (clip: Int16Array, endSec: number): Promise<CompleteResult> => {
+        const plan = smartRelease && streamed ? await releasePlan(streamed) : null
+        if (plan) {
+          try {
+            const answer = await dictateRelease(
+              { wav: encodeWavPcm16(clip, SAMPLE_RATE), prompt },
+              resolved.cfg,
+              plan.prefix,
+              { ...plan.format, context: pieceContext(this.formatContext(s, style, app), plan.before, true) }
+            )
+            if (answer) {
+              if (answer.format) preformatted = [answer.transcript, answer.format as FormatOutcome]
+              log.info(`session ${tag}: tail in one call, ${answer.stt.latencyMs} ms${answer.rules ? ' (short tail, rules)' : ''}`)
+              return {
+                ...answer.stt,
+                resumed: 0,
+                recoveredSec: 0,
+                coverage: { transcribedSec: null, missingSec: 0, truncated: false }
+              } as CompleteResult
+            }
+          } catch (err) {
+            log.warn(`session ${tag}: one-call release failed; using two calls`, err)
+          }
+        }
+        return run(clip, endSec)
+      }
       stt = streamed
-        ? await this.withStreamedPrefix(streamed, pcm, threshold, run, tag, () =>
+        ? await this.withStreamedPrefix(streamed, pcm, threshold, runTail, tag, () =>
             run(audio, speechEndSec)
           )
         : await run(audio, speechEndSec)
@@ -878,6 +918,7 @@ export class DictationController extends EventEmitter {
               formatter,
               input,
               streamed,
+              preformatted,
               stt,
               job.id.slice(0, 8)
             )) ?? (await formatter.format(input))
@@ -1080,6 +1121,7 @@ export class DictationController extends EventEmitter {
     formatter: Formatter,
     input: FormatInput,
     streamed: StreamedPrefix | undefined,
+    preformatted: [string, FormatOutcome] | undefined,
     stt: StreamedStt,
     tag: string
   ): Promise<FormatOutcome | null> {
@@ -1107,13 +1149,19 @@ export class DictationController extends EventEmitter {
         }
       }
     }
-    const tailFormat = tailInput
-      ? formatter.format({
-          ...input,
-          transcript: tailInput,
-          context: pieceContext(input.context, tailBefore, true)
-        })
-      : null
+    const tailRequest: FormatInput = {
+      ...input,
+      transcript: tailInput,
+      context: pieceContext(input.context, tailBefore, true)
+    }
+    const tailFormat = !tailInput
+      ? null
+      : preformatted && preformatted[0] === tailInput
+        ? Promise.resolve(preformatted[1])
+        : // A few words after formatted text: rule-based formatting, no model round trip.
+          countWords(tail) > 0 && countWords(tail) <= SHORT_TAIL_WORDS && (specHead || stt.streamed.texts.length)
+          ? formatTranscript(tailRequest, null)
+          : formatter.format(tailRequest)
     tailFormat?.catch(() => undefined)
     type PieceOutcome = Awaited<(typeof streamed.formats)[number]>
     const pieces: PieceOutcome[] = await within(Promise.all(streamed.formats), STREAM_WAIT_MS).catch(
@@ -1323,6 +1371,28 @@ export function serviceNoticeOf(err: unknown): ServiceNotice | undefined {
  * dictation is transcribed instead (Oct 15 2026: a stalled piece held a release for minutes).
  */
 export const STREAM_WAIT_MS = 8_000
+/** A release tail of at most this many words is formatted by rules (SHORT_TAIL_WORDS in the gateway). */
+export const SHORT_TAIL_WORDS = 6
+
+/**
+ * What the one-call release needs, known at release without waiting: the speculation's formatted
+ * last sentence (the prefix the tail continues), the text before it, and the base request. Null
+ * when the speculation is missing or not formatted yet.
+ */
+async function releasePlan(
+  streamed: StreamedPrefix
+): Promise<{ prefix: string; before: string; format: Record<string, unknown> } | null> {
+  if (!streamed.spec) return null
+  const PENDING = Symbol('pending')
+  const spec = await Promise.race([streamed.spec.result.catch(() => null), Promise.resolve(PENDING)])
+  if (spec === PENDING || spec === null) return null
+  const f = await Promise.race([spec.format.catch(() => null), Promise.resolve(PENDING)])
+  if (f === PENDING || f === null || f === 'empty') return null
+  const at = lastSentenceStart(f.text)
+  const head = f.text.slice(0, at).trim()
+  if (!head) return null
+  return { prefix: f.text.slice(at), before: head, format: {} }
+}
 export const RELEASE_TIMEOUT_MESSAGE = 'Murmur took too long to transcribe this — tap Retry'
 
 /** The longest a release may take: 30 s plus 0.1 s per second of audio, at most 75 s. */

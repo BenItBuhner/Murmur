@@ -69,7 +69,7 @@ object Inference {
     const val FAST_UNAVAILABLE_NOTE = "Fast isn't available yet, used Normal"
     /** The Speed setting's explanation, the same words as the desktop's Models page. */
     const val SPEED_SETTING_DESCRIPTION =
-        "Normal: today's speech model with AI formatting. Fast: faster speech model and no AI formatting, just the instant Light cleanup. A per-app rule on the Style screen can pick a speed for one app."
+        "Automatic: while you speak, pieces are transcribed and formatted by the stronger models; when you stop, the last few seconds go to the fastest models, with a backup request to a second provider if the first is slow. There is nothing to choose."
     /** Under the Speed setting when the instance reports no fast model. */
     const val FAST_UNAVAILABLE_SETTING_NOTE =
         "The faster speech model isn't available on this server yet; Fast dictations use the Normal model until it is, still without AI formatting."
@@ -208,7 +208,7 @@ class InferenceRouter(
                     language = s.language,
                     timeoutMs = s.sttTimeoutMs,
                     // Sent even for Normal, so the instance's log shows what was asked for.
-                    speed = (speed ?: s.sttSpeed).id
+                    speed = (speed ?: SttSpeed.NORMAL).id
                 ),
                 fallbackModel = "",
                 provider = Inference.PROVIDER

@@ -343,71 +343,34 @@ describe('a dictation fed by MURMUR_TEST_AUDIO_FILE', () => {
     return history.list().entries[0] as HistoryEntry
   }
 
-  it('Fast skips the formatting model: Light cleanup goes in, and History says why', async () => {
+  it('one automatic mode: a stored Fast (setting or per-app rule) runs like Normal, with AI formatting', async () => {
     const s = (controller as unknown as { deps: { settings: FakeSettings } }).deps.settings.value
     s.formatting.mode = 'smart'
-    // Normal with smart formatting: the model is asked and its answer goes in.
     const normal = await dictateOnce()
     expect(routed.formatterCalls).toBe(1)
     expect(normal.finalText).toBe('Hello from Murmur, this is a test.')
-    expect(normal.llm).toMatchObject({ outcome: 'used' })
     expect(normal.speed).toBe('normal')
-    expect(routed.speeds).toEqual(['normal'])
 
-    // Fast: no formatting request at all, the rule-based Light text, and the reason on the entry.
+    // Fast from an older version or another device: same request, same formatting.
     s.stt.speed = 'fast'
     const fast = await dictateOnce()
-    expect(routed.formatterCalls).toBe(1)
-    expect(routed.speeds).toEqual(['normal', 'fast'])
-    expect(fast.finalText).toBe('So hello from murmur this is a test')
-    expect(fast.llmUsed).toBe(false)
-    expect(fast.llm).toEqual({ outcome: 'skipped', detail: 'fast speed', attempts: 0 })
-    expect(fast.speed).toBe('fast')
-    expect(fast.stages).toContain('fillers')
-    expect(inject.calls.at(-1)).toEqual({
-      text: 'So hello from murmur this is a test ',
-      method: 'auto',
-      pressEnter: false
-    })
-    expect(logLines).toContainEqual(expect.stringMatching(/\(fast, no model\) speed=fast/))
+    expect(routed.formatterCalls).toBe(2)
+    expect(fast.finalText).toBe('Hello from Murmur, this is a test.')
+    expect(fast.llm).toMatchObject({ outcome: 'used' })
+    expect(fast.speed).toBe('normal')
 
-    // Fast with formatting off stays off: nothing is cleaned up, and nothing is skipped "because of Fast".
-    s.formatting.mode = 'off'
-    const off = await dictateOnce()
-    expect(routed.formatterCalls).toBe(1)
-    expect(off.finalText).toBe('um so hello from murmur this is a test')
-    expect(off.llm).toBeUndefined()
-    expect(off.speed).toBe('fast')
-  })
-
-  it('a per-app rule’s speed wins over the setting, for the speech request and the formatting model alike', async () => {
-    const s = (controller as unknown as { deps: { settings: FakeSettings } }).deps.settings.value
-    s.formatting.mode = 'smart'
-    // The active window is "Notes"; a rule on it says Fast while the device says Normal.
-    s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'auto', speed: 'fast' }]
-    const fast = await dictateOnce()
-    expect(routed.speeds).toEqual(['fast'])
-    expect(routed.formatterCalls).toBe(0)
-    expect(fast.speed).toBe('fast')
-    expect(fast.llm).toEqual({ outcome: 'skipped', detail: 'fast speed', attempts: 0 })
-    expect(fast.finalText).toBe('So hello from murmur this is a test')
-
-    // The other way round: the device says Fast, the rule for this app says Normal.
-    s.stt.speed = 'fast'
-    s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'auto', speed: 'normal' }]
-    const normal = await dictateOnce()
-    expect(routed.speeds).toEqual(['fast', 'normal'])
-    expect(routed.formatterCalls).toBe(1)
-    expect(normal.speed).toBe('normal')
-    expect(normal.llm).toMatchObject({ outcome: 'used' })
-
-    // A rule that leaves the speed on Default inherits the device setting; one for another app does not apply.
-    s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'casual' }]
-    expect((await dictateOnce()).speed).toBe('fast')
     s.stt.speed = 'normal'
-    s.formatting.appRules = [{ id: 'r2', match: 'slack', tone: 'auto', speed: 'fast' }]
-    expect((await dictateOnce()).speed).toBe('normal')
-    expect(routed.speeds).toEqual(['fast', 'normal', 'fast', 'normal'])
+    s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'auto', speed: 'fast' }]
+    const rule = await dictateOnce()
+    expect(routed.formatterCalls).toBe(3)
+    expect(rule.speed).toBe('normal')
+    expect(routed.speeds).toEqual(['normal', 'normal', 'normal'])
+
+    // Turning AI formatting off for an app is how to skip the model now.
+    s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'auto', formatting: 'light' }]
+    const light = await dictateOnce()
+    expect(routed.formatterCalls).toBe(3)
+    expect(light.finalText).toBe('So hello from murmur this is a test')
   })
 
   it('press enter: a clip ending in "press enter" types the text and presses Enter', async () => {

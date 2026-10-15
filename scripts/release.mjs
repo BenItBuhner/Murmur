@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.23': [
+    'One automatic speed: the Fast/Normal choice is gone. While you speak, the stronger models transcribe and format; when you stop, the fastest models finish the last few seconds. A Fast setting saved earlier now runs the same way, with AI formatting. To skip AI formatting in one app, set that app\'s formatting to Light or Off.',
+    '30-minute dictations: a failed piece is retried on its own instead of re-sending the whole recording, long recordings are re-sent (and retried) in pieces, long transcripts are formatted in parts, and up to 64,000 characters sync to your account.',
+    'If Murmur is closed or crashes in the middle of a long dictation, the text transcribed so far shows up in History the next time it starts. On Android, a long dictation keeps running with the screen off.'
+  ],
   '0.6.22': [
     'Faster at release: the last few seconds are transcribed and formatted in one request, the connection opens when you start recording, short endings are formatted instantly, and a slow request is retried on a second provider after half a second.',
     'Cleaner long dictations: repeated or dropped words at chunk seams are caught even when the two pieces word them slightly differently, and sentence-ending periods at seams are kept.'

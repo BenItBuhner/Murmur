@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import app.murmur.android.R
 
@@ -22,6 +23,14 @@ private const val TAG = "MurmurRecordingSvc"
  */
 class RecordingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    override fun onDestroy() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
+        super.onDestroy()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val channelId = "murmur_dictation"
@@ -65,10 +74,30 @@ class RecordingService : Service() {
             Log.e(TAG, "startForeground failed; recording continues without the foreground service", e)
             stopSelf(startId)
         }
+        // The CPU stays up for the whole session (a long dictation with the screen off keeps sending
+        // pieces); the timeout is a backstop in case the service is never stopped.
+        if (wakeLock == null) wakeLock = acquireWakeLock(this, "murmur:recording", RECORDING_WAKE_LOCK_MS)
         return START_NOT_STICKY
     }
 
     companion object {
+        /** Longest a recording keeps the CPU awake: past the 30-minute session limit, with margin. */
+        const val RECORDING_WAKE_LOCK_MS = 35 * 60_000L
+        /** Longest a release keeps the CPU awake (the release deadline's maximum). */
+        const val PROCESSING_WAKE_LOCK_MS = 4 * 60_000L
+
+        /** A partial wake lock with a timeout, or null when the system refuses one. */
+        fun acquireWakeLock(context: Context, tag: String, timeoutMs: Long): PowerManager.WakeLock? = try {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag).apply {
+                setReferenceCounted(false)
+                acquire(timeoutMs)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "no wake lock: ${e.message}")
+            null
+        }
+
         private const val NOTIFICATION_ID = 1291
 
         fun start(context: Context) {

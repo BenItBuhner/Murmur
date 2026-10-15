@@ -17,6 +17,8 @@ class Recorder {
     private var record: AudioRecord? = null
     private var thread: Thread? = null
     private val chunks = ArrayList<ShortArray>()
+    /** Samples in [chunks], kept alongside so a 30-minute session (36,000 chunks) is not summed on every poll. */
+    private var total = 0
     @Volatile private var running = false
 
     /** Perceptual 0..1 level for the waveform, updated from the capture thread. */
@@ -27,24 +29,27 @@ class Recorder {
 
     /** The samples captured so far from [from] on (a copy), for streaming a long dictation. */
     fun read(from: Int): ShortArray = synchronized(chunks) {
-        val total = chunks.sumOf { it.size }
         val out = ShortArray(maxOf(0, total - from))
-        var pos = 0
+        // Walk back from the end to the chunk holding `from`: streaming reads only the last stretch
+        // (under a minute), so this stays cheap however long the session runs.
+        var i = chunks.size
+        var pos = total
+        while (i > 0 && pos > from) { i--; pos -= chunks[i].size }
         var at = 0
-        for (c in chunks) {
-            val end = pos + c.size
-            if (end > from) {
-                val start = maxOf(0, from - pos)
+        for (k in i until chunks.size) {
+            val c = chunks[k]
+            val start = maxOf(0, from - pos)
+            if (start < c.size) {
                 System.arraycopy(c, start, out, at, c.size - start)
                 at += c.size - start
             }
-            pos = end
+            pos += c.size
         }
         out
     }
 
     /** Samples captured so far in this session. */
-    fun sampleCount(): Int = synchronized(chunks) { chunks.sumOf { it.size } }
+    fun sampleCount(): Int = synchronized(chunks) { total }
 
     /** How many samples are buffered so far; for tests that watch a capture run. */
     @androidx.annotation.VisibleForTesting
@@ -84,7 +89,7 @@ class Recorder {
             throw IllegalStateException("Microphone is busy or unavailable", e)
         }
 
-        synchronized(chunks) { chunks.clear() }
+        synchronized(chunks) { chunks.clear(); total = 0 }
         record = rec
         running = true
         val maxSamples = maxDurationSec?.let { it.toLong() * SAMPLE_RATE }
@@ -97,7 +102,7 @@ class Recorder {
                 if (n < 0) break // ERROR_INVALID_OPERATION / ERROR_DEAD_OBJECT: the stream is gone
                 if (n == 0) continue
                 val copy = buf.copyOf(n)
-                synchronized(chunks) { chunks.add(copy) }
+                synchronized(chunks) { chunks.add(copy); total += copy.size }
                 total += n
                 level = perceptualLevel(copy)
                 if (maxSamples != null && total >= maxSamples) {
@@ -114,7 +119,7 @@ class Recorder {
 
     fun stop(): ShortArray {
         stopInternal()
-        val list = synchronized(chunks) { ArrayList(chunks).also { chunks.clear() } }
+        val list = synchronized(chunks) { ArrayList(chunks).also { chunks.clear(); total = 0 } }
         val total = list.sumOf { it.size }
         val out = ShortArray(total)
         var off = 0
@@ -127,7 +132,7 @@ class Recorder {
 
     fun cancel() {
         stopInternal()
-        synchronized(chunks) { chunks.clear() }
+        synchronized(chunks) { chunks.clear(); total = 0 }
     }
 
     private fun stopInternal() {

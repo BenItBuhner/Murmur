@@ -28,6 +28,7 @@ import { registerIpc } from './ipc'
 import { createLogger, initLogger } from './logger'
 import { getActiveWindow } from './active-window'
 import { HistoryStore } from './store/history'
+import { PartialStore, recoveredEntry } from './store/partials'
 import { RecordingStore } from './store/recordings'
 import { SettingsStore } from './store/settings'
 import { AppTray } from './tray'
@@ -137,6 +138,12 @@ async function main(): Promise<void> {
   const recordings = new RecordingStore(join(userData, 'recordings'))
   const history = new HistoryStore(userData, recordings)
   recordings.sweep(history.recordingNames())
+  // Dictations a crash or forced quit cut short: what their streamed pieces transcribed goes to History.
+  const partials = new PartialStore(join(userData, 'partials'))
+  for (const p of partials.takeAll()) {
+    const entry = recoveredEntry(p)
+    if (entry && !history.get(entry.id)) history.add(entry)
+  }
 
   // Updates: follow the GitHub Releases of the repository this build came from.
   const updateSource = resolveUpdateSource(process.env, {
@@ -238,7 +245,8 @@ async function main(): Promise<void> {
     hook,
     inference,
     overlay: { setState: (s) => overlay.setState(s), playSound: (n) => overlay.playSound(n) },
-    getActiveWindow
+    getActiveWindow,
+    partials
   })
 
   const resolvedTheme = (s: Settings): 'light' | 'dark' =>

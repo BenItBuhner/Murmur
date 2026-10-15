@@ -27,6 +27,14 @@ export type Grant =
   | { ok: false; denied: 'private_testing' }
 
 export const GRANT_TTL_MS = 120_000
+/**
+ * Convex gets this long to answer /worker/grant. Oct 15 2026: a grant fetch with no deadline stalled
+ * every request of one user in an isolate (they share the in-flight promise) until the phone gave
+ * up at 45 s, which showed as dictations stuck on "Transcribing" for minutes.
+ */
+export const GRANT_TIMEOUT_MS = 3_000
+/** A grant this old may still be used when Convex is slow or unreachable. */
+export const GRANT_STALE_MS = 30 * 60_000
 /** How long the first record of a batch waits for company (inside `waitUntil`'s 30 s). */
 export const USAGE_FLUSH_MS = 20_000
 export const USAGE_FLUSH_COUNT = 25
@@ -65,10 +73,11 @@ export function resetState(): void {
   oldestUsageAt = 0
 }
 
-async function post(link: ConvexLink, path: string, body: unknown): Promise<Response> {
+async function post(link: ConvexLink, path: string, body: unknown, timeoutMs = 10_000): Promise<Response> {
   const fetcher = link.fetcher
   return await fetcher(`${link.siteUrl.replace(/\/+$/, '')}${path}`, {
     method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { authorization: `Bearer ${link.secret}`, 'content-type': 'application/json' },
     body: JSON.stringify(body)
   })
@@ -81,15 +90,25 @@ export async function grantFor(link: ConvexLink, identity: GatewayIdentity, now 
   const pending = inflight.get(identity.subject)
   if (pending) return await pending
   const request = (async () => {
-    const res = await post(link, '/worker/grant', {
-      clerkId: identity.subject,
-      email: identity.email,
-      emailVerified: identity.emailVerified
-    })
-    if (!res.ok) throw new Error(`Convex /worker/grant answered HTTP ${res.status}`)
-    const grant = (await res.json()) as Grant
-    grants.set(identity.subject, { at: now, grant })
-    return grant
+    try {
+      const res = await post(
+        link,
+        '/worker/grant',
+        { clerkId: identity.subject, email: identity.email, emailVerified: identity.emailVerified },
+        GRANT_TIMEOUT_MS
+      )
+      if (!res.ok) throw new Error(`Convex /worker/grant answered HTTP ${res.status}`)
+      const grant = (await res.json()) as Grant
+      grants.set(identity.subject, { at: now, grant })
+      return grant
+    } catch (err) {
+      // Convex slow or down: the last allowance it gave (if recent enough and not a denial) stands.
+      if (cached && cached.grant.ok && now - cached.at < GRANT_STALE_MS) {
+        console.warn(`[worker] grant refresh failed, using the cached grant: ${err instanceof Error ? err.message : err}`)
+        return cached.grant
+      }
+      throw err
+    }
   })()
   inflight.set(identity.subject, request)
   try {

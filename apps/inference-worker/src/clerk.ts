@@ -39,8 +39,11 @@ function b64urlJson(input: string): Record<string, unknown> | null {
   }
 }
 
+/** A JWKS fetch that has not answered by now is given up on (a hung fetch must not hang dictation). */
+export const JWKS_TIMEOUT_MS = 3_000
+
 async function loadKeys(issuer: string, fetcher: typeof fetch): Promise<Map<string, CryptoKey>> {
-  const res = await fetcher(`${issuer}/.well-known/jwks.json`)
+  const res = await fetcher(`${issuer}/.well-known/jwks.json`, { signal: AbortSignal.timeout(JWKS_TIMEOUT_MS) })
   if (!res.ok) throw new Error(`JWKS fetch failed: HTTP ${res.status}`)
   const body = (await res.json()) as { keys?: Jwk[] }
   const keys = new Map<string, CryptoKey>()
@@ -62,8 +65,14 @@ async function loadKeys(issuer: string, fetcher: typeof fetch): Promise<Map<stri
 async function keyFor(issuer: string, kid: string, fetcher: typeof fetch): Promise<CryptoKey | null> {
   const fresh = jwksCache && jwksCache.issuer === issuer && Date.now() - jwksCache.at < JWKS_TTL_MS
   if (fresh && jwksCache!.keys.has(kid)) return jwksCache!.keys.get(kid)!
-  const keys = await loadKeys(issuer, fetcher)
-  return keys.get(kid) ?? null
+  try {
+    const keys = await loadKeys(issuer, fetcher)
+    return keys.get(kid) ?? null
+  } catch (err) {
+    // Clerk slow or down: a key we already know (even past its TTL) still verifies the session.
+    if (jwksCache && jwksCache.issuer === issuer && jwksCache.keys.has(kid)) return jwksCache.keys.get(kid)!
+    throw err
+  }
 }
 
 /**

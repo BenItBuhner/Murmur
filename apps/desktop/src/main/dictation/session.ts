@@ -160,6 +160,8 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
 /** One run of the pipeline: a dictation that was just spoken, or a stored one sent again. */
 interface ProcessJob {
   id: string
+  /** The release passed its deadline and the user was offered Retry: a late answer is dropped. */
+  abandoned?: boolean
   mode: DictationMode
   windowInfo: Promise<ActiveWindowInfo>
   /** File name of the stored audio, when it was kept. */
@@ -378,7 +380,32 @@ export class DictationController extends EventEmitter {
       // Store the audio before anything can go wrong with it: a failed request is retried from
       // this file, and a kept recording is what History plays back.
       job.recording = await this.storeRecording(session.id, pcm)
-      await this.process(job, pcm, stopAt, s, streamed)
+      // A hard deadline: whatever stalls, the pill never sits on "processing" forever.
+      const audioSec = pcm.length / SAMPLE_RATE
+      const work = this.process(job, pcm, stopAt, s, streamed)
+      const done = await within(work, releaseDeadlineMs(audioSec)).then(
+        () => true,
+        (err: unknown) => {
+          if (err instanceof ReleaseTimeoutError) return false
+          throw err
+        }
+      )
+      if (!done) {
+        job.abandoned = true
+        work.catch(() => undefined)
+        log.warn(`session ${job.id.slice(0, 8)}: release passed its ${releaseDeadlineMs(audioSec)} ms deadline; offering Retry`)
+        const timings: StageTimings = {
+          recordMs: Math.round(audioSec * 1000),
+          vadMs: 0,
+          sttMs: 0,
+          formatMs: 0,
+          llmMs: 0,
+          injectMs: 0,
+          totalMs: Math.round(performance.now() - stopAt)
+        }
+        this.recordFailure(job, '', classifyApp('', ''), timings, null, RELEASE_TIMEOUT_MESSAGE)
+        this.showError(RELEASE_TIMEOUT_MESSAGE, job.recording ? job.id : undefined)
+      }
     } catch (err) {
       log.error('session processing crashed', err)
       this.showError(friendlyError(err))
@@ -894,6 +921,10 @@ export class DictationController extends EventEmitter {
     const wordCount = countWords(finalText)
 
     // 4. Inject (serialized), or only copy when the text has nowhere to go right now.
+    if (job.abandoned) {
+      log.warn(`session ${job.id.slice(0, 8)}: finished after its deadline; not inserting`)
+      return { ok: false, error: RELEASE_TIMEOUT_MESSAGE, recorded: true }
+    }
     t = performance.now()
     const injectResult = job.inject
       ? await this.enqueueInject(finalText, pressEnter, s, replaceSelection)
@@ -994,9 +1025,12 @@ export class DictationController extends EventEmitter {
     // stretch after the pieces is sent as before.
     let sent = sendFrom(streamed.spec ? streamed.spec.samples : streamed.samples)
     let spec: TailSpec | undefined
+    // Everything streamed shares one wait; past it the whole dictation goes up instead.
+    const streamDeadline = Date.now() + STREAM_WAIT_MS
+    const left = (): number => Math.max(1, streamDeadline - Date.now())
     if (streamed.spec) {
       try {
-        spec = await streamed.spec.result
+        spec = await within(streamed.spec.result, left())
       } catch (err) {
         log.warn(`session ${tag}: the tail speculation failed; sending the whole tail`, err)
         sent = sendFrom(streamed.samples)
@@ -1005,12 +1039,18 @@ export class DictationController extends EventEmitter {
     const { rest, a, tail } = sent
     let texts: string[]
     try {
-      texts = await streamed.texts
+      texts = await within(streamed.texts, left())
     } catch (err) {
       log.warn(`session ${tag}: a streamed piece failed; transcribing the whole dictation`, err)
       return whole()
     }
-    let last = await tail
+    let last: CompleteResult | null
+    try {
+      last = await within(tail, left() + 10_000)
+    } catch (err) {
+      log.warn(`session ${tag}: the tail did not come back in time; transcribing the whole dictation`, err)
+      return whole()
+    }
     // A quiet tail (a breath, the key release) can come back as a stock phrase like "Thank you."
     // that nobody said: with under 0.6 s of voiced audio it is dropped.
     if (last && a.speechMs < TAIL_PHRASE_MIN_SPEECH_MS && isSilenceHallucination(last.text)) {
@@ -1053,7 +1093,7 @@ export class DictationController extends EventEmitter {
     let tailInput = tail
     let tailBefore = lastPiece
     if (stt.streamed.spec) {
-      const f = await stt.streamed.spec.format
+      const f = await within(stt.streamed.spec.format, STREAM_WAIT_MS).catch(() => null)
       if (f === null) return null
       if (f !== 'empty') {
         const at = lastSentenceStart(f.text)
@@ -1075,7 +1115,10 @@ export class DictationController extends EventEmitter {
         })
       : null
     tailFormat?.catch(() => undefined)
-    const pieces = await Promise.all(streamed.formats)
+    type PieceOutcome = Awaited<(typeof streamed.formats)[number]>
+    const pieces: PieceOutcome[] = await within(Promise.all(streamed.formats), STREAM_WAIT_MS).catch(
+      (): PieceOutcome[] => [null as PieceOutcome]
+    )
     if (pieces.some((p) => p === null)) {
       log.info(
         `session ${tag}: a piece was not formatted while speaking; formatting the whole text`
@@ -1273,6 +1316,34 @@ export function planLimitOf(err: unknown): LimitNotice | undefined {
 /** The service notice behind an error, when a Murmur instance said its provider is down. */
 export function serviceNoticeOf(err: unknown): ServiceNotice | undefined {
   return err instanceof SttError ? err.service : undefined
+}
+
+/**
+ * At release, the pieces and tail speculation sent while recording get this long before the whole
+ * dictation is transcribed instead (Oct 15 2026: a stalled piece held a release for minutes).
+ */
+export const STREAM_WAIT_MS = 8_000
+export const RELEASE_TIMEOUT_MESSAGE = 'Murmur took too long to transcribe this — tap Retry'
+
+/** The longest a release may take: 30 s plus 0.1 s per second of audio, at most 75 s. */
+export function releaseDeadlineMs(audioSec: number): number {
+  return Math.min(75_000, Math.round(30_000 + audioSec * 100))
+}
+
+export class ReleaseTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`timed out after ${ms} ms`)
+    this.name = 'ReleaseTimeoutError'
+  }
+}
+
+/** `p`, or a ReleaseTimeoutError once `ms` have passed. */
+export function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ReleaseTimeoutError(ms)), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
 }
 
 export function friendlyError(err: unknown): string {

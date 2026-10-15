@@ -72,12 +72,27 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 private const val TAG = "MurmurDictation"
 
 /** How long an error that can be retried stays on the pill, waiting for the user. */
 private const val RETRY_HOLD_MS = 15_000L
+
+/**
+ * At release, the pieces and the tail speculation sent while recording get this long to finish
+ * before the whole dictation is transcribed instead (Oct 15 2026: a stalled piece held the release
+ * on "Transcribing…" for minutes).
+ */
+const val STREAM_WAIT_MS = 8_000L
+
+/** The longest a release may take before the pill shows an error with Retry: 30 s plus 0.1 s per second of audio, at most 75 s. */
+fun releaseDeadlineMs(audioSec: Double): Long = (30_000 + audioSec * 100).toLong().coerceAtMost(75_000)
+
+/** A release that ran past [releaseDeadlineMs]. */
+class ReleaseTimeoutException : Exception("Murmur took too long to transcribe this — tap Retry")
 
 /** Command mode began with nothing selected; the same words as the desktop pill. */
 const val NO_SELECTION = "Select some text first, then hold the command key"
@@ -390,7 +405,15 @@ object DictationController {
                     selection = selectionJob?.await()
                 )
                 run = started
-                process(started, pcm, settings, appContext, InferenceRouter.get(appContext), streamed)
+                // A hard deadline: whatever stalls, the pill never sits on "Transcribing…" forever.
+                // The work runs on its own so a blocking request cannot hold the deadline up.
+                val work = scope.async { process(started, pcm, settings, appContext, InferenceRouter.get(appContext), streamed) }
+                val finished = withTimeoutOrNull(releaseDeadlineMs(pcm.size.toDouble() / SAMPLE_RATE)) { work.await(); true }
+                if (finished == null) {
+                    work.cancel()
+                    Log.w(TAG, "release passed its deadline; offering Retry")
+                    throw ReleaseTimeoutException()
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "dictation failed", e)
                 RecordingService.stop(appContext)
@@ -592,7 +615,7 @@ object DictationController {
         var tailBefore = texts.lastOrNull().orEmpty()
         if (spec != null) {
             if (specFormat == null || specFormat.first !== spec) return null
-            when (val f = specFormat.second.await()) {
+            when (val f = withTimeoutOrNull(STREAM_WAIT_MS) { specFormat.second.await() } ?: PieceFormat.Unavailable) {
                 PieceFormat.Unavailable -> return null
                 PieceFormat.Empty -> Unit
                 is PieceFormat.Done -> {
@@ -615,7 +638,7 @@ object DictationController {
             )
         )
         val tailJob = if (tailText.isNotEmpty()) scope.async { runCatching { formatter.format(tailInput) } } else null
-        val done = specs.awaitAll()
+        val done = withTimeoutOrNull(STREAM_WAIT_MS) { specs.awaitAll() } ?: return null
         if (done.any { it is PieceFormat.Unavailable }) return null
         val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
         specHead?.let { parts.add(it) }
@@ -675,14 +698,18 @@ object DictationController {
         var streamedSpec: Deferred<String>? = null
         // With a tail speculation, only the audio after its pause goes up now; if it failed, the
         // whole stretch after the pieces does.
-        val specOk = streamed?.specText?.let { runCatching { it.await() }.isSuccess } == true
+        // Everything streamed shares one wait (STREAM_WAIT_MS); past it the whole dictation goes up.
+        val streamDeadline = System.currentTimeMillis() + STREAM_WAIT_MS
+        fun streamLeft() = (streamDeadline - System.currentTimeMillis()).coerceAtLeast(1)
+        val specOk = streamed?.specText?.let { runCatching { withTimeout(streamLeft()) { it.await() } }.isSuccess } == true
         val from = if (specOk) streamed!!.specSamples!! else streamed?.samples ?: 0
         val complete = if (streamed != null && (from in 1 until pcm.size)) {
             // Only the audio after the pieces goes up now, alongside waiting for the pieces.
             val rest = pcm.copyOfRange(from, pcm.size)
             val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async { runCatching { runStt(rest) } }
-            val texts = runCatching { streamed.texts() }
-            val tailResult = tail?.await()
+            val texts = runCatching { withTimeout(streamLeft()) { streamed.texts() } }
+            // The tail is new audio, not a stalled piece: it gets the stream wait plus its own STT time.
+            val tailResult = tail?.let { t -> withTimeoutOrNull(streamLeft() + 10_000) { t.await() } ?: Result.failure(ReleaseTimeoutException()) }
             if (texts.isFailure || tailResult?.isFailure == true) {
                 Log.w(TAG, "a streamed piece failed; transcribing the whole dictation", texts.exceptionOrNull() ?: tailResult?.exceptionOrNull())
                 runStt(pcm)
@@ -1032,6 +1059,7 @@ object DictationController {
 
     fun friendlyError(err: Throwable): String = when {
         err is SttException -> err.friendly()
+        err is ReleaseTimeoutException -> err.message!!
         err is SecurityException -> "Microphone permission missing — grant it in Murmur"
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             err is android.app.ForegroundServiceStartNotAllowedException ->

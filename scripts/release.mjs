@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.21': [
+    'Fix: a dictation can no longer hang on Transcribing. A stalled request now falls back to transcribing the whole recording, and after a hard deadline you get an error with Retry.'
+  ],
   '0.6.20': [
     'Steadier speed on long dictations: pieces sent while you are still speaking use a separate model pool, so the end of the dictation gets the fastest models when you stop.'
   ],

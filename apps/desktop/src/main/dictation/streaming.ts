@@ -144,7 +144,11 @@ export class ChunkStreamer<T = never> {
   }
 
   private maybeSpeculate(total: number): void {
-    if (!this.speculate || total - this.committed < this.nextSpecCheck) return
+    // Short dictations never reach a piece cut (~18 s). Speculating on them makes release wait
+    // for an in-flight STT+format of almost the whole clip (desktop log 004edb08: 17 words, 2.7 s).
+    // Only speculate on the stretch after at least one piece, where the remainder is the real tail.
+    if (!this.speculate || this.committed === 0) return
+    if (total - this.committed < this.nextSpecCheck) return
     this.nextSpecCheck = total - this.committed + Math.floor(SPEC_CHECK_SEC * this.sampleRate)
     const pending = this.read(this.committed)
     const threshold = adaptiveThreshold(pending, this.sampleRate, this.floorDb)

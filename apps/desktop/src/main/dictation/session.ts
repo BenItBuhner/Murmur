@@ -810,8 +810,49 @@ export class DictationController extends EventEmitter {
     // The whole recording at once, for a dictation with no streamed pieces, one whose pieces
     // failed, and Retry. A long one goes up in pieces cut at pauses, never as one request (the
     // gateway refuses clips over 600 s, and one huge request is the slowest way to get it back).
+    const releaseFormatBody = (before?: string): Record<string, unknown> => ({
+      context: before
+        ? pieceContext(this.formatContext(s, style, app), before, true)
+        : this.formatContext(s, style, app)
+    })
+    /** Speech + formatting in one gateway round trip when precision is on. */
+    const oneCallRelease = async (
+      clip: Int16Array,
+      prefix: string | undefined,
+      before: string | undefined
+    ): Promise<CompleteResult | null> => {
+      try {
+        const answer = await dictateRelease(
+          { wav: encodeWavPcm16(clip, SAMPLE_RATE), prompt },
+          resolved.cfg,
+          prefix,
+          releaseFormatBody(before)
+        )
+        if (!answer) return null
+        if (answer.format) preformatted = [answer.transcript, answer.format as FormatOutcome]
+        log.info(
+          `session ${tag}: ${prefix ? 'tail' : 'clip'} in one call, ${answer.stt.latencyMs} ms${answer.rules ? ' (short, rules)' : ''}`
+        )
+        return {
+          ...answer.stt,
+          resumed: 0,
+          recoveredSec: 0,
+          coverage: { transcribedSec: null, missingSec: 0, truncated: false }
+        } as CompleteResult
+      } catch (err) {
+        log.warn(`session ${tag}: one-call release failed; using two calls`, err)
+        return null
+      }
+    }
     const runWhole = async (): Promise<CompleteResult> => {
-      if (audio.length / SAMPLE_RATE <= LONG_CLIP_SEC) return run(audio, speechEndSec)
+      if (audio.length / SAMPLE_RATE <= LONG_CLIP_SEC) {
+        // Short / whole dictation: one round trip (STT then format on the edge). ≤6 words use rules.
+        if (smartRelease) {
+          const once = await oneCallRelease(audio, undefined, undefined)
+          if (once) return once
+        }
+        return run(audio, speechEndSec)
+      }
       const started = performance.now()
       const texts = await transcribeInPieces(audio, SAMPLE_RATE, s.audio.silenceThresholdDb, (clip) =>
         run(clip, clip.length / SAMPLE_RATE).then((r) => r.text)
@@ -830,30 +871,14 @@ export class DictationController extends EventEmitter {
     }
     try {
       // One call for the tail when the speculation before it is formatted already: speech, then
-      // formatting of its last sentence + the tail, on the gateway.
+      // formatting of its last sentence + the tail, on the gateway. Short clips (no speculation)
+      // also use one call so release is not STT then a second format hop.
       const runTail = async (clip: Int16Array, endSec: number): Promise<CompleteResult> => {
-        const plan = smartRelease && streamed ? await releasePlan(streamed) : null
-        if (plan) {
-          try {
-            const answer = await dictateRelease(
-              { wav: encodeWavPcm16(clip, SAMPLE_RATE), prompt },
-              resolved.cfg,
-              plan.prefix,
-              { ...plan.format, context: pieceContext(this.formatContext(s, style, app), plan.before, true) }
-            )
-            if (answer) {
-              if (answer.format) preformatted = [answer.transcript, answer.format as FormatOutcome]
-              log.info(`session ${tag}: tail in one call, ${answer.stt.latencyMs} ms${answer.rules ? ' (short tail, rules)' : ''}`)
-              return {
-                ...answer.stt,
-                resumed: 0,
-                recoveredSec: 0,
-                coverage: { transcribedSec: null, missingSec: 0, truncated: false }
-              } as CompleteResult
-            }
-          } catch (err) {
-            log.warn(`session ${tag}: one-call release failed; using two calls`, err)
-          }
+        if (!smartRelease) return run(clip, endSec)
+        const plan = streamed ? await releasePlan(streamed) : null
+        if (plan || !streamed?.spec) {
+          const once = await oneCallRelease(clip, plan?.prefix, plan?.before)
+          if (once) return once
         }
         return run(clip, endSec)
       }
@@ -1217,8 +1242,8 @@ export class DictationController extends EventEmitter {
       ? null
       : preformatted && preformatted[0] === tailInput
         ? Promise.resolve(preformatted[1])
-        : // A few words after formatted text: rule-based formatting, no model round trip.
-          countWords(tail) > 0 && countWords(tail) <= SHORT_TAIL_WORDS && (specHead || stt.streamed.texts.length)
+        : // A few words: rules (matches gateway SHORT_TAIL_WORDS), no model round trip.
+          countWords(tail) > 0 && countWords(tail) <= SHORT_TAIL_WORDS
           ? formatTranscript(tailRequest, null)
           : formatter.format(tailRequest)
     tailFormat?.catch(() => undefined)

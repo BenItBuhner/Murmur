@@ -179,6 +179,9 @@ class ChunkStreamer(
 
     private fun maybeSpeculate(total: Int) {
         val notify = onSpec ?: return
+        // Short dictations never reach a piece cut (~18 s). Speculating on them makes release wait
+        // for an in-flight STT+format of almost the whole clip. Only speculate after a piece.
+        if (committed == 0) return
         if (total - committed < nextSpecCheck) return
         nextSpecCheck = total - committed + (SPEC_CHECK_SEC * sampleRate).toInt()
         val pending = read(committed)

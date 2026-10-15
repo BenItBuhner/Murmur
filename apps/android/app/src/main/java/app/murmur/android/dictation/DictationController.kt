@@ -671,8 +671,8 @@ object DictationController {
         val tailJob = when {
             tailText.isEmpty() -> null
             ready != null -> kotlinx.coroutines.CompletableDeferred(Result.success(ready))
-            // A few words after formatted text: rule-based formatting, no model round trip.
-            countWords(tail) in 1..SHORT_TAIL_WORDS && (specHead != null || texts.isNotEmpty()) ->
+            // A few words: rules (matches gateway SHORT_TAIL_WORDS), no model round trip.
+            countWords(tail) in 1..SHORT_TAIL_WORDS ->
                 scope.async { runCatching { Engine.formatTranscript(tailInput, null) } }
             else -> scope.async { runCatching { formatter.format(tailInput) } }
         }
@@ -794,11 +794,33 @@ object DictationController {
             tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
             log = { Log.w(TAG, it) }
         ) { wav, p -> router.transcribe(resolved, wav, p) }
+        // The tail formatted on the gateway in the same call as its speech (text it formatted, result).
+        var preformatted: Pair<String, FormatResult>? = null
+        val smartRelease = run.mode != DictationMode.COMMAND && style.effectiveMode == FormattingMode.SMART && murmurFormatting(context)
+        suspend fun oneCallRelease(clip: ShortArray, prefix: String?, format: org.json.JSONObject?): CompleteResult? {
+            return try {
+                val answer = router.dictateRelease(resolved, Wav.encodePcm16(clip, SAMPLE_RATE), prompt, prefix, format)
+                    ?: return null
+                answer.format?.let { preformatted = answer.transcript to FormatResult.fromJson(it) }
+                Log.i(TAG, "${if (prefix != null) "tail" else "clip"} in one call: ${answer.stt.latencyMs} ms${if (answer.rules) " (short, rules)" else ""}")
+                CompleteResult(answer.stt, 0, 0.0, Coverage(null, 0.0, false))
+            } catch (e: Exception) {
+                Log.w(TAG, "one-call release failed; using two calls", e)
+                null
+            }
+        }
         // The whole recording at once (no streamed pieces, pieces that failed, Retry). A long one
         // goes up in pieces cut at pauses, never as one request: the gateway refuses clips over
         // 600 s, and one huge request is the slowest way to get a 30-minute dictation back.
         suspend fun runWhole(): CompleteResult {
-            if (pcm.size.toDouble() / SAMPLE_RATE <= LONG_CLIP_SEC) return runStt(pcm)
+            if (pcm.size.toDouble() / SAMPLE_RATE <= LONG_CLIP_SEC) {
+                if (smartRelease) {
+                    val fmt = formatInputFor("", FormattingMode.SMART, style, app, focusedPackage, s, context, precedingText = null)
+                    val once = oneCallRelease(pcm, null, fmt.toJson().apply { remove("transcript") })
+                    if (once != null) return once
+                }
+                return runStt(pcm)
+            }
             val started = System.currentTimeMillis()
             val texts = transcribeInPieces(pcm, SAMPLE_RATE, -48.0) { clip, _ -> runStt(clip).output.text }
             val joined = joinPieces(texts)
@@ -806,8 +828,6 @@ object DictationController {
             return CompleteResult(TranscribeOutput(text = joined.text, latencyMs = System.currentTimeMillis() - started), 0, 0.0, Coverage(null, 0.0, false))
         }
         var streamedTexts: List<String>? = null
-        // The tail formatted on the gateway in the same call as its speech (text it formatted, result).
-        var preformatted: Pair<String, FormatResult>? = null
         var streamedTail: String? = null
         var streamedSpec: Deferred<String>? = null
         // With a tail speculation, only the audio after its pause goes up now; if it failed, the
@@ -822,19 +842,17 @@ object DictationController {
             val rest = pcm.copyOfRange(from, pcm.size)
             // One call for the tail when the rest is formatted already: speech, then formatting of the
             // speculation's last sentence + the tail, on the gateway (no second phone round trip).
-            val plan = if (run.mode != DictationMode.COMMAND && style.effectiveMode == FormattingMode.SMART && murmurFormatting(context))
-                releasePlan(streamed, specOk, style, app, focusedPackage, s, context) else null
+            val plan = if (smartRelease) releasePlan(streamed, specOk, style, app, focusedPackage, s, context) else null
             val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async {
                 runCatching {
-                    val answer = plan?.let { p ->
-                        runCatching { router.dictateRelease(resolved, Wav.encodePcm16(rest, SAMPLE_RATE), prompt, p.first, p.second) }
-                            .onFailure { Log.w(TAG, "one-call release failed; using two calls", it) }.getOrNull()
-                    }
-                    if (answer == null) runStt(rest)
-                    else {
-                        answer.format?.let { preformatted = answer.transcript to FormatResult.fromJson(it) }
-                        Log.i(TAG, "tail in one call: ${answer.stt.latencyMs} ms${if (answer.rules) " (short tail, rules)" else ""}")
-                        CompleteResult(answer.stt, 0, 0.0, Coverage(null, 0.0, false))
+                    when {
+                        plan != null -> oneCallRelease(rest, plan.first, plan.second) ?: runStt(rest)
+                        // No speculation in play: one call for the remainder (short clip or post-piece tail).
+                        !specOk && smartRelease -> {
+                            val fmt = formatInputFor("", FormattingMode.SMART, style, app, focusedPackage, s, context, precedingText = null)
+                            oneCallRelease(rest, null, fmt.toJson().apply { remove("transcript") }) ?: runStt(rest)
+                        }
+                        else -> runStt(rest)
                     }
                 }
             }

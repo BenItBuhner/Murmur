@@ -18,6 +18,7 @@ const wav = new Uint8Array(64)
 
 interface Seen {
   fields: Record<string, string[]>
+  headers: Record<string, string>
 }
 
 /** Fake server: records the multipart fields of each request and answers from a script. */
@@ -33,7 +34,7 @@ function serve(
       form.forEach((v, k) => {
         if (typeof v === 'string') (fields[k] ??= []).push(v)
       })
-      seen.push({ fields })
+      seen.push({ fields, headers: { ...(init.headers as Record<string, string>) } })
       const next = responses.shift() ?? { status: 500, body: { error: 'out of script' } }
       return new Response(JSON.stringify(next.body), {
         status: next.status,
@@ -146,6 +147,23 @@ describe('OpenAiCompatibleStt', () => {
     expect(seen[2].fields.language).toBeUndefined()
     expect(seen[2].fields['languages[]']).toBeUndefined()
     expect(auto.language).toBeUndefined()
+  })
+
+  it('sends the tier header to the gateway only', async () => {
+    const seen = serve([
+      { status: 200, body: { text: 'a' } },
+      { status: 200, body: { text: 'b' } },
+      { status: 200, body: { text: 'c' } }
+    ])
+    const stt = new OpenAiCompatibleStt()
+    const gateway = cfg('https://tier.example/v1')
+    // The user's own provider (no speed set) never sees it, even with a tier.
+    await stt.transcribe({ wav }, { ...gateway, tier: 'background' })
+    await stt.transcribe({ wav }, { ...gateway, speed: 'normal', tier: 'background' })
+    await stt.transcribe({ wav }, { ...gateway, speed: 'normal' })
+    expect(seen[0].headers['x-murmur-tier']).toBeUndefined()
+    expect(seen[1].headers['x-murmur-tier']).toBe('background')
+    expect(seen[2].headers['x-murmur-tier']).toBeUndefined()
   })
 
   it('sends the speed only when the router set one, and reads back the speed that ran', async () => {

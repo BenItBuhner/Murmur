@@ -20,7 +20,15 @@ export interface SttConfig {
    * provider, which never sees the field.
    */
   speed?: SpeedMode
+  /**
+   * Murmur's gateway only: `background` for a piece sent while the user is still speaking (the
+   * gateway may use a slower pool), sent as the `x-murmur-tier` header. Unset: release.
+   */
+  tier?: InferenceTier
 }
+
+export type InferenceTier = 'background' | 'release'
+export const MURMUR_TIER_HEADER = 'x-murmur-tier'
 
 export interface TranscribeInput {
   wav: Uint8Array

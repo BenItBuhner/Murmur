@@ -58,6 +58,9 @@ object Inference {
     const val SPEED_FIELD = "speed"
     /** Response header: the mode that transcribed the clip. */
     const val SPEED_HEADER = "x-murmur-speed"
+    /** Request header: `background` for a piece sent while recording (absent: release). */
+    const val TIER_HEADER = "x-murmur-tier"
+    const val TIER_BACKGROUND = "background"
     /** Response header, only when the requested mode could not be honoured: why Normal ran instead. */
     const val SPEED_FALLBACK_HEADER = "x-murmur-speed-fallback"
     val SPEED_FALLBACKS = listOf("not_configured", "model_not_found")
@@ -142,7 +145,12 @@ class ResolvedStt(
 data class ResolvedLlm(val source: InferenceSource, val cfg: LlmConfig)
 
 /** Where the formatting engine runs, and the function that runs it. */
-class Formatter(val source: InferenceSource, val format: suspend (FormatInput) -> FormatResult)
+class Formatter(
+    val source: InferenceSource,
+    val format: suspend (FormatInput) -> FormatResult,
+    /** A piece formatted while the user keeps talking; on Murmur it is sent as the background tier. */
+    val formatBackground: suspend (FormatInput) -> FormatResult = format
+)
 
 /**
  * Decides, for every request, whether speech and formatting go to the instance's models or to the
@@ -238,15 +246,16 @@ class InferenceRouter(
      * token the gateway no longer accepts is refreshed once (`resolved.cfg` is updated so the next
      * resume round uses it too), and a user's own model that errors falls back to their fallback model.
      */
-    suspend fun transcribe(resolved: ResolvedStt, wav: ByteArray, prompt: String?): TranscribeOutput {
-        val cfg = resolved.cfg
+    suspend fun transcribe(resolved: ResolvedStt, wav: ByteArray, prompt: String?, tier: String? = null): TranscribeOutput {
+        // The tier rides on this call only; resolved.cfg is shared with the release.
+        val cfg = if (tier != null) resolved.cfg.copy(tier = tier) else resolved.cfg
         return try {
             SttClient.transcribe(wav, prompt, cfg)
         } catch (e: SttException) {
             if (resolved.source == InferenceSource.MURMUR && e.kind == SttErrorKind.AUTH) {
                 Log.i(TAG, "session token rejected by the gateway; refreshing and retrying")
                 val fresh = cfg.copy(apiKey = sessionToken(true))
-                resolved.cfg = fresh
+                resolved.cfg = fresh.copy(tier = resolved.cfg.tier)
                 return SttClient.transcribe(wav, prompt, fresh)
             }
             val fallback = resolved.fallbackModel
@@ -268,27 +277,31 @@ class InferenceRouter(
         val resolved = llm()
         val cfg = resolved.cfg
         if (resolved.source == InferenceSource.MURMUR) {
-            return Formatter(InferenceSource.MURMUR) { input -> remoteFormat(cfg, input) }
+            return Formatter(
+                InferenceSource.MURMUR,
+                format = { input -> remoteFormat(cfg, input) },
+                formatBackground = { input -> remoteFormat(cfg, input, Inference.TIER_BACKGROUND) }
+            )
         }
         if (cfg.baseUrl.isEmpty() || cfg.model.isEmpty()) {
-            return Formatter(InferenceSource.CUSTOM) { input -> Engine.formatTranscript(input, null) }
+            return Formatter(InferenceSource.CUSTOM, format = { input -> Engine.formatTranscript(input, null) })
         }
-        return Formatter(InferenceSource.CUSTOM) { input ->
+        return Formatter(InferenceSource.CUSTOM, format = { input ->
             Engine.formatTranscript(input) { messages, maxTokens ->
                 val res = complete(cfg, messages, maxTokens = maxTokens)
                 ModelAnswer(res.text, res.finishReason)
             }
-        }
+        })
     }
 
-    private suspend fun remoteFormat(cfg: LlmConfig, input: FormatInput): FormatResult {
+    private suspend fun remoteFormat(cfg: LlmConfig, input: FormatInput, tier: String? = null): FormatResult {
         val body = input.toJson()
         return try {
-            FormatResult.fromJson(LlmClient.format(cfg, body))
+            FormatResult.fromJson(LlmClient.format(cfg, body, tier))
         } catch (e: SttException) {
             if (e.kind != SttErrorKind.AUTH) throw e
             Log.i(TAG, "session token rejected by the gateway; refreshing and retrying")
-            FormatResult.fromJson(LlmClient.format(cfg.copy(apiKey = sessionToken(true)), body))
+            FormatResult.fromJson(LlmClient.format(cfg.copy(apiKey = sessionToken(true)), body, tier))
         }
     }
 

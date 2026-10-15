@@ -1,5 +1,6 @@
 package app.murmur.android.llm
 
+import app.murmur.android.inference.Inference
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.SttException
 import app.murmur.android.stt.errorFromResponse
@@ -99,13 +100,16 @@ object LlmClient {
      * Murmur's own formatting endpoint (`POST /v1/format` on the gateway): the transcript and its
      * context in, the engine's result out. Only ever called against a Murmur instance.
      */
-    suspend fun format(cfg: LlmConfig, body: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun format(cfg: LlmConfig, body: JSONObject, tier: String? = null): JSONObject = withContext(Dispatchers.IO) {
         val base = normalizeBaseUrl(cfg.baseUrl)
         if (base.isEmpty()) throw SttException("No LLM base URL configured", SttErrorKind.BAD_REQUEST)
         val req = Request.Builder()
             .url("$base/format")
             .header("Content-Type", "application/json")
-            .apply { if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}") }
+            .apply {
+                if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}")
+                if (tier != null) header(Inference.TIER_HEADER, tier)
+            }
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         try {

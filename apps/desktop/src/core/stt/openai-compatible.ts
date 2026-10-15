@@ -7,6 +7,7 @@ import {
   normalizeBaseUrl,
   rankSpeechModels,
   toSttError,
+  MURMUR_TIER_HEADER,
   type SttConfig,
   type SttProvider,
   type TimedSpan,
@@ -113,6 +114,7 @@ export class OpenAiCompatibleStt implements SttProvider {
       if (cfg.speed) form.append(MURMUR_SPEED_FIELD, cfg.speed)
       const headers: Record<string, string> = {}
       if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`
+      if (cfg.speed && cfg.tier) headers[MURMUR_TIER_HEADER] = cfg.tier
       return fetch(url, {
         method: 'POST',
         body: form,

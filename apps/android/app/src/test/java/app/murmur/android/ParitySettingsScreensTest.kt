@@ -10,6 +10,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
@@ -50,7 +51,6 @@ import app.murmur.android.inference.InferenceRouting
 import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.SettingsStore
-import app.murmur.android.settings.SttSpeed
 import app.murmur.android.settings.Tone
 import app.murmur.android.stt.SpeedOutcome
 import app.murmur.android.ui.AccountContent
@@ -218,12 +218,8 @@ class ParitySettingsScreensTest {
         ruleChip("rule-tone", "Professional").performScrollTo().performClick()
         ruleChip("rule-mode", "Off").performScrollTo().performClick()
         ruleChip("rule-trailing", "Default").assertIsSelected()
-        // A rule's Speed starts on Default (inherit) and takes either mode.
-        ruleChip("rule-speed", "Default").performScrollTo().assertIsSelected()
-        assertNull(store.get().appRules.single().speed)
-        ruleChip("rule-speed", "Fast").performScrollTo().performClick()
-        assertEquals(SttSpeed.FAST, store.get().appRules.single().speed)
-        ruleChip("rule-speed", "Fast").assertIsSelected()
+        // One automatic mode: a rule has no Speed choice any more.
+        compose.onAllNodesWithTag("rule-speed", useUnmergedTree = true).assertCountEquals(0)
         compose.onNodeWithText("PER-APP RULES").performScrollTo()
         snap("android-style-per-app-rules")
         val rule = store.get().appRules.single()
@@ -231,10 +227,6 @@ class ParitySettingsScreensTest {
         assertEquals(Tone.PROFESSIONAL, rule.tone)
         assertEquals(FormattingMode.OFF, rule.formatting)
         assertNull("trailing space left on Default", rule.trailingSpace)
-        ruleChip("rule-speed", "Normal").performScrollTo().performClick()
-        assertEquals(SttSpeed.NORMAL, store.get().appRules.single().speed)
-        ruleChip("rule-speed", "Default").performScrollTo().performClick()
-        assertNull("back to inheriting the device's speed", store.get().appRules.single().speed)
         compose.onNodeWithText("Remove").performScrollTo().performClick()
         assertTrue(store.get().appRules.isEmpty())
     }
@@ -405,37 +397,7 @@ class ParitySettingsScreensTest {
     )
 
     @Test
-    fun `Speech model offers Normal and Fast for Murmur's models, Normal by default, and notes when Fast is not there yet`() {
-        val view = cloudView.copy(planState = "unlimited", plan = "unlimited", billingEnabled = false, status = murmurStatus(listOf("normal")))
-        compose.setContent {
-            val settings by store.flow.collectAsState()
-            CompositionLocalProvider(LocalInferenceView provides view) {
-                MurmurTheme(settings.copy(dynamicColor = false)) { SpeechModelScreen(store, settings, TopNav.Back {}) }
-            }
-        }
-        compose.waitForIdle()
-        assertEquals(SttSpeed.NORMAL, store.get().sttSpeed)
-        compose.onNodeWithText("Speed").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText(Inference.SPEED_SETTING_DESCRIPTION).assertIsDisplayed()
-        compose.onNodeWithText("Normal").assertIsSelected()
-        compose.onNodeWithText("Fast").assertIsNotSelected()
-        // The instance has no fast model yet: the row says so, and Fast stays a choice.
-        compose.onNodeWithTag("speed-unavailable", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText(Inference.FAST_UNAVAILABLE_SETTING_NOTE).assertIsDisplayed()
-        snap("android-speech-model-speed")
-
-        compose.onNodeWithText("Fast").performClick()
-        compose.waitForIdle()
-        assertEquals(SttSpeed.FAST, store.get().sttSpeed)
-        compose.onNodeWithText("Fast").assertIsSelected()
-        compose.onNodeWithText("Normal").assertIsNotSelected()
-        snap("android-speech-model-speed-fast")
-        compose.onNodeWithText("Normal").performClick()
-        assertEquals(SttSpeed.NORMAL, store.get().sttSpeed)
-    }
-
-    @Test
-    fun `the Fast note goes away once the instance offers it`() {
+    fun `Speech model shows one automatic Speed for Murmur's models, with nothing to choose`() {
         val view = cloudView.copy(planState = "unlimited", plan = "unlimited", billingEnabled = false, status = murmurStatus(listOf("normal", "fast")))
         compose.setContent {
             val settings by store.flow.collectAsState()
@@ -445,10 +407,11 @@ class ParitySettingsScreensTest {
         }
         compose.waitForIdle()
         compose.onNodeWithText("Speed").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(Inference.SPEED_SETTING_DESCRIPTION).assertIsDisplayed()
+        compose.onNodeWithTag("speed-automatic", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Fast").assertDoesNotExist()
         compose.onNodeWithTag("speed-unavailable", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText(Inference.FAST_UNAVAILABLE_SETTING_NOTE).assertDoesNotExist()
-        compose.onNodeWithText("Normal").assertIsSelected()
-        compose.onNodeWithText("Fast").assertIsNotSelected()
+        snap("android-speech-model-speed")
     }
 
     @Test

@@ -6,6 +6,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Where to cut a long dictation while it is still being spoken, matching the desktop
@@ -20,6 +24,16 @@ data class ChunkPlan(
 )
 
 private const val FRAME_MS = 20
+
+/**
+ * Pieces sent at once (desktop: MAX_PIECES_IN_FLIGHT). A long session on a slow network queues the
+ * rest instead of opening one request per piece (a 30-minute dictation is ~200 pieces).
+ */
+const val MAX_PIECES_IN_FLIGHT = 4
+/** A piece that fails is sent once more before the dictation falls back to slower paths. */
+const val PIECE_RETRIES = 1
+/** Clips longer than this are transcribed in pieces, never as one request (the gateway caps a clip at 600 s). */
+const val LONG_CLIP_SEC = 240.0
 
 /** Audio repeated at the start of the next piece after a cut that may split a word. */
 const val FORCED_OVERLAP_SEC = 1.0
@@ -107,8 +121,25 @@ class ChunkStreamer(
      * (null: never). Told about it like [onPiece], with the number of pieces before it.
      */
     private val onSpec: ((pieces: Int, text: Deferred<String>) -> Unit)? = null,
+    maxPiecesInFlight: Int = MAX_PIECES_IN_FLIGHT,
     private val transcribe: suspend (pcm: ShortArray, index: Int) -> String
 ) {
+    private val gate = Semaphore(maxPiecesInFlight)
+
+    /** One piece: queued behind the others in flight, and sent once more if it fails. */
+    private suspend fun send(piece: ShortArray, index: Int): String {
+        var left = PIECE_RETRIES
+        while (true) {
+            try {
+                return gate.withPermit { transcribe(piece, index) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (left-- <= 0) throw e
+            }
+        }
+    }
+
     private var committed = 0
     /** Samples before [committed] the next piece (or the tail) repeats. */
     private var overlap = 0
@@ -134,7 +165,7 @@ class ChunkStreamer(
         val cut = found.at
         val piece = if (overlap > 0) read(committed - overlap).copyOfRange(0, overlap + cut) else pending.copyOfRange(0, cut)
         val index = pieces.size
-        val text = scope.async { transcribe(piece, index) }
+        val text = scope.async { send(piece, index) }
         pieces.add(text)
         onPiece(index, text)
         committed += cut
@@ -185,3 +216,57 @@ class Streamed(
     val specText: Deferred<String>? = null,
     val texts: suspend () -> List<String>
 )
+
+/**
+ * Transcribes a recording that is already complete in pieces cut at pauses, the same way pieces
+ * are cut while recording, at most [MAX_PIECES_IN_FLIGHT] at a time (desktop: transcribeInPieces).
+ * For a long dictation whose streamed pieces failed, and for Retry of one: a 30-minute clip never
+ * goes up as one request. The last text is the rest after the final cut.
+ */
+suspend fun transcribeInPieces(
+    pcm: ShortArray,
+    sampleRate: Int,
+    floorDb: Double,
+    plan: ChunkPlan = ChunkPlan(),
+    transcribe: suspend (pcm: ShortArray, index: Int) -> String
+): List<String> = coroutineScope {
+    var total = 0
+    val streamer = ChunkStreamer(this, { from -> pcm.copyOfRange(minOf(from, total), total) }, sampleRate, floorDb, plan, transcribe = transcribe)
+    val step = sampleRate / 4
+    total = minOf(step, pcm.size)
+    while (true) {
+        streamer.poll(total)
+        if (total >= pcm.size) break
+        total = minOf(total + step, pcm.size)
+    }
+    val done = streamer.finish()
+    val rest = pcm.copyOfRange(minOf(done.samples, pcm.size), pcm.size)
+    val pieces = done.texts()
+    val last = if (rest.size >= sampleRate / 4) transcribe(rest, pieces.size) else ""
+    pieces + last
+}
+
+/** Above this many words, a whole transcript is formatted in groups (desktop: LONG_FORMAT_WORDS). */
+const val LONG_FORMAT_WORDS = 600
+/** Words per group when a long transcript is formatted in groups, cut at sentence ends. */
+const val FORMAT_GROUP_WORDS = 250
+
+/** Splits a transcript at sentence ends into groups of about [size] words (desktop: formatGroups). */
+fun formatGroups(text: String, size: Int = FORMAT_GROUP_WORDS): List<String> {
+    val sentences = text.trim().split(Regex("(?<=[.!?])\\s+"))
+    val groups = ArrayList<String>()
+    val cur = ArrayList<String>()
+    var words = 0
+    for (sentence in sentences) {
+        val n = sentence.split(Regex("\\s+")).count { it.isNotEmpty() }
+        if (words > 0 && words + n > size) {
+            groups.add(cur.joinToString(" "))
+            cur.clear()
+            words = 0
+        }
+        cur.add(sentence)
+        words += n
+    }
+    if (cur.isNotEmpty()) groups.add(cur.joinToString(" "))
+    return groups
+}

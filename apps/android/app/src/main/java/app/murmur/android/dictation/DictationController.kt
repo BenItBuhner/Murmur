@@ -12,6 +12,8 @@ import app.murmur.android.audio.Wav
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.history.HistoryEntry
 import app.murmur.android.history.HistoryStore
+import app.murmur.android.history.PartialStore
+import app.murmur.android.history.PartialTranscript
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
@@ -66,6 +68,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,8 +91,12 @@ private const val RETRY_HOLD_MS = 15_000L
  */
 const val STREAM_WAIT_MS = 8_000L
 
-/** The longest a release may take before the pill shows an error with Retry: 30 s plus 0.1 s per second of audio, at most 75 s. */
-fun releaseDeadlineMs(audioSec: Double): Long = (30_000 + audioSec * 100).toLong().coerceAtMost(75_000)
+/**
+ * The longest a release may take before the pill shows an error with Retry: 30 s plus 0.1 s per
+ * second of audio, at most 4 minutes (a 30-minute dictation whose pieces all failed is transcribed
+ * again in pieces, which takes a while). Desktop: releaseDeadlineMs.
+ */
+fun releaseDeadlineMs(audioSec: Double): Long = (30_000 + audioSec * 100).toLong().coerceAtMost(240_000)
 
 /** A release that ran past [releaseDeadlineMs]. */
 class ReleaseTimeoutException : Exception("Murmur took too long to transcribe this — tap Retry")
@@ -355,6 +362,7 @@ object DictationController {
         listeningJob?.cancel()
         listeningJob = null
         streamer = null
+        partialsOf(context).clear(sessionId)
         recorder.cancel()
         RecordingService.stop(context.applicationContext)
         _state.value = DictationState.Idle
@@ -379,6 +387,9 @@ object DictationController {
             val id = sessionId
             var run: Run? = null
             var streamed: Streamed? = null
+            // The recording service (and its wake lock) stops before the release is processed; a
+            // long dictation's release must not stall because the screen went off.
+            val processingLock = RecordingService.acquireWakeLock(appContext, "murmur:processing", RecordingService.PROCESSING_WAKE_LOCK_MS)
             try {
                 val pcm: ShortArray = if (fixtureMode(settings)) {
                     loadFixture(appContext)
@@ -424,6 +435,8 @@ object DictationController {
                 recordFailure(appContext, settings, failed, raw = "", error = message)
                 showError(appContext, message, failed, planLimitOf(e), serviceNoticeOf(e))
             } finally {
+                processingLock?.let { if (it.isHeld) it.release() }
+                partialsOf(appContext).clear(id)
                 run?.let { releaseRecording(appContext, it) }
             }
         }
@@ -493,6 +506,8 @@ object DictationController {
         null
     }
 
+    private fun partialsOf(context: Context) = PartialStore(java.io.File(context.applicationContext.filesDir, "partials"))
+
     /** After a run: audio that no History entry refers to any more has nothing to be kept for. */
     private fun releaseRecording(context: Context, run: Run) {
         val name = run.recording ?: return
@@ -534,7 +549,19 @@ object DictationController {
                 PieceFormat.Unavailable
             }
         }
+        // Crash recovery: each piece's text goes to disk as it comes back (cleared when the dictation ends).
+        val partials = partialsOf(context)
+        val partialId = sessionId
+        val partialMode = mode.id
+        val partialAt = startedAt
+        val partialTexts = java.util.concurrent.ConcurrentHashMap<Int, String>()
         val onPiece: (Int, Deferred<String>) -> Unit = { index, textJob ->
+            scope.launch {
+                val text = runCatching { textJob.await() }.getOrNull() ?: return@launch
+                partialTexts[index] = text
+                val n = (partialTexts.keys.maxOrNull() ?: -1) + 1
+                partials.save(PartialTranscript(partialId, partialAt, partialMode, (0 until n).map { partialTexts[it] }))
+            }
             textJobs.add(textJob)
             formats.add(formatPiece(textJob, if (index > 0) textJobs[index - 1] else null))
         }
@@ -661,10 +688,48 @@ object DictationController {
         return FormatResult(
             text = joinPieces(parts.map { it.text }).text,
             pressEnter = parts.last().pressEnter,
-            status = if (worst.status.outcome == FormatOutcome.USED) worst.status.copy(detail = "${parts.size} pieces, formatted while speaking") else worst.status,
+            // A piece the model left as it was, or a short tail formatted by rules, does not make the
+            // dictation "not formatted" (desktop: joinFormatted; Oct 15: 13 formatted pieces, llmUsed=false).
+            status = (parts.firstOrNull { it.status.outcome == FormatOutcome.USED }
+                ?.takeIf { worst.status.outcome in setOf(FormatOutcome.USED, FormatOutcome.SKIPPED_CLEAN, FormatOutcome.SKIPPED) }
+                ?.status?.copy(detail = "${parts.size} pieces, formatted while speaking")) ?: worst.status,
             modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
             llmMs = parts.last().llmMs,
             stages = stages,
+            limit = parts.firstNotNullOfOrNull { it.limit }
+        )
+    }
+
+    /**
+     * The whole transcript through the formatting model. A long one (pieces not formatted while
+     * recording) goes in groups, two at a time, each told the end of the one before: one huge
+     * request would be the slowest, and its answer is capped (desktop: formatLong).
+     */
+    private suspend fun formatLong(router: InferenceRouter, input: FormatInput): FormatResult {
+        val formatter = router.formatter()
+        if (countWords(input.transcript) <= LONG_FORMAT_WORDS) return formatter.format(input)
+        val groups = formatGroups(input.transcript)
+        val gate = kotlinx.coroutines.sync.Semaphore(2)
+        val parts = kotlinx.coroutines.coroutineScope {
+            groups.mapIndexed { i, g ->
+                async {
+                    val prior = if (i > 0) seamContext(groups[i - 1]) else ""
+                    val ctx = input.context.copy(
+                        precedingText = listOfNotNull(input.context.precedingText, prior.ifEmpty { null }).joinToString(" ").ifEmpty { null }
+                    )
+                    gate.withPermit { formatter.format(input.copy(transcript = g, context = ctx)) }
+                }
+            }.awaitAll()
+        }
+        Log.i(TAG, "long transcript formatted in ${parts.size} groups")
+        val worst = parts.maxBy { it.status.outcome.ordinal.let { o -> listOf(0, 2, 1, 3, 4)[o] } }
+        return FormatResult(
+            text = joinPieces(parts.map { it.text }).text,
+            pressEnter = parts.last().pressEnter,
+            status = worst.status,
+            modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
+            llmMs = parts.sumOf { it.llmMs },
+            stages = LinkedHashSet<String>().apply { parts.forEach { addAll(it.stages) } }.toList(),
             limit = parts.firstNotNullOfOrNull { it.limit }
         )
     }
@@ -729,6 +794,17 @@ object DictationController {
             tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
             log = { Log.w(TAG, it) }
         ) { wav, p -> router.transcribe(resolved, wav, p) }
+        // The whole recording at once (no streamed pieces, pieces that failed, Retry). A long one
+        // goes up in pieces cut at pauses, never as one request: the gateway refuses clips over
+        // 600 s, and one huge request is the slowest way to get a 30-minute dictation back.
+        suspend fun runWhole(): CompleteResult {
+            if (pcm.size.toDouble() / SAMPLE_RATE <= LONG_CLIP_SEC) return runStt(pcm)
+            val started = System.currentTimeMillis()
+            val texts = transcribeInPieces(pcm, SAMPLE_RATE, -48.0) { clip, _ -> runStt(clip).output.text }
+            val joined = joinPieces(texts)
+            Log.i(TAG, "${pcm.size / SAMPLE_RATE} s transcribed in ${texts.size} piece(s)")
+            return CompleteResult(TranscribeOutput(text = joined.text, latencyMs = System.currentTimeMillis() - started), 0, 0.0, Coverage(null, 0.0, false))
+        }
         var streamedTexts: List<String>? = null
         // The tail formatted on the gateway in the same call as its speech (text it formatted, result).
         var preformatted: Pair<String, FormatResult>? = null
@@ -767,7 +843,7 @@ object DictationController {
             val tailResult = tail?.let { t -> withTimeoutOrNull(streamLeft() + 10_000) { t.await() } ?: Result.failure(ReleaseTimeoutException()) }
             if (texts.isFailure || tailResult?.isFailure == true) {
                 Log.w(TAG, "a streamed piece failed; transcribing the whole dictation", texts.exceptionOrNull() ?: tailResult?.exceptionOrNull())
-                runStt(pcm)
+                runWhole()
             } else {
                 var last = tailResult?.getOrNull()
                 // A quiet tail can come back as a stock phrase nobody said ("Thank you.").
@@ -786,7 +862,7 @@ object DictationController {
                 val base = last ?: CompleteResult(TranscribeOutput(text = "", latencyMs = 0), 0, 0.0, Coverage(null, 0.0, false))
                 base.copy(output = base.output.copy(text = joined, spans = null))
             }
-        } else runStt(pcm)
+        } else runWhole()
         val stt = complete.output
         if (complete.resumed > 0) {
             Log.i(TAG, "transcript recovered ${"%.1f".format(complete.recoveredSec)}s of speech in ${complete.resumed} extra request(s)")
@@ -879,7 +955,7 @@ object DictationController {
                 // text goes in and History says why. A Murmur instance past the fair-use cap answers
                 // with the rule-based text itself and says which limit paused the model.
                 formatted = try {
-                    (formatWithSpeculation(router, input, streamedTexts, streamedTail, streamedSpec, preformatted) ?: router.formatter().format(input))
+                    (formatWithSpeculation(router, input, streamedTexts, streamedTail, streamedSpec, preformatted) ?: formatLong(router, input))
                         .also { softLimit = it.limit }
                 } catch (e: Exception) {
                     Log.w(TAG, "formatting unavailable, using rule-based text: ${e.message}")

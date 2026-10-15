@@ -26,7 +26,6 @@ import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SttKind
 import app.murmur.android.settings.SttPresets
-import app.murmur.android.settings.SttSpeed
 import app.murmur.android.stt.SttClient
 import app.murmur.android.ui.components.Chip
 import app.murmur.android.ui.components.ChipRow
@@ -40,8 +39,6 @@ import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.SecondsControl
 import app.murmur.android.ui.components.SectionGap
-import app.murmur.android.ui.components.Segment
-import app.murmur.android.ui.components.Segmented
 import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Space
@@ -150,28 +147,12 @@ private fun MurmurSpeechSummary(store: SettingsStore, settings: MurmurSettings, 
         ControlRow("Model", description = "Provided by this Murmur instance for your account. Your dictionary still biases recognition.") {
             Text(inference.status?.models?.stt ?: Inference.STT_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
         }
-        // The instance said it has no fast model: Fast stays selectable (the instance answers on
-        // Normal and History says so), with the reason right under the control.
-        val fastMissing = inference.fastAvailable == false
         Column(Modifier.padding(vertical = Space.row).testTag("speed-row")) {
             Text("Speed", style = Murmur.type.title, color = c.ink)
             Spacer(Modifier.height(4.dp))
+            Text("Automatic", style = Murmur.type.labelSmall, color = c.inkSoft, modifier = Modifier.testTag("speed-automatic"))
+            Spacer(Modifier.height(4.dp))
             Text(Inference.SPEED_SETTING_DESCRIPTION, style = Murmur.type.bodySmall, color = c.inkSoft)
-            if (fastMissing) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    Inference.FAST_UNAVAILABLE_SETTING_NOTE,
-                    style = Murmur.type.bodySmall,
-                    color = c.ink.copy(alpha = 0.8f),
-                    modifier = Modifier.testTag("speed-unavailable")
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            Segmented(
-                options = SttSpeed.entries.map { Segment(it, it.label) },
-                selected = settings.sttSpeed,
-                onSelect = { speed -> store.update { s -> s.copy(sttSpeed = speed) } }
-            )
         }
         ControlRow(
             when {

@@ -20,7 +20,6 @@ import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.SnippetCodec
 import app.murmur.android.settings.SttSpeed
-import app.murmur.android.text.FAST_SKIP_DETAIL
 import app.murmur.android.text.basicCleanup
 import app.murmur.android.text.prepareTranscript
 import kotlinx.coroutines.Dispatchers
@@ -464,58 +463,32 @@ class DictationFlowTest {
         assertTrue(normal.llm == LlmOutcome.USED || normal.llm == LlmOutcome.REJECTED)
         assertEquals("normal", normal.speed)
 
-        // Fast: the same settings, but no formatting request at all; the Light cleanup goes in and the
-        // entry says the model was skipped for speed. The user's own speech provider never sees `speed`.
+        // A stored Fast (older version / another device) runs the one automatic mode: the model is
+        // still asked, the entry says normal, and the user's own provider never sees `speed`.
         SettingsStore.get(activity).update { it.copy(sttSpeed = SttSpeed.FAST) }
         field.setText("")
         requests.clear()
         assertEquals(DictationState.Success("Inserted"), dictate(activity))
-        assertTrue("no chat completion was requested: $requests", requests.none { "/v1/chat/completions" in it })
-        assertEquals(lightText(), field.text.toString())
+        assertTrue("the formatting model was asked: $requests", requests.any { "/v1/chat/completions" in it })
         val fast = history.entries.value.first()
-        assertFalse(fast.llmUsed)
-        assertEquals(LlmOutcome.SKIPPED, fast.llm)
-        assertEquals(FAST_SKIP_DETAIL, fast.llmDetail)
-        assertEquals("fast", fast.speed)
+        assertEquals("normal", fast.speed)
         assertNull("the user's own provider says nothing about speed", fast.sttSpeed)
         assertTrue("the speed field never reaches the user's own provider: $sttSpeedFields", sttSpeedFields.all { it == null })
     }
 
     @Test
-    fun `a per-app rule's speed decides the formatting step for that app`() {
+    fun `a per-app rule's stored Fast no longer skips the formatting model`() {
         llmBody = LiveFixtures.raw("complete.what-are-you-referring-to.json")
         val (activity, field) = setUpField(FormattingMode.SMART, llmModel = "mock-llm")
         val history = HistoryStore.get(activity)
-        // The device says Normal; the rule for Murmur's own package (what the sink reports) says Fast.
         SettingsStore.get(activity).update {
             it.copy(appRules = listOf(AppRuleCodec.newRule("murmur").copy(speed = SttSpeed.FAST)))
-        }
-        assertEquals(DictationState.Success("Inserted"), dictate(activity))
-        assertTrue("no chat completion was requested: $requests", requests.none { "/v1/chat/completions" in it })
-        assertEquals(lightText(), field.text.toString())
-        assertEquals("fast", history.entries.value.first().speed)
-        assertEquals(FAST_SKIP_DETAIL, history.entries.value.first().llmDetail)
-
-        // The other way round: the device says Fast, the rule for this app says Normal, so the model runs.
-        SettingsStore.get(activity).update {
-            it.copy(sttSpeed = SttSpeed.FAST, appRules = listOf(AppRuleCodec.newRule("murmur").copy(speed = SttSpeed.NORMAL)))
         }
         field.setText("")
         requests.clear()
         assertEquals(DictationState.Success("Inserted"), dictate(activity))
         assertTrue("the formatting model was asked: $requests", requests.any { "/v1/chat/completions" in it })
         assertEquals("normal", history.entries.value.first().speed)
-        assertTrue(history.entries.value.first().llm == LlmOutcome.USED || history.entries.value.first().llm == LlmOutcome.REJECTED)
-
-        // A rule for another app leaves this one on the device's Fast.
-        SettingsStore.get(activity).update {
-            it.copy(appRules = listOf(AppRuleCodec.newRule("whatsapp").copy(speed = SttSpeed.NORMAL)))
-        }
-        field.setText("")
-        requests.clear()
-        assertEquals(DictationState.Success("Inserted"), dictate(activity))
-        assertTrue(requests.none { "/v1/chat/completions" in it })
-        assertEquals("fast", history.entries.value.first().speed)
     }
 
     /** What Light mode inserts for the sample transcript: the rule-based cleanup plus the trailing space. */

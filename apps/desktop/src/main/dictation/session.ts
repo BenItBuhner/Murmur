@@ -55,7 +55,8 @@ import { createLogger } from '../logger'
 import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
 import { DEFAULT_CHUNK_PLAN } from '@core/audio/chunker'
-import { ChunkStreamer, type TailSpeculation } from './streaming'
+import type { PartialStore } from '../store/partials'
+import { ChunkStreamer, LONG_CLIP_SEC, LONG_FORMAT_WORDS, formatGroups, limiter, transcribeInPieces, type TailSpeculation } from './streaming'
 import { dictateRelease, prewarmGateway } from '@core/stt/openai-compatible'
 import { encodeWavPcm16 } from '@core/audio/wav'
 import { MURMUR_PROVIDER } from '@shared/inference'
@@ -129,6 +130,29 @@ function pieceContext(ctx: FormatContext, before: string, last = false): FormatC
   }
 }
 
+/**
+ * The whole transcript through the formatting model. A long one (a dictation whose pieces were not
+ * formatted while recording) goes in groups, two at a time, each told the end of the one before:
+ * one huge request would be the slowest, and its answer is capped at 4,096 tokens.
+ */
+async function formatLong(formatter: Formatter, input: FormatInput): Promise<FormatOutcome> {
+  if (countWords(input.transcript) <= LONG_FORMAT_WORDS) return formatter.format(input)
+  const groups = formatGroups(input.transcript)
+  const run = limiter(2)
+  const parts = await Promise.all(
+    groups.map((g, i) =>
+      run(() =>
+        formatter.format({
+          ...input,
+          transcript: g,
+          context: pieceContext(input.context, i ? groups[i - 1] : '', i === groups.length - 1)
+        })
+      )
+    )
+  )
+  return joinFormatted(parts)
+}
+
 /** Pieces formatted separately, joined in order with their seams repaired; the last decides Enter. */
 function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const rank: Record<string, number> = {
@@ -141,6 +165,7 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const worst = parts.reduce((a, b) =>
     (rank[b.status.outcome] ?? 0) > (rank[a.status.outcome] ?? 0) ? b : a
   )
+  const usedPart = parts.find((p) => p.status.outcome === 'used')
   const stages: string[] = []
   for (const p of parts) for (const st of p.stages) if (!stages.includes(st)) stages.push(st)
   return {
@@ -150,9 +175,12 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
       ? joinPieces(parts.map((p) => p.modelText!)).text
       : undefined,
     llmMs: parts[parts.length - 1].llmMs,
+    // A piece the model left as it was, or a short tail formatted by rules, does not make the
+    // dictation "not formatted": with any part from the model and none rejected or failed, it was
+    // (Oct 15: a 5-minute dictation with 13 formatted pieces was recorded as llmUsed=false).
     status:
-      worst.status.outcome === 'used'
-        ? { ...worst.status, detail: `${parts.length} pieces, formatted while speaking` }
+      worst.status.outcome === 'used' || (usedPart && (rank[worst.status.outcome] ?? 0) <= rank.skipped)
+        ? { ...(usedPart ?? worst).status, detail: `${parts.length} pieces, formatted while speaking` }
         : worst.status,
     stages,
     limit: parts.find((p) => p.limit)?.limit
@@ -197,6 +225,8 @@ export interface SessionDeps {
   inference: InferenceRouter
   overlay: { setState: (s: OverlayState) => void; playSound: (n: SoundName) => void }
   getActiveWindow: () => Promise<ActiveWindowInfo>
+  /** Streamed pieces' texts kept on disk while a dictation runs (crash recovery); optional. */
+  partials?: Pick<PartialStore, 'save' | 'clear'>
 }
 
 /**
@@ -352,6 +382,7 @@ export class DictationController extends EventEmitter {
     this.active = null
     this.stopStreaming(session)
     this.deps.recorder.cancel(session.id)
+    this.deps.partials?.clear(session.id)
     this.deps.overlay.setState({ phase: 'idle' })
     if (this.deps.settings.get().general.sounds) this.deps.overlay.playSound('cancel')
     this.emit('state', 'idle')
@@ -412,6 +443,7 @@ export class DictationController extends EventEmitter {
       log.error('session processing crashed', err)
       this.showError(friendlyError(err))
     } finally {
+      this.deps.partials?.clear(session.id)
       this.releaseRecording(job)
       this.processing--
       if (!this.active && this.processing === 0) this.emit('state', 'idle')
@@ -531,6 +563,7 @@ export class DictationController extends EventEmitter {
         return { resolved, prompt, keyterms: s.dictionary.map((d) => d.word), smart, context }
       })())
     const pieceTexts: Promise<string>[] = []
+    const partialTexts: string[] = []
     const transcribePiece = async (pcm: Int16Array, index: number): Promise<string> => {
       // Registered before the first await, so the session sees every piece's slot at release.
       let settle: (v: Promise<FormatOutcome | 'empty' | null> | 'empty' | null) => void = () =>
@@ -541,6 +574,13 @@ export class DictationController extends EventEmitter {
       pieceTexts[index] = own
       try {
         const text = await own
+        partialTexts[index] = text
+        this.deps.partials?.save({
+          id: session.id,
+          createdAt: session.startedAt,
+          mode: session.mode,
+          texts: Array.from(partialTexts, (t) => t ?? null)
+        })
         // The piece continues the one before it: the formatter sees that text as what precedes
         // the cursor, so a sentence the cut split is not capitalized or closed as if complete.
         const before = index > 0 ? await pieceTexts[index - 1].catch(() => '') : ''
@@ -767,6 +807,27 @@ export class DictationController extends EventEmitter {
         tailPrompt: prompt ? STT_BASE_PROMPT : undefined,
         log: (m) => log.warn(`session ${tag}: ${m}`)
       })
+    // The whole recording at once, for a dictation with no streamed pieces, one whose pieces
+    // failed, and Retry. A long one goes up in pieces cut at pauses, never as one request (the
+    // gateway refuses clips over 600 s, and one huge request is the slowest way to get it back).
+    const runWhole = async (): Promise<CompleteResult> => {
+      if (audio.length / SAMPLE_RATE <= LONG_CLIP_SEC) return run(audio, speechEndSec)
+      const started = performance.now()
+      const texts = await transcribeInPieces(audio, SAMPLE_RATE, s.audio.silenceThresholdDb, (clip) =>
+        run(clip, clip.length / SAMPLE_RATE).then((r) => r.text)
+      )
+      const joined = joinPieces(texts)
+      log.info(
+        `session ${tag}: ${(audio.length / SAMPLE_RATE).toFixed(0)} s transcribed in ${texts.length} piece(s); seams: ${joined.joined} joined, ${joined.deduped} word(s) deduped`
+      )
+      return {
+        text: joined.text,
+        latencyMs: Math.round(performance.now() - started),
+        resumed: 0,
+        recoveredSec: 0,
+        coverage: { transcribedSec: null, missingSec: 0, truncated: false }
+      } as CompleteResult
+    }
     try {
       // One call for the tail when the speculation before it is formatted already: speech, then
       // formatting of its last sentence + the tail, on the gateway.
@@ -797,10 +858,8 @@ export class DictationController extends EventEmitter {
         return run(clip, endSec)
       }
       stt = streamed
-        ? await this.withStreamedPrefix(streamed, pcm, threshold, runTail, tag, () =>
-            run(audio, speechEndSec)
-          )
-        : await run(audio, speechEndSec)
+        ? await this.withStreamedPrefix(streamed, pcm, threshold, runTail, tag, runWhole)
+        : await runWhole()
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
       return failure('', resolved, err)
@@ -921,7 +980,7 @@ export class DictationController extends EventEmitter {
               preformatted,
               stt,
               job.id.slice(0, 8)
-            )) ?? (await formatter.format(input))
+            )) ?? (await formatLong(formatter, input))
           softLimit = formatted.limit
         } catch (err) {
           formatted = await formatTranscript(input, null)
@@ -1395,9 +1454,12 @@ async function releasePlan(
 }
 export const RELEASE_TIMEOUT_MESSAGE = 'Murmur took too long to transcribe this — tap Retry'
 
-/** The longest a release may take: 30 s plus 0.1 s per second of audio, at most 75 s. */
+/**
+ * The longest a release may take: 30 s plus 0.1 s per second of audio, at most 4 minutes (a
+ * 30-minute dictation whose pieces all failed is transcribed again in pieces, which takes a while).
+ */
 export function releaseDeadlineMs(audioSec: number): number {
-  return Math.min(75_000, Math.round(30_000 + audioSec * 100))
+  return Math.min(240_000, Math.round(30_000 + audioSec * 100))
 }
 
 export class ReleaseTimeoutError extends Error {

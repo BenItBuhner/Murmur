@@ -264,8 +264,9 @@ class InferenceTest {
 
     @Test
     fun `the chosen speed goes with Murmur requests and never to the user's own provider`() = runBlocking {
+        // One automatic mode: a stored Fast setting asks Murmur for Normal (the release is fast anyway).
         val fast = Harness(cloud, blank().copy(sttSpeed = SttSpeed.FAST), tokens = listOf("jwt"))
-        assertEquals("fast", fast.router.stt().cfg.speed)
+        assertEquals("normal", fast.router.stt().cfg.speed)
         // The speed is a Murmur thing: the own-provider configuration has no such field, whatever the
         // setting says (a Groq or OpenAI form must not grow a `speed` part).
         val ownFast = Harness(cloud, own().copy(sttSpeed = SttSpeed.FAST), tokens = listOf("jwt"))

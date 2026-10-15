@@ -5,6 +5,9 @@ import android.util.Log
 import app.murmur.android.cloud.CloudBoot
 import app.murmur.android.cloud.CloudBootstrap
 import app.murmur.android.cloud.CloudConfig
+import app.murmur.android.history.HistoryStore
+import app.murmur.android.history.PartialStore
+import app.murmur.android.history.recoveredEntry
 
 class MurmurApplication : Application() {
     /** What the build bakes in: which instance, and whether accounts are off, optional or required. */
@@ -17,6 +20,14 @@ class MurmurApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         cloudConfig = CloudConfig.fromBuildConfig()
+        // Dictations the system or a crash cut short: what their streamed pieces transcribed goes to History.
+        runCatching {
+            val history = HistoryStore.get(this)
+            for (p in PartialStore(java.io.File(filesDir, "partials")).takeAll()) {
+                val entry = recoveredEntry(p) ?: continue
+                if (history.get(entry.id) == null) history.add(entry)
+            }
+        }.onFailure { Log.w("Murmur", "could not recover unfinished dictations", it) }
         // Nothing on the cloud path may take the app down: a failure leaves it in local mode and
         // the Account screen says so (see CloudBootstrap).
         when (val boot = CloudBootstrap.start(this, cloudConfig)) {

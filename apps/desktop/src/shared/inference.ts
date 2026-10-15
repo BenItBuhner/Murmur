@@ -78,9 +78,9 @@ export function readSpeedOutcome(
 /** The one sentence the apps say when Fast was asked for and Normal answered. */
 export const FAST_UNAVAILABLE_NOTE = "Fast isn't available yet, used Normal"
 
-/** The Speed setting's explanation, the same words on desktop and Android. */
+/** The Speed explanation, the same words on desktop and Android. There is one mode now. */
 export const SPEED_SETTING_DESCRIPTION =
-  "Normal: today's speech model with AI formatting. Fast: faster speech model and no AI formatting, just the instant Light cleanup. A per-app rule on the Style page can pick a speed for one app."
+  'Automatic: while you speak, pieces are transcribed and formatted by the stronger models; when you stop, the last few seconds go to the fastest models, with a backup request to a second provider if the first is slow. There is nothing to choose.'
 
 /** Under the Speed setting when the instance reports no fast model. */
 export const FAST_UNAVAILABLE_SETTING_NOTE =
@@ -93,16 +93,15 @@ export const FAST_UNAVAILABLE_SETTING_NOTE =
 export const FAST_SKIP_DETAIL = 'fast speed'
 
 /**
- * The speed a dictation runs at: the matching per-app rule's speed when it set one, otherwise the
- * device's Speed setting. Decides the `speed` sent to Murmur's speech model and, with `fast`,
- * that the formatting model is not asked (the rule-based Light cleanup runs instead), on the
- * managed and the user's own formatting path alike.
+ * The speed a dictation runs at. Fast and Normal were merged into one automatic mode (0.6.23): the
+ * background runs on the stronger models and the release on the fast ones, so a stored `fast`
+ * (device setting or per-app rule, from older versions or another device) runs as `normal` and no
+ * longer turns AI formatting off. Per-app formatting `light`/`off` still does that.
  */
-export function effectiveSpeed(
-  setting: SpeedMode,
-  rule: { speed?: SpeedMode } | undefined
-): SpeedMode {
-  return rule?.speed ?? setting
+export function effectiveSpeed(setting: SpeedMode, rule: { speed?: SpeedMode } | undefined): SpeedMode {
+  void setting
+  void rule
+  return 'normal'
 }
 
 /**

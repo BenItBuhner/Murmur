@@ -216,7 +216,7 @@ describe('streaming a long dictation while it is spoken', () => {
     for (let i = 1; i <= provider.requests; i++) expect(text).toContain(`${i}`)
   })
 
-  it('a failed piece falls back to one whole upload', async () => {
+  it('a failed piece is sent once more on its own, not the whole dictation', async () => {
     provider.failFirst = true
     controller.handle({ type: 'start', mode: 'hold' })
     recorder.feedAll()
@@ -225,8 +225,8 @@ describe('streaming a long dictation while it is spoken', () => {
     await settle()
     const entry = history.list().entries[0]
     expect(entry.error).toBeUndefined()
-    // The whole 50 s clip went up once more after the failure.
-    expect(Math.max(...provider.sizes)).toBeGreaterThan(recorder.pcm.length * 2 * 0.8)
+    // Only the failed piece went up again: no request carries the whole 50 s clip.
+    expect(Math.max(...provider.sizes)).toBeLessThan(recorder.pcm.length * 2 * 0.8)
   })
 
   it('a short dictation is one request, as before', async () => {

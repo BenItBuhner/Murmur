@@ -21,6 +21,6 @@ export const LIMITS = {
   hesitationPhrases: 100,
   /** Free-form model instructions (global or per app rule). */
   instructionsLength: 2000,
-  historyTextLength: 20_000,
+  historyTextLength: 64_000,
   deviceNameLength: 120
 } as const

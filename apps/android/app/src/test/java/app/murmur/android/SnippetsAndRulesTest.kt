@@ -168,31 +168,18 @@ class SnippetsAndRulesTest {
     }
 
     @Test
-    fun `a rule's speed wins over the device's, decides the formatting step, and inherits when left on Default`() {
+    fun `one automatic mode, a stored Fast, on the device or a rule, runs as Normal and keeps AI formatting`() {
         val chat = classifyPackage("com.whatsapp", "WhatsApp")
         val fastRule = base.copy(appRules = listOf(rule("whatsapp").copy(speed = SttSpeed.FAST)))
-        // The device says Normal, the rule says Fast: Fast, and smart formatting becomes the Light cleanup.
-        val fast = resolveStyle(fastRule, chat)
-        assertEquals(SttSpeed.FAST, fast.speed)
-        assertEquals(FormattingMode.SMART, fast.mode)
-        assertEquals(FormattingMode.LIGHT, fast.effectiveMode)
-        assertTrue(fast.skipsModelForSpeed)
-        // The other way round: the device says Fast, the rule for this app says Normal, so the model runs.
-        val normalRule = base.copy(sttSpeed = SttSpeed.FAST, appRules = listOf(rule("whatsapp").copy(speed = SttSpeed.NORMAL)))
-        val normal = resolveStyle(normalRule, chat)
-        assertEquals(SttSpeed.NORMAL, normal.speed)
-        assertEquals(FormattingMode.SMART, normal.effectiveMode)
-        assertFalse(normal.skipsModelForSpeed)
-        // A rule that leaves the speed on Default inherits the device's; a rule for another app does not apply.
-        assertEquals(SttSpeed.FAST, resolveStyle(base.copy(sttSpeed = SttSpeed.FAST, appRules = listOf(rule("whatsapp", Tone.CASUAL))), chat).speed)
-        assertEquals(SttSpeed.NORMAL, resolveStyle(base.copy(appRules = listOf(rule("gmail").copy(speed = SttSpeed.FAST))), chat).speed)
-        // Fast never turns formatting on: Off stays Off, and Light stays Light with nothing "skipped for speed".
-        val off = resolveStyle(fastRule.copy(formattingMode = FormattingMode.OFF), chat)
-        assertEquals(FormattingMode.OFF, off.effectiveMode)
-        assertFalse(off.skipsModelForSpeed)
-        val light = resolveStyle(fastRule.copy(formattingMode = FormattingMode.LIGHT), chat)
-        assertEquals(FormattingMode.LIGHT, light.effectiveMode)
-        assertFalse(light.skipsModelForSpeed)
+        val fromRule = resolveStyle(fastRule, chat)
+        assertEquals(SttSpeed.NORMAL, fromRule.speed)
+        assertEquals(FormattingMode.SMART, fromRule.effectiveMode)
+        assertFalse(fromRule.skipsModelForSpeed)
+        val fromDevice = resolveStyle(base.copy(sttSpeed = SttSpeed.FAST), chat)
+        assertEquals(SttSpeed.NORMAL, fromDevice.speed)
+        assertFalse(fromDevice.skipsModelForSpeed)
+        // Per-app formatting is how an app skips the model now.
+        assertEquals(FormattingMode.LIGHT, resolveStyle(fastRule.copy(formattingMode = FormattingMode.LIGHT), chat).effectiveMode)
     }
 
     @Test

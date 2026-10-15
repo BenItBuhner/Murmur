@@ -120,7 +120,9 @@ fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
         instructions = instructions,
         trailingSpace = rule?.trailingSpace ?: s.trailingSpace,
         rule = rule,
-        speed = rule?.speed ?: s.sttSpeed
+        // One automatic mode since 0.6.23 (desktop: `effectiveSpeed`): a stored Fast, on the device
+        // or a rule, runs as Normal and no longer turns AI formatting off.
+        speed = SttSpeed.NORMAL
     )
 }
 

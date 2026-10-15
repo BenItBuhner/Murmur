@@ -165,6 +165,7 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const worst = parts.reduce((a, b) =>
     (rank[b.status.outcome] ?? 0) > (rank[a.status.outcome] ?? 0) ? b : a
   )
+  const usedPart = parts.find((p) => p.status.outcome === 'used')
   const stages: string[] = []
   for (const p of parts) for (const st of p.stages) if (!stages.includes(st)) stages.push(st)
   return {
@@ -174,9 +175,12 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
       ? joinPieces(parts.map((p) => p.modelText!)).text
       : undefined,
     llmMs: parts[parts.length - 1].llmMs,
+    // A piece the model left as it was, or a short tail formatted by rules, does not make the
+    // dictation "not formatted": with any part from the model and none rejected or failed, it was
+    // (Oct 15: a 5-minute dictation with 13 formatted pieces was recorded as llmUsed=false).
     status:
-      worst.status.outcome === 'used'
-        ? { ...worst.status, detail: `${parts.length} pieces, formatted while speaking` }
+      worst.status.outcome === 'used' || (usedPart && (rank[worst.status.outcome] ?? 0) <= rank.skipped)
+        ? { ...(usedPart ?? worst).status, detail: `${parts.length} pieces, formatted while speaking` }
         : worst.status,
     stages,
     limit: parts.find((p) => p.limit)?.limit

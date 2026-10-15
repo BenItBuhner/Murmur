@@ -688,7 +688,11 @@ object DictationController {
         return FormatResult(
             text = joinPieces(parts.map { it.text }).text,
             pressEnter = parts.last().pressEnter,
-            status = if (worst.status.outcome == FormatOutcome.USED) worst.status.copy(detail = "${parts.size} pieces, formatted while speaking") else worst.status,
+            // A piece the model left as it was, or a short tail formatted by rules, does not make the
+            // dictation "not formatted" (desktop: joinFormatted; Oct 15: 13 formatted pieces, llmUsed=false).
+            status = (parts.firstOrNull { it.status.outcome == FormatOutcome.USED }
+                ?.takeIf { worst.status.outcome in setOf(FormatOutcome.USED, FormatOutcome.SKIPPED_CLEAN, FormatOutcome.SKIPPED) }
+                ?.status?.copy(detail = "${parts.size} pieces, formatted while speaking")) ?: worst.status,
             modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
             llmMs = parts.last().llmMs,
             stages = stages,

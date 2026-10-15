@@ -168,7 +168,7 @@ class SnippetsAndRulesTest {
     }
 
     @Test
-    fun `one automatic mode: a stored Fast, on the device or a rule, runs as Normal and keeps AI formatting`() {
+    fun `one automatic mode, a stored Fast, on the device or a rule, runs as Normal and keeps AI formatting`() {
         val chat = classifyPackage("com.whatsapp", "WhatsApp")
         val fastRule = base.copy(appRules = listOf(rule("whatsapp").copy(speed = SttSpeed.FAST)))
         val fromRule = resolveStyle(fastRule, chat)

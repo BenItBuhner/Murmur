@@ -7,6 +7,7 @@ import {
   SttError,
   transcribeComplete,
   type CompleteResult,
+  type InferenceTier,
   type TranscribeOutput
 } from '@core/stt'
 import type { LlmConfig } from '@core/llm/client'
@@ -528,7 +529,7 @@ export class DictationController extends EventEmitter {
       if (!a.hasSpeech) return ''
       const started = performance.now()
       const out = await transcribeComplete(
-        (wav, p) => this.transcribeWithFallback(wav, p, t.keyterms, t.resolved),
+        (wav, p) => this.transcribeWithFallback(wav, p, t.keyterms, t.resolved, 'background'),
         {
           pcm,
           sampleRate: SAMPLE_RATE,
@@ -588,11 +589,14 @@ export class DictationController extends EventEmitter {
       const formatter = await this.deps.inference.formatter()
       if (formatter.source !== 'murmur') return null
       const started = performance.now()
-      const out = await formatter.format({
-        transcript: text,
-        mode: 'smart',
-        context: pieceContext(t.context, before)
-      })
+      const out = await formatter.format(
+        {
+          transcript: text,
+          mode: 'smart',
+          context: pieceContext(t.context, before)
+        },
+        { tier: 'background' }
+      )
       log.info(
         `session ${tag}: piece ${index} formatted in ${Math.round(performance.now() - started)} ms while recording`
       )
@@ -1099,9 +1103,11 @@ export class DictationController extends EventEmitter {
     wav: Uint8Array,
     prompt: string | undefined,
     keyterms: string[],
-    resolved: ResolvedStt
+    resolved: ResolvedStt,
+    tier?: InferenceTier
   ): Promise<TranscribeOutput> {
-    const cfg = resolved.cfg
+    // The tier rides on this call only; resolved.cfg is shared with the release.
+    const cfg = tier ? { ...resolved.cfg, tier } : resolved.cfg
     const provider = getSttProvider(cfg.kind)
     try {
       return await provider.transcribe({ wav, prompt, keyterms }, cfg)
@@ -1109,7 +1115,10 @@ export class DictationController extends EventEmitter {
       const refreshed = await this.deps.inference.refreshedStt(resolved, err)
       if (refreshed) {
         resolved.cfg = refreshed
-        return provider.transcribe({ wav, prompt, keyterms }, refreshed)
+        return provider.transcribe(
+          { wav, prompt, keyterms },
+          tier ? { ...refreshed, tier } : refreshed
+        )
       }
       const e = err instanceof SttError ? err : null
       const fallbackModel = resolved.fallbackModel

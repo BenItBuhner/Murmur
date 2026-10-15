@@ -174,7 +174,12 @@ data class SttConfig(
      * Speed mode for the Murmur gateway (`normal` or `fast`), sent as the `speed` form part. Null
      * for the user's own provider, which never sees the field.
      */
-    val speed: String? = null
+    val speed: String? = null,
+    /**
+     * Murmur's gateway only: `background` for a piece sent while the user is still speaking (the
+     * gateway may use a slower pool), sent as the `x-murmur-tier` header. Null: release.
+     */
+    val tier: String? = null
 )
 
 /** A timed span of the transcript, in seconds from the start of the audio that was sent. */
@@ -323,6 +328,7 @@ object SttClient {
             cfg.speed?.let { form.addFormDataPart(Inference.SPEED_FIELD, it) }
             val req = Request.Builder().url(url).post(form.build()).apply {
                 if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}")
+                if (cfg.speed != null && cfg.tier != null) header(Inference.TIER_HEADER, cfg.tier)
             }.build()
             return client(cfg.timeoutMs).newCall(req).execute()
         }

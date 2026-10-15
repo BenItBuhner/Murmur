@@ -501,7 +501,7 @@ object DictationController {
                 // may itself stop mid-sentence.
                 val prior = seamContext(before?.let { runCatching { it.await() }.getOrNull() }.orEmpty())
                 val base = formatInputFor(text, FormattingMode.SMART, style, app, pkg, s, context, precedingText = prior.ifEmpty { null })
-                val out = router.formatter().format(base.copy(context = base.context.copy(instructions = listOfNotNull(base.context.instructions, PIECE_NOTE).joinToString(" "))))
+                val out = router.formatter().formatBackground(base.copy(context = base.context.copy(instructions = listOfNotNull(base.context.instructions, PIECE_NOTE).joinToString(" "))))
                 Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording")
                 if (out.status.outcome == FormatOutcome.FAILED) PieceFormat.Unavailable
                 else PieceFormat.Done(out.copy(text = stripEcho(out.text, prior)))
@@ -532,7 +532,7 @@ object DictationController {
                 prompt = prompt,
                 tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
                 log = { Log.w(TAG, "piece $index: $it") }
-            ) { wav, p -> router.transcribe(resolved, wav, p) }
+            ) { wav, p -> router.transcribe(resolved, wav, p, Inference.TIER_BACKGROUND) }
             Log.i(TAG, "piece $index (${pcm.size / SAMPLE_RATE} s) transcribed in ${System.currentTimeMillis() - started} ms while recording")
             out.output.text.trim()
         }

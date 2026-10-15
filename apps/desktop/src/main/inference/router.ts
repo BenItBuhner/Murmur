@@ -1,4 +1,12 @@
-import { SttError, combineSignals, errorFromResponse, toSttError, type SttConfig } from '@core/stt'
+import {
+  SttError,
+  combineSignals,
+  errorFromResponse,
+  toSttError,
+  MURMUR_TIER_HEADER,
+  type InferenceTier,
+  type SttConfig
+} from '@core/stt'
 import { formatTranscript, type FormatInput, type FormatResult } from '@engine'
 import {
   chatComplete,
@@ -76,7 +84,8 @@ export interface FormatOutcome extends FormatResult {
 
 export interface Formatter {
   source: InferenceSource
-  format: (input: FormatInput) => Promise<FormatOutcome>
+  /** `tier`: Murmur's gateway only; `background` for a piece formatted while recording. */
+  format: (input: FormatInput, opts?: { tier?: InferenceTier }) => Promise<FormatOutcome>
 }
 
 export class InferenceRouter {
@@ -218,7 +227,7 @@ export class InferenceRouter {
     if (resolved.source === 'murmur') {
       return {
         source: 'murmur',
-        format: (input) => this.remoteFormat(cfg, input)
+        format: (input, opts) => this.remoteFormat(cfg, input, opts?.tier)
       }
     }
     if (!cfg.baseUrl || !cfg.model)
@@ -230,13 +239,21 @@ export class InferenceRouter {
     }
   }
 
-  private async remoteFormat(cfg: LlmConfig, input: FormatInput): Promise<FormatOutcome> {
+  private async remoteFormat(
+    cfg: LlmConfig,
+    input: FormatInput,
+    tier?: InferenceTier
+  ): Promise<FormatOutcome> {
     const call = async (apiKey: string): Promise<FormatOutcome> => {
       let res: Response
       try {
         res = await fetch(`${cfg.baseUrl}/format`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+            ...(tier ? { [MURMUR_TIER_HEADER]: tier } : {})
+          },
           body: JSON.stringify({ transcript: input.transcript, context: input.context }),
           // The gateway may make two model round trips before answering.
           signal: combineSignals(cfg.timeoutMs * 2 + 2000)

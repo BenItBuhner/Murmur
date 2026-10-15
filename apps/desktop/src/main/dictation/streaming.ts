@@ -11,11 +11,11 @@ export type ChunkTranscriber = (pcm: Int16Array, index: number) => Promise<strin
 export type TailSpeculator<T> = (pcm: Int16Array) => Promise<T>
 
 /** How often the unfinished stretch is checked for a new pause to speculate up to. */
-export const SPEC_CHECK_SEC = 1
+export const SPEC_CHECK_SEC = 0.5
 /** A new speculation needs at least this much more audio than the last one covered. */
-export const SPEC_MIN_GAIN_SEC = 4
+export const SPEC_MIN_GAIN_SEC = 2
 /** Pauses at least this long are speculation points (mid-sentence ones too; the join repairs). */
-export const SPEC_PAUSE_MS = 400
+export const SPEC_PAUSE_MS = 300
 
 /** A speculation that was running or done at release, and where the audio after it starts. */
 export interface TailSpeculation<T> {

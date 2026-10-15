@@ -179,3 +179,40 @@ describe('usage buffer', () => {
     expect(GRANT_TTL_MS).toBeGreaterThan(0)
   })
 })
+
+describe('one-call release and prewarm', () => {
+  async function releaseRequest(auth: string, extra: Record<string, string>): Promise<Request> {
+    const form = new FormData()
+    form.append('file', new Blob([wav(2) as BlobPart], { type: 'audio/wav' }), 'audio.wav')
+    form.append('model', 'murmur-transcribe')
+    for (const [k, v] of Object.entries(extra)) form.append(k, v)
+    return new Request('https://w.test/v1/dictate/release', { method: 'POST', headers: { authorization: auth }, body: form })
+  }
+
+  it('transcribes and formats a short tail with rules, no model call', async () => {
+    const auth = `Bearer ${await token({})}`
+    const res = await handle(await releaseRequest(auth, { format: JSON.stringify({ context: {} }) }), env, ctx, fetcher)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { transcript: string; rules: boolean; format: { text: string } }
+    expect(body.transcript).toBe('hello there world')
+    expect(body.rules).toBe(true)
+    expect(body.format.text.toLowerCase()).toContain('hello there world')
+    expect(calls.some((c) => c.url.includes('llm.example.test'))).toBe(false)
+  })
+
+  it('joins onto a prefix and answers without format when none is asked', async () => {
+    const auth = `Bearer ${await token({})}`
+    const res = await handle(await releaseRequest(auth, { prefix: 'And I said' }), env, ctx, fetcher)
+    const body = (await res.json()) as { transcript: string; format: unknown }
+    expect(body.transcript).toBe('And I said hello there world')
+    expect(body.format).toBeNull()
+  })
+
+  it('prewarm answers 204 at once and warms the grant', async () => {
+    const auth = `Bearer ${await token({})}`
+    const res = await handle(new Request('https://w.test/v1/warm', { headers: { authorization: auth } }), env, ctx, fetcher)
+    expect(res.status).toBe(204)
+    await Promise.all(waits)
+    expect(calls.filter((c) => c.url.endsWith('/worker/grant'))).toHaveLength(1)
+  })
+})

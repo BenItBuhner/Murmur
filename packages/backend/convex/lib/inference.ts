@@ -53,6 +53,14 @@ export interface Upstream {
    * still speaking, where a slower but cheaper or more accurate pool costs no waiting.
    */
   bgModel?: string
+  /**
+   * `_RELEASE_FAST=on`: the release (what the user waits for, usually a short tail) always runs on
+   * `_FAST_MODEL`, whatever the speed mode; quality comes from the background models that did the
+   * rest of the dictation. One default mode instead of Fast vs Normal.
+   */
+  releaseFast?: boolean
+  /** `_HEDGE_MODEL`: what a slow release is hedged with, ideally a different provider pool. */
+  hedgeModel?: string
 }
 
 export interface Upstreams {
@@ -85,6 +93,8 @@ export function readUpstreams(env: Env): Upstreams {
     const proModel = (env[`${prefix}_PRO_MODEL`] ?? '').trim()
     const fastModel = (env[`${prefix}_FAST_MODEL`] ?? '').trim()
     const bgModel = (env[`${prefix}_BG_MODEL`] ?? '').trim()
+    const hedgeModel = (env[`${prefix}_HEDGE_MODEL`] ?? '').trim()
+    const releaseFast = /^(on|1|true|yes)$/i.test((env[`${prefix}_RELEASE_FAST`] ?? '').trim())
     return {
       baseUrl,
       apiKey: (env[`${prefix}_KEY`] ?? '').trim(),
@@ -92,6 +102,8 @@ export function readUpstreams(env: Env): Upstreams {
       proModel: proModel || undefined,
       fastModel: fastModel || undefined,
       bgModel: bgModel || undefined,
+      hedgeModel: hedgeModel || undefined,
+      releaseFast: releaseFast && !!fastModel ? true : undefined,
       reasoningEffort: speedModes ? undefined : reasoningFrom(env[`${prefix}_REASONING`])
     }
   }
@@ -128,6 +140,10 @@ export function chooseLlmModel(
 ): { model: string; alternate: string | null } {
   const normal = upstreamModelFor(upstream, plan)
   if (tier === 'background') return { model: upstream.bgModel ?? normal, alternate: null }
+  if (upstream.releaseFast && upstream.fastModel) {
+    const alt = upstream.hedgeModel ?? normal
+    return { model: upstream.fastModel, alternate: alt !== upstream.fastModel ? alt : null }
+  }
   const model = speed === 'fast' && upstream.fastModel ? upstream.fastModel : normal
   const other = model === normal ? upstream.fastModel : normal
   return { model, alternate: other && other !== model ? other : null }
@@ -213,6 +229,9 @@ export function chooseSttModel(
   // not know, the normal model is used (normalModel).
   if (tier === 'background' && upstream.bgModel && upstream.bgModel !== normal)
     return { model: upstream.bgModel, speed: 'normal', normalModel: normal }
+  // One default mode: the release runs on the fast model; the speed it reports is the one asked for.
+  if (tier === 'release' && upstream.releaseFast && upstream.fastModel)
+    return { model: upstream.fastModel, speed, normalModel: normal }
   if (speed !== 'fast') return { model: normal, speed: 'normal' }
   if (!upstream.fastModel) return { model: normal, speed: 'normal', fallback: 'not_configured' }
   return { model: upstream.fastModel, speed: 'fast', normalModel: normal }

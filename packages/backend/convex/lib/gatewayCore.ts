@@ -1,6 +1,8 @@
 import { formatTranscript } from '../../../text-engine/src/format'
 import { dropSilentSegments } from '../../../text-engine/src/hallucination'
 import { sttLanguageField } from '../../../text-engine/src/languages'
+import { joinSeam } from '../../../text-engine/src/seam'
+import { countWords } from '../../../text-engine/src/text'
 import type { ChatMessage, ChatOptions, ChatResult } from '../../../text-engine/src/types'
 import {
   MAX_COMPLETION_TOKENS,
@@ -229,6 +231,9 @@ export async function handleTranscriptions(
   // its verbose answer whenever the client wants JSON; the client still gets the shape it asked for.
   const asked = (fields.response_format?.[0] ?? 'json').trim().toLowerCase()
   let upstreamFormat = asked === 'json' ? 'verbose_json' : asked
+  // Models that cannot give segments or timings (the background/hedge pool: NVIDIA Riva) are asked
+  // for plain JSON; asking them for verbose_json made the proxy skip them for its Groq fallback.
+  const plainOnly = (m: string): boolean => m === upstream.bgModel || m === upstream.hedgeModel
   const buildForm = (upstreamModel: string): FormData => {
     const form = new FormData()
     form.append(
@@ -239,12 +244,13 @@ export async function handleTranscriptions(
     form.append('model', upstreamModel)
     for (const [key, values] of Object.entries(fields)) {
       if (!STT_PASSTHROUGH_FIELDS.has(key) || key === 'response_format') continue
+      if (plainOnly(upstreamModel) && key.startsWith('timestamp_granularities')) continue
       // Clients speak to the Murmur alias and send the singular `language`; an OpenAI gpt-transcribe
       // upstream takes `languages[]` instead.
       const upstreamKey = key === 'language' ? sttLanguageField(upstreamModel) : key
       for (const value of values) form.append(upstreamKey, value)
     }
-    form.append('response_format', upstreamFormat)
+    form.append('response_format', plainOnly(upstreamModel) && upstreamFormat === 'verbose_json' ? 'json' : upstreamFormat)
     return form
   }
   const headers: Record<string, string> = {}
@@ -272,8 +278,12 @@ export async function handleTranscriptions(
   const normalStt = upstreamModelFor(upstream, gate.plan)
   // Longer clips legitimately take longer: the hedge waits 50 ms more per second of audio.
   const hedgeBase = hedgeAfterMs(hooks.env)
-  const sttHedgeMs = hedgeBase === null ? null : hedgeBase + Math.round(seconds * 50)
-  const altStt = tier === 'release' ? (choice.model === normalStt ? upstream.fastModel : normalStt) : undefined
+  const sttHedgeMs = hedgeBase === null ? null : hedgeBase + Math.round(seconds * 20)
+  // The hedge goes to another provider pool when one is configured (_HEDGE_MODEL).
+  const altStt =
+    tier === 'release'
+      ? (upstream.hedgeModel ?? (choice.model === normalStt ? upstream.fastModel : normalStt))
+      : undefined
   const first = await hedged(
     () => transcribe(choice.model),
     altStt && altStt !== choice.model ? () => transcribe(altStt) : null,
@@ -667,4 +677,100 @@ async function upstreamChat(
     result: { text: answer, finishReason: choice?.finish_reason, model, usage: json.usage },
     tokens: tokensUsed(json.usage, bodyWith(false).length, text.length)
   }
+}
+
+// ---- one call for the release: speech, then formatting, on the edge ------------------------------
+
+/** A release tail of at most this many new words is formatted by rules, not the model. */
+export const SHORT_TAIL_WORDS = 6
+
+/**
+ * `POST /v1/dictate/release`: the end of a dictation in one round trip. Takes the same multipart
+ * body as `/v1/audio/transcriptions`, plus optional fields:
+ *
+ *   prefix   text the tail continues (the already-formatted last sentence of the tail speculation);
+ *            the transcript is seam-joined onto it before formatting
+ *   format   JSON: the `/v1/format` request without `transcript` (its `context`); absent: no formatting
+ *
+ * Answers `{ stt, transcript, format, rules }`: the speech answer as `/v1/audio/transcriptions`
+ * gives it, the text that was formatted, the `/v1/format` answer (null without `format`), and
+ * whether the short-tail rules ran instead of the model. Saves the phone's second round trip to
+ * the edge between speech and formatting.
+ */
+export async function handleDictateRelease(
+  hooks: GatewayHooks,
+  identity: GatewayIdentity | null,
+  request: Request
+): Promise<Response> {
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  const contentType = request.headers.get('content-type')
+  if (!multipartBoundary(contentType)) return gatewayError(400, 'bad_request', 'Send multipart/form-data with a "file" part')
+  const bytes = new Uint8Array(await request.arrayBuffer())
+  let fields: Record<string, string[]>
+  try {
+    fields = parseMultipart(bytes, contentType).fields
+  } catch (err) {
+    return gatewayError(400, 'bad_request', err instanceof Error ? err.message : 'Malformed multipart body')
+  }
+  const started = Date.now()
+  const sttHeaders = new Headers(request.headers)
+  sttHeaders.delete(TIER_HEADER)
+  const sttRes = await handleTranscriptions(
+    hooks,
+    identity,
+    new Request(request.url, { method: 'POST', headers: sttHeaders, body: bytes })
+  )
+  if (!sttRes.ok) return sttRes
+  const sttBody = await sttRes.text()
+  let stt: { text?: unknown } & Record<string, unknown>
+  try {
+    stt = JSON.parse(sttBody) as typeof stt
+  } catch {
+    stt = { text: sttBody }
+  }
+  const sttMs = Date.now() - started
+  const raw = typeof stt.text === 'string' ? stt.text.trim() : ''
+  const prefix = (fields.prefix?.[0] ?? '').trim()
+  const transcript = prefix ? joinSeam(prefix, raw).text : raw
+  const headers: Record<string, string> = { ...JSON_HEADERS }
+  for (const h of [SPEED_HEADER, SPEED_FALLBACK_HEADER]) {
+    const v = sttRes.headers.get(h)
+    if (v) headers[h] = v
+  }
+  const formatRaw = fields.format?.[0]
+  let format: unknown = null
+  let rules = false
+  if (formatRaw && transcript) {
+    let fmt: Record<string, unknown>
+    try {
+      fmt = JSON.parse(formatRaw) as Record<string, unknown>
+    } catch {
+      return gatewayError(400, 'bad_request', '"format" must be JSON')
+    }
+    const body = { ...fmt, transcript }
+    if (raw && countWords(raw) <= SHORT_TAIL_WORDS) {
+      // A few words after a formatted sentence: rule-based text is as good and ~0.5 s sooner.
+      const parsed = parseFormatRequest(body)
+      if (!parsed.ok) return gatewayError(400, 'bad_request', parsed.message)
+      format = {
+        ...(await formatTranscript({ transcript, mode: 'smart', context: parsed.request.context }, null)),
+        model: MURMUR_MODELS.llm
+      }
+      rules = true
+    } else if (raw) {
+      const fmtHeaders = new Headers({ 'content-type': 'application/json' })
+      const auth = request.headers.get('authorization')
+      if (auth) fmtHeaders.set('authorization', auth)
+      const res = await handleFormat(
+        hooks,
+        identity,
+        new Request(request.url, { method: 'POST', headers: fmtHeaders, body: JSON.stringify(body) })
+      )
+      format = res.ok ? await res.json() : null
+    }
+  }
+  console.log(
+    `[gateway] release sttMs=${sttMs} totalMs=${Date.now() - started} words=${countWords(raw)} rules=${rules} formatted=${format !== null}`
+  )
+  return new Response(JSON.stringify({ stt, transcript, format, rules }), { status: 200, headers })
 }

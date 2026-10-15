@@ -265,6 +265,77 @@ object SttClient {
     /** Turns the 16 kHz WAV into Ogg Opus for Murmur's gateway; null result means send the WAV. Swappable in tests. */
     @Volatile internal var compactEncoder: ((ByteArray) -> ByteArray?)? = app.murmur.android.audio.OggOpus::fromWav
 
+    /** Gateways without the one-call release route (older instances, Convex); they get two calls. */
+    private val releaseUnsupported = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Opens a connection to Murmur's gateway while the user starts speaking (`GET /v1/warm`), so the
+     * release does not pay the TLS handshake; the gateway warms its own upstream and the account's
+     * grant. Best effort: every error is ignored.
+     */
+    fun prewarm(gatewayUrl: String, token: String) {
+        runCatching {
+            val req = Request.Builder().url("${normalizeBaseUrl(gatewayUrl)}/warm").get()
+                .apply { if (token.isNotEmpty()) header("Authorization", "Bearer $token") }.build()
+            client(3_000).newCall(req).execute().close()
+        }
+    }
+
+    /** What `/v1/dictate/release` answers: the tail's speech, the text formatted, and its formatting. */
+    data class ReleaseAnswer(val stt: TranscribeOutput, val transcript: String, val format: JSONObject?, val rules: Boolean)
+
+    /**
+     * The end of a dictation in one round trip to Murmur's gateway: speech, then (with [format])
+     * formatting of [prefix] + the transcript, on the edge. Null when the gateway has no such route.
+     */
+    suspend fun dictateRelease(wav: ByteArray, prompt: String?, cfg: SttConfig, prefix: String?, format: JSONObject?): ReleaseAnswer? =
+        withContext(Dispatchers.IO) {
+            try {
+                releaseOnce(wav, prompt, cfg, prefix, format)
+            } catch (e: Exception) {
+                throw toSttException(e)
+            }
+        }
+
+    private fun releaseOnce(wav: ByteArray, prompt: String?, cfg: SttConfig, prefix: String?, format: JSONObject?): ReleaseAnswer? {
+        val base = normalizeBaseUrl(cfg.baseUrl)
+        if (base.isEmpty() || base in releaseUnsupported) return null
+        val started = System.nanoTime()
+        val upload = if (base !in compactUnsupported) runCatching { compactEncoder?.invoke(wav) }.getOrNull() else null
+        val form = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .apply {
+                if (upload != null) addFormDataPart("file", "audio.ogg", upload.toRequestBody("audio/ogg".toMediaType()))
+                else addFormDataPart("file", "audio.wav", wav.toRequestBody("audio/wav".toMediaType()))
+            }
+            .addFormDataPart("model", cfg.model)
+            .addFormDataPart("response_format", "json")
+            .addFormDataPart("temperature", "0")
+        if (cfg.language.isNotEmpty() && cfg.language != "auto") form.addFormDataPart(sttLanguageField(cfg.model), cfg.language)
+        if (!prompt.isNullOrEmpty()) form.addFormDataPart("prompt", prompt)
+        cfg.speed?.let { form.addFormDataPart(Inference.SPEED_FIELD, it) }
+        if (!prefix.isNullOrBlank()) form.addFormDataPart("prefix", prefix)
+        if (format != null) form.addFormDataPart("format", format.toString())
+        val req = Request.Builder().url("$base/dictate/release").post(form.build())
+            .apply { if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}") }.build()
+        client(cfg.timeoutMs).newCall(req).execute().use { r ->
+            if (r.code == 404 || r.code == 405) {
+                releaseUnsupported.add(base)
+                return null
+            }
+            if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
+            val json = JSONObject(r.body?.string() ?: "{}")
+            val stt = json.optJSONObject("stt") ?: JSONObject()
+            val out = TranscribeOutput(
+                text = stt.optString("text", "").trim(),
+                language = languageFromResponse(stt),
+                durationSec = if (stt.has("duration")) stt.optDouble("duration") else null,
+                latencyMs = (System.nanoTime() - started) / 1_000_000,
+                speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed)
+            )
+            return ReleaseAnswer(out, json.optString("transcript", ""), json.optJSONObject("format"), json.optBoolean("rules"))
+        }
+    }
+
     private fun client(timeoutMs: Int): OkHttpClient = baseClient.newBuilder()
         .callTimeout(timeoutMs.toLong().coerceAtLeast(1000), TimeUnit.MILLISECONDS)
         .readTimeout(timeoutMs.toLong().coerceAtLeast(1000), TimeUnit.MILLISECONDS)

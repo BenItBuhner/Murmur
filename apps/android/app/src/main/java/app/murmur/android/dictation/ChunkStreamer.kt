@@ -58,11 +58,11 @@ fun findChunkCutDetail(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, pl
 }
 
 /** How often the stretch after the last piece is checked for a pause to speculate up to. */
-const val SPEC_CHECK_SEC = 1.0
+const val SPEC_CHECK_SEC = 0.5
 /** A new speculation needs at least this much more audio than the last one covered. */
-const val SPEC_MIN_GAIN_SEC = 4.0
+const val SPEC_MIN_GAIN_SEC = 2.0
 /** Pauses at least this long are speculation points (the join repairs mid-sentence ones). */
-const val SPEC_PAUSE_MS = 400
+const val SPEC_PAUSE_MS = 300
 
 /**
  * The last pause of at least [minPauseMs] in `pcm` that has ended, at least [minSec] in; mirrors

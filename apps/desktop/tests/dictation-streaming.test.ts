@@ -283,11 +283,12 @@ describe('precision mode formats pieces while the user speaks', () => {
     expect(before).toBeGreaterThanOrEqual(2)
     controller.handle({ type: 'stop' })
     await settle()
-    // One more call at release, for the tail alone; never the whole transcript.
-    expect(inference.formatCalls.length).toBe(before + 1)
-    expect(inference.formatCalls.at(-1)).toBe(`piece ${provider.requests}`)
+    // The tail is two words after formatted text: rules format it, so no model call at release,
+    // and never one for the whole transcript.
+    expect(inference.formatCalls.length).toBe(before)
     const text = history.list().entries[0].finalText
-    for (let i = 1; i <= provider.requests; i++) expect(text).toContain(`[piece ${i}]`)
+    for (let i = 1; i < provider.requests; i++) expect(text).toContain(`[piece ${i}]`)
+    expect(text).toMatch(new RegExp(`Piece ${provider.requests}\\.?$`))
   })
 })
 

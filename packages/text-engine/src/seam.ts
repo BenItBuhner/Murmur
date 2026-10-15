@@ -49,6 +49,55 @@ function words(s: string): Word[] {
   return out
 }
 
+/** How many words each side of a seam are searched for a repeat (a piece can echo a whole clause). */
+export const SEAM_WINDOW = 20
+/** Words at the end of the text before that an echo may stop short of (the model dropped or changed them). */
+const ECHO_SLACK = 3
+
+/** Same word, or the same word with and without a contraction ("it" / "it's"). */
+function sameKey(a: string, b: string): boolean {
+  if (a === b) return true
+  const base = (k: string): string => k.replace(/'(s|re|ll|ve|d|m|t)$/u, '')
+  return Math.min(a.length, b.length) >= 2 && base(a) === base(b)
+}
+
+/**
+ * Does `b` start with the `k` words of `a` that end at index `aEnd` (exclusive)? Runs of 8 or more
+ * words tolerate one changed word (a near-exact echo); the first and last words must agree.
+ */
+function runMatches(a: readonly Word[], aEnd: number, b: readonly Word[], k: number): boolean {
+  if (k > aEnd || k > b.length) return false
+  const from = aEnd - k
+  // The run's last word must agree exactly: "it" then "it's" is the next word starting, not an echo.
+  if (!sameKey(a[from].key, b[0].key) || a[aEnd - 1].key !== b[k - 1].key) return false
+  let miss = 0
+  const allowed = k >= 8 ? 1 : 0
+  for (let i = 0; i < k; i++) {
+    const same = k >= 4 ? sameKey(a[from + i].key, b[i].key) : a[from + i].key === b[i].key
+    if (!same && ++miss > allowed) return false
+  }
+  return true
+}
+
+/**
+ * The longest repeat of the end of `prev` (within its last SEAM_WINDOW words) at the start of
+ * `next`: { k: words repeated, slack: words at the very end of prev after the repeated run }.
+ * slack > 0 only for runs of 5+ words.
+ */
+function findRepeat(hw: readonly Word[], tw: readonly Word[]): { k: number; slack: number } | null {
+  for (let k = Math.min(hw.length, tw.length); k >= 1; k--) {
+    if (runMatches(hw, hw.length, tw, k)) {
+      // One shared short word is an echo only if it is a function word ("to to", "the the"),
+      // which nobody doubles on purpose; "it it" or "no no" may have been said.
+      if (k >= 2 || tw[0].key.length >= 4 || CONTINUATION.has(tw[0].key)) return { k, slack: 0 }
+    }
+  }
+  for (let slack = 1; slack <= ECHO_SLACK; slack++)
+    for (let k = Math.min(hw.length - slack, tw.length); k >= 5; k--)
+      if (runMatches(hw, hw.length - slack, tw, k)) return { k, slack }
+  return null
+}
+
 export interface SeamJoin {
   text: string
   /** Words dropped from the start of `next` because `prev` already ended with them. */
@@ -77,20 +126,27 @@ export function joinSeam(prev: string, next: string): SeamJoin {
   if (!t) return { text: h, deduped: 0, joined: false }
   if (!h) return { text: t, deduped: 0, joined: false }
 
-  // 1. The word(s) at the cut heard by both pieces.
-  const hw = words(h).slice(-8)
-  let tw = words(t).slice(0, 8)
+  // 1. The words at the cut heard (or echoed by the formatter) by both pieces: up to
+  // SEAM_WINDOW words, near-exact for long runs, possibly stopping a few words short of prev's end.
+  const hw = words(h).slice(-SEAM_WINDOW)
+  let tw = words(t).slice(0, SEAM_WINDOW)
   let deduped = 0
-  for (let k = Math.min(hw.length, tw.length); k >= 1; k--) {
-    let same = true
-    for (let i = 0; i < k && same; i++) same = hw[hw.length - k + i].key === tw[i].key
-    // One shared short word is an echo only if it is a function word ("to to", "the the"),
-    // which nobody doubles on purpose; "it it" or "no no" may have been said.
-    if (same && (k >= 2 || tw[0].key.length >= 4 || CONTINUATION.has(tw[0].key))) {
-      deduped = k
-      break
+  const rep = findRepeat(hw, tw)
+  if (rep && rep.slack > 0) {
+    // prev ends with a few words after the repeated run; next repeats the run and goes on. When
+    // next goes on with those same words, its version is kept and prev's is dropped.
+    const slackWords = hw.slice(hw.length - rep.slack)
+    const after = tw.slice(rep.k, rep.k + rep.slack)
+    const redone = after.length === rep.slack && slackWords.every((w, i) => sameKey(w.key, after[i].key))
+    if (redone) {
+      h = h.slice(0, slackWords[0].start).replace(/[\s,;:]+$/u, '')
+      // Drop the run itself; next carries the rest.
     }
-  }
+    t = t.slice(tw[rep.k - 1].end).replace(/^[\s,;:.!?…-]+/u, '')
+    deduped = rep.k
+    if (!t) return { text: h, deduped, joined: false }
+    tw = words(t).slice(0, SEAM_WINDOW)
+  } else if (rep) deduped = rep.k
   // "a An extra": the article at the cut heard twice, differently.
   const lastH = hw[hw.length - 1]
   if (!deduped && lastH && tw[0] && ARTICLES.has(lastH.key) && ARTICLES.has(tw[0].key)) {
@@ -101,10 +157,10 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     if (!h) return { text: t, deduped: 1, joined: false }
     deduped = 1
     tw = words(t).slice(0, 8)
-  } else if (deduped) {
+  } else if (deduped && !(rep && rep.slack > 0)) {
     t = t.slice(tw[deduped - 1].end).replace(/^[\s,;:.!?…-]+/u, '')
     if (!t) return { text: h, deduped, joined: false }
-    tw = words(t).slice(0, 8)
+    tw = words(t).slice(0, SEAM_WINDOW)
   }
 
   // 2. A period or ellipsis the cut put in the middle of a sentence.
@@ -127,6 +183,17 @@ export function joinSeam(prev: string, next: string): SeamJoin {
       ALWAYS_CAPITAL.test(first.text) || looksLikeName(first.text, h, t.slice(first.end))
     if (!keepCap) t = first.text.toLowerCase() + t.slice(first.end)
     joined = endsSoft || !keepCap
+  } else if (
+    firstAtStart &&
+    endsBare &&
+    !midSentence &&
+    /^\p{Lu}/u.test(first.text) &&
+    !ALWAYS_CAPITAL.test(first.text) &&
+    !looksLikeName(first.text, h, t.slice(first.end))
+  ) {
+    // 3. A bare end followed by a capital that is not a name or "I": a new sentence whose period
+    // the piece left off (pieces are told to leave a possibly unfinished end unpunctuated).
+    h = `${h}.`
   }
   return { text: `${h} ${t}`, deduped, joined }
 }
@@ -180,13 +247,17 @@ export function lastSentenceStart(text: string): number {
  * its context into the answer): that copy is removed. Three or more matching words count.
  */
 export function stripEcho(output: string, before: string): string {
-  const bw = words(before)
+  const bw = words(before).slice(-SEAM_WINDOW)
   const ow = words(output)
   if (bw.length < 3 || ow.length <= 3) return output
-  for (let k = Math.min(bw.length, ow.length - 1); k >= 3; k--) {
-    let same = true
-    for (let i = 0; i < k && same; i++) same = ow[i].key === bw[bw.length - k + i].key
-    if (same) return output.slice(ow[k - 1].end).replace(/^[\s,;:.!?…-]+/u, '')
-  }
+  const cut = (k: number): string => output.slice(ow[k - 1].end).replace(/^[\s,;:.!?…-]+/u, '')
+  // The echo copies the end of the context (exactly, or with one word changed in a long run)...
+  for (let k = Math.min(bw.length, ow.length - 1); k >= 3; k--)
+    if (runMatches(bw, bw.length, ow, k)) return cut(k)
+  // ...or stops a word or three short of it (5+ words), as when the context ends on the first
+  // word of what the piece itself says next.
+  for (let slack = 1; slack <= ECHO_SLACK; slack++)
+    for (let k = Math.min(bw.length - slack, ow.length - 1); k >= 5; k--)
+      if (runMatches(bw, bw.length - slack, ow, k)) return cut(k)
   return output
 }

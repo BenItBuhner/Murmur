@@ -267,6 +267,32 @@ class InferenceRouter(
         }
     }
 
+    /** Warm the connections to Murmur's gateway when recording starts (no-op for the user's own provider). */
+    suspend fun prewarm() {
+        if (routing().stt != InferenceSource.MURMUR) return
+        val token = runCatching { sessionToken(false) }.getOrNull() ?: return
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            SttClient.prewarm(gatewayUrl, token)
+            LlmClient.prewarm(gatewayUrl, token)
+        }
+    }
+
+    /**
+     * The release tail in one call (speech + formatting on the gateway). Null when it cannot be used
+     * (not Murmur, or an instance without the route): the caller makes the two calls instead.
+     */
+    suspend fun dictateRelease(resolved: ResolvedStt, wav: ByteArray, prompt: String?, prefix: String?, format: org.json.JSONObject?): SttClient.ReleaseAnswer? {
+        if (resolved.source != InferenceSource.MURMUR) return null
+        return try {
+            SttClient.dictateRelease(wav, prompt, resolved.cfg, prefix, format)
+        } catch (e: SttException) {
+            if (e.kind != SttErrorKind.AUTH) throw e
+            val fresh = resolved.cfg.copy(apiKey = sessionToken(true))
+            resolved.cfg = fresh
+            SttClient.dictateRelease(wav, prompt, fresh, prefix, format)
+        }
+    }
+
     /**
      * The formatting stage for the current routing (desktop: `InferenceRouter.formatter`). Against
      * a Murmur instance the whole engine runs on the gateway's `POST /v1/format`; with the user's

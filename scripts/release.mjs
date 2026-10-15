@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.22': [
+    'Faster at release: the last few seconds are transcribed and formatted in one request, the connection opens when you start recording, short endings are formatted instantly, and a slow request is retried on a second provider after half a second.',
+    'Cleaner long dictations: repeated or dropped words at chunk seams are caught even when the two pieces word them slightly differently, and sentence-ending periods at seams are kept.'
+  ],
   '0.6.21': [
     'Fix: a dictation can no longer hang on Transcribing. A stalled request now falls back to transcribing the whole recording, and after a hard deadline you get an error with Retry.'
   ],

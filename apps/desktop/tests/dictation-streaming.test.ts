@@ -91,11 +91,11 @@ class FakeSettings extends EventEmitter {
   }
 }
 
-/** Speech with a clear 0.6 s pause every 4 s, like sentences. */
+/** Speech with a clear 0.8 s pause every 4 s, like sentences. */
 function sentences(seconds: number): Int16Array {
   const pcm = speech(seconds)
   for (let s = 3.4; s < seconds; s += 4)
-    pcm.fill(0, Math.round(s * SAMPLE_RATE), Math.round((s + 0.6) * SAMPLE_RATE))
+    pcm.fill(0, Math.round(s * SAMPLE_RATE), Math.round((s + 0.8) * SAMPLE_RATE))
   return pcm
 }
 

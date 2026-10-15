@@ -24,7 +24,10 @@ import {
   type FormatContext,
   type FormatInput,
   type ResolvedStyle,
-  isSilenceHallucination
+  isSilenceHallucination,
+  joinPieces,
+  seamContext,
+  stripEcho
 } from '@engine'
 import {
   FAST_SKIP_DETAIL,
@@ -90,7 +93,27 @@ interface StreamedPrefix {
 /** Streamed pieces and the tail, for formatting the tail alone at release. */
 type StreamedStt = CompleteResult & { streamed?: { texts: string[]; tail: string } }
 
-/** Pieces formatted separately, joined in order; the last one decides Enter. */
+/** What the formatter is told about a piece of a longer dictation. */
+const PIECE_NOTE =
+  'This transcript is one part of a longer dictation and may stop mid-sentence; if it does, leave the end unpunctuated.'
+
+/**
+ * Context for formatting one piece of a streamed dictation: the piece before it stands in for the
+ * text before the cursor (when the platform gave none, or after it), and a piece that is not the
+ * last may stop mid-sentence.
+ */
+function pieceContext(ctx: FormatContext, before: string, last = false): FormatContext {
+  const prior = seamContext(before)
+  return {
+    ...ctx,
+    precedingText: prior ? `${ctx.precedingText ?? ''} ${prior}`.trim() : ctx.precedingText,
+    instructions: last
+      ? ctx.instructions
+      : [ctx.instructions?.trim(), PIECE_NOTE].filter(Boolean).join(' ')
+  }
+}
+
+/** Pieces formatted separately, joined in order with their seams repaired; the last decides Enter. */
 function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const rank: Record<string, number> = {
     used: 0,
@@ -105,13 +128,10 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const stages: string[] = []
   for (const p of parts) for (const st of p.stages) if (!stages.includes(st)) stages.push(st)
   return {
-    text: parts
-      .map((p) => p.text.trim())
-      .filter(Boolean)
-      .join(' '),
+    text: joinPieces(parts.map((p) => p.text)).text,
     pressEnter: parts[parts.length - 1].pressEnter,
     modelText: parts.every((p) => p.modelText !== undefined)
-      ? parts.map((p) => p.modelText!.trim()).join(' ')
+      ? joinPieces(parts.map((p) => p.modelText!)).text
       : undefined,
     llmMs: parts[parts.length - 1].llmMs,
     status:
@@ -428,7 +448,7 @@ export class DictationController extends EventEmitter {
   }
 
   /**
-   * Transcribe finished 15-30 s stretches while the user keeps talking, so release only waits
+   * Transcribe finished 18-30 s stretches while the user keeps talking, so release only waits
    * for the last stretch. Murmur's gateway only: a piece for any other provider fails before a
    * request is made, and the dictation is then transcribed whole as before.
    */
@@ -465,14 +485,23 @@ export class DictationController extends EventEmitter {
           : undefined
         return { resolved, prompt, keyterms: s.dictionary.map((d) => d.word), smart, context }
       })())
+    const pieceTexts: Promise<string>[] = []
     const transcribePiece = async (pcm: Int16Array, index: number): Promise<string> => {
       // Registered before the first await, so the session sees every piece's slot at release.
       let settle: (v: Promise<FormatOutcome | 'empty' | null> | 'empty' | null) => void = () =>
         undefined
       formats[index] = new Promise((r) => (settle = r))
+      const own = transcribeOnly(pcm, index)
+      own.catch(() => undefined)
+      pieceTexts[index] = own
       try {
-        const text = await transcribeOnly(pcm, index)
-        settle(text ? this.speculateFormat(text, await resolveTarget()!, tag, index) : 'empty')
+        const text = await own
+        // The piece continues the one before it: the formatter sees that text as what precedes
+        // the cursor, so a sentence the cut split is not capitalized or closed as if complete.
+        const before = index > 0 ? await pieceTexts[index - 1].catch(() => '') : ''
+        settle(
+          text ? this.speculateFormat(text, await resolveTarget()!, tag, index, before) : 'empty'
+        )
         return text
       } catch (err) {
         settle(null)
@@ -523,18 +552,24 @@ export class DictationController extends EventEmitter {
     text: string,
     t: { smart: boolean; context: FormatContext },
     tag: string,
-    index: number
+    index: number,
+    before = ''
   ): Promise<FormatOutcome | null> {
     if (!t.smart) return null
     try {
       const formatter = await this.deps.inference.formatter()
       if (formatter.source !== 'murmur') return null
       const started = performance.now()
-      const out = await formatter.format({ transcript: text, mode: 'smart', context: t.context })
+      const out = await formatter.format({
+        transcript: text,
+        mode: 'smart',
+        context: pieceContext(t.context, before)
+      })
       log.info(
         `session ${tag}: piece ${index} formatted in ${Math.round(performance.now() - started)} ms while recording`
       )
-      return out.status.outcome === 'failed' ? null : out
+      if (out.status.outcome === 'failed') return null
+      return { ...out, text: stripEcho(out.text, seamContext(before)) }
     } catch {
       return null
     }
@@ -927,12 +962,10 @@ export class DictationController extends EventEmitter {
       log.info(`session ${tag}: dropped a stock phrase from a quiet tail (${a.speechMs} ms voiced)`)
       last = { ...last, text: '' }
     }
-    const text = [...texts, last?.text ?? '']
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .join(' ')
+    const seams = joinPieces([...texts, last?.text ?? ''])
+    const text = seams.text
     log.info(
-      `session ${tag}: ${texts.length} piece(s) sent while recording; tail ${(rest.length / SAMPLE_RATE).toFixed(1)} s`
+      `session ${tag}: ${texts.length} piece(s) sent while recording; tail ${(rest.length / SAMPLE_RATE).toFixed(1)} s; seams: ${seams.joined} joined, ${seams.deduped} word(s) deduped`
     )
     return {
       ...(last ?? { latencyMs: 0, resumed: 0, recoveredSec: 0 }),
@@ -958,7 +991,14 @@ export class DictationController extends EventEmitter {
     if (!streamed || !stt.streamed || formatter.source !== 'murmur') return null
     if (streamed.formats.length !== stt.streamed.texts.length) return null
     const tail = stt.streamed.tail
-    const tailFormat = tail ? formatter.format({ ...input, transcript: tail }) : null
+    const lastPiece = stt.streamed.texts[stt.streamed.texts.length - 1] ?? ''
+    const tailFormat = tail
+      ? formatter.format({
+          ...input,
+          transcript: tail,
+          context: pieceContext(input.context, lastPiece, true)
+        })
+      : null
     tailFormat?.catch(() => undefined)
     const pieces = await Promise.all(streamed.formats)
     if (pieces.some((p) => p === null)) {
@@ -970,7 +1010,8 @@ export class DictationController extends EventEmitter {
     const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty' && p !== null)
     if (tailFormat) {
       try {
-        parts.push(await tailFormat)
+        const t = await tailFormat
+        parts.push({ ...t, text: stripEcho(t.text, seamContext(lastPiece)) })
       } catch {
         return null
       }

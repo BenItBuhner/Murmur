@@ -75,8 +75,9 @@ describe('inference helpers', () => {
     const fast = readUpstreams({ ...STT_ENV, ...FAST_ENV }).stt!
     expect(fast.fastModel).toBe(FAST_MODEL)
     expect(speedModesFor(fast)).toEqual(['normal', 'fast'])
-    // The variable exists for speech only; a formatting model never has a fast twin.
-    expect(readUpstreams({ ...LLM_ENV, MURMUR_INFERENCE_LLM_FAST_MODEL: 'x' }).llm!.fastModel).toBeUndefined()
+    // Formatting has a fast model too (the release in Fast mode), and both kinds a background one.
+    expect(readUpstreams({ ...LLM_ENV, MURMUR_INFERENCE_LLM_FAST_MODEL: 'x' }).llm!.fastModel).toBe('x')
+    expect(readUpstreams({ ...LLM_ENV, MURMUR_INFERENCE_LLM_BG_MODEL: 'bg' }).llm!.bgModel).toBe('bg')
     expect(modelsPayload(readUpstreams({ ...STT_ENV, ...FAST_ENV })).data[0].speed_modes).toEqual(['normal', 'fast'])
     expect(modelsPayload(readUpstreams({ ...STT_ENV, ...LLM_ENV })).data).toMatchObject([
       { id: 'murmur-transcribe', speed_modes: ['normal'] },

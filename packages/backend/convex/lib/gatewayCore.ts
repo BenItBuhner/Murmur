@@ -38,12 +38,24 @@ import {
   type SpeedFallback,
   type SpeedMode,
   type Upstream,
-  type UpstreamFailure
+  type UpstreamFailure,
+  chooseLlmModel,
+  LLM_SPEED_HEADER,
+  parseTier,
+  TIER_HEADER,
+  type Tier
 } from './inference'
 import type { Meter, Refusal } from './entitlements'
 import type { AccessState, Plan } from './plans'
 import { admitFormat, dedupeFormat, releaseFormat } from './formatGuard'
-import { callUpstream, readUpstreamBudgets, sttBudgetMs, type UnavailableReason } from './upstream'
+import {
+  callUpstream,
+  hedgeAfterMs,
+  hedged,
+  readUpstreamBudgets,
+  sttBudgetMs,
+  type UnavailableReason
+} from './upstream'
 
 /**
  * Managed inference: an OpenAI-compatible facade in front of the model providers the operator
@@ -250,11 +262,31 @@ export async function handleTranscriptions(
   // The tier's model for normal; the fast model for fast, or the tier's model again when the
   // instance has none, and again when the provider does not know the fast model yet. Either way
   // the answer says which mode ran, so a client can tell the user that Fast is not there yet.
-  const choice = chooseSttModel(upstream, gate.plan, speed)
+  const tier = parseTier(request.headers.get(TIER_HEADER))
+  const choice = chooseSttModel(upstream, gate.plan, speed, tier)
   let ran: SpeedMode = choice.speed
   let fallback: SpeedFallback | undefined = choice.fallback
   let usedModel = choice.model
-  let attempt = await transcribe(choice.model)
+  // What the user is waiting for is hedged: a release that has not answered in time is asked of
+  // the other speech model too, and the first usable answer wins.
+  const normalStt = upstreamModelFor(upstream, gate.plan)
+  // Longer clips legitimately take longer: the hedge waits 50 ms more per second of audio.
+  const hedgeBase = hedgeAfterMs(hooks.env)
+  const sttHedgeMs = hedgeBase === null ? null : hedgeBase + Math.round(seconds * 50)
+  const altStt = tier === 'release' ? (choice.model === normalStt ? upstream.fastModel : normalStt) : undefined
+  const first = await hedged(
+    () => transcribe(choice.model),
+    altStt && altStt !== choice.model ? () => transcribe(altStt) : null,
+    sttHedgeMs,
+    (a) => a.kind === 'response' && a.res.ok
+  )
+  let attempt = first.value
+  if (first.winner === 'alternate') {
+    usedModel = altStt!
+    ran = altStt === upstream.fastModel ? 'fast' : 'normal'
+  }
+  if (first.hedged) console.log(`[gateway] stt hedged after ${sttHedgeMs} ms; ${first.winner} won`)
+  if (tier === 'background') console.log(`[gateway] stt tier=background model=${usedModel}`)
   if (attempt.kind !== 'response')
     return providerFailure(hooks, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
   if (
@@ -375,7 +407,7 @@ export async function handleChatCompletions(
     })
   }
   try {
-    return await chatCompletionOnce(hooks, upstream, gate, identity, input)
+    return await chatCompletionOnce(hooks, upstream, gate, identity, input, parseTier(request.headers.get(TIER_HEADER)))
   } finally {
     releaseFormat(gate.userId)
   }
@@ -386,9 +418,13 @@ async function chatCompletionOnce(
   upstream: Upstream,
   gate: Allowed,
   identity: GatewayIdentity,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  chatTier: Tier
 ): Promise<Response> {
-  const outbound: Record<string, unknown> = { model: upstreamModelFor(upstream, gate.plan), stream: false }
+  const outbound: Record<string, unknown> = {
+    model: chooseLlmModel(upstream, gate.plan, chatTier, 'normal').model,
+    stream: false
+  }
   for (const key of CHAT_PASSTHROUGH) if (input[key] !== undefined) outbound[key] = input[key]
   const requestedMax = typeof input.max_tokens === 'number' ? input.max_tokens : 1024
   outbound.max_tokens = Math.max(1, Math.min(MAX_COMPLETION_TOKENS, Math.floor(requestedMax)))
@@ -464,9 +500,11 @@ export async function handleFormat(
 
   // Identical requests from one user already in flight share one answer, so a client that
   // re-sends cannot multiply the provider calls.
-  const key = `${gate.userId}\u0000${JSON.stringify(parsed.request)}`
+  const tier = parseTier(request.headers.get(TIER_HEADER))
+  const speed: SpeedMode = (request.headers.get(LLM_SPEED_HEADER) ?? '').trim().toLowerCase() === 'fast' ? 'fast' : 'normal'
+  const key = `${gate.userId}\u0000${tier}\u0000${speed}\u0000${JSON.stringify(parsed.request)}`
   const { value: body, shared } = await dedupeFormat(key, () =>
-    formatOnce(hooks, upstream, gate, identity, parsed.request)
+    formatOnce(hooks, upstream, gate, identity, parsed.request, tier, speed)
   )
   if (shared) console.log('[gateway] format deduped (identical request in flight)')
   return new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
@@ -477,9 +515,14 @@ async function formatOnce(
   upstream: Upstream,
   gate: Allowed,
   identity: GatewayIdentity,
-  request: Extract<ReturnType<typeof parseFormatRequest>, { ok: true }>['request']
+  request: Extract<ReturnType<typeof parseFormatRequest>, { ok: true }>['request'],
+  tier: Tier,
+  speed: SpeedMode
 ): Promise<Record<string, unknown>> {
-  const model = upstreamModelFor(upstream, gate.plan)
+  // Background pieces use the background pool; a release uses the fast or normal model, hedged
+  // with the other one when it is slow.
+  const { model, alternate } = chooseLlmModel(upstream, gate.plan, tier, speed)
+  const hedgeMs = hedgeAfterMs(hooks.env)
   const budgetMs = readUpstreamBudgets(hooks.env).formatMs
   let tokens = 0
   /** Model round trips the provider answered; only those are usage. */
@@ -491,7 +534,13 @@ async function formatOnce(
     // Once the provider said it is busy or down, the rest of this request (other pieces, the
     // strict retry) does not ask it again.
     if (unavailable) throw new UpstreamError(unavailable.message, unavailable.status, unavailable.code)
-    const answer = await upstreamChat(upstream, model, messages, opts, budgetMs)
+    const { value: answer, hedged: didHedge, winner } = await hedged(
+      () => upstreamChat(upstream, model, messages, opts, budgetMs),
+      alternate ? () => upstreamChat(upstream, alternate, messages, opts, budgetMs) : null,
+      hedgeMs,
+      (a) => a.ok
+    )
+    if (didHedge) console.log(`[gateway] format hedged after ${hedgeMs} ms; ${winner} won`)
     if (!answer.ok) {
       if (answer.failure.unavailable) unavailable = answer.failure
       else console.warn(`[gateway] llm upstream -> ${answer.failure.status} ${answer.failure.code}`)

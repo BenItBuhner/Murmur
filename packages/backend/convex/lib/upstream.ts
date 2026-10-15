@@ -238,3 +238,44 @@ export function retryAfterSeconds(ms: number): number {
 export function serviceOf(kind: InferenceKind): 'speech' | 'formatting' {
   return kind === 'stt' ? 'speech' : 'formatting'
 }
+
+// ---- hedging ------------------------------------------------------------------------------------
+
+/** Default wait before a release request is hedged with a second model (MURMUR_INFERENCE_HEDGE_MS). */
+export const HEDGE_AFTER_MS = 1_500
+
+export function hedgeAfterMs(env: Record<string, string | undefined>): number | null {
+  const raw = (env.MURMUR_INFERENCE_HEDGE_MS ?? '').trim()
+  if (raw === 'off' || raw === '0') return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : HEDGE_AFTER_MS
+}
+
+/**
+ * Run `primary`; when it has not answered usably within `afterMs`, start `alternate` too and take
+ * whichever answers usably first (`ok`). When neither does, the primary's answer is returned. Cuts
+ * the slow tail (a cold provider, a queued key) at the cost of a second call only for those.
+ */
+export async function hedged<T>(
+  primary: () => Promise<T>,
+  alternate: (() => Promise<T>) | null,
+  afterMs: number | null,
+  ok: (value: T) => boolean
+): Promise<{ value: T; hedged: boolean; winner: 'primary' | 'alternate' }> {
+  const first = primary()
+  if (!alternate || afterMs === null) return { value: await first, hedged: false, winner: 'primary' }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const fired = new Promise<'hedge'>((resolve) => (timer = setTimeout(() => resolve('hedge'), afterMs)))
+  const early = await Promise.race([first.then((v) => ({ v })), fired])
+  if (early !== 'hedge') {
+    // Answered in time, usable or not (a failure is handled by the caller as before).
+    clearTimeout(timer)
+    return { value: early.v, hedged: false, winner: 'primary' }
+  }
+  const second = alternate()
+  const tagged = [first.then((v) => ({ v, w: 'primary' as const })), second.then((v) => ({ v, w: 'alternate' as const }))]
+  const winner = await Promise.any(tagged.map((p) => p.then((r) => (ok(r.v) ? r : Promise.reject(r)))))
+    .catch(() => null)
+  if (winner) return { value: winner.v, hedged: true, winner: winner.w }
+  return { value: await first, hedged: true, winner: 'primary' }
+}

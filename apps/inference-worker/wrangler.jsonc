@@ -18,14 +18,18 @@
     // Provider endpoints and models: the same MURMUR_INFERENCE_* values the Convex deployment has.
     "MURMUR_INFERENCE_STT_URL": "https://infer.techlitnow.com/v1",
     "MURMUR_INFERENCE_STT_MODEL": "transcribe-1",
-    "MURMUR_INFERENCE_STT_FAST_MODEL": "transcribe-1-fast",
+    "MURMUR_INFERENCE_STT_FAST_MODEL": "murmur-fast-transcribe",
+    "MURMUR_INFERENCE_STT_HEDGE_MODEL": "murmur-bg-transcribe",
+    "MURMUR_INFERENCE_STT_RELEASE_FAST": "on",
     // Background pieces (sent while the user is still speaking, x-murmur-tier: background) go to
     // slower or cheaper pools; the release stays on the fastest ones and is hedged.
     "MURMUR_INFERENCE_STT_BG_MODEL": "murmur-bg-transcribe",
     "MURMUR_INFERENCE_LLM_URL": "https://infer.techlitnow.com/v1",
     "MURMUR_INFERENCE_LLM_MODEL": "complete",
     "MURMUR_INFERENCE_LLM_FAST_MODEL": "murmur-fast-format",
-    "MURMUR_INFERENCE_LLM_BG_MODEL": "murmur-bg-format",
+    "MURMUR_INFERENCE_LLM_BG_MODEL": "complete",
+    "MURMUR_INFERENCE_LLM_HEDGE_MODEL": "murmur-bg-format",
+    "MURMUR_INFERENCE_LLM_RELEASE_FAST": "on",
     // Where limit errors link to; same value as MURMUR_SITE_URL in the Convex deployment.
     "MURMUR_SITE_URL": "https://murmur.techlitnow.com"
   }

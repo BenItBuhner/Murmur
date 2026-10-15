@@ -1,5 +1,6 @@
 import {
   handleChatCompletions,
+  handleDictateRelease,
   handleFormat,
   handleModels,
   handleTranscriptions,
@@ -96,6 +97,12 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
   const url = new URL(request.url)
   const path = url.pathname.replace(/\/+$/, '')
   if (path === '' || path === '/health') return new Response('ok', { status: 200 })
+  // Prewarm, sent by the apps when recording starts: this isolate opens its connection to the model
+  // proxy and, with a session token, refreshes the account's grant, so the release pays neither.
+  if (path === '/v1/warm') {
+    ctx.waitUntil(warm(request, env, fetcher))
+    return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } })
+  }
   if (!env.CLERK_JWT_ISSUER_DOMAIN || !env.CONVEX_SITE_URL || !env.MURMUR_WORKER_SECRET)
     return gatewayError(503, 'not_configured', 'This Murmur inference gateway is not configured')
 
@@ -114,12 +121,29 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     if (path === '/v1/audio/transcriptions') return await handleTranscriptions(hooks, identity, request)
     if (path === '/v1/chat/completions') return await handleChatCompletions(hooks, identity, request)
     if (path === '/v1/format') return await handleFormat(hooks, identity, request)
+    if (path === '/v1/dictate/release') return await handleDictateRelease(hooks, identity, request)
     return gatewayError(404, 'bad_request', 'Not found')
   } catch (err) {
     // grantFor failing means Convex is unreachable: refuse rather than serve without an allowance.
     console.error(`[worker] ${path} failed: ${err instanceof Error ? err.message : err}`)
     return gatewayError(503, 'provider_unavailable', 'Murmur models are briefly unavailable; try again shortly')
   }
+}
+
+async function warm(request: Request, env: Env, fetcher: typeof fetch): Promise<void> {
+  const base = (env.MURMUR_INFERENCE_STT_URL ?? '').replace(/\/+$/, '')
+  const jobs: Promise<unknown>[] = []
+  if (base) jobs.push(fetcher(`${base}/models`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.body?.cancel()))
+  const auth = request.headers.get('authorization')
+  if (auth && env.CLERK_JWT_ISSUER_DOMAIN && env.CONVEX_SITE_URL && env.MURMUR_WORKER_SECRET) {
+    jobs.push(
+      (async () => {
+        const identity = await verifyClerkToken(auth, env.CLERK_JWT_ISSUER_DOMAIN, fetcher)
+        if (identity) await grantFor({ siteUrl: env.CONVEX_SITE_URL, secret: env.MURMUR_WORKER_SECRET, fetcher }, identity)
+      })()
+    )
+  }
+  await Promise.allSettled(jobs)
 }
 
 export default {

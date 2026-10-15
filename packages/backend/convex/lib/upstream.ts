@@ -242,7 +242,7 @@ export function serviceOf(kind: InferenceKind): 'speech' | 'formatting' {
 // ---- hedging ------------------------------------------------------------------------------------
 
 /** Default wait before a release request is hedged with a second model (MURMUR_INFERENCE_HEDGE_MS). */
-export const HEDGE_AFTER_MS = 1_500
+export const HEDGE_AFTER_MS = 500
 
 export function hedgeAfterMs(env: Record<string, string | undefined>): number | null {
   const raw = (env.MURMUR_INFERENCE_HEDGE_MS ?? '').trim()

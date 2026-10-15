@@ -53,7 +53,21 @@ describe('hedged requests', () => {
   })
   it('can be turned off', () => {
     expect(hedgeAfterMs({ MURMUR_INFERENCE_HEDGE_MS: 'off' })).toBeNull()
-    expect(hedgeAfterMs({})).toBe(1500)
+    expect(hedgeAfterMs({})).toBe(500)
     expect(hedgeAfterMs({ MURMUR_INFERENCE_HEDGE_MS: '900' })).toBe(900)
+  })
+})
+
+describe('one default mode (_RELEASE_FAST) and cross-pool hedges', () => {
+  const base = { baseUrl: 'https://x.test/v1', apiKey: '', model: 'transcribe-1', fastModel: 'murmur-fast-transcribe', bgModel: 'murmur-bg-transcribe', hedgeModel: 'murmur-bg-transcribe', releaseFast: true } as Upstream
+  it('runs every release on the fast model, keeping the asked speed', () => {
+    expect(chooseSttModel(base, 'free', 'normal', 'release')).toMatchObject({ model: 'murmur-fast-transcribe', speed: 'normal' })
+    expect(chooseSttModel(base, 'free', 'fast', 'release')).toMatchObject({ model: 'murmur-fast-transcribe', speed: 'fast' })
+    expect(chooseSttModel(base, 'free', 'normal', 'background').model).toBe('murmur-bg-transcribe')
+  })
+  it('hedges release formatting with the other pool', () => {
+    const llm = { baseUrl: 'https://x.test/v1', apiKey: '', model: 'complete', fastModel: 'murmur-fast-format', bgModel: 'complete', hedgeModel: 'murmur-bg-format', releaseFast: true } as Upstream
+    expect(chooseLlmModel(llm, 'free', 'release', 'normal')).toEqual({ model: 'murmur-fast-format', alternate: 'murmur-bg-format' })
+    expect(chooseLlmModel(llm, 'free', 'background', 'normal')).toEqual({ model: 'complete', alternate: null })
   })
 })

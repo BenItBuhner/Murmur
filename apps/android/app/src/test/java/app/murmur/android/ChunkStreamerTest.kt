@@ -67,8 +67,9 @@ class ChunkStreamerTest {
     @Test
     fun `speculates on the tail and says where the rest starts`() = runBlocking {
         val clip = loud(12.0)
-        clip.fill(0, 5 * rate, (5.6 * rate).toInt())
-        clip.fill(0, 10 * rate, (10.6 * rate).toInt())
+        // Long enough pauses that the adaptive threshold (20th-percentile noise floor) sees them.
+        clip.fill(0, 3 * rate, (5.6 * rate).toInt())
+        clip.fill(0, 8 * rate, (10.6 * rate).toInt())
         var fed = 0
         var specs = 0
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -80,7 +81,7 @@ class ChunkStreamerTest {
         val streamed = streamer.finish()
         assertTrue(specs >= 1)
         val at = streamed.specSamples!!
-        assertTrue(at > 10 * rate && at < 10.6 * rate)
+        assertTrue(at > 8 * rate && at < 10.6 * rate)
         assertTrue(streamed.specText!!.await().startsWith("s0:"))
     }
 }

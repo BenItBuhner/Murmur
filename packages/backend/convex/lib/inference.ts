@@ -48,6 +48,11 @@ export interface Upstream {
    * fewer output tokens (so fewer provider rate limits).
    */
   reasoningEffort?: string
+  /**
+   * Optional model for background work (`_BG_MODEL`): pieces of a dictation sent while the user is
+   * still speaking, where a slower but cheaper or more accurate pool costs no waiting.
+   */
+  bgModel?: string
 }
 
 export interface Upstreams {
@@ -78,17 +83,54 @@ export function readUpstreams(env: Env): Upstreams {
     const model = (env[`${prefix}_MODEL`] ?? '').trim()
     if (!baseUrl || !model || !/^https?:\/\//i.test(baseUrl)) return null
     const proModel = (env[`${prefix}_PRO_MODEL`] ?? '').trim()
-    const fastModel = speedModes ? (env[`${prefix}_FAST_MODEL`] ?? '').trim() : ''
+    const fastModel = (env[`${prefix}_FAST_MODEL`] ?? '').trim()
+    const bgModel = (env[`${prefix}_BG_MODEL`] ?? '').trim()
     return {
       baseUrl,
       apiKey: (env[`${prefix}_KEY`] ?? '').trim(),
       model,
       proModel: proModel || undefined,
       fastModel: fastModel || undefined,
+      bgModel: bgModel || undefined,
       reasoningEffort: speedModes ? undefined : reasoningFrom(env[`${prefix}_REASONING`])
     }
   }
   return { stt: read('MURMUR_INFERENCE_STT', true), llm: read('MURMUR_INFERENCE_LLM', false) }
+}
+
+// ---- tiers: background work vs the release ----------------------------------------------------
+
+/**
+ * Which pool a request belongs to, from the `x-murmur-tier` header. `background`: a piece sent
+ * while the user is still speaking (slower pools are fine). `release`: what the user is waiting
+ * for right now (fastest pools, hedged). Absent means `release`, so older clients keep the models
+ * they had.
+ */
+export const TIER_HEADER = 'x-murmur-tier'
+export type Tier = 'background' | 'release'
+export function parseTier(raw: string | null | undefined): Tier {
+  return (raw ?? '').trim().toLowerCase() === 'background' ? 'background' : 'release'
+}
+
+/** The formatting speed from the `x-murmur-speed` header (absent: normal). */
+export const LLM_SPEED_HEADER = 'x-murmur-speed'
+
+/**
+ * The formatting model: `_BG_MODEL` for background pieces, `_FAST_MODEL` for a release in Fast
+ * mode, otherwise the tier's model. `alternate` is a different model a slow release call may be
+ * hedged with (null when there is none).
+ */
+export function chooseLlmModel(
+  upstream: Upstream,
+  plan: Plan,
+  tier: Tier,
+  speed: SpeedMode
+): { model: string; alternate: string | null } {
+  const normal = upstreamModelFor(upstream, plan)
+  if (tier === 'background') return { model: upstream.bgModel ?? normal, alternate: null }
+  const model = speed === 'fast' && upstream.fastModel ? upstream.fastModel : normal
+  const other = model === normal ? upstream.fastModel : normal
+  return { model, alternate: other && other !== model ? other : null }
 }
 
 export function upstreamModelFor(upstream: Upstream, plan: Plan): string {
@@ -160,8 +202,17 @@ export interface SttModelChoice {
  * available here yet. The tier logic is untouched: fast applies within whatever tier the account
  * has, and Pro accounts asking for `normal` still get `_PRO_MODEL`.
  */
-export function chooseSttModel(upstream: Upstream, plan: Plan, speed: SpeedMode): SttModelChoice {
+export function chooseSttModel(
+  upstream: Upstream,
+  plan: Plan,
+  speed: SpeedMode,
+  tier: Tier = 'release'
+): SttModelChoice {
   const normal = upstreamModelFor(upstream, plan)
+  // Background pieces go to the background pool whatever the speed; on a model the provider does
+  // not know, the normal model is used (normalModel).
+  if (tier === 'background' && upstream.bgModel && upstream.bgModel !== normal)
+    return { model: upstream.bgModel, speed: 'normal', normalModel: normal }
   if (speed !== 'fast') return { model: normal, speed: 'normal' }
   if (!upstream.fastModel) return { model: normal, speed: 'normal', fallback: 'not_configured' }
   return { model: upstream.fastModel, speed: 'fast', normalModel: normal }

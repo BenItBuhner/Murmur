@@ -44,4 +44,28 @@ class SeamTest {
         assertEquals("Send the details by email.", stripEcho("Send the details by email.", "keep the meeting short and"))
         assertEquals("and send it.", stripEcho("and send it.", "short and"))
     }
+
+    /** Mirrors packages/text-engine/tests/seam-oct15.test.ts (Bennett's Oct 15 2026 dictation). */
+    @Test
+    fun `oct 15 dictation - long echo, near-exact echo, lost periods`() {
+        val echo = "that this can achieve under half a second, but as reported,"
+        val prev = "I really would prefer $echo"
+        val next = "$echo it's completing in roughly 0.8 seconds apparently."
+        val joined = joinSeam(prev, next).text
+        assertEquals(1, joined.split(echo).size - 1)
+        assertEquals("I really would prefer $echo it's completing in roughly 0.8 seconds apparently.", joined)
+        assertEquals(
+            "it's completing in roughly 0.8 seconds.",
+            stripEcho("That this can achieve under half a second, but as reported, it's completing in roughly 0.8 seconds.", "I really would prefer that this can achieve under half a second, but as reported, it")
+        )
+        assertEquals(
+            "and keep the smart ones.",
+            stripEcho("We should really move the release tail onto the fast routes by default, and keep the smart ones.", "we should really move the release tail to the fast routes by default")
+        )
+        assertEquals("to actually transcribe. But it would no doubt be amazing.", j("to actually transcribe", "But it would no doubt be amazing."))
+        assertEquals("at all times. And only fast ones.", j("at all times", "And only fast ones."))
+        assertEquals("the point stands. Now I've been speaking.", j("the point stands", "Now I've been speaking."))
+        assertEquals("I have paused a few times I'm hesitating.", j("I have paused a few times", "I'm hesitating."))
+        assertEquals("We met with Sarah and Sarah agreed.", j("We met with Sarah and", "Sarah agreed."))
+    }
 }

@@ -26,6 +26,8 @@ import {
   type ResolvedStyle,
   isSilenceHallucination,
   joinPieces,
+  joinSeam,
+  lastSentenceStart,
   seamContext,
   stripEcho
 } from '@engine'
@@ -51,7 +53,8 @@ import type { RetryResult, SoundName } from '@shared/ipc'
 import { createLogger } from '../logger'
 import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
-import { ChunkStreamer } from './streaming'
+import { DEFAULT_CHUNK_PLAN } from '@core/audio/chunker'
+import { ChunkStreamer, type TailSpeculation } from './streaming'
 import { MURMUR_PROVIDER } from '@shared/inference'
 import type { HookService } from '../hotkeys/hook'
 import type { FormatOutcome, Formatter, InferenceRouter, ResolvedStt } from '../inference/router'
@@ -74,15 +77,23 @@ interface ActiveSession {
   /** The stand-in clip (MURMUR_TEST_AUDIO_FILE) is spent; a microphone never says so. */
   inputEnded: boolean
   /** Long dictations to Murmur's gateway go up in pieces while they are spoken. */
-  stream?: ChunkStreamer
+  stream?: ChunkStreamer<TailSpec>
   streamFormats?: Promise<FormatOutcome | 'empty' | null>[]
   streamListener?: (id: string, samples: number) => void
+}
+
+/** The unfinished stretch after the last piece, transcribed and formatted up to a pause. */
+interface TailSpec {
+  text: string
+  format: Promise<FormatOutcome | 'empty' | null>
 }
 
 /** What was already transcribed while the user spoke: the samples covered and their texts. */
 interface StreamedPrefix {
   samples: number
   texts: Promise<string[]>
+  /** A speculation on the stretch after the pieces; the rest of the audio starts at its samples. */
+  spec?: TailSpeculation<TailSpec>
   /**
    * Each piece formatted on the gateway as soon as its text arrived (precision mode only), in
    * order: 'empty' for a piece with no speech, null where speculation was not possible.
@@ -91,7 +102,9 @@ interface StreamedPrefix {
 }
 
 /** Streamed pieces and the tail, for formatting the tail alone at release. */
-type StreamedStt = CompleteResult & { streamed?: { texts: string[]; tail: string } }
+type StreamedStt = CompleteResult & {
+  streamed?: { texts: string[]; tail: string; spec?: TailSpec }
+}
 
 /** What the formatter is told about a piece of a longer dictation. */
 const PIECE_NOTE =
@@ -531,11 +544,26 @@ export class DictationController extends EventEmitter {
       )
       return out.text.trim()
     }
-    session.stream = new ChunkStreamer(
+    // The stretch after the last piece, up to its latest pause, so release only waits for the
+    // words after that pause.
+    const speculateTail = async (pcm: Int16Array): Promise<TailSpec> => {
+      const n = pieceTexts.length
+      const text = await transcribeOnly(pcm, n)
+      const before = n > 0 ? await pieceTexts[n - 1].catch(() => '') : ''
+      const format: Promise<FormatOutcome | 'empty' | null> = text
+        ? this.speculateFormat(text, (await resolveTarget())!, tag, n, before)
+        : Promise.resolve('empty')
+      format.catch(() => undefined)
+      return { text, format }
+    }
+    session.stream = new ChunkStreamer<TailSpec>(
       (from) => this.deps.recorder.read(session.id, from),
       transcribePiece,
       SAMPLE_RATE,
-      s.audio.silenceThresholdDb
+      s.audio.silenceThresholdDb,
+      DEFAULT_CHUNK_PLAN,
+      // MURMUR_TAIL_SPECULATION=0 turns it off (diagnostics, and tests of the plain pipeline).
+      process.env.MURMUR_TAIL_SPECULATION === '0' ? undefined : speculateTail
     )
     session.streamListener = (id, samples) => {
       if (id === session.id) session.stream?.onSamples(samples)
@@ -582,9 +610,10 @@ export class DictationController extends EventEmitter {
     session.stream = undefined
     const formats = session.streamFormats ?? []
     session.streamFormats = undefined
-    if (!stream || stream.piecesSent === 0) return undefined
+    const spec = stream?.speculation() ?? undefined
+    if (!stream || (stream.piecesSent === 0 && !spec)) return undefined
     for (const f of formats) f.catch(() => undefined)
-    return { ...stream.finish(), formats }
+    return { ...stream.finish(), formats, spec }
   }
 
   private clearTimers(session: ActiveSession): void {
@@ -936,18 +965,40 @@ export class DictationController extends EventEmitter {
     tag: string,
     whole: () => Promise<CompleteResult>
   ): Promise<StreamedStt> {
-    const rest = pcm.subarray(streamed.samples)
-    const a = analyze(rest, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
-    let tail: Promise<CompleteResult | null> = Promise.resolve(null)
-    if (a.hasSpeech) {
-      const trimmed = trimSilence(rest, {
-        sampleRate: SAMPLE_RATE,
-        thresholdDb: threshold,
-        paddingMs: 300
-      })
-      tail = run(trimmed.pcm, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
+    const sendFrom = (
+      from: number
+    ): {
+      rest: Int16Array
+      a: ReturnType<typeof analyze>
+      tail: Promise<CompleteResult | null>
+    } => {
+      const rest = pcm.subarray(Math.min(from, pcm.length))
+      const a = analyze(rest, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
+      let tail: Promise<CompleteResult | null> = Promise.resolve(null)
+      if (a.hasSpeech) {
+        const trimmed = trimSilence(rest, {
+          sampleRate: SAMPLE_RATE,
+          thresholdDb: threshold,
+          paddingMs: 300
+        })
+        tail = run(trimmed.pcm, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
+      }
+      tail.catch(() => undefined)
+      return { rest, a, tail }
     }
-    tail.catch(() => undefined)
+    // With a speculation, only the audio after its pause is sent now; if it failed, the whole
+    // stretch after the pieces is sent as before.
+    let sent = sendFrom(streamed.spec ? streamed.spec.samples : streamed.samples)
+    let spec: TailSpec | undefined
+    if (streamed.spec) {
+      try {
+        spec = await streamed.spec.result
+      } catch (err) {
+        log.warn(`session ${tag}: the tail speculation failed; sending the whole tail`, err)
+        sent = sendFrom(streamed.samples)
+      }
+    }
+    const { rest, a, tail } = sent
     let texts: string[]
     try {
       texts = await streamed.texts
@@ -962,10 +1013,10 @@ export class DictationController extends EventEmitter {
       log.info(`session ${tag}: dropped a stock phrase from a quiet tail (${a.speechMs} ms voiced)`)
       last = { ...last, text: '' }
     }
-    const seams = joinPieces([...texts, last?.text ?? ''])
+    const seams = joinPieces([...texts, spec?.text ?? '', last?.text ?? ''])
     const text = seams.text
     log.info(
-      `session ${tag}: ${texts.length} piece(s) sent while recording; tail ${(rest.length / SAMPLE_RATE).toFixed(1)} s; seams: ${seams.joined} joined, ${seams.deduped} word(s) deduped`
+      `session ${tag}: ${texts.length} piece(s) sent while recording${spec ? ' + tail speculation' : ''}; ${(rest.length / SAMPLE_RATE).toFixed(1)} s sent at release; seams: ${seams.joined} joined, ${seams.deduped} word(s) deduped`
     )
     return {
       ...(last ?? { latencyMs: 0, resumed: 0, recoveredSec: 0 }),
@@ -973,7 +1024,7 @@ export class DictationController extends EventEmitter {
       // The pieces carry their own timings; spans of the tail alone would mislead coverage checks.
       spans: undefined,
       coverage: last?.coverage ?? { transcribedSec: null, missingSec: 0, truncated: false },
-      streamed: { texts, tail: last?.text?.trim() ?? '' }
+      streamed: { texts, tail: last?.text?.trim() ?? '', spec }
     } as StreamedStt
   }
 
@@ -992,11 +1043,31 @@ export class DictationController extends EventEmitter {
     if (streamed.formats.length !== stt.streamed.texts.length) return null
     const tail = stt.streamed.tail
     const lastPiece = stt.streamed.texts[stt.streamed.texts.length - 1] ?? ''
-    const tailFormat = tail
+    // A tail speculation already formatted: its last sentence is formatted again with the words
+    // that followed, so the model sees that sentence whole; the rest of it stands.
+    let specHead: FormatOutcome | null = null
+    let tailInput = tail
+    let tailBefore = lastPiece
+    if (stt.streamed.spec) {
+      const f = await stt.streamed.spec.format
+      if (f === null) return null
+      if (f !== 'empty') {
+        const at = lastSentenceStart(f.text)
+        const head = f.text.slice(0, at).trim()
+        const lastSentence = f.text.slice(at)
+        if (!tail) specHead = f
+        else {
+          if (head) specHead = { ...f, text: head }
+          tailInput = joinSeam(lastSentence, tail).text
+          tailBefore = head || lastPiece
+        }
+      }
+    }
+    const tailFormat = tailInput
       ? formatter.format({
           ...input,
-          transcript: tail,
-          context: pieceContext(input.context, lastPiece, true)
+          transcript: tailInput,
+          context: pieceContext(input.context, tailBefore, true)
         })
       : null
     tailFormat?.catch(() => undefined)
@@ -1008,10 +1079,11 @@ export class DictationController extends EventEmitter {
       return null
     }
     const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty' && p !== null)
+    if (specHead) parts.push(specHead)
     if (tailFormat) {
       try {
         const t = await tailFormat
-        parts.push({ ...t, text: stripEcho(t.text, seamContext(lastPiece)) })
+        parts.push({ ...t, text: stripEcho(t.text, seamContext(tailBefore)) })
       } catch {
         return null
       }

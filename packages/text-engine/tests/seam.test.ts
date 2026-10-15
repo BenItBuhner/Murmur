@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { joinPieces, joinSeam, seamContext, stripEcho } from '../src/seam'
+import { joinPieces, joinSeam, lastSentenceStart, seamContext, stripEcho } from '../src/seam'
 
 const j = (a: string, b: string): string => joinSeam(a, b).text
 
@@ -79,5 +79,15 @@ describe('stripEcho', () => {
       'Send the details by email.'
     )
     expect(stripEcho('and send it.', 'short and')).toBe('and send it.')
+  })
+})
+
+describe('lastSentenceStart', () => {
+  it('finds the start of the last (or unfinished) sentence', () => {
+    const t = 'One. Two is here. And three'
+    expect(t.slice(lastSentenceStart(t))).toBe('And three')
+    const u = 'One. Two is here.'
+    expect(u.slice(lastSentenceStart(u))).toBe('Two is here.')
+    expect(lastSentenceStart('no marks at all')).toBe(0)
   })
 })

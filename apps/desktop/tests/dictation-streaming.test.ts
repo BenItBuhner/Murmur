@@ -167,6 +167,8 @@ const inference = {
 }
 
 describe('streaming a long dictation while it is spoken', () => {
+  beforeEach(() => vi.stubEnv('MURMUR_TAIL_SPECULATION', '0'))
+  afterEach(() => vi.unstubAllEnvs())
   let dir: string
   let history: HistoryStore
   let controller: DictationController
@@ -238,6 +240,8 @@ describe('streaming a long dictation while it is spoken', () => {
 })
 
 describe('precision mode formats pieces while the user speaks', () => {
+  beforeEach(() => vi.stubEnv('MURMUR_TAIL_SPECULATION', '0'))
+  afterEach(() => vi.unstubAllEnvs())
   let dir: string
   let history: HistoryStore
   let controller: DictationController
@@ -284,5 +288,60 @@ describe('precision mode formats pieces while the user speaks', () => {
     expect(inference.formatCalls.at(-1)).toBe(`piece ${provider.requests}`)
     const text = history.list().entries[0].finalText
     for (let i = 1; i <= provider.requests; i++) expect(text).toContain(`[piece ${i}]`)
+  })
+})
+
+describe('speculating on the tail while the user speaks', () => {
+  let dir: string
+  let history: HistoryStore
+  let controller: DictationController
+  let recorder: FakeRecorder
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 400 && controller.isBusy; i++) await new Promise((r) => setTimeout(r, 5))
+  }
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'murmur-tail-'))
+    const recordings = new RecordingStore(join(dir, 'recordings'))
+    history = new HistoryStore(dir, recordings)
+    provider.requests = 0
+    provider.sizes = []
+    provider.failFirst = false
+    provider.outcome = 'ok'
+    provider.text = 'part'
+    inference.formatCalls.length = 0
+    recorder = new FakeRecorder()
+    const settings = new FakeSettings()
+    settings.value.formatting.mode = 'smart'
+    controller = new DictationController({
+      settings: settings as never,
+      history,
+      recorder: recorder as never,
+      recordings,
+      hook: hook as never,
+      inference: inference as never,
+      overlay: { setState: () => undefined, playSound: () => undefined },
+      getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
+    })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('sends only the words after the last pause at release', async () => {
+    recorder.pcm = sentences(12)
+    controller.handle({ type: 'start', mode: 'hold' })
+    recorder.feedAll()
+    await new Promise((r) => setTimeout(r, 40))
+    const during = provider.requests
+    expect(during).toBeGreaterThanOrEqual(1)
+    controller.handle({ type: 'stop' })
+    await settle()
+    expect(provider.requests).toBe(during + 1)
+    // Far less than the 12 s clip goes up at release.
+    expect(provider.sizes.at(-1)!).toBeLessThan(recorder.pcm.length * 2 * 0.5)
+    const entry = history.list().entries[0]
+    expect(entry.error).toBeUndefined()
+    // The latest speculation and the words after it, nothing from superseded speculations.
+    expect(entry.finalText).toContain(`part ${provider.requests}`)
+    expect(entry.finalText).toContain(`part ${during}`)
+    for (let i = 1; i < during; i++) expect(entry.finalText).not.toContain(`part ${i}]`)
   })
 })

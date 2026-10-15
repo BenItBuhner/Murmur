@@ -99,3 +99,32 @@ export function findCut(
 ): number | null {
   return findCutDetail(pcm, sampleRate, thresholdDb, plan)?.at ?? null
 }
+
+/**
+ * Speculating on the tail: the last pause of at least `minPauseMs` in `pcm` (the audio since the
+ * last cut) that ends at least `minSec` in, or null. The audio up to its middle can be transcribed
+ * and formatted while the user is still talking, so release only waits for what follows it.
+ */
+export function findSpecCut(
+  pcm: Int16Array,
+  sampleRate: number,
+  thresholdDb: number,
+  minPauseMs = 400,
+  minSec = 2
+): Cut | null {
+  const frame = Math.floor((sampleRate * FRAME_MS) / 1000)
+  const need = Math.ceil(minPauseMs / FRAME_MS)
+  const from = Math.floor(minSec * sampleRate)
+  let run = 0
+  let best: Cut | null = null
+  for (let at = 0; at + frame <= pcm.length; at += frame) {
+    if (rmsDb(pcm, at, at + frame) < thresholdDb) {
+      run++
+      continue
+    }
+    if (run >= need && at >= from)
+      best = { at: at - Math.floor((run * frame) / 2), pauseMs: run * FRAME_MS, forced: false }
+    run = 0
+  }
+  return best
+}

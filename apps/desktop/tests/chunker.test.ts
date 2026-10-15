@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findCut, findCutDetail } from '@core/audio/chunker'
+import { findCut, findCutDetail, findSpecCut } from '@core/audio/chunker'
 import { ChunkStreamer, PAUSE_LEAD_IN_SEC } from '../src/main/dictation/streaming'
 
 const RATE = 16000
@@ -75,5 +75,17 @@ describe('ChunkStreamer overlap', () => {
     const { sizes, samples } = await run(pcm)
     expect(sizes.length).toBe(2)
     expect(sizes[0] + sizes[1] - samples).toBe(2 * PAUSE_LEAD_IN_SEC * RATE)
+  })
+})
+
+describe('findSpecCut', () => {
+  it('finds the last pause that has ended', () => {
+    const p = gap(gap(loud(12), 3, 3.5), 8, 8.6)
+    const c = findSpecCut(p, RATE, -30)!
+    expect(Math.abs(c.at / RATE - 8.3)).toBeLessThan(0.05)
+  })
+  it('ignores a pause still going and short breaths', () => {
+    const p = gap(gap(loud(12), 4, 4.2), 11, 12)
+    expect(findSpecCut(p, RATE, -30)).toBeNull()
   })
 })

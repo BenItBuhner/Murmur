@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.19': [
+    'Text appears faster when you stop dictating: the end of a long dictation is transcribed and formatted while you are still speaking.'
+  ],
   '0.6.18': [
     'Long dictations no longer break sentences at chunk boundaries (no stray periods or capitals mid-sentence, no doubled or lost words at the seams).'
   ],

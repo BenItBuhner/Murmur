@@ -158,13 +158,21 @@ export function joinPieces(pieces: readonly string[]): {
 export function seamContext(prev: string, maxWords = 12): string {
   const t = prev.trim()
   if (!t) return ''
-  // Sentence starts: after a terminal mark and space. A piece that ended on a full sentence
-  // gives that sentence; one cut mid-sentence gives the unfinished part.
-  const starts = [0, ...[...t.matchAll(/[.!?…]["')\]]*\s+/gu)].map((m) => m.index + m[0].length)]
-  const tail = t.slice(starts[starts.length - 1])
+  const tail = t.slice(lastSentenceStart(t))
   const ws = words(tail)
   if (ws.length <= maxWords) return tail
   return tail.slice(ws[ws.length - maxWords].start)
+}
+
+/**
+ * Where the last sentence of `text` starts (after a terminal mark and a space): a text that ends
+ * on a full sentence gives that sentence, one cut mid-sentence its unfinished part.
+ */
+export function lastSentenceStart(text: string): number {
+  const t = text.replace(/\s+$/u, '')
+  let start = 0
+  for (const m of t.matchAll(/[.!?…]["')\]]*\s+/gu)) start = m.index + m[0].length
+  return start
 }
 
 /**

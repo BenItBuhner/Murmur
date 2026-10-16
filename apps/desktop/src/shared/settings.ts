@@ -1,5 +1,11 @@
 import { z } from 'zod'
 import { replacementModel } from './models'
+import {
+  OVERLAY_BAR_DEFAULT_HEIGHT,
+  OVERLAY_BAR_DEFAULT_WIDTH,
+  OVERLAY_BAR_HEIGHT,
+  OVERLAY_BAR_WIDTH
+} from './overlay-bar'
 import { ACCENT_PRESET_IDS } from './theme'
 
 export const SETTINGS_VERSION = 5
@@ -44,7 +50,11 @@ export const SETTINGS_RANGES = {
   /** `formatting.llm.timeoutMs`: a formatting model slower than this loses to the Light result. */
   llmTimeoutMs: { min: 1000, max: 60000 },
   /** `audio.maxDurationSec`: how long a session may run when the limit is on. */
-  maxDurationSec: { min: 5, max: 1800 }
+  maxDurationSec: { min: 5, max: 1800 },
+  /** Idle bar width, in CSS pixels on the desktop and dp on the Android keyboard overlay. */
+  overlayBarWidth: { min: OVERLAY_BAR_WIDTH.min, max: OVERLAY_BAR_WIDTH.max },
+  /** Idle bar height, in the same units. */
+  overlayBarHeight: { min: OVERLAY_BAR_HEIGHT.min, max: OVERLAY_BAR_HEIGHT.max }
 } as const satisfies Record<string, SettingRange>
 
 export function clampToRange(value: number, range: SettingRange): number {
@@ -57,6 +67,32 @@ export type InjectionMethod = z.infer<typeof injectionMethodSchema>
 
 export const overlayPositionSchema = z.enum(['bottom-center', 'top-center', 'bottom-right'])
 export type OverlayPosition = z.infer<typeof overlayPositionSchema>
+
+/**
+ * Where the idle bar sits, and how big it is. `preset` follows `overlayPosition`, which is how
+ * every existing install is stored: centered at the bottom, at the current size, until someone
+ * drags the bar or changes its size. `free` is a center the user placed by hand, as fractions of
+ * the work area, so it is not stuck on one of the three presets.
+ */
+export const overlayBarAnchorSchema = z.enum(['preset', 'free'])
+export const overlayBarSchema = z
+  .object({
+    anchor: overlayBarAnchorSchema.default('preset'),
+    x: z.number().min(0).max(1).default(0.5),
+    y: z.number().min(0).max(1).default(0.5),
+    width: z
+      .number()
+      .min(SETTINGS_RANGES.overlayBarWidth.min)
+      .max(SETTINGS_RANGES.overlayBarWidth.max)
+      .default(OVERLAY_BAR_DEFAULT_WIDTH),
+    height: z
+      .number()
+      .min(SETTINGS_RANGES.overlayBarHeight.min)
+      .max(SETTINGS_RANGES.overlayBarHeight.max)
+      .default(OVERLAY_BAR_DEFAULT_HEIGHT)
+  })
+  .prefault({})
+export type OverlayBarSettings = z.infer<typeof overlayBarSchema>
 
 export const themeSchema = z.enum(['system', 'light', 'dark'])
 export type Theme = z.infer<typeof themeSchema>
@@ -140,6 +176,8 @@ export const settingsSchema = z.object({
       sounds: z.boolean().default(true),
       soundVolume: z.number().min(0).max(1).default(0.35),
       overlayPosition: overlayPositionSchema.default('bottom-center'),
+      /** Size and free placement of the idle bar. Absent on older files: the preset and the default size. */
+      overlayBar: overlayBarSchema,
       showOverlayWhenIdle: z.boolean().default(true),
       showLatencyInHistory: z.boolean().default(true)
     })

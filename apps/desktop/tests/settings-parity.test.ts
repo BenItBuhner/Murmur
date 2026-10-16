@@ -71,6 +71,9 @@ describe('settings parity contract', () => {
       sounds: s.general.sounds,
       soundVolume: s.general.soundVolume,
       overlayPosition: s.general.overlayPosition,
+      overlayBarAnchor: s.general.overlayBar.anchor,
+      overlayBarWidth: s.general.overlayBar.width,
+      overlayBarHeight: s.general.overlayBar.height,
       showOverlayWhenIdle: s.general.showOverlayWhenIdle,
       // The command chord is left out on purpose: the desktop's Alt + Meta toggles Caps Lock on
       // Android, so the phone ships Shift + Meta there.

@@ -25,6 +25,9 @@
     "sounds": true,
     "soundVolume": 0.35,
     "overlayPosition": "bottom-center",
+    "overlayBarAnchor": "preset",
+    "overlayBarWidth": 56,
+    "overlayBarHeight": 6,
     "showOverlayWhenIdle": true,
     "pushToTalk": [29, 3675],
     "handsFree": [29, 3675, 57],
@@ -42,6 +45,8 @@
     "sttTimeoutMs": { "min": 2000, "max": 120000 },
     "llmTimeoutMs": { "min": 1000, "max": 60000 },
     "maxDurationSec": { "min": 5, "max": 1800 },
+    "overlayBarWidth": { "min": 24, "max": 280 },
+    "overlayBarHeight": { "min": 2, "max": 32 },
     "instructionsLength": { "min": 0, "max": 2000 }
   },
   "sttPresets": [

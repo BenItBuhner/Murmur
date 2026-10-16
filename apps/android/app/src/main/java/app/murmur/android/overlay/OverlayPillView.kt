@@ -153,6 +153,12 @@ class OverlayPillView(context: Context) : View(context) {
     /** The spots changed: one was moved, added, removed or re-arranged, or the button landed on another one. */
     var onLayoutChanged: ((OverlayLayout) -> Unit)? = null
 
+    /**
+     * The desktop-style bar was dragged or resized. The floating button never calls this; it keeps
+     * reporting spot changes through [onLayoutChanged].
+     */
+    var onBarChanged: ((OverlayBar, OverlayPosition) -> Unit)? = null
+
     /** Each frame drawn, with how much of the pill it shows (0..1) and the frame's time; for the keyboard timing log. */
     var onFrameDrawn: ((presence: Float, frameTimeMs: Long) -> Unit)? = null
 
@@ -283,6 +289,11 @@ class OverlayPillView(context: Context) : View(context) {
 
     /** Outside of editing: where the finger holds the button (it is not on a spot until released). */
     private var dragPosition: Pair<Float, Float>? = null
+
+    /** The desktop bar while a finger is moving or resizing it, before the gesture is saved. */
+    private var liveBar: OverlayBar? = null
+    private var dragEdge: BarEdge? = null
+    private var dragBarStart: OverlayBar? = null
 
     /** The spot the held button would land on if let go now (highlighted); -1 before the first move. */
     private var flickCandidate = -1
@@ -508,9 +519,12 @@ class OverlayPillView(context: Context) : View(context) {
 
     // ---- looks ----------------------------------------------------------------------------------
 
+    private fun barNow(): OverlayBar = liveBar ?: (presentation as? PillPresentation.Desktop)?.bar ?: OverlayBar.DEFAULT
+
     private fun idleLook(): Look {
         if (presentation is PillPresentation.Desktop) {
-            return Look(Kind.IDLE, dp(DESKTOP_IDLE_W_DP), dp(DESKTOP_IDLE_H_DP), palette.background, desktop = true)
+            val bar = barNow()
+            return Look(Kind.IDLE, dp(bar.widthDp), dp(bar.heightDp), palette.background, desktop = true)
         }
         return when (shape) {
             OverlayShape.PILL -> Look(Kind.IDLE, dp(64f), dp(36f), palette.background)
@@ -603,14 +617,33 @@ class OverlayPillView(context: Context) : View(context) {
         return spotPoint(layout.active)
     }
 
-    /** Where the desktop pill's centre goes for [look]: the desktop's margin from the edge, above any keyboard. */
+    /**
+     * Where the desktop pill's centre goes for [look]. A preset keeps the edge it has always kept.
+     * A free placement uses the center the user dragged the idle bar to, and the look grows away
+     * from the nearer horizontal edge so it can sit anywhere, not only on center.
+     */
     private fun desktopAnchor(look: Look, p: PillPresentation.Desktop): Pair<Float, Float> {
+        val bar = barNow()
+        if (bar.anchor == BarAnchor.FREE && screenW > 0f && screenH > 0f) {
+            val idle = idleLook()
+            val cx = bar.x * screenW
+            val cy = bar.y * screenH
+            val y = OverlayBarPlacement.lookCenterY(cy, idle.h, look.h, screenH)
+            val margin = dp(OverlayGeometry.EDGE_MARGIN_DP)
+            return OverlayGeometry.clampCenter(cx, look.w, screenW, margin) to
+                OverlayGeometry.clampCenter(y, look.h, screenH, margin)
+        }
+        return presetAnchor(p.position, look)
+    }
+
+    /** The three spots the bar had before it could be dragged. The bottom edge (or the top, at top center) stays put. */
+    private fun presetAnchor(position: OverlayPosition, look: Look): Pair<Float, Float> {
         val margin = dp(DESKTOP_MARGIN_DP) + dp(DESKTOP_PAD_DP)
-        val x = when (p.position) {
+        val x = when (position) {
             OverlayPosition.BOTTOM_RIGHT -> screenW - dp(DESKTOP_MARGIN_DP) - dp(DESKTOP_RIGHT_CENTER_DP)
             OverlayPosition.BOTTOM_CENTER, OverlayPosition.TOP_CENTER -> screenW / 2f
         }
-        val y = if (p.position == OverlayPosition.TOP_CENTER) {
+        val y = if (position == OverlayPosition.TOP_CENTER) {
             statusBarInset() + dp(DESKTOP_MARGIN_DP) + look.h / 2f
         } else {
             desktopFloor() - margin - look.h / 2f
@@ -700,11 +733,12 @@ class OverlayPillView(context: Context) : View(context) {
         return Box(box.left - dp(DESKTOP_TOUCH_PAD_X_DP), box.top - dy, box.right + dp(DESKTOP_TOUCH_PAD_X_DP), box.bottom + dy)
     }
 
-    /** False only for the desktop presentation's idle bar without [PillPresentation.Desktop.idleTap]: it lets every tap through. */
-    private fun takesTouches(): Boolean {
-        val p = presentation
-        return p !is PillPresentation.Desktop || p.idleTap || toLook.kind != Kind.IDLE
-    }
+    /**
+     * The desktop idle bar always takes a drag, including when a tap on it does not dictate.
+     * The touch window still hugs the bar, so a tap anywhere else goes to what is underneath.
+     * The phone's button is unchanged: it always takes touches.
+     */
+    private fun takesTouches(): Boolean = true
 
     /** Where a touch counts as being on the pill. */
     private fun hitBox(): Box =
@@ -879,7 +913,7 @@ class OverlayPillView(context: Context) : View(context) {
         if (editing) {
             drawGhostSpots(canvas)
             drawEditGuides(canvas, now, drawn)
-        } else if (dragging || (releasedAt > 0L && now - releasedAt < FLICK_GHOST_FADE_MS)) {
+        } else if (presentation !is PillPresentation.Desktop && (dragging || (releasedAt > 0L && now - releasedAt < FLICK_GHOST_FADE_MS))) {
             drawFlickTargets(canvas, now)
         }
 
@@ -1742,6 +1776,7 @@ class OverlayPillView(context: Context) : View(context) {
     fun onScreenTouch(event: MotionEvent, x: Float, y: Float): Boolean {
         if (isDismissing) return false
         if (editing) return onEditTouch(event, x, y)
+        if (presentation is PillPresentation.Desktop) return onDesktopTouch(event, x, y)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (!takesTouches() || !hitBox().contains(x, y)) return false
@@ -1790,9 +1825,130 @@ class OverlayPillView(context: Context) : View(context) {
         return false
     }
 
+    /**
+     * Drag the desktop bar to place it, or drag the ring around the idle bar to resize it.
+     * The phone's button never comes here. A press that does not move is a tap, and a tap only
+     * dictates when the bar is set to take one.
+     */
+    private fun onDesktopTouch(event: MotionEvent, x: Float, y: Float): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (!hitBox().contains(x, y)) return false
+                pressed = true
+                downX = x
+                downY = y
+                val (cx, cy) = anchorPointNow(idleLook())
+                grabDx = x - cx
+                grabDy = y - cy
+                dragEdge = OverlayBarPlacement.edgeAt(pillBox, x, y, dp(TOUCH_PAD_DP))
+                dragBarStart = barNow()
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (dragging || (pressed && hypot(x - downX, y - downY) > touchSlop)) {
+                    if (!dragging) {
+                        dragging = true
+                        pressed = false
+                    }
+                    dragDesktopBar(x, y)
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (dragging) finishDesktopDrag()
+                else if (pressed) {
+                    pressed = false
+                    invalidate()
+                    tap(x, y)
+                }
+                performClick()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                liveBar = null
+                dragEdge = null
+                dragBarStart = null
+                dragging = false
+                pressed = false
+                retarget(animate = false)
+                return true
+            }
+        }
+        return false
+    }
+
+    /** Follow the finger. A resize keeps the placement; a move leaves the presets until it is let go. */
+    private fun dragDesktopBar(x: Float, y: Float) {
+        val start = dragBarStart ?: barNow()
+        val edge = dragEdge
+        if (edge != null && edge != BarEdge.BODY && toLook.kind == Kind.IDLE) {
+            val size = OverlayBarPlacement.resize(
+                edge,
+                start.widthDp,
+                start.heightDp,
+                (x - downX) / density,
+                (y - downY) / density
+            )
+            liveBar = start.copy(widthDp = size.widthDp, heightDp = size.heightDp)
+        } else {
+            val idle = idleLook()
+            val margin = dp(OverlayGeometry.EDGE_MARGIN_DP)
+            val cx = OverlayGeometry.clampCenter(x - grabDx, idle.w, screenW, margin)
+            val cy = OverlayGeometry.clampCenter(y - grabDy, idle.h, screenH, margin)
+            liveBar = start.copy(
+                anchor = BarAnchor.FREE,
+                x = if (screenW > 0f) cx / screenW else OverlayAnchor.DEFAULT_X,
+                y = if (screenH > 0f) cy / screenH else 0.5f
+            )
+        }
+        retarget(animate = false)
+    }
+
+    /** Save the bar where the finger left it. Near a preset, it becomes that preset again. */
+    private fun finishDesktopDrag() {
+        val current = presentation as? PillPresentation.Desktop ?: return
+        val dragged = (liveBar ?: barNow()).rounded()
+        val idleH = dp(dragged.heightDp)
+        val resizing = dragEdge != null && dragEdge != BarEdge.BODY
+        val (cx, cy) = if (!resizing && dragged.anchor == BarAnchor.FREE && screenW > 0f && screenH > 0f) {
+            dragged.x * screenW to dragged.y * screenH
+        } else {
+            presetAnchor(current.position, Look(Kind.IDLE, dp(dragged.widthDp), idleH, palette.background, desktop = true))
+        }
+        val idle = Look(Kind.IDLE, dp(dragged.widthDp), idleH, palette.background, desktop = true)
+        val snapped = if (resizing) {
+            null
+        } else {
+            OverlayBarPlacement.nearestPreset(
+                cx,
+                cy,
+                OverlayPosition.entries.map { it to presetAnchor(it, idle) },
+                dp(OverlayBar.SNAP_DP)
+            )
+        }
+        val committed = when {
+            snapped != null -> dragged.copy(anchor = BarAnchor.PRESET)
+            resizing -> dragged
+            else -> dragged.copy(anchor = BarAnchor.FREE)
+        }.rounded()
+        val position = snapped ?: current.position
+        liveBar = null
+        dragEdge = null
+        dragBarStart = null
+        dragging = false
+        pressed = false
+        presentation = current.copy(position = position, bar = committed)
+        onBarChanged?.invoke(committed, position)
+        retarget(animate = false)
+    }
+
     private fun tap(x: Float, y: Float) {
         when (toLook.kind) {
-            Kind.IDLE -> onMicTap?.invoke()
+            Kind.IDLE -> {
+                val desktop = presentation as? PillPresentation.Desktop
+                if (desktop == null || desktop.idleTap) onMicTap?.invoke()
+            }
             // Without a cancel button (the desktop pill with a keyboard) a tap anywhere stops and inserts.
             Kind.LISTENING -> if (cancelBox != Box.EMPTY && cancelBox.inflate(dp(4f)).contains(x, y)) onCancelTap?.invoke() else onConfirmTap?.invoke()
             Kind.ERROR -> {
@@ -1895,6 +2051,9 @@ class OverlayPillView(context: Context) : View(context) {
     private fun cancelGesture() {
         removeCallbacks(nudgeRepeat)
         dragPosition = null
+        liveBar = null
+        dragEdge = null
+        dragBarStart = null
         flickCandidate = -1
         dragging = false
         dragArmed = false

@@ -128,8 +128,8 @@ private const val FIELD_MEMORY = 128
  * With a physical keyboard attached (or on a tablet-sized screen) the overlay takes the desktop
  * app's form instead ([PillPresentation.Desktop]): a pill parked at the desktop's position with an
  * idle bar, driven by the same shortcuts as the desktop, which arrive here through the service's
- * key-event filter ([onKeyEvent], [HardwareShortcuts]). As on the desktop, the idle bar lets taps
- * through unless it is set (or, without a keyboard, needed) to start a dictation.
+ * key-event filter ([onKeyEvent], [HardwareShortcuts]). The idle bar always takes a drag. A tap
+ * that does not move starts a dictation only when that is turned on, or when there is no keyboard.
  *
  * This service is also the injection backend ([TextSink]); see [TextInserter] for the
  * ACTION_SET_TEXT / ACTION_SET_SELECTION / ACTION_PASTE strategy.
@@ -798,6 +798,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             onUpgradeTap = { url -> openUrl(url); DictationController.dismiss() }
             onOwnModelTap = { openApp(Route.MODEL); DictationController.dismiss() }
             onLayoutChanged = { layout -> settings.update { it.copy(overlayLayout = layout) } }
+            onBarChanged = { bar, position ->
+                settings.update { it.copy(keyboard = it.keyboard.copy(overlayBar = bar, overlayPosition = position)) }
+            }
             onEditDone = { OverlayEditor.stop() }
             onEditReset = { settings.update { it.copy(overlayLayout = settings.defaultOverlayLayout) } }
         }

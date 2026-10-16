@@ -1,6 +1,8 @@
 package app.murmur.android.settings
 
 import app.murmur.android.keyboard.Key
+import app.murmur.android.overlay.BarAnchor
+import app.murmur.android.overlay.OverlayBar
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -17,7 +19,7 @@ enum class HandsFreeTrigger(val id: String) {
 }
 
 /**
- * Whether the overlay takes the desktop app's form (a pill parked at a fixed position, an idle bar,
+ * Whether the overlay takes the desktop app's form (a pill the user can drag, an idle bar,
  * shortcuts) instead of the floating button beside the keyboard. AUTO follows the device: a
  * physical keyboard, a tablet-sized screen or a desktop-style session (Samsung DeX, desktop
  * windowing) turns it on; a touch-only phone keeps the button.
@@ -69,6 +71,11 @@ data class KeyboardSettings(
     val escapeCancels: Boolean = true,
     val desktopOverlay: DesktopOverlay = DesktopOverlay.AUTO,
     val overlayPosition: OverlayPosition = OverlayPosition.BOTTOM_CENTER,
+    /**
+     * Size and free placement of the desktop-style idle bar. Preset, at the current size, until
+     * the user drags or resizes it. The floating button beside the keyboard does not read this.
+     */
+    val overlayBar: OverlayBar = OverlayBar.DEFAULT,
     /** A small bar stays visible when Murmur is ready, as on the desktop. */
     val showOverlayWhenIdle: Boolean = true,
     /**
@@ -101,6 +108,11 @@ object KeyboardSettingsCodec {
         val escapeCancels: Boolean = true,
         val desktopOverlay: String = DesktopOverlay.AUTO.id,
         val overlayPosition: String = OverlayPosition.BOTTOM_CENTER.id,
+        val overlayBarAnchor: String = "preset",
+        val overlayBarX: Float = 0.5f,
+        val overlayBarY: Float = 0.5f,
+        val overlayBarWidth: Float = OverlayBar.DEFAULT_WIDTH_DP,
+        val overlayBarHeight: Float = OverlayBar.DEFAULT_HEIGHT_DP,
         val showOverlayWhenIdle: Boolean = true,
         val tapIdleBarToDictate: Boolean = false
     )
@@ -120,6 +132,11 @@ object KeyboardSettingsCodec {
             escapeCancels = s.escapeCancels,
             desktopOverlay = s.desktopOverlay.id,
             overlayPosition = s.overlayPosition.id,
+            overlayBarAnchor = if (s.overlayBar.anchor == BarAnchor.FREE) "free" else "preset",
+            overlayBarX = s.overlayBar.x,
+            overlayBarY = s.overlayBar.y,
+            overlayBarWidth = s.overlayBar.widthDp,
+            overlayBarHeight = s.overlayBar.heightDp,
             showOverlayWhenIdle = s.showOverlayWhenIdle,
             tapIdleBarToDictate = s.tapIdleBarToDictate
         )
@@ -145,6 +162,13 @@ object KeyboardSettingsCodec {
             escapeCancels = parsed.escapeCancels,
             desktopOverlay = DesktopOverlay.from(parsed.desktopOverlay),
             overlayPosition = OverlayPosition.from(parsed.overlayPosition),
+            overlayBar = OverlayBar(
+                anchor = if (parsed.overlayBarAnchor == "free") BarAnchor.FREE else BarAnchor.PRESET,
+                x = parsed.overlayBarX,
+                y = parsed.overlayBarY,
+                widthDp = parsed.overlayBarWidth,
+                heightDp = parsed.overlayBarHeight
+            ).rounded(),
             showOverlayWhenIdle = parsed.showOverlayWhenIdle,
             tapIdleBarToDictate = parsed.tapIdleBarToDictate
         )

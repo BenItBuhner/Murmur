@@ -20,6 +20,8 @@ class Recorder {
     /** Samples in [chunks], kept alongside so a 30-minute session (36,000 chunks) is not summed on every poll. */
     private var buffered = 0
     @Volatile private var running = false
+    /** Sample count at which the capture loop should stop. [stop] sets this to a short post-roll. */
+    @Volatile private var captureUntil = Long.MAX_VALUE
 
     /** Perceptual 0..1 level for the waveform, updated from the capture thread. */
     @Volatile var level: Float = 0f
@@ -91,13 +93,14 @@ class Recorder {
 
         synchronized(chunks) { chunks.clear(); buffered = 0 }
         record = rec
+        captureUntil = Long.MAX_VALUE
         running = true
         val maxSamples = maxDurationSec?.let { it.toLong() * SAMPLE_RATE }
         thread = Thread {
             val buf = ShortArray(SAMPLE_RATE / 20) // 50 ms
             var total = 0L
             var autoStop = false
-            while (running) {
+            while (running && total < captureUntil) {
                 val n = rec.read(buf, 0, buf.size)
                 if (n < 0) break // ERROR_INVALID_OPERATION / ERROR_DEAD_OBJECT: the stream is gone
                 if (n == 0) continue
@@ -134,7 +137,13 @@ class Recorder {
 
     fun stop(): ShortArray {
         // Post-roll: the button comes up while the last word is still sounding.
-        if (running) Thread.sleep(STOP_POST_ROLL_MS)
+        // The cap is 200 ms of audio. On a device, read() blocks and wall time matches that.
+        // Robolectric's shadow returns a full buffer immediately, so an uncapped sleep here
+        // invents minutes of samples and the concat runs out of heap.
+        if (running) {
+            captureUntil = peekSampleCount() + STOP_POST_ROLL_MS * SAMPLE_RATE / 1000
+            Thread.sleep(STOP_POST_ROLL_MS)
+        }
         stopInternal()
         val list = synchronized(chunks) { ArrayList(chunks).also { chunks.clear(); buffered = 0 } }
         val total = list.sumOf { it.size }

@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.24': [
+    'The end of a dictation is kept. A spoken "thank you" is no longer thrown away, a quiet last phrase after a loud one is still transcribed, and releasing the key keeps the last fraction of a second.',
+    'Stopping no longer waits on a transcription that was still in progress. Short clips go up whole, and if formatting drops the last words, the original ending is used.',
+    'A word split on a chunk boundary, such as "this chat?", is put back in the sentence it finishes.'
+  ],
   '0.6.23': [
     'One automatic speed: the Fast/Normal choice is gone. While you speak, the stronger models transcribe and format; when you stop, the fastest models finish the last few seconds. A Fast setting saved earlier now runs the same way, with AI formatting. To skip AI formatting in one app, set that app\'s formatting to Light or Off.',
     '30-minute dictations: a failed piece is retried on its own instead of re-sending the whole recording, long recordings are re-sent (and retried) in pieces, long transcripts are formatted in parts, and up to 64,000 characters sync to your account.',

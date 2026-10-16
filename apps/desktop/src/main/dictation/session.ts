@@ -19,13 +19,14 @@ import {
   cleanModelOutput,
   countWords,
   finish,
+  endingKept,
   formatTranscript,
   resolveStyle,
   type AppContext,
   type FormatContext,
   type FormatInput,
   type ResolvedStyle,
-  isSilenceHallucination,
+  isSilentStockPhrase,
   joinPieces,
   joinSeam,
   lastSentenceStart,
@@ -213,7 +214,9 @@ type ProcessOutcome =
   | { ok: false; error: string; recorded: boolean }
 
 /** Voiced time below which a tail that reads as a stock phrase is taken for silence. */
-const TAIL_PHRASE_MIN_SPEECH_MS = 600
+/** How long release waits for a speculation already running before sending the whole tail. */
+export const SPEC_RELEASE_GRACE_MS = 150
+
 
 export interface SessionDeps {
   settings: SettingsStore
@@ -858,7 +861,7 @@ export class DictationController extends EventEmitter {
         return run(clip, endSec)
       }
       stt = streamed
-        ? await this.withStreamedPrefix(streamed, pcm, threshold, runTail, tag, runWhole)
+        ? await this.withStreamedPrefix(streamed, pcm, threshold, runTail, tag, runWhole, s.audio.silenceThresholdDb)
         : await runWhole()
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
@@ -881,7 +884,7 @@ export class DictationController extends EventEmitter {
     if (
       !raw ||
       (stt.noSpeechProb !== undefined && stt.noSpeechProb > 0.85 && countWords(raw) <= 2) ||
-      (analysis.speechMs < TAIL_PHRASE_MIN_SPEECH_MS && isSilenceHallucination(raw))
+      isSilentStockPhrase(raw, analysis.speechMs, stt.noSpeechProb)
     ) {
       return notice('Nothing heard')
     }
@@ -1098,7 +1101,8 @@ export class DictationController extends EventEmitter {
     threshold: number,
     run: (clip: Int16Array, endSec: number) => Promise<CompleteResult>,
     tag: string,
-    whole: () => Promise<CompleteResult>
+    whole: () => Promise<CompleteResult>,
+    configuredDb = -48
   ): Promise<StreamedStt> {
     const sendFrom = (
       from: number
@@ -1108,12 +1112,15 @@ export class DictationController extends EventEmitter {
       tail: Promise<CompleteResult | null>
     } => {
       const rest = pcm.subarray(Math.min(from, pcm.length))
-      const a = analyze(rest, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
+      // The tail's own noise floor, never stricter than the session's: a soft last phrase after a
+      // loud dictation must not be judged silent and skipped.
+      const tailDb = Math.min(threshold, adaptiveThreshold(rest, SAMPLE_RATE, configuredDb))
+      const a = analyze(rest, { sampleRate: SAMPLE_RATE, thresholdDb: tailDb })
       let tail: Promise<CompleteResult | null> = Promise.resolve(null)
       if (a.hasSpeech) {
         const trimmed = trimSilence(rest, {
           sampleRate: SAMPLE_RATE,
-          thresholdDb: threshold,
+          thresholdDb: tailDb,
           paddingMs: 300
         })
         tail = run(trimmed.pcm, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
@@ -1123,12 +1130,32 @@ export class DictationController extends EventEmitter {
     }
     // With a speculation, only the audio after its pause is sent now; if it failed, the whole
     // stretch after the pieces is sent as before.
-    let sent = sendFrom(streamed.spec ? streamed.spec.samples : streamed.samples)
+    // A speculation still running at release (its speech, or its background-tier formatting) is
+    // dropped: waiting on that chain is what made some releases take 2-3 s. The whole stretch
+    // after the pieces goes up at release priority instead.
+    const t0 = Date.now()
+    let specUsable = false
+    if (streamed.spec) {
+      const PENDING = Symbol('pending')
+      const ready = await Promise.race([
+        streamed.spec.result.then((r) => r, () => null),
+        new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), SPEC_RELEASE_GRACE_MS))
+      ])
+      if (ready && ready !== PENDING) {
+        const f = await Promise.race([
+          ready.format.then((x) => x, () => null),
+          new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), SPEC_RELEASE_GRACE_MS))
+        ])
+        specUsable = f !== PENDING && f !== null
+      }
+      if (!specUsable) log.info(`session ${tag}: tail speculation not ready at release; sending the whole tail`)
+    }
+    let sent = sendFrom(specUsable && streamed.spec ? streamed.spec.samples : streamed.samples)
     let spec: TailSpec | undefined
     // Everything streamed shares one wait; past it the whole dictation goes up instead.
     const streamDeadline = Date.now() + STREAM_WAIT_MS
     const left = (): number => Math.max(1, streamDeadline - Date.now())
-    if (streamed.spec) {
+    if (streamed.spec && specUsable) {
       try {
         spec = await within(streamed.spec.result, left())
       } catch (err) {
@@ -1136,6 +1163,7 @@ export class DictationController extends EventEmitter {
         sent = sendFrom(streamed.samples)
       }
     }
+    const tSpec = Date.now()
     const { rest, a, tail } = sent
     let texts: string[]
     try {
@@ -1151,9 +1179,13 @@ export class DictationController extends EventEmitter {
       log.warn(`session ${tag}: the tail did not come back in time; transcribing the whole dictation`, err)
       return whole()
     }
-    // A quiet tail (a breath, the key release) can come back as a stock phrase like "Thank you."
-    // that nobody said: with under 0.6 s of voiced audio it is dropped.
-    if (last && a.speechMs < TAIL_PHRASE_MIN_SPEECH_MS && isSilenceHallucination(last.text)) {
+    const tTail = Date.now()
+    log.info(
+      `session ${tag}: release waits: spec ${tSpec - t0} ms${streamed.spec ? (specUsable ? ' (used)' : ' (dropped)') : ''}, pieces+tail ${tTail - tSpec} ms`
+    )
+    // A stock phrase ("Thank you.") is dropped only on audio evidence: the tail held (almost) no
+    // voiced audio, or the model rated it as silence. Never on the text alone.
+    if (last && isSilentStockPhrase(last.text, a.speechMs, last.noSpeechProb)) {
       log.info(`session ${tag}: dropped a stock phrase from a quiet tail (${a.speechMs} ms voiced)`)
       last = { ...last, text: '' }
     }
@@ -1236,7 +1268,13 @@ export class DictationController extends EventEmitter {
     if (specHead) parts.push(specHead)
     if (tailFormat) {
       try {
-        const t = await tailFormat
+        let t = await tailFormat
+        // The end of the dictation is what the user notices: a formatted tail that dropped or
+        // moved its last words is replaced by the rule-based text (local, no round trip).
+        if (!endingKept(tailInput, t.text)) {
+          log.warn(`session ${tag}: formatted tail lost its ending; using rule-based formatting`)
+          t = await formatTranscript(tailRequest, null)
+        }
         parts.push({ ...t, text: stripEcho(t.text, seamContext(tailBefore)) })
       } catch {
         return null

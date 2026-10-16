@@ -112,6 +112,19 @@ fun joinSeam(prev: String, next: String): SeamJoin {
         tw = seamWords(t).take(SEAM_WINDOW)
     }
 
+    // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
+    // never owed, and next opens with the one or two lower-case words that finish prev's sentence,
+    // then its own mark. Those words go back before prev's mark ("in this chat?"). Mirrors seam.ts.
+    val frag = Regex("""^(\p{Ll}[\p{L}\p{N}'’-]*(?:\s+[\p{L}\p{N}'’-]+)?)([.?!…]+)["')\]]*\s+(?=\p{Lu})""").find(t)
+    val hMark = Regex("""([.?!…]+)(["')\]]*)$""").find(h)
+    if (frag != null && hMark != null) {
+        val fm = frag.groupValues[2]
+        val mark = if ('?' in hMark.groupValues[1] || '?' in fm) "?" else fm
+        h = h.substring(0, hMark.range.first) + " " + frag.groupValues[1] + mark + hMark.groupValues[2]
+        t = t.substring(frag.range.last + 1)
+        return SeamJoin("$h $t", deduped, true)
+    }
+
     val last = seamWords(h).lastOrNull()
     val first = tw.firstOrNull()
     val endsSoft = Regex("""(\.{2,}|…|(?<!\.)\.)["')\]]*$""").containsMatchIn(h) && !Regex("""[!?]["')\]]*$""").containsMatchIn(h)

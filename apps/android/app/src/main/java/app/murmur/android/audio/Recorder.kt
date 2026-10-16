@@ -20,6 +20,8 @@ class Recorder {
     /** Samples in [chunks], kept alongside so a 30-minute session (36,000 chunks) is not summed on every poll. */
     private var buffered = 0
     @Volatile private var running = false
+    /** Sample count at which the capture loop should stop. [stop] sets this to a short post-roll. */
+    @Volatile private var captureUntil = Long.MAX_VALUE
 
     /** Perceptual 0..1 level for the waveform, updated from the capture thread. */
     @Volatile var level: Float = 0f
@@ -91,13 +93,14 @@ class Recorder {
 
         synchronized(chunks) { chunks.clear(); buffered = 0 }
         record = rec
+        captureUntil = Long.MAX_VALUE
         running = true
         val maxSamples = maxDurationSec?.let { it.toLong() * SAMPLE_RATE }
         thread = Thread {
             val buf = ShortArray(SAMPLE_RATE / 20) // 50 ms
             var total = 0L
             var autoStop = false
-            while (running) {
+            while (running && total < captureUntil) {
                 val n = rec.read(buf, 0, buf.size)
                 if (n < 0) break // ERROR_INVALID_OPERATION / ERROR_DEAD_OBJECT: the stream is gone
                 if (n == 0) continue
@@ -110,6 +113,21 @@ class Recorder {
                     break
                 }
             }
+            // Release: what AudioRecord has buffered but not handed over yet is the end of the
+            // last word; read it out before the stream is stopped (stop() discards it).
+            // Cap at one buffer. A non-blocking read that never comes back short (Robolectric's
+            // shadow answers every read at once) is newly invented audio, not the leftover tail.
+            if (!autoStop) {
+                val cap = rec.bufferSizeInFrames.coerceAtLeast(buf.size)
+                var drained = 0
+                while (drained < cap) {
+                    val n = rec.read(buf, 0, minOf(buf.size, cap - drained), AudioRecord.READ_NON_BLOCKING)
+                    if (n <= 0) break
+                    val copy = buf.copyOf(n)
+                    synchronized(chunks) { chunks.add(copy); buffered += copy.size }
+                    drained += n
+                }
+            }
             if (autoStop && running) onAutoStop()
         }.apply {
             name = "murmur-recorder"
@@ -118,6 +136,14 @@ class Recorder {
     }
 
     fun stop(): ShortArray {
+        // Post-roll: the button comes up while the last word is still sounding.
+        // The cap is 200 ms of audio. On a device, read() blocks and wall time matches that.
+        // Robolectric's shadow returns a full buffer immediately, so an uncapped sleep here
+        // invents minutes of samples and the concat runs out of heap.
+        if (running) {
+            captureUntil = peekSampleCount() + STOP_POST_ROLL_MS * SAMPLE_RATE / 1000
+            Thread.sleep(STOP_POST_ROLL_MS)
+        }
         stopInternal()
         val list = synchronized(chunks) { ArrayList(chunks).also { chunks.clear(); buffered = 0 } }
         val total = list.sumOf { it.size }
@@ -162,3 +188,6 @@ class Recorder {
         return (((db + 50.0) / 50.0).coerceIn(0.0, 1.0)).toFloat()
     }
 }
+
+/** Audio kept after release so the end of the last word is not cut off. */
+private const val STOP_POST_ROLL_MS = 200L

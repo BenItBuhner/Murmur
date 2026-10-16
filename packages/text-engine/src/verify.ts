@@ -229,3 +229,30 @@ export function repairOutput(transcript: string, text: string): string {
     out = out.replace(/[ \t]*\n+[ \t]*/g, ' ')
   return out.trim()
 }
+
+/**
+ * Did the formatted text keep how the transcript ends? The last two words of 3+ letters must
+ * appear, in order, among the last 10 words of the output. A formatter that dropped or moved
+ * trailing words ("…and performance" gone, "chat" carried into the next sentence) fails, and the
+ * caller uses the rule-based text instead. Cheap and local: no extra round trip.
+ */
+export function endingKept(transcript: string, text: string): boolean {
+  const norm = (s: string): string[] =>
+    s
+      .toLowerCase()
+      .replace(/[’]/g, "'")
+      .split(/[^\p{L}\p{N}']+/u)
+      .filter(Boolean)
+  const want = norm(transcript)
+    .filter((w) => w.replace(/'/g, '').length >= 3)
+    .slice(-2)
+  if (!want.length) return true
+  const tail = norm(text).slice(-10)
+  let at = 0
+  for (const w of want) {
+    const i = tail.indexOf(w, at)
+    if (i < 0) return false
+    at = i + 1
+  }
+  return true
+}

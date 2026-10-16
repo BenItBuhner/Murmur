@@ -104,6 +104,9 @@ class ReleaseTimeoutException : Exception("Murmur took too long to transcribe th
 /** Command mode began with nothing selected; the same words as the desktop pill. */
 const val NO_SELECTION = "Select some text first, then hold the command key"
 const val NO_COMMAND_MODEL = "Command mode needs a formatting model (Style settings)"
+const val NO_CORRECT_MODEL = "Correction needs a formatting model (Style settings)"
+const val NO_CORRECT_SELECTION = "Select some text first"
+const val NOTHING_TO_CORRECT = "Nothing to correct"
 /** A limit refusal is read, not glanced at; a text inserted unformatted deserves a beat more too. */
 private const val LIMIT_HOLD_MS = 20_000L
 private const val SOFT_LIMIT_HOLD_MS = 5_000L
@@ -188,6 +191,12 @@ interface TextSink {
     /** The selected text in the focused field, for command mode; null when there is none. */
     suspend fun readSelection(): Selection? = null
 
+    /** Select the whole focused field. False when there is no field or it refused. */
+    suspend fun selectAll(): Boolean = false
+
+    /** The whole focused field as a selection, for select-all-then-correct when offsets fail. */
+    suspend fun readField(): Selection? = null
+
     /**
      * Put [text] in place of [selection] (command mode). The default writes it where the cursor is.
      * @return null on success, or a user-facing error message.
@@ -256,6 +265,8 @@ object DictationController {
             HotkeyAction.Lock -> lock(context)
             HotkeyAction.Stop -> stopAndInsert(context)
             HotkeyAction.Cancel -> cancel(context)
+            HotkeyAction.Correct -> correct(context, selectAllFirst = false)
+            HotkeyAction.CorrectAll -> correct(context, selectAllFirst = true)
         }
     }
 
@@ -267,6 +278,65 @@ object DictationController {
         (_state.value as? DictationState.Listening)?.let { _state.value = it.copy(mode = mode, locked = true) }
         Haptics.play(context, Haptic.LOCK)
         Cues.play(context, Cue.LOCK)
+    }
+
+    /**
+     * Instant correction: the current selection (or the whole field first) goes through the
+     * formatting model with the AHK Insta-AI-Correct prompt, and the model's text replaces it.
+     * No dictation, and the model's answer is not patched.
+     */
+    fun correct(context: Context, selectAllFirst: Boolean) {
+        if (isListening || isBusy) return
+        resetJob?.cancel()
+        val appContext = context.applicationContext
+        val currentSink = sink
+        if (currentSink == null) {
+            showNotice(appContext, "Accessibility service not running")
+            return
+        }
+        scope.launch {
+            _state.value = DictationState.Processing("Correcting…")
+            try {
+                if (selectAllFirst) currentSink.selectAll()
+                var selection = currentSink.readSelection()
+                if (selection == null && selectAllFirst) selection = currentSink.readField()
+                if (selection == null || selection.text.isBlank()) {
+                    showNotice(appContext, if (selectAllFirst) NOTHING_TO_CORRECT else NO_CORRECT_SELECTION)
+                    return@launch
+                }
+                val router = InferenceRouter.get(appContext)
+                val cfg = try {
+                    router.llm().cfg
+                } catch (e: Exception) {
+                    showNotice(appContext, e.message ?: NO_CORRECT_MODEL)
+                    return@launch
+                }
+                if (cfg.baseUrl.isEmpty() || cfg.model.isEmpty()) {
+                    showNotice(appContext, NO_CORRECT_MODEL)
+                    return@launch
+                }
+                val answer = router.complete(
+                    cfg,
+                    Prompt.buildAutocorrectMessages(selection.text),
+                    temperature = Prompt.AUTOCORRECT_TEMPERATURE,
+                    maxTokens = Prompt.autocorrectMaxTokens(selection.text)
+                )
+                if (answer.text.isEmpty()) {
+                    showNotice(appContext, "The model returned nothing")
+                    return@launch
+                }
+                val error = currentSink.replaceSelection(selection, answer.text)
+                if (error != null) {
+                    showNotice(appContext, error)
+                    return@launch
+                }
+                Haptics.play(appContext, Haptic.DONE)
+                showTransient(DictationState.Success("Corrected"))
+            } catch (e: Exception) {
+                Log.w(TAG, "correction failed", e)
+                showNotice(appContext, e.message ?: "Correction failed")
+            }
+        }
     }
 
     /**

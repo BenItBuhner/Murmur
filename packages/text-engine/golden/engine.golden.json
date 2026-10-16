@@ -308,6 +308,78 @@
       ]
     }
   ],
+  "autocorrect": [
+    {
+      "name": "plain selection",
+      "text": "hey can u send me the report tmrw",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a grammar correction and alignment agent. Your sole and only goal here is to fix any and all grammatical errors with minimal augmentation to the original text or meaning, including spelling, styling, and punctuation. Correct the text while keeping it as original as feasibly possible, not altering correct words or phrases in any way. Return only the final corrected text in your response; do not add any preamble, explanation, or other text."
+        },
+        {
+          "role": "user",
+          "content": "hey can u send me the report tmrw"
+        }
+      ]
+    },
+    {
+      "name": "embedded instructions",
+      "text": "{Make it formal}hey can u send me the report tmrw",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Make it formal"
+        },
+        {
+          "role": "user",
+          "content": "hey can u send me the report tmrw"
+        }
+      ]
+    },
+    {
+      "name": "multiline braces",
+      "text": "Keep this.\n{Fix only the second sentence.\nKeep names.}\nits broken.",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Fix only the second sentence.\nKeep names."
+        },
+        {
+          "role": "user",
+          "content": "Keep this.\n\nits broken."
+        }
+      ]
+    },
+    {
+      "name": "empty braces",
+      "text": "{}unchanged words",
+      "messages": [
+        {
+          "role": "system",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "unchanged words"
+        }
+      ]
+    },
+    {
+      "name": "first block only",
+      "text": "{tone: terse}one {leave this} two",
+      "messages": [
+        {
+          "role": "system",
+          "content": "tone: terse"
+        },
+        {
+          "role": "user",
+          "content": "one {leave this} two"
+        }
+      ]
+    }
+  ],
   "signatures": [
     {
       "text": "the budget is one million two hundred thousand dollars",

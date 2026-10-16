@@ -6,6 +6,8 @@ const base: HotkeyEngineConfig = {
   pushToTalk: [Key.Ctrl, Key.Meta],
   handsFree: [Key.Ctrl, Key.Meta, Key.Space],
   commandMode: [Key.Alt, Key.Meta],
+  correctSelection: [],
+  selectAllThenCorrect: [],
   handsFreeTrigger: 'tap',
   tapThresholdMs: 350,
   doubleTapWindowMs: 400,
@@ -169,6 +171,49 @@ describe('HotkeyEngine: command mode and cancel', () => {
   it('escape does nothing when idle', () => {
     const e = make()
     expect(e.keyDown(Key.Escape, 0)).toEqual([])
+  })
+})
+
+describe('HotkeyEngine: correction chords', () => {
+  it('an empty correction bind never fires', () => {
+    const e = make()
+    e.keyDown(Key.Ctrl, 0)
+    e.keyDown(Key.Alt, 1)
+    expect(e.keyDown(Key.A, 2)).toEqual([])
+  })
+
+  it('correct and select-all-then-correct are independent binds and fire on press', () => {
+    const e = make({
+      correctSelection: [Key.Ctrl, Key.Alt, Key.C],
+      selectAllThenCorrect: [Key.Ctrl, Key.Alt, Key.A]
+    })
+    e.keyDown(Key.Ctrl, 0)
+    e.keyDown(Key.Alt, 1)
+    expect(e.keyDown(Key.C, 2)).toEqual([{ type: 'correct' }])
+    expect(e.isListening).toBe(false)
+    e.keyUp(Key.C, 3)
+    e.keyUp(Key.Alt, 4)
+    e.keyUp(Key.Ctrl, 5)
+    e.keyDown(Key.Ctrl, 10)
+    e.keyDown(Key.Alt, 11)
+    expect(e.keyDown(Key.A, 12)).toEqual([{ type: 'correctAll' }])
+    expect(e.isListening).toBe(false)
+  })
+
+  it('does not glue Shift onto the correction bind', () => {
+    const e = make({ correctSelection: [Key.Ctrl, Key.Alt, Key.C] })
+    e.keyDown(Key.Ctrl, 0)
+    e.keyDown(Key.Alt, 1)
+    e.keyDown(Key.Shift, 2)
+    expect(e.keyDown(Key.C, 3)).toEqual([{ type: 'correct' }])
+  })
+
+  it('ignores correction while a dictation session is running', () => {
+    const e = make({ correctSelection: [Key.F9] })
+    e.keyDown(Key.Ctrl, 0)
+    e.keyDown(Key.Meta, 1)
+    expect(e.isListening).toBe(true)
+    expect(e.keyDown(Key.F9, 20)).toEqual([])
   })
 })
 

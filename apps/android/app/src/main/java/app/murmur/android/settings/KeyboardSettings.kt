@@ -46,7 +46,7 @@ enum class OverlayPosition(val id: String, val label: String) {
 /**
  * Everything about using Murmur with a physical keyboard, kept as one section of the settings so it
  * can be stored and edited as a unit. The shortcut fields mirror the desktop `hotkeys` schema
- * (same names, same key codes, same defaults where Android allows them; see
+ * (same names, same key codes, same empty-unless-push-to-talk defaults; see
  * [app.murmur.android.keyboard.Keys]) and the overlay fields the desktop `general.overlayPosition`
  * and `general.showOverlayWhenIdle`. Device-local; never synced, as on the desktop.
  */
@@ -55,13 +55,14 @@ data class KeyboardSettings(
     val shortcuts: Boolean = true,
     /** Hold to record, release to insert; a quick tap locks hands-free. Ctrl + Meta, as on the desktop. */
     val pushToTalk: List<Int> = DEFAULT_PUSH_TO_TALK,
-    /** Starts or stops a hands-free session on its own. Ctrl + Meta + Space, as on the desktop. */
-    val handsFree: List<Int> = DEFAULT_HANDS_FREE,
-    /**
-     * Hold and say what to do with the selected text. The desktop's Alt + Meta toggles Caps Lock on
-     * Android, so the default here is Shift + Meta: Meta plus a neighbouring modifier, like the rest.
-     */
-    val commandMode: List<Int> = DEFAULT_COMMAND_MODE,
+    /** Starts or stops a hands-free session on its own. Unbound until the user sets it. */
+    val handsFree: List<Int> = emptyList(),
+    /** Hold and say what to do with the selected text. Unbound until the user sets it. */
+    val commandMode: List<Int> = emptyList(),
+    /** Send the current selection through the formatting model. Unbound until the user sets it. */
+    val correctSelection: List<Int> = emptyList(),
+    /** Select everything first, then the same correction. Its own bind, not Shift on the first. */
+    val selectAllThenCorrect: List<Int> = emptyList(),
     val handsFreeTrigger: HandsFreeTrigger = HandsFreeTrigger.TAP,
     val tapThresholdMs: Int = 350,
     val doubleTapWindowMs: Int = 400,
@@ -80,8 +81,10 @@ data class KeyboardSettings(
 ) {
     companion object {
         val DEFAULT_PUSH_TO_TALK: List<Int> = listOf(Key.CTRL, Key.META)
-        val DEFAULT_HANDS_FREE: List<Int> = listOf(Key.CTRL, Key.META, Key.SPACE)
-        val DEFAULT_COMMAND_MODE: List<Int> = listOf(Key.SHIFT, Key.META)
+        /** Factory chords shipped before keyboard settings v2. Migration clears them. */
+        val FACTORY_HANDS_FREE: List<Int> = listOf(Key.CTRL, Key.META, Key.SPACE)
+        val FACTORY_COMMAND_MODE: List<Int> = listOf(Key.SHIFT, Key.META)
+        val KEYBOARD_SETTINGS_VERSION = 2
         val DEFAULT = KeyboardSettings()
     }
 }
@@ -90,10 +93,13 @@ data class KeyboardSettings(
 object KeyboardSettingsCodec {
     @Serializable
     private data class Stored(
+        val version: Int = 1,
         val shortcuts: Boolean = true,
         val pushToTalk: List<Int> = KeyboardSettings.DEFAULT_PUSH_TO_TALK,
-        val handsFree: List<Int> = KeyboardSettings.DEFAULT_HANDS_FREE,
-        val commandMode: List<Int> = KeyboardSettings.DEFAULT_COMMAND_MODE,
+        val handsFree: List<Int> = emptyList(),
+        val commandMode: List<Int> = emptyList(),
+        val correctSelection: List<Int> = emptyList(),
+        val selectAllThenCorrect: List<Int> = emptyList(),
         val handsFreeTrigger: String = HandsFreeTrigger.TAP.id,
         val tapThresholdMs: Int = 350,
         val doubleTapWindowMs: Int = 400,
@@ -109,10 +115,13 @@ object KeyboardSettingsCodec {
 
     fun encode(s: KeyboardSettings): String = json.encodeToString(
         Stored(
+            version = KeyboardSettings.KEYBOARD_SETTINGS_VERSION,
             shortcuts = s.shortcuts,
             pushToTalk = s.pushToTalk,
             handsFree = s.handsFree,
             commandMode = s.commandMode,
+            correctSelection = s.correctSelection,
+            selectAllThenCorrect = s.selectAllThenCorrect,
             handsFreeTrigger = s.handsFreeTrigger.id,
             tapThresholdMs = s.tapThresholdMs,
             doubleTapWindowMs = s.doubleTapWindowMs,
@@ -133,11 +142,19 @@ object KeyboardSettingsCodec {
         } catch (_: Exception) {
             return KeyboardSettings.DEFAULT
         }
+        var handsFree = parsed.handsFree.take(3)
+        var commandMode = parsed.commandMode.take(3)
+        if (parsed.version < KeyboardSettings.KEYBOARD_SETTINGS_VERSION) {
+            if (handsFree == KeyboardSettings.FACTORY_HANDS_FREE) handsFree = emptyList()
+            if (commandMode == KeyboardSettings.FACTORY_COMMAND_MODE) commandMode = emptyList()
+        }
         return KeyboardSettings(
             shortcuts = parsed.shortcuts,
             pushToTalk = parsed.pushToTalk.take(3),
-            handsFree = parsed.handsFree.take(3),
-            commandMode = parsed.commandMode.take(3),
+            handsFree = handsFree,
+            commandMode = commandMode,
+            correctSelection = parsed.correctSelection.take(3),
+            selectAllThenCorrect = parsed.selectAllThenCorrect.take(3),
             handsFreeTrigger = HandsFreeTrigger.from(parsed.handsFreeTrigger),
             tapThresholdMs = parsed.tapThresholdMs.coerceIn(80, 1500),
             doubleTapWindowMs = parsed.doubleTapWindowMs.coerceIn(100, 1500),

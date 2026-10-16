@@ -112,12 +112,17 @@ class Recorder {
             }
             // Release: what AudioRecord has buffered but not handed over yet is the end of the
             // last word; read it out before the stream is stopped (stop() discards it).
+            // Cap at one buffer. A non-blocking read that never comes back short (Robolectric's
+            // shadow answers every read at once) is newly invented audio, not the leftover tail.
             if (!autoStop) {
-                while (true) {
-                    val n = rec.read(buf, 0, buf.size, AudioRecord.READ_NON_BLOCKING)
+                val cap = rec.bufferSizeInFrames.coerceAtLeast(buf.size)
+                var drained = 0
+                while (drained < cap) {
+                    val n = rec.read(buf, 0, minOf(buf.size, cap - drained), AudioRecord.READ_NON_BLOCKING)
                     if (n <= 0) break
                     val copy = buf.copyOf(n)
                     synchronized(chunks) { chunks.add(copy); buffered += copy.size }
+                    drained += n
                 }
             }
             if (autoStop && running) onAutoStop()

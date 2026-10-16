@@ -163,6 +163,19 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     tw = words(t).slice(0, SEAM_WINDOW)
   }
 
+  // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
+  // never owed, and next opens with the one or two words that finish prev's sentence, in lower
+  // case, then its own mark. Those words go back before prev's mark ("in this chat?"), so neither
+  // the reader nor the formatter sees a stray fragment it might move elsewhere.
+  const frag = /^(\p{Ll}[\p{L}\p{N}'’-]*(?:\s+[\p{L}\p{N}'’-]+)?)([.?!…]+)["')\]]*\s+(?=\p{Lu})/u.exec(t)
+  const hMark = /([.?!…]+)(["')\]]*)$/u.exec(h)
+  if (frag && hMark) {
+    const mark = hMark[1].includes('?') || frag[2].includes('?') ? '?' : frag[2]
+    h = `${h.slice(0, hMark.index)} ${frag[1]}${mark}${hMark[2]}`
+    t = t.slice(frag[0].length)
+    return { text: `${h} ${t}`, deduped, joined: true }
+  }
+
   // 2. A period or ellipsis the cut put in the middle of a sentence.
   const hWords = words(h)
   const last = hWords[hWords.length - 1]

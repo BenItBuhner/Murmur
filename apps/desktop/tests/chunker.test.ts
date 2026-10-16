@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findCut, findCutDetail, findSpecCut } from '@core/audio/chunker'
+import { DEFAULT_CHUNK_PLAN, findCut, findCutDetail, findSpecCut } from '@core/audio/chunker'
 import { ChunkStreamer, PAUSE_LEAD_IN_SEC } from '../src/main/dictation/streaming'
 
 const RATE = 16000
@@ -87,5 +87,57 @@ describe('findSpecCut', () => {
   it('ignores a pause still going and short breaths', () => {
     const p = gap(gap(loud(12), 4, 4.2), 11, 12)
     expect(findSpecCut(p, RATE, -30)).toBeNull()
+  })
+})
+
+describe('ChunkStreamer speculation', () => {
+  it('does not speculate before the first piece (short clips stay whole)', async () => {
+    const pcm = gap(gap(loud(12), 3, 3.8), 8, 8.8)
+    let fed = 0
+    let specs = 0
+    const s = new ChunkStreamer(
+      (from) => pcm.slice(from, fed),
+      async () => 'piece',
+      RATE,
+      -30,
+      DEFAULT_CHUNK_PLAN,
+      async () => {
+        specs++
+        return 'spec'
+      }
+    )
+    while (fed < pcm.length) {
+      fed = Math.min(pcm.length, fed + 1600)
+      s.onSamples(fed)
+    }
+    const done = s.finish()
+    expect(specs).toBe(0)
+    expect(s.speculation()).toBeNull()
+    await done.texts
+  })
+  it('speculates on the stretch after a piece', async () => {
+    // 22 s with a clean pause at 19 s (piece cut), then a later pause for speculation.
+    const pcm = gap(gap(loud(28), 19, 19.9), 24, 24.8)
+    let fed = 0
+    let specs = 0
+    const s = new ChunkStreamer(
+      (from) => pcm.slice(from, fed),
+      async () => 'piece',
+      RATE,
+      -30,
+      DEFAULT_CHUNK_PLAN,
+      async () => {
+        specs++
+        return 'spec'
+      }
+    )
+    while (fed < pcm.length) {
+      fed = Math.min(pcm.length, fed + 1600)
+      s.onSamples(fed)
+    }
+    const done = s.finish()
+    expect(specs).toBeGreaterThanOrEqual(1)
+    expect(s.speculation()).not.toBeNull()
+    await done.texts
   })
 })

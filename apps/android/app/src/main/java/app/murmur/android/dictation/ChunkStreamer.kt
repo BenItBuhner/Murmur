@@ -76,7 +76,7 @@ const val SPEC_CHECK_SEC = 0.5
 /** A new speculation needs at least this much more audio than the last one covered. */
 const val SPEC_MIN_GAIN_SEC = 2.0
 /** Pauses at least this long are speculation points (the join repairs mid-sentence ones). */
-const val SPEC_PAUSE_MS = 300
+const val SPEC_PAUSE_MS = 600
 
 /**
  * The last pause of at least [minPauseMs] in `pcm` that has ended, at least [minSec] in; mirrors
@@ -179,6 +179,9 @@ class ChunkStreamer(
 
     private fun maybeSpeculate(total: Int) {
         val notify = onSpec ?: return
+        // Short dictations never reach a piece cut (~18 s). Speculating on them makes release wait
+        // for an in-flight STT+format of almost the whole clip. Only speculate after a piece.
+        if (committed == 0) return
         if (total - committed < nextSpecCheck) return
         nextSpecCheck = total - committed + (SPEC_CHECK_SEC * sampleRate).toInt()
         val pending = read(committed)

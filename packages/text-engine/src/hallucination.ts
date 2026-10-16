@@ -96,3 +96,16 @@ export function dropSilentSegments(
   if (short && isSilenceHallucination(text)) return { text: '', segments: undefined }
   return null
 }
+
+/** Voiced time below which a stock phrase is taken for silence ("thank you" itself is ~400 ms voiced). */
+export const TAIL_PHRASE_MIN_SPEECH_MS = 120
+
+/**
+ * A stock phrase is dropped only on audio evidence: the model rated it as silence, or (without a
+ * rating) the audio held almost no voiced frames. Never on the text alone.
+ */
+export function isSilentStockPhrase(text: string, speechMs: number, noSpeechProb?: number): boolean {
+  if (!isSilenceHallucination(text)) return false
+  if (noSpeechProb !== undefined) return noSpeechProb >= NO_SPEECH_PROB
+  return speechMs < TAIL_PHRASE_MIN_SPEECH_MS
+}

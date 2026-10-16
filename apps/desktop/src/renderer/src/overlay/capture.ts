@@ -2,6 +2,8 @@ import type { AudioConfigureMessage } from '@shared/ipc'
 
 const TARGET_RATE = 16000
 const CHUNK_SAMPLES = 1024 // 64 ms at 16 kHz
+/** Audio kept after the key comes up, so the end of the last word is not cut off. */
+const STOP_POST_ROLL_MS = 200
 
 // Runs on the audio rendering thread: converts float frames to Int16 and batches them.
 const WORKLET_SOURCE = `
@@ -11,6 +13,15 @@ class PcmCapture extends AudioWorkletProcessor {
     this.buf = new Int16Array(${CHUNK_SAMPLES});
     this.fill = 0;
     this.sumSq = 0;
+    // Release: hand over the partly filled buffer too, or up to 64 ms of the last word is lost.
+    this.port.onmessage = (e) => {
+      if (e.data !== 'flush' || this.fill === 0) return;
+      const out = this.buf.slice(0, this.fill);
+      const rms = Math.sqrt(this.sumSq / this.fill);
+      this.port.postMessage({ pcm: out.buffer, rms }, [out.buffer]);
+      this.fill = 0;
+      this.sumSq = 0;
+    };
   }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
@@ -136,9 +147,17 @@ export class MicCapture {
       return
     }
     const s = this.session
-    this.session = null
     this.pendingStart = null
-    this.events.onStopped(s.id, s.samples)
+    // Post-roll: the key comes up while the last word is still sounding and audio still in the
+    // graph; keep the session open briefly, then flush the worklet's partial buffer.
+    setTimeout(() => {
+      this.node?.port.postMessage('flush')
+      // The flushed buffer arrives as one more message; give it a tick before closing.
+      setTimeout(() => {
+        if (this.session === s) this.session = null
+        this.events.onStopped(s.id, s.samples)
+      }, 20)
+    }, STOP_POST_ROLL_MS)
     if (this.cfg && !this.cfg.keepWarm) {
       this.releaseTimer = setTimeout(() => void this.release(), 4000)
     }

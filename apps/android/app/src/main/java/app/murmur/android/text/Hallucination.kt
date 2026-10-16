@@ -33,6 +33,11 @@ object Hallucination {
         return false
     }
 
-    /** Voiced time below which a text that reads as a stock phrase is taken for silence. */
-    const val MIN_SPEECH_MS = 600
+    /**
+     * Voiced time below which a text that reads as a stock phrase is taken for silence. A real
+     * "thank you" is ~400 ms voiced, so this only fires on (near-)silence: audio evidence, never text.
+     */
+    const val MIN_SPEECH_MS = 120
+    /** Frame level counted as voiced for that check; VOICE_RECOGNITION has no AGC, so speech is quiet. */
+    const val VOICED_DB = -50.0
 }

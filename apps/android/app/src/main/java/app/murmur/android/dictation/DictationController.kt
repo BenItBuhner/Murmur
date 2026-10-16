@@ -815,7 +815,11 @@ object DictationController {
         // Everything streamed shares one wait (STREAM_WAIT_MS); past it the whole dictation goes up.
         val streamDeadline = System.currentTimeMillis() + STREAM_WAIT_MS
         fun streamLeft() = (streamDeadline - System.currentTimeMillis()).coerceAtLeast(1)
-        val specOk = streamed?.specText?.let { runCatching { withTimeout(streamLeft()) { it.await() } }.isSuccess } == true
+        // A speculation still running at release is dropped, not waited for: the tail was sent only after
+        // it came back, which put the background-tier speculation on the critical path (2-3 s releases).
+        val specOk = streamed?.specText?.let { runCatching { withTimeout(SPEC_RELEASE_GRACE_MS) { it.await() } }.isSuccess } == true
+        val specWaitMs = System.currentTimeMillis() - (streamDeadline - STREAM_WAIT_MS)
+        Log.i(TAG, "release: spec ${if (streamed?.specText == null) "none" else if (specOk) "used" else "dropped"} after $specWaitMs ms")
         val from = if (specOk) streamed!!.specSamples!! else streamed?.samples ?: 0
         val complete = if (streamed != null && (from in 1 until pcm.size)) {
             // Only the audio after the pieces goes up now, alongside waiting for the pieces.
@@ -848,7 +852,7 @@ object DictationController {
                 var last = tailResult?.getOrNull()
                 // A quiet tail can come back as a stock phrase nobody said ("Thank you.").
                 if (last != null && Hallucination.isSilencePhrase(last.output.text) &&
-                    Wav.voicedMs(rest, SAMPLE_RATE) < Hallucination.MIN_SPEECH_MS
+                    Wav.voicedMs(rest, SAMPLE_RATE, Hallucination.VOICED_DB) < Hallucination.MIN_SPEECH_MS
                 ) {
                     Log.i(TAG, "dropped a stock phrase from a quiet tail")
                     last = last.copy(output = last.output.copy(text = ""))
@@ -875,7 +879,7 @@ object DictationController {
         Log.i(TAG, "stt done in ${stt.latencyMs}ms$speedNote: ${raw.take(80)}")
         if (raw.isEmpty() ||
             (stt.noSpeechProb != null && stt.noSpeechProb > 0.85 && countWords(raw) <= 2) ||
-            (Hallucination.isSilencePhrase(raw) && Wav.voicedMs(pcm, SAMPLE_RATE) < Hallucination.MIN_SPEECH_MS)
+            (Hallucination.isSilencePhrase(raw) && Wav.voicedMs(pcm, SAMPLE_RATE, Hallucination.VOICED_DB) < Hallucination.MIN_SPEECH_MS)
         ) {
             recordFailure(
                 context, s, run, raw, "Nothing heard", StageTimings(recordMs = recordMs, sttMs = sttMs),
@@ -1205,3 +1209,6 @@ const val SHORT_TAIL_WORDS = 6
 /** What the formatter is told about a piece of a longer dictation that is not the last. */
 private const val PIECE_NOTE =
     "This transcript is one part of a longer dictation and may stop mid-sentence; if it does, leave the end unpunctuated."
+
+/** How long release waits for a tail speculation that is still running before sending the whole tail. */
+private const val SPEC_RELEASE_GRACE_MS = 150L

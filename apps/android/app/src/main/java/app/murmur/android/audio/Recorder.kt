@@ -110,6 +110,16 @@ class Recorder {
                     break
                 }
             }
+            // Release: what AudioRecord has buffered but not handed over yet is the end of the
+            // last word; read it out before the stream is stopped (stop() discards it).
+            if (!autoStop) {
+                while (true) {
+                    val n = rec.read(buf, 0, buf.size, AudioRecord.READ_NON_BLOCKING)
+                    if (n <= 0) break
+                    val copy = buf.copyOf(n)
+                    synchronized(chunks) { chunks.add(copy); buffered += copy.size }
+                }
+            }
             if (autoStop && running) onAutoStop()
         }.apply {
             name = "murmur-recorder"
@@ -118,6 +128,8 @@ class Recorder {
     }
 
     fun stop(): ShortArray {
+        // Post-roll: the button comes up while the last word is still sounding.
+        if (running) Thread.sleep(STOP_POST_ROLL_MS)
         stopInternal()
         val list = synchronized(chunks) { ArrayList(chunks).also { chunks.clear(); buffered = 0 } }
         val total = list.sumOf { it.size }
@@ -162,3 +174,6 @@ class Recorder {
         return (((db + 50.0) / 50.0).coerceIn(0.0, 1.0)).toFloat()
     }
 }
+
+/** Audio kept after release so the end of the last word is not cut off. */
+private const val STOP_POST_ROLL_MS = 200L

@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,9 +66,8 @@ class ChunkStreamerTest {
     }
 
     @Test
-    fun `speculates on the tail and says where the rest starts`() = runBlocking {
+    fun `does not speculate before the first piece`() = runBlocking {
         val clip = loud(12.0)
-        // Long enough pauses that the adaptive threshold (20th-percentile noise floor) sees them.
         clip.fill(0, 3 * rate, (5.6 * rate).toInt())
         clip.fill(0, 8 * rate, (10.6 * rate).toInt())
         var fed = 0
@@ -79,9 +79,29 @@ class ChunkStreamerTest {
             streamer.poll(fed)
         }
         val streamed = streamer.finish()
+        assertEquals(0, specs)
+        assertNull(streamed.specSamples)
+        assertNull(streamed.specText)
+    }
+
+    @Test
+    fun `speculates on the tail after a piece and says where the rest starts`() = runBlocking {
+        // Piece cut (~18–30 s plan) then a pause on the remainder for speculation.
+        val clip = loud(28.0)
+        clip.fill(0, 19 * rate, (19.9 * rate).toInt())
+        clip.fill(0, 24 * rate, (24.8 * rate).toInt())
+        var fed = 0
+        var specs = 0
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val streamer = ChunkStreamer(scope, { from -> clip.copyOfRange(from, fed) }, rate, -48.0, onSpec = { _, _ -> specs++ }) { pcm, i -> "s$i:${pcm.size}" }
+        while (fed < clip.size) {
+            fed = minOf(clip.size, fed + 1600)
+            streamer.poll(fed)
+        }
+        val streamed = streamer.finish()
         assertTrue(specs >= 1)
         val at = streamed.specSamples!!
-        assertTrue(at > 8 * rate && at < 10.6 * rate)
-        assertTrue(streamed.specText!!.await().startsWith("s0:"))
+        assertTrue(at > 24 * rate && at < 24.8 * rate)
+        assertTrue(streamed.specText!!.await().startsWith("s"))
     }
 }

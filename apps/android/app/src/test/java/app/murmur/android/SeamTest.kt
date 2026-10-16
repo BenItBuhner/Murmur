@@ -68,4 +68,13 @@ class SeamTest {
         assertEquals("I have paused a few times I'm hesitating.", j("I have paused a few times", "I'm hesitating."))
         assertEquals("We met with Sarah and Sarah agreed.", j("We met with Sarah and", "Sarah agreed."))
     }
+
+    @Test
+    fun `puts a fragment the cut moved past a stray question mark back`() {
+        assertEquals(
+            "Can you preview that video for me in this chat? Can I just watch it here, please, or is that not possible?",
+            j("Can you preview that video for me in this?", "chat. Can I just watch it here, please, or is that not possible?")
+        )
+        assertEquals("Is it done? Yes. We shipped it.", j("Is it done?", "Yes. We shipped it."))
+    }
 }

@@ -76,6 +76,7 @@ export {
 } from './languages'
 export {
   cleanModelOutput,
+  endingKept,
   verifyOutput,
   type Verdict,
   type VerifyReason,
@@ -106,7 +107,12 @@ export {
   type NotCleanReason
 } from './clean'
 export { formatTranscript, type FormatInput } from './format'
-export { dropSilentSegments, isSilenceHallucination } from './hallucination'
+export {
+  dropSilentSegments,
+  isSilenceHallucination,
+  isSilentStockPhrase,
+  TAIL_PHRASE_MIN_SPEECH_MS
+} from './hallucination'
 export {
   joinSeam,
   joinPieces,

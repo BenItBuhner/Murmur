@@ -281,8 +281,13 @@ object DictationController {
      * until stopped, COMMAND takes an instruction for the selected text: the selection is read as
      * the session begins (there is no waiting for a key release here, so nothing is lost by reading
      * it first), and a session with nothing selected ends at once with a notice.
+     *
+     * [selectionDelayMs] is the one entry-point exception (DictationEntryActivity, command mode):
+     * the selection must be read in the user's app, and the trampoline that took the intent is in
+     * front until it finishes, so the read waits that long — the session itself (and the
+     * microphone service) starts at once, while the trampoline is resumed. Zero everywhere else.
      */
-    fun start(context: Context, mode: DictationMode = DictationMode.HANDS_FREE) {
+    fun start(context: Context, mode: DictationMode = DictationMode.HANDS_FREE, selectionDelayMs: Long = 0L) {
         if (isListening || isBusy) return
         resetJob?.cancel()
         val appContext = context.applicationContext
@@ -299,7 +304,10 @@ object DictationController {
                 showNotice(appContext, "Accessibility service not running")
                 return
             }
-            selectionJob = scope.async { runCatching { currentSink.readSelection() }.getOrNull() }
+            selectionJob = scope.async {
+                if (selectionDelayMs > 0) delay(selectionDelayMs)
+                runCatching { currentSink.readSelection() }.getOrNull()
+            }
         }
 
         // The press is felt the moment it is accepted, ahead of the recorder's own start-up: a

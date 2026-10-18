@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The static launcher shortcuts (long-press Murmur's icon): what Samsung RegiStar back taps,
+    Modes and Routines, and Tasker pick from, the same as ChatGPT's "start voice" shortcut. Each
+    fires at the entry trampoline (entry/DictationEntryActivity.kt), which drives the same
+    DictationController the pill uses and refuses when a gate is shut.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:shortcutId="dictate"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_mic"
+        android:shortcutShortLabel="@string/shortcut_dictate_short"
+        android:shortcutLongLabel="@string/shortcut_dictate_long">
+        <intent
+            android:action="app.murmur.android.action.TOGGLE_DICTATION"
+            android:targetPackage="app.murmur.android"
+            android:targetClass="app.murmur.android.entry.DictationEntryActivity" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="stop_dictation"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_mic"
+        android:shortcutShortLabel="@string/shortcut_stop_short"
+        android:shortcutLongLabel="@string/shortcut_stop_long">
+        <intent
+            android:action="app.murmur.android.action.STOP_DICTATION"
+            android:targetPackage="app.murmur.android"
+            android:targetClass="app.murmur.android.entry.DictationEntryActivity" />
+    </shortcut>
+
+    <!-- Command mode: the trampoline finishes first and the selection is read in the user's app
+         just after (DictationController.start's selectionDelayMs); nothing selected ends the
+         session with the "select some text first" notice. -->
+    <shortcut
+        android:shortcutId="dictate_command"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_mic"
+        android:shortcutShortLabel="@string/shortcut_command_short"
+        android:shortcutLongLabel="@string/shortcut_command_long">
+        <intent
+            android:action="app.murmur.android.action.START_DICTATION"
+            android:targetPackage="app.murmur.android"
+            android:targetClass="app.murmur.android.entry.DictationEntryActivity">
+            <extra
+                android:name="app.murmur.android.extra.MODE"
+                android:value="command" />
+        </intent>
+    </shortcut>
+</shortcuts>

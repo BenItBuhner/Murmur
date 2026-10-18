@@ -86,8 +86,10 @@ describe('settings parity contract', () => {
 
   it("the phone's own settings are a decision, not a gap: the desktop schema has no setting of those names", () => {
     // A laptop has no vibrator, so the dictation's haptics (and their switch) are Android's alone.
+    // Only a phone is dictated at from outside itself (back taps, routines, other apps), so the
+    // switch allowing external triggers is Android's alone too.
     const androidOnly = Object.keys(contract.androidOnly).filter((k) => !k.startsWith('$'))
-    expect(androidOnly).toEqual(['haptics'])
+    expect(androidOnly).toEqual(['haptics', 'allowExternalTriggers'])
     const desktopKeys = keysDeep(defaultSettings())
     for (const key of androidOnly) expect(desktopKeys.has(key), key).toBe(false)
   })

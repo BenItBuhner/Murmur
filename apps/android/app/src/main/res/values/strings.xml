@@ -6,4 +6,20 @@
     <string name="notification_channel_name">Dictation</string>
     <string name="notification_recording">Listening…</string>
     <string name="notification_channel_updates">Updates</string>
+
+    <!-- External entry points: the static launcher shortcuts, the Quick Settings tile, and what
+         the entry trampoline says when a gate refuses a command. -->
+    <string name="shortcut_dictate_short">Dictate</string>
+    <string name="shortcut_dictate_long">Start or stop dictation</string>
+    <string name="shortcut_stop_short">Stop</string>
+    <string name="shortcut_stop_long">Stop the dictation in flight</string>
+    <string name="shortcut_command_short">Dictate a command</string>
+    <string name="shortcut_command_long">Edit the selected text with an instruction</string>
+    <string name="tile_dictate">Dictate</string>
+    <string name="tile_listening">Listening…</string>
+    <string name="tile_transcribing">Transcribing…</string>
+    <string name="entry_need_setup">Finish setting up Murmur first</string>
+    <string name="entry_need_mic">Murmur needs the microphone — allow it in Permissions</string>
+    <string name="entry_need_accessibility">Turn on Murmur\'s accessibility service first</string>
+    <string name="entry_external_off">Murmur only lets its own shortcuts start dictation (see Dictation button)</string>
 </resources>

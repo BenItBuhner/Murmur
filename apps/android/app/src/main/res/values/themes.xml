@@ -24,4 +24,20 @@
         <!-- Platform dialogs (the account sheet) dim with the same scrim as the drawer: black at 40 % in both modes. -->
         <item name="android:backgroundDimAmount">0.4</item>
     </style>
+
+    <!--
+        The external-entry trampoline (entry/DictationEntryActivity.kt): fully transparent, no
+        window animation, nothing drawn. It has to actually reach onResume — the dictation is
+        started from the resumed activity, and the microphone foreground service must be started
+        by an app that is in front (Android 14/15 while-in-use rule) — so it is Translucent, not
+        NoDisplay, which never resumes.
+    -->
+    <style name="Theme.Murmur.Trampoline" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
 </resources>

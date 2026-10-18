@@ -92,11 +92,15 @@ class SettingsParityTest {
     fun `the phone's own settings ship with the defaults the contract records for them`() {
         // A laptop has no vibrator: the dictation's haptics are Android's alone, on by default, and
         // the desktop side of the contract checks its schema never grows a setting of the same name.
+        // So is the switch allowing external triggers (back taps, routines, other apps): the
+        // desktop has nothing that could fire at it from outside.
         val own = contract.getJSONObject("androidOnly")
         val names = own.keys().asSequence().filterNot { it.startsWith("$") }.toList()
-        assertEquals(listOf("haptics"), names)
+        assertEquals(listOf("haptics", "allowExternalTriggers"), names)
         assertEquals(own.getBoolean("haptics"), MurmurSettings().haptics)
         assertEquals(true, MurmurSettings().haptics)
+        assertEquals(own.getBoolean("allowExternalTriggers"), MurmurSettings().allowExternalTriggers)
+        assertEquals(true, MurmurSettings().allowExternalTriggers)
     }
 
     @Test

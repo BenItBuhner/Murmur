@@ -7,7 +7,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.widget.Toast
 import app.murmur.android.MainActivity
 import app.murmur.android.R
@@ -212,13 +211,18 @@ open class DictationEntryActivity : Activity() {
          */
         internal const val COMMAND_SELECTION_DELAY_MS = 150L
 
+        /**
+         * The last command taken, in nanoTime; 0 when there has been none yet. NanoTime, not
+         * SystemClock.elapsedRealtime, because it is the one clock Robolectric does not pin at
+         * boot (where the elapsed clock reads ~0 and every first command would look debounced).
+         */
         @Volatile
         private var lastCommandAt = 0L
 
         /** @return true when this command came too soon after the previous one. */
-        internal fun debounced(now: Long = SystemClock.elapsedRealtime()): Boolean {
+        internal fun debounced(now: Long = System.nanoTime()): Boolean {
             val last = lastCommandAt
-            if (now - last < DEBOUNCE_MS) return true
+            if (last != 0L && now - last < DEBOUNCE_MS * 1_000_000) return true
             lastCommandAt = now
             return false
         }

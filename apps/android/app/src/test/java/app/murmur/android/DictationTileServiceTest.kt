@@ -22,6 +22,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowService
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -96,7 +97,7 @@ class DictationTileServiceTest {
 
 /** Records what the tile asked the system to do; Robolectric has no Quick Settings to bind. */
 @Implements(TileService::class)
-class ShadowQSTileService {
+class ShadowQSTileService : ShadowService() {
     companion object {
         val collapseCalls = CopyOnWriteArrayList<Any>()
         val unlockRuns = CopyOnWriteArrayList<Runnable>()

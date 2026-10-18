@@ -1,6 +1,7 @@
 package app.murmur.android.entry
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -48,20 +49,10 @@ class DictationTileService : TileService() {
 
     private fun render() {
         val tile = qsTile ?: return
-        when (val state = DictationController.state.value) {
-            is DictationState.Idle -> tile.state = Tile.STATE_INACTIVE
-            is DictationState.Listening -> {
-                tile.state = Tile.STATE_ACTIVE
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    tile.subtitle = getString(R.string.tile_listening)
-                }
-            }
-            else -> {
-                tile.state = Tile.STATE_ACTIVE
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    tile.subtitle = getString(R.string.tile_transcribing)
-                }
-            }
+        val (state, subtitle) = tileLook(this, DictationController.state.value)
+        tile.state = state
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && subtitle != null) {
+            tile.subtitle = subtitle
         }
         tile.updateTile()
     }
@@ -85,4 +76,14 @@ class DictationTileService : TileService() {
         }
         if (isLocked) unlockAndRun { collapse() } else collapse()
     }
+}
+
+/**
+ * What the tile shows for a dictation state: active while one is in flight — "Listening…" while
+ * it records, "Transcribing…" once the release is being processed — and inactive when idle.
+ */
+internal fun tileLook(context: Context, state: DictationState): Pair<Int, String?> = when (state) {
+    is DictationState.Idle -> Tile.STATE_INACTIVE to null
+    is DictationState.Listening -> Tile.STATE_ACTIVE to context.getString(R.string.tile_listening)
+    else -> Tile.STATE_ACTIVE to context.getString(R.string.tile_transcribing)
 }

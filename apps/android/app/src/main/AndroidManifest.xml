@@ -49,6 +49,44 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The static launcher shortcuts (res/xml/shortcuts.xml): the app's icon is
+                 long-pressed for "Dictate", and external triggers (Samsung RegiStar back taps,
+                 Modes and Routines, Tasker) pick the same shortcuts. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- The trampoline external entry points land in (entry/EntryCommands.kt for the actions
+             and extras). Transparent and out of Recents: it takes the command, starts or stops
+             the dictation through DictationController while it is resumed (Android 14/15 only
+             let an app in front start the microphone service), and finishes. Its own task
+             (empty taskAffinity) so nothing of Murmur's is disturbed; exported because Samsung's
+             RegiStar, Modes and Routines, launchers and Tasker all fire at it from outside. -->
+        <activity
+            android:name=".entry.DictationEntryActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
+            android:theme="@style/Theme.Murmur.Trampoline">
+            <intent-filter>
+                <action android:name="app.murmur.android.action.TOGGLE_DICTATION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="app.murmur.android.action.START_DICTATION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="app.murmur.android.action.STOP_DICTATION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="app.murmur.android.action.CANCEL_DICTATION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <service
@@ -68,5 +106,19 @@
             android:name=".service.RecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- The "Dictate" Quick Settings tile. It never starts the microphone service itself: a
+             tap fires the same TOGGLE at the trampoline, where the gates, the keyguard and the
+             debounce apply as for every other entry point. -->
+        <service
+            android:name=".entry.DictationTileService"
+            android:exported="true"
+            android:label="@string/tile_dictate"
+            android:icon="@drawable/ic_shortcut_mic"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

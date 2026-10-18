@@ -35,8 +35,9 @@
     "escapeCancels": true
   },
   "androidOnly": {
-    "$comment": "Settings the phone has and the desktop cannot, with their defaults: a laptop has no vibrator, so the dictation's haptics are Android's alone. SettingsParityTest pins the Android defaults to this section; settings-parity.test.ts checks the desktop schema has no setting of these names, so the difference stays a decision and not an oversight.",
-    "haptics": true
+    "$comment": "Settings the phone has and the desktop cannot, with their defaults: a laptop has no vibrator, so the dictation's haptics are Android's alone; and only a phone is dictated at from outside itself (back taps, routines, other apps), so the switch allowing external triggers is Android's alone too. SettingsParityTest pins the Android defaults to this section; settings-parity.test.ts checks the desktop schema has no setting of these names, so the difference stays a decision and not an oversight.",
+    "haptics": true,
+    "allowExternalTriggers": true
   },
   "ranges": {
     "sttTimeoutMs": { "min": 2000, "max": 120000 },

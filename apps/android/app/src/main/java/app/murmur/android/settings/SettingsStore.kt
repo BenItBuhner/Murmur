@@ -259,6 +259,13 @@ data class MurmurSettings(
     val haptics: Boolean = true,
     /** Per-stage timing bars on Home and in History (desktop: `general.showLatencyInHistory`). Device-local. */
     val showLatencyInHistory: Boolean = true,
+    /**
+     * Let entry points outside the app — Samsung RegiStar back taps, Modes and Routines, launcher
+     * shortcuts, Tasker, the Quick Settings tile — start or stop a dictation
+     * (entry/DictationEntryActivity). Off, callers other than Murmur's own package and the
+     * default launcher are refused. Device-local; never synced.
+     */
+    val allowExternalTriggers: Boolean = true,
     /** Device-level first-run flow finished (permissions, provider). */
     val onboardingComplete: Boolean = false,
     /** `optional` account mode: the user chose to keep using Murmur without an account. */
@@ -492,6 +499,7 @@ class SettingsStore(context: Context) {
             soundVolume = prefs.getFloat("soundVolume", d.soundVolume).coerceIn(0f, 1f),
             haptics = prefs.getBoolean("haptics", d.haptics),
             showLatencyInHistory = prefs.getBoolean("showLatencyInHistory", d.showLatencyInHistory),
+            allowExternalTriggers = prefs.getBoolean("allowExternalTriggers", d.allowExternalTriggers),
             onboardingComplete = prefs.getBoolean("onboardingComplete", d.onboardingComplete),
             accountSkipped = prefs.getBoolean("accountSkipped", d.accountSkipped),
             deviceId = prefs.getString("deviceId", d.deviceId) ?: "",
@@ -554,6 +562,7 @@ class SettingsStore(context: Context) {
             .putFloat("soundVolume", s.soundVolume.coerceIn(0f, 1f))
             .putBoolean("haptics", s.haptics)
             .putBoolean("showLatencyInHistory", s.showLatencyInHistory)
+            .putBoolean("allowExternalTriggers", s.allowExternalTriggers)
             .putBoolean("onboardingComplete", s.onboardingComplete)
             .putBoolean("accountSkipped", s.accountSkipped)
             .putString("deviceId", s.deviceId)

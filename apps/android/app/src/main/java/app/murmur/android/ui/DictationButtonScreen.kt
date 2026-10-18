@@ -34,9 +34,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
+import app.murmur.android.R
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.dictation.Haptic
 import app.murmur.android.dictation.Haptics
+import app.murmur.android.entry.EntryCommand
+import app.murmur.android.entry.EntryCommands
 import app.murmur.android.keyboard.KeyboardPresence
 import app.murmur.android.overlay.OverlayArrangement
 import app.murmur.android.overlay.OverlayDefaults
@@ -78,6 +84,8 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
     val context = LocalContext.current
     val posture by remember(context) { KeyboardPresence.get(context) }.posture.collectAsState()
     val desktopPill = PillPresentation.resolve(settings.keyboard, posture) is PillPresentation.Desktop
+    // The launcher accepts a pin request (most do; otherwise the button would only confuse).
+    val canPinShortcut = remember { ShortcutManagerCompat.isRequestPinShortcutSupported(context) }
 
     Screen(
         title = "Dictation button",
@@ -224,6 +232,38 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
                 checked = settings.haptics,
                 onCheckedChange = { store.update { s -> s.copy(haptics = it) } }
             )
+        }
+
+        SectionGap()
+
+        Group("Start from anywhere", rows = true) {
+            ToggleRow(
+                title = "Let shortcuts, routines and other apps start dictation",
+                description = "Back tap, Routines, Tasker: pick Murmur's 'Dictate' shortcut.",
+                checked = settings.allowExternalTriggers,
+                onCheckedChange = { store.update { s -> s.copy(allowExternalTriggers = it) } }
+            )
+            Text(
+                "A Quick Settings tile, a launcher shortcut and four intent actions " +
+                    "(app.murmur.android.action.TOGGLE_DICTATION and kin) all start or stop the same dictation. " +
+                    "Off, only Murmur's own shortcuts and your launcher can fire them.",
+                style = Murmur.type.bodySmall,
+                color = Murmur.colors.inkSoft
+            )
+            if (canPinShortcut) {
+                SecondaryButton(
+                    "Add Dictate to home screen",
+                    onClick = {
+                        val pin = ShortcutInfoCompat.Builder(context, "dictate")
+                            .setShortLabel(context.getString(R.string.shortcut_dictate_short))
+                            .setLongLabel(context.getString(R.string.shortcut_dictate_long))
+                            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_mic))
+                            .setIntent(EntryCommands.buildIntent(context, EntryCommand.Toggle))
+                            .build()
+                        ShortcutManagerCompat.requestPinShortcut(context, pin, null)
+                    }
+                )
+            }
         }
     }
 }

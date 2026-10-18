@@ -130,7 +130,7 @@ open class DictationEntryActivity : Activity() {
     /** Who fired this activity's intent, or null when the system will not say. Overridable for tests. */
     internal open fun launchedFrom(): String? = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) getLaunchedFromPackage()
-        else @Suppress("DEPRECATION") intent?.referrer?.host
+        else referrer?.host
     }.getOrNull()
 
     /** The package of the home app the phone resolves to. */

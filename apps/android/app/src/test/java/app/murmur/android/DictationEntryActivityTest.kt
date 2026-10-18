@@ -5,9 +5,11 @@ import android.content.Intent
 import android.os.Looper
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.dictation.TextSink
 import app.murmur.android.entry.DictationEntryActivity
 import app.murmur.android.entry.EntryActions
 import app.murmur.android.service.MurmurAccessibilityService
+import app.murmur.android.settings.FormattingMode
 import app.murmur.android.settings.SettingsStore
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -106,8 +108,9 @@ class DictationEntryActivityTest {
     @Test
     fun `a second toggle stops the dictation`() {
         connectAccessibility()
-        // The same in-process STT endpoint DictationFlowTest uses; the session ends somewhere
-        // (inserted into a field, or copied when Robolectric has none), which is all we need.
+        // The same in-process STT endpoint DictationFlowTest uses. The service's own insertion
+        // waits out its target-lookup retries on Robolectric's paused main clock, so a plain sink
+        // stands in for it here (DictationFlowTest does the same); the session ends inserted.
         server = MockWebServer().apply {
             dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse =
@@ -116,7 +119,19 @@ class DictationEntryActivityTest {
             start()
         }
         SettingsStore.get(context).update {
-            it.copy(sttBaseUrl = "http://${server!!.hostName}:${server!!.port}/v1", sttApiKey = "test-key", sttModel = "mock-whisper")
+            it.copy(
+                sttBaseUrl = "http://${server!!.hostName}:${server!!.port}/v1",
+                sttApiKey = "test-key",
+                sttModel = "mock-whisper",
+                sttFallbackModel = "",
+                formattingMode = FormattingMode.LIGHT,
+                llmSameAsStt = true,
+                llmModel = ""
+            )
+        }
+        DictationController.sink = object : TextSink {
+            override suspend fun insert(text: String, pressEnter: Boolean): String? = null
+            override fun focusedPackage(): String = "app.murmur.android"
         }
         fire(EntryActions.TOGGLE_DICTATION)
         assertTrue(DictationController.state.value is DictationState.Listening)
@@ -125,7 +140,7 @@ class DictationEntryActivityTest {
         DictationEntryActivity.resetDebounce()
         fire(EntryActions.TOGGLE_DICTATION)
         assertTrue("release moves the pill on", DictationController.state.value is DictationState.Processing)
-        awaitTerminal()
+        assertEquals(DictationState.Success("Inserted"), awaitTerminal())
         DictationController.dismiss()
     }
 
@@ -246,12 +261,12 @@ class DictationEntryActivityTest {
     }
 
     /** The release under way settles on a result (the pill's own tests wait the same way). */
-    private fun awaitTerminal(timeoutMs: Long = 30_000) {
+    private fun awaitTerminal(timeoutMs: Long = 30_000): DictationState {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             shadowOf(Looper.getMainLooper()).idle()
-            when (DictationController.state.value) {
-                is DictationState.Success, is DictationState.Error -> return
+            when (val s = DictationController.state.value) {
+                is DictationState.Success, is DictationState.Error -> return s
                 else -> Thread.sleep(25)
             }
         }

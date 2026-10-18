@@ -94,7 +94,7 @@ open class DictationEntryActivity : Activity() {
         if (startsSession(command)) {
             refusal()?.let {
                 Toast.makeText(this, getString(it.message), Toast.LENGTH_SHORT).show()
-                openMurmur(it.route)
+                openMurmur(it.home)
                 finishQuietly()
                 return
             }

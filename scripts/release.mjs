@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.25': [
+    'Start dictation from anywhere: a Dictate shortcut for back tap, Routines, Tasker and your launcher, plus a Quick Settings tile.',
+    'Shortcuts, routines and other apps start or stop dictation through four intent actions — TOGGLE, START, STOP and CANCEL_DICTATION — so Samsung RegiStar back taps, Modes and Routines and Tasker buttons work whether the pill is showing or not.',
+    'A "Start from anywhere" section on the Dictation button screen lets you turn external triggers off, or pin a Dictate shortcut to your home screen.'
+  ],
   '0.6.24': [
     'The end of a dictation is kept. A spoken "thank you" is no longer thrown away, a quiet last phrase after a loud one is still transcribed, and releasing the key keeps the last fraction of a second.',
     'Stopping no longer waits on a transcription that was still in progress. Short clips go up whole, and if formatting drops the last words, the original ending is used.',

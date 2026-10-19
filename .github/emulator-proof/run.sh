@@ -15,7 +15,11 @@ front() {
   echo "  focus:   $(adb shell dumpsys window | grep -m1 mCurrentFocus | sed 's/^ *//')"
 }
 
-shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
+shot() {
+  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1
+  sleep 0.5
+  adb exec-out screencap -p > "$OUT/$1.png"
+}
 
 AM_FIRE="am start -a app.murmur.android.action.TOGGLE_DICTATION -n $TRAMPOLINE -f $SHORTCUT_FLAGS"
 fire() { adb shell "$AM_FIRE" >/dev/null; }
@@ -38,13 +42,16 @@ open_their_app() {
 }
 
 pass_or_fail() {
-  if adb shell dumpsys window | grep -m1 mCurrentFocus | grep -q "$1"; then echo "  RESULT: PASS ($1 still in front)"; else echo "  RESULT: FAIL ($1 is no longer in front)"; fi
+  # The resumed activity, not window focus: an emulator "isn't responding" dialog can hold focus.
+  if adb shell dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity' | grep -q "$1"; then echo "  RESULT: PASS ($1 still in front)"; else echo "  RESULT: FAIL ($1 is no longer in front)"; fi
 }
 
 run_build() {
   local label=$1 apk=$2
   echo "=================== $label ==================="
   adb uninstall $PKG >/dev/null 2>&1
+  # The slow emulator's launcher trips "isn't responding" dialogs; keep them off the screen.
+  adb shell settings put global hide_error_dialogs 1
   adb install -r -g "$apk" | tail -1
   adb shell pm grant $PKG android.permission.RECORD_AUDIO
   # Past onboarding, external triggers allowed (the debug build is debuggable, so run-as works).

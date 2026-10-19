@@ -51,6 +51,7 @@ class DictationEntryActivityTest {
         DictationEntryActivity.resetDebounce()
         if (DictationController.isListening) DictationController.cancel(context)
         DictationController.dismiss()
+        MurmurAccessibilityService.frontApp = null
         shadowOf(context).grantPermissions(Manifest.permission.RECORD_AUDIO)
         SettingsStore.get(context).update {
             it.copy(onboardingComplete = true, useFixtureAudio = true, allowExternalTriggers = true, updateAutoCheck = false)
@@ -225,19 +226,17 @@ class DictationEntryActivityTest {
         assertTrue(entry.isFinishing)
     }
 
-    // ---- the double-fire and the lock screen ------------------------------------------------------
+    // ---- the double-fire, the lock screen, and staying in their app --------------------------------
 
     @Test
     fun `a shortcut never comes to the front - the command runs before any window`() {
-        // The regression this class guards against: app shortcuts are fired with
-        // FLAG_ACTIVITY_TASK_ON_HOME, so a trampoline that ever becomes the visible task returns
-        // the user to the home screen when it finishes. With the overlay permission (the
-        // onboarding default) the dictation starts the way it does from the pill, from the
-        // accessibility service, and the trampoline is finished before it is ever started.
+        // Shortcuts are fired with FLAG_ACTIVITY_TASK_ON_HOME: the launch itself moves this
+        // task to the front, anchored to home. The command therefore runs (and this finishes)
+        // inside onCreate, before a window exists — and the app the user was in is brought back
+        // in front, so the anchor never takes them anywhere.
         connectAccessibility()
         val intent = Intent(context, TestEntryActivity::class.java).setAction(EntryActions.TOGGLE_DICTATION)
         val controller = Robolectric.buildActivity(TestEntryActivity::class.java, intent)
-        controller.get().allowBackgroundStart = true
         controller.create() // no start(), no setup(): there is nothing to resume
         assertTrue("dictation starts with no window at all", DictationController.state.value is DictationState.Listening)
         assertTrue(controller.get().isFinishing)
@@ -245,17 +244,43 @@ class DictationEntryActivityTest {
     }
 
     @Test
-    fun `without the overlay permission a session start waits until the trampoline is in front`() {
+    fun `the app the user was in is brought back to the front after the command`() {
         connectAccessibility()
-        val intent = Intent(context, TestEntryActivity::class.java).setAction(EntryActions.TOGGLE_DICTATION)
-        val controller = Robolectric.buildActivity(TestEntryActivity::class.java, intent)
-        controller.get().allowBackgroundStart = false
-        controller.create()
-        assertTrue("the microphone service waits for a top activity", DictationController.state.value is DictationState.Idle)
-        controller.start()
-        controller.resume()
+        MurmurAccessibilityService.frontApp = "com.their.app"
+        val entry = fire(EntryActions.TOGGLE_DICTATION)
         assertTrue(DictationController.state.value is DictationState.Listening)
+        assertEquals("the return happens after every command", 1, entry.bringBacks)
         DictationController.cancel(context)
+        MurmurAccessibilityService.frontApp = null
+    }
+
+    @Test
+    fun `nothing is brought back when Murmur itself was in front`() {
+        connectAccessibility()
+        MurmurAccessibilityService.frontApp = context.packageName
+        val entry = fire(EntryActions.TOGGLE_DICTATION)
+        assertEquals("the return was decided against", 1, entry.bringBacks)
+        assertTrue("Murmur does not relaunch itself", nothingStarted(entry))
+        DictationController.cancel(context)
+        MurmurAccessibilityService.frontApp = null
+    }
+
+    @Test
+    fun `the service remembers the app whose window last came to the front`() {
+        val service = connectAccessibility()
+        fun windowOf(pkg: String) {
+            val event = android.view.accessibility.AccessibilityEvent.obtain(
+                android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            )
+            event.packageName = pkg
+            service.onAccessibilityEvent(event)
+        }
+        windowOf("com.their.app")
+        assertEquals("com.their.app", MurmurAccessibilityService.frontApp)
+        // System furniture never counts as the app the user is in.
+        windowOf("com.android.systemui")
+        assertEquals("com.their.app", MurmurAccessibilityService.frontApp)
+        MurmurAccessibilityService.frontApp = null
     }
 
     @Test
@@ -305,17 +330,20 @@ class DictationEntryActivityTest {
     }
 }
 
-/** The trampoline with its keyguard, caller and background-start permission steered from the test. */
+/** The trampoline with its keyguard and caller steered from the test. */
 class TestEntryActivity : DictationEntryActivity() {
     var lockKeyguard = false
     var fromPackage: String? = null
-    var allowBackgroundStart = false
     var dismissals = 0
+    var bringBacks = 0
     var heldDismissal: (() -> Unit)? = null
 
     override fun keyguardLocked() = lockKeyguard
     override fun launchedFrom(): String? = fromPackage ?: super.launchedFrom()
-    override fun canStartInBackground(): Boolean = allowBackgroundStart
+    override fun bringBackTheAppTheyWereIn() {
+        bringBacks++
+        super.bringBackTheAppTheyWereIn()
+    }
     override fun requestKeyguardDismissed(run: () -> Unit) {
         dismissals++
         heldDismissal = run

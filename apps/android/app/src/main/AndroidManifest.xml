@@ -59,11 +59,13 @@
 
         <!-- The trampoline external entry points land in (entry/EntryCommands.kt for the actions
              and extras). Nothing is ever shown in the common case: the command runs and the
-             activity finishes inside onCreate, before a window exists — the system fires app
-             shortcuts with FLAG_ACTIVITY_TASK_ON_HOME, and a trampoline that ever becomes the
-             visible task would return the user to the home screen when it finishes, out of the
-             app they were dictating into. Out of Recents, no history; exported because Samsung's
-             RegiStar, Modes and Routines, launchers and Tasker all fire at it from outside. -->
+             activity finishes inside onCreate, before a window exists. The system fires app
+             shortcuts with FLAG_ACTIVITY_TASK_ON_HOME, which anchors this task's exit to the
+             home screen — so after running the command the trampoline brings the app the user
+             was in back to the front (the accessibility service's last-front-app snapshot) and
+             its own exit happens behind that. Out of Recents, no history; exported because
+             Samsung's RegiStar, Modes and Routines, launchers and Tasker all fire at it from
+             outside. -->
         <activity
             android:name=".entry.DictationEntryActivity"
             android:exported="true"

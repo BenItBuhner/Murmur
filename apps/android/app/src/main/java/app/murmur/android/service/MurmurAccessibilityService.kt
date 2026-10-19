@@ -613,6 +613,32 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         if (pkg == "com.android.systemui" || pkg == "android") return
         if (pkg == defaultKeyboardPackage() || pkg == lastKeyboardWindow?.packageName) return
         frontApp = pkg
+        val cls = event.className?.toString()
+        // An app screen: the event names one of the app's activities, or the app owns the topmost
+        // application window. Apps often report a window of their own instead of the activity
+        // (Chrome coming back reports an obfuscated view class), while a panel another app keeps
+        // over the home screen reports itself without ever being the top application window.
+        val appScreen = (cls != null && isActivity(pkg, cls)) || topApplicationPackage() == pkg
+        recordFront(pkg, event.eventTime, appScreen)
+    }
+
+    /** The package of the topmost application window on screen, or null when it cannot be read. */
+    private fun topApplicationPackage(): String? = runCatching {
+        windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .maxByOrNull { it.layer }
+            ?.let { readRoot(it)?.packageName?.toString() }
+    }.getOrNull()
+
+    /** Activity class names seen in window events, and whether they really are activities. */
+    private val activityClasses = HashMap<String, Boolean>()
+
+    /**
+     * Whether [cls] is one of [pkg]'s activities: an app's own screen, as opposed to a window it
+     * adds over another app (the Google app's feed panel on the home screen reports itself as a
+     * FrameLayout of com.google.android.googlequicksearchbox).
+     */
+    private fun isActivity(pkg: String, cls: String): Boolean = activityClasses.getOrPut("$pkg/$cls") {
+        runCatching { packageManager.getActivityInfo(android.content.ComponentName(pkg, cls), 0) }.isSuccess
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
@@ -1184,6 +1210,59 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         @Volatile
         var frontApp: String? = null
             internal set
+
+        /** One window coming to the front: whose, when (event time, uptimeMillis), and whether it was an activity. */
+        internal data class FrontChange(val pkg: String, val at: Long, val activity: Boolean)
+
+        private const val FRONT_HISTORY = 16
+        private val fronts = ArrayDeque<FrontChange>()
+
+        /** Records a window coming to the front. Internal for tests. */
+        internal fun recordFront(pkg: String, at: Long, activity: Boolean) = synchronized(fronts) {
+            fronts.addLast(FrontChange(pkg, at, activity))
+            while (fronts.size > FRONT_HISTORY) fronts.removeFirst()
+        }
+
+        /** Tests start from a clean history. */
+        internal fun clearFronts() = synchronized(fronts) {
+            fronts.clear()
+            launches.clear()
+        }
+
+        /** When entry trampolines were created (uptimeMillis), newest last. */
+        private val launches = ArrayDeque<Long>()
+
+        /** Records a trampoline launch: the home screen coming up around it is the launch's doing. */
+        internal fun recordLaunch(at: Long) = synchronized(fronts) {
+            launches.addLast(at)
+            while (launches.size > FRONT_HISTORY) launches.removeFirst()
+        }
+
+        /**
+         * How close to a trampoline launch the home screen's window counts as the launch's own
+         * doing: a shortcut launch moves home to the front (FLAG_ACTIVITY_TASK_ON_HOME), and its
+         * window event can be stamped a little before or after the trampoline is created.
+         */
+        internal const val LAUNCH_SLACK_MS = 2_000L
+
+        /**
+         * The app the entry trampoline should put back in front: the latest app screen that came
+         * to the front, by when it happened (events arrive late and out of order), with the home
+         * screen skipped when a launch put it there. Null when the user really was on the home
+         * screen ([home]) or nothing is known. [launchedAt] is when this trampoline was created.
+         */
+        fun appToReturnTo(home: String?, launchedAt: Long): String? {
+            val candidates = synchronized(fronts) {
+                val launchTimes = launches.toList() + launchedAt
+                fronts.filter { f ->
+                    f.at <= launchedAt &&
+                        !(f.pkg == home && launchTimes.any { kotlin.math.abs(f.at - it) <= LAUNCH_SLACK_MS })
+                }
+            }
+            val pick = candidates.filter { it.activity }.maxByOrNull { it.at }
+                ?: candidates.maxByOrNull { it.at } ?: return null
+            return pick.pkg.takeIf { it != home }
+        }
 
         /**
          * Whether the system lets this service filter key events. The capability is read when the

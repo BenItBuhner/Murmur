@@ -52,6 +52,18 @@ class EntryPointsManifestTest {
     }
 
     @Test
+    fun `other apps' launch intents are visible, so the trampoline can return the user to theirs`() {
+        // Without this, Android 11+ hides every other package and getLaunchIntentForPackage
+        // returns null: the trampoline's return silently did nothing and shortcut launches left
+        // the user on the home screen.
+        val manifest = java.io.File("src/main/AndroidManifest.xml").readText()
+        val queries = Regex("<queries>(.*?)</queries>", RegexOption.DOT_MATCHES_ALL).find(manifest)?.groupValues?.get(1)
+        assertNotNull("the manifest declares <queries>", queries)
+        assertTrue(queries!!.contains("android.intent.action.MAIN"))
+        assertTrue(queries.contains("android.intent.category.LAUNCHER"))
+    }
+
+    @Test
     fun `MainActivity carries the shortcuts`() {
         val main = pm.getActivityInfo(ComponentName(context, "app.murmur.android.MainActivity"), PackageManager.GET_META_DATA)
         val resource = main.metaData?.getInt("android.app.shortcuts") ?: 0

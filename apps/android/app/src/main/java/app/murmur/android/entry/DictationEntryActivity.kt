@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Toast
 import app.murmur.android.MainActivity
 import app.murmur.android.R
@@ -25,12 +26,14 @@ import app.murmur.android.ui.Route
  * leaves Idle.
  *
  * Shortcuts are fired by the system with FLAG_ACTIVITY_TASK_ON_HOME (ShortcutParser adds
- * NEW_TASK | CLEAR_TASK | TASK_ON_HOME to a shortcut's intent): a trampoline that finishes
- * lands the user on the HOME screen, out of the app they were in, whatever it does — the task
- * was anchored to home at launch. So after running the command, the trampoline puts the app the
- * user was in ([MurmurAccessibilityService.frontApp]) back in front — the same thing its icon
- * tap does — and its own exit happens behind that. A window-less launch emits no window event,
- * so the service's snapshot still names their app.
+ * NEW_TASK | CLEAR_TASK | TASK_ON_HOME to a shortcut's intent). The moment such a task comes to
+ * the front the system moves the HOME screen up right behind it (Task.moveToFront →
+ * moveHomeRootTaskToFront), so the app the user was in is pushed behind the launcher before this
+ * activity's onCreate even runs: to the user it looks as if their app was closed. Nothing done
+ * inside this activity can undo that move, so every exit that is not a lock-screen or gate path
+ * puts the app the user was in ([MurmurAccessibilityService.appToReturnTo]) back in front, the
+ * same way its launcher icon does, and this activity's own exit happens behind it. That includes
+ * the ignored second fire of a double-firing trigger: it moved home to the front again too.
  *
  * The command needs no resumed activity: the gates require the accessibility service to be
  * running, and the microphone foreground service starts exactly the way it does from the pill,
@@ -47,7 +50,12 @@ open class DictationEntryActivity : Activity() {
     /** Bumped by every command; a keyguard dismissal answers only the latest one. */
     private var generation = 0
 
+    /** When this trampoline was created (uptimeMillis): window changes just before it are the launch's own. */
+    private var createdAt = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        createdAt = SystemClock.uptimeMillis()
+        MurmurAccessibilityService.recordLaunch(createdAt)
         super.onCreate(savedInstanceState)
         // Nothing is drawn and nothing is set as content: the command runs and this finishes
         // before the activity is ever started, let alone resumed.
@@ -73,11 +81,12 @@ open class DictationEntryActivity : Activity() {
         if (current === takenIntent) return
         takenIntent = current
         heldByLockScreen = false
-        if (current == null) return finishQuietly()
-        val command = EntryCommands.parse(current) ?: return finishQuietly()
+        if (current == null) return leave()
+        val command = EntryCommands.parse(current) ?: return leave()
         // Triggers double-fire for one gesture (Samsung's back tap above all); the second within
-        // the window is ignored, so one tap is one command.
-        if (debounced()) return finishQuietly()
+        // the window is ignored, so one tap is one command. Its launch still moved home in front
+        // of the user's app, so it leaves the same way a command does.
+        if (debounced()) return leave()
         if (keyguardLocked()) {
             // The lock screen first: this one path shows the activity (behind the keyguard) and
             // runs the command only once the user got past it. No task juggling then — the user
@@ -140,10 +149,13 @@ open class DictationEntryActivity : Activity() {
         else referrer?.host
     }.getOrNull()
 
-    /** The package of the home app the phone resolves to. */
+    /**
+     * The package of the home app the phone uses. MATCH_DEFAULT_ONLY: without it a phone with a
+     * fallback home (the emulator's Settings has one) can resolve to the wrong package.
+     */
     private fun defaultLauncherPackage(): String? = runCatching {
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        packageManager.resolveActivity(home, 0)?.activityInfo?.packageName
+        packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
     }.getOrNull()
 
     private fun openMurmur(home: Boolean) {
@@ -169,25 +181,50 @@ open class DictationEntryActivity : Activity() {
             EntryCommand.Stop -> DictationController.stopAndInsert(this)
             EntryCommand.Cancel -> DictationController.cancel(this)
         }
-        // The launch of this activity has already moved its task to the front and anchored it to
-        // the home screen (shortcuts are fired with FLAG_ACTIVITY_TASK_ON_HOME), so finishing
-        // alone would land the user on the launcher, out of the app they were in. Put that app's
-        // task back in front first — the same thing its icon tap does — and the exit of this
-        // task happens out of sight.
+        // The launch of this activity has already moved the home screen in front of the app the
+        // user was in (shortcuts are fired with FLAG_ACTIVITY_TASK_ON_HOME), so finishing alone
+        // would leave them on the launcher. Put their app back in front first.
         if (!heldByLockScreen) bringBackTheAppTheyWereIn()
         finishQuietly()
     }
 
+    /** Finishes without running a command, after putting the user's app back in front. */
+    private fun leave() {
+        if (!heldByLockScreen && !keyguardLocked()) bringBackTheAppTheyWereIn()
+        finishQuietly()
+    }
+
     /**
-     * Brings the task of the app the user was in back to the front ([MurmurAccessibilityService.frontApp],
-     * snapshotted by the service before this launch — a window-less trampoline emits no window
-     * event of its own, so the snapshot still names their app). Overridable so tests can watch it.
+     * Brings the task of the app the user was in back to the front, the way its launcher icon
+     * does. Overridable so tests can watch it.
+     *
+     * Two things made this silently do nothing before: without the launcher-intent `<queries>`
+     * in the manifest, Android 11+ package visibility hides every other app from us and
+     * getLaunchIntentForPackage returns null; and without FLAG_ACTIVITY_RESET_TASK_IF_NEEDED a
+     * task that was not started from its icon gets a fresh copy of its main screen stacked on
+     * top instead of just coming forward.
      */
     internal open fun bringBackTheAppTheyWereIn() {
-        val pkg = MurmurAccessibilityService.frontApp ?: return
-        if (pkg == packageName) return
-        val launch = runCatching { packageManager.getLaunchIntentForPackage(pkg) }.getOrNull() ?: return
-        runCatching { startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        val intent = returnIntent() ?: return
+        runCatching { startActivity(intent) }.onSuccess {
+            // Its window event may come late or not at all (an app brought back unchanged often
+            // reports nothing), and a second fire right behind this one has to know where the
+            // user is.
+            (intent.component?.packageName ?: intent.`package`)?.let {
+                MurmurAccessibilityService.recordFront(it, SystemClock.uptimeMillis(), activity = true)
+            }
+        }
+    }
+
+    /** The launch that puts the user's app back in front, or null when there is nothing to return to. */
+    internal fun returnIntent(): Intent? {
+        val pkg = MurmurAccessibilityService.appToReturnTo(defaultLauncherPackage(), createdAt) ?: return null
+        val launch = runCatching { packageManager.getLaunchIntentForPackage(pkg) }.getOrNull() ?: return null
+        return launch.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                Intent.FLAG_ACTIVITY_NO_ANIMATION
+        )
     }
 
     private fun finishQuietly() = finish()

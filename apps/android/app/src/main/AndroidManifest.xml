@@ -24,6 +24,21 @@
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- Package visibility for the entry trampoline: after a shortcut launch (back tap, Routines,
+         Tasker) it puts the app the user was in back in front through that app's launch intent,
+         and on Android 11+ getLaunchIntentForPackage returns null for any app we cannot see. The
+         home app is needed to tell "the user was on the home screen" apart. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
+
     <!-- usesCleartextTraffic: a self-hosted whisper server on the LAN (http://192.168.x.x:8000/v1)
          is a first-class provider, and Android otherwise refuses every plain-http base URL. Hosted
          providers keep using https.
@@ -63,7 +78,9 @@
              shortcuts with FLAG_ACTIVITY_TASK_ON_HOME, which anchors this task's exit to the
              home screen — so after running the command the trampoline brings the app the user
              was in back to the front (the accessibility service's last-front-app snapshot) and
-             its own exit happens behind that. Out of Recents, no history; exported because
+             its own exit happens behind that. Its own task affinity, because shortcuts also carry
+             FLAG_ACTIVITY_CLEAR_TASK: sharing Murmur's would wipe Murmur's own screens on every
+             back tap. Out of Recents, no history; exported because
              Samsung's RegiStar, Modes and Routines, launchers and Tasker all fire at it from
              outside. -->
         <activity
@@ -71,6 +88,7 @@
             android:exported="true"
             android:excludeFromRecents="true"
             android:noHistory="true"
+            android:taskAffinity="app.murmur.android.entry"
             android:theme="@style/Theme.Murmur.Trampoline">
             <intent-filter>
                 <action android:name="app.murmur.android.action.TOGGLE_DICTATION" />

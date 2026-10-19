@@ -67,13 +67,14 @@ class DictationEntryActivityTest {
         DictationController.sink = null
     }
 
-    private fun connectAccessibility() {
+    private fun connectAccessibility(): MurmurAccessibilityService {
         val s = Robolectric.buildService(MurmurAccessibilityService::class.java).create().get()
         val connected = android.accessibilityservice.AccessibilityService::class.java.getDeclaredMethod("onServiceConnected")
         connected.isAccessible = true
         connected.invoke(s)
         service = s
         shadowOf(Looper.getMainLooper()).idle()
+        return s
     }
 
     /** Fires [action] at a fresh trampoline and returns it, configured first, already resumed. */

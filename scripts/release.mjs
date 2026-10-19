@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.26': [
+    'Fixed: a Dictate shortcut fired while you were in another app took you to the home screen instead of leaving you there. Dictation now starts in place — the pill appears over the app you are in and nothing moves.'
+  ],
   '0.6.25': [
     'Start dictation from anywhere: a Dictate shortcut for back tap, Routines, Tasker and your launcher, plus a Quick Settings tile.',
     'Shortcuts, routines and other apps start or stop dictation through four intent actions — TOGGLE, START, STOP and CANCEL_DICTATION — so Samsung RegiStar back taps, Modes and Routines and Tasker buttons work whether the pill is showing or not.',

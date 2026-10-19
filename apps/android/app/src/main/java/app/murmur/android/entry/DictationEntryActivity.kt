@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Toast
 import app.murmur.android.MainActivity
 import app.murmur.android.R
@@ -49,7 +50,11 @@ open class DictationEntryActivity : Activity() {
     /** Bumped by every command; a keyguard dismissal answers only the latest one. */
     private var generation = 0
 
+    /** When this trampoline was created (uptimeMillis): window changes just before it are the launch's own. */
+    private var createdAt = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        createdAt = SystemClock.uptimeMillis()
         super.onCreate(savedInstanceState)
         // Nothing is drawn and nothing is set as content: the command runs and this finishes
         // before the activity is ever started, let alone resumed.
@@ -143,10 +148,13 @@ open class DictationEntryActivity : Activity() {
         else referrer?.host
     }.getOrNull()
 
-    /** The package of the home app the phone resolves to. */
+    /**
+     * The package of the home app the phone uses. MATCH_DEFAULT_ONLY: without it a phone with a
+     * fallback home (the emulator's Settings has one) can resolve to the wrong package.
+     */
     private fun defaultLauncherPackage(): String? = runCatching {
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        packageManager.resolveActivity(home, 0)?.activityInfo?.packageName
+        packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
     }.getOrNull()
 
     private fun openMurmur(home: Boolean) {
@@ -202,8 +210,7 @@ open class DictationEntryActivity : Activity() {
 
     /** The launch that puts the user's app back in front, or null when there is nothing to return to. */
     internal fun returnIntent(): Intent? {
-        val pkg = MurmurAccessibilityService.appToReturnTo(defaultLauncherPackage()) ?: return null
-        if (pkg == packageName) return null
+        val pkg = MurmurAccessibilityService.appToReturnTo(defaultLauncherPackage(), createdAt) ?: return null
         val launch = runCatching { packageManager.getLaunchIntentForPackage(pkg) }.getOrNull() ?: return null
         return launch.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or

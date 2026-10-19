@@ -1224,25 +1224,43 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         }
 
         /** Tests start from a clean history. */
-        internal fun clearFronts() = synchronized(fronts) { fronts.clear() }
+        internal fun clearFronts() = synchronized(fronts) {
+            fronts.clear()
+            launches.clear()
+        }
+
+        /** When entry trampolines were created (uptimeMillis), newest last. */
+        private val launches = ArrayDeque<Long>()
+
+        /** Records a trampoline launch: the home screen coming up around it is the launch's doing. */
+        internal fun recordLaunch(at: Long) = synchronized(fronts) {
+            launches.addLast(at)
+            while (launches.size > FRONT_HISTORY) launches.removeFirst()
+        }
 
         /**
-         * Window changes this close before the trampoline was created are the launch's own doing,
-         * not the user's: a shortcut launch moves the home screen (and its feed panel) to the
-         * front, and the trampoline's own return of the user's app shows up again on the second
-         * fire of a double-firing back tap. The window events can reach this service before the
-         * trampoline runs, so they are told apart by when they happened, not when they arrived.
+         * How close to a trampoline launch the home screen's window counts as the launch's own
+         * doing: a shortcut launch moves home to the front (FLAG_ACTIVITY_TASK_ON_HOME), and its
+         * window event can be stamped a little before or after the trampoline is created.
          */
-        internal const val LAUNCH_SLACK_MS = 1_000L
+        internal const val LAUNCH_SLACK_MS = 2_000L
 
         /**
-         * The app the entry trampoline should put back in front: the last app screen that came to
-         * the front before the launch, or null when that was the home screen ([home]) or nothing
-         * is known. [launchedAt] is when the trampoline was created, in uptimeMillis.
+         * The app the entry trampoline should put back in front: the latest app screen that came
+         * to the front, by when it happened (events arrive late and out of order), with the home
+         * screen skipped when a launch put it there. Null when the user really was on the home
+         * screen ([home]) or nothing is known. [launchedAt] is when this trampoline was created.
          */
         fun appToReturnTo(home: String?, launchedAt: Long): String? {
-            val before = synchronized(fronts) { fronts.filter { it.at <= launchedAt - LAUNCH_SLACK_MS } }
-            val pick = before.lastOrNull { it.activity } ?: before.lastOrNull() ?: return null
+            val candidates = synchronized(fronts) {
+                val launchTimes = launches.toList() + launchedAt
+                fronts.filter { f ->
+                    f.at <= launchedAt &&
+                        !(f.pkg == home && launchTimes.any { kotlin.math.abs(f.at - it) <= LAUNCH_SLACK_MS })
+                }
+            }
+            val pick = candidates.filter { it.activity }.maxByOrNull { it.at }
+                ?: candidates.maxByOrNull { it.at } ?: return null
             return pick.pkg.takeIf { it != home }
         }
 

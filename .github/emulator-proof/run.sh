@@ -8,8 +8,7 @@ mkdir -p "$OUT"
 PKG=app.murmur.android
 TRAMPOLINE=$PKG/.entry.DictationEntryActivity
 SHORTCUT_FLAGS=0x1000C000   # NEW_TASK | CLEAR_TASK | TASK_ON_HOME
-THEIR_APP=com.android.settings
-THEIR_ACTIVITY=com.android.settings/.Settings
+APPS="com.android.settings com.android.chrome com.google.android.deskclock"
 
 front() {
   echo "  resumed: $(adb shell dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity' | sed 's/^ *//')"
@@ -23,8 +22,14 @@ fire() {
 }
 
 open_their_app() {
-  adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n $THEIR_ACTIVITY >/dev/null
-  sleep 4
+  local cmp
+  cmp=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$1" | tail -1 | tr -d '\r')
+  adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$cmp" >/dev/null
+  sleep 5
+}
+
+pass_or_fail() {
+  if adb shell dumpsys window | grep -m1 mCurrentFocus | grep -q "$1"; then echo "  RESULT: PASS ($1 still in front)"; else echo "  RESULT: FAIL ($1 is no longer in front)"; fi
 }
 
 run_build() {
@@ -41,33 +46,35 @@ run_build() {
     <boolean name="allowExternalTriggers" value="true" />
 </map>
 XML
+  adb shell settings delete secure enabled_accessibility_services >/dev/null
+  sleep 2
   adb shell settings put secure enabled_accessibility_services $PKG/$PKG.service.MurmurAccessibilityService
   adb shell settings put secure accessibility_enabled 1
-  sleep 5
-  echo "accessibility: $(adb shell settings get secure enabled_accessibility_services)"
+  for _ in $(seq 1 20); do adb shell pidof $PKG >/dev/null && break; sleep 1; done
+  sleep 3
+  echo "accessibility bound: $(adb shell dumpsys accessibility | grep -c 'app.murmur.android') mentions, murmur pid $(adb shell pidof $PKG)"
 
   adb logcat -c
-  echo "--- scenario 1: one app action over $THEIR_APP"
-  open_their_app
-  echo " before:"; front; shot "$label-1-before"
-  fire
-  sleep 4
-  echo " after:"; front; shot "$label-1-after"
-  adb shell dumpsys activity activities | grep -E '^ *\* Task\{|^ *\* Hist|Task id' | head -20 > "$OUT/$label-1-tasks.txt"
-  echo "--- scenario 1b: app action again (stops the dictation)"
-  fire
-  sleep 4
-  echo " after stop:"; front; shot "$label-1b-after-stop"
-
-  echo "--- scenario 2: a double-firing back tap (two launches 150 ms apart)"
-  open_their_app
-  echo " before:"; front
-  fire; sleep 0.15; fire
-  sleep 4
-  echo " after:"; front; shot "$label-2-after-double"
-  fire; sleep 3   # stop whatever runs
-
-  adb logcat -d | grep -E 'Background activity|BAL|ActivityTaskManager: START|DictationEntry|Murmur' | grep -v 'chatty' | tail -60 > "$OUT/$label-logcat.txt"
+  # Chrome's first run shows a welcome screen; get it out of the way once.
+  adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1
+  adb shell 'echo "chrome --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line'
+  for app in $APPS; do
+    adb shell pm path "$app" >/dev/null 2>&1 || { echo "--- $app not on this image, skipped"; continue; }
+    short=${app##*.}
+    echo "--- $app: one app action (start)"
+    open_their_app "$app"
+    echo " before:"; front; shot "$label-$short-1-before"
+    fire; sleep 4
+    echo " after start:"; front; pass_or_fail "$app"; shot "$label-$short-2-after-start"
+    fire; sleep 4
+    echo " after stop:"; front; pass_or_fail "$app"; shot "$label-$short-3-after-stop"
+    echo "--- $app: double-firing back tap (two launches 150 ms apart)"
+    open_their_app "$app"
+    fire; sleep 0.15; fire; sleep 4
+    echo " after:"; front; pass_or_fail "$app"; shot "$label-$short-4-after-double"
+    fire; sleep 4
+  done
+  adb logcat -d | grep -E 'Background activity|ActivityTaskManager: START|Start proc .*murmur|WINDOW_STATE|AndroidRuntime' > "$OUT/$label-logcat.txt"
   echo " logcat: $(wc -l < "$OUT/$label-logcat.txt") lines kept"
 }
 

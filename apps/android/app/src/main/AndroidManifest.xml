@@ -58,18 +58,17 @@
         </activity>
 
         <!-- The trampoline external entry points land in (entry/EntryCommands.kt for the actions
-             and extras). Transparent and out of Recents: it takes the command, starts or stops
-             the dictation through DictationController while it is resumed (Android 14/15 only
-             let an app in front start the microphone service), and finishes. Its own task
-             (empty taskAffinity) so nothing of Murmur's is disturbed; exported because Samsung's
+             and extras). Nothing is ever shown in the common case: the command runs and the
+             activity finishes inside onCreate, before a window exists — the system fires app
+             shortcuts with FLAG_ACTIVITY_TASK_ON_HOME, and a trampoline that ever becomes the
+             visible task would return the user to the home screen when it finishes, out of the
+             app they were dictating into. Out of Recents, no history; exported because Samsung's
              RegiStar, Modes and Routines, launchers and Tasker all fire at it from outside. -->
         <activity
             android:name=".entry.DictationEntryActivity"
             android:exported="true"
             android:excludeFromRecents="true"
             android:noHistory="true"
-            android:taskAffinity=""
-            android:launchMode="singleInstance"
             android:theme="@style/Theme.Murmur.Trampoline">
             <intent-filter>
                 <action android:name="app.murmur.android.action.TOGGLE_DICTATION" />

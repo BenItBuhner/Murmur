@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import app.murmur.android.MainActivity
 import app.murmur.android.R
@@ -19,22 +20,32 @@ import app.murmur.android.ui.Route
 
 /**
  * The trampoline external triggers land in: Samsung RegiStar back taps, Modes and Routines,
- * launcher shortcuts, Tasker, the Quick Settings tile. It checks the gates, hands the command to
- * DictationController while it is resumed — Android 14/15 only let an app that is in front start
- * the microphone foreground service — and vanishes at once: fully transparent, no transition,
- * never in Recents. The accessibility service shows the pill the moment the controller leaves
- * Idle, so the overlay needs no new code here.
+ * launcher shortcuts, Tasker, the Quick Settings tile. It takes the command, hands it to
+ * DictationController, and finishes — all inside onCreate, before a window ever exists, so the
+ * app being dictated into never pauses and the accessibility service shows the pill over it the
+ * moment the controller leaves Idle.
  *
- * `Theme.NoDisplay` never reaches onResume, which is exactly what must not happen (the controller
- * is called from the resumed trampoline, and the FGS start from it), so the theme is translucent
- * instead.
+ * Why no window: the system fires static app shortcuts with FLAG_ACTIVITY_TASK_ON_HOME
+ * (ShortcutParser adds NEW_TASK | CLEAR_TASK | TASK_ON_HOME to a shortcut's intent), and a
+ * trampoline that ever becomes the visible task returns the user to the HOME screen when it
+ * finishes — out of the app they were in. One that finishes before it is resumed never becomes
+ * the front task, so nothing moves.
+ *
+ * Why the command may run without a resumed activity: the microphone foreground service starts
+ * the way it does from the pill, from the accessibility service's process (the overlay
+ * permission from onboarding exempts the start; the service running is one of the gates). Only
+ * without the overlay permission does the start have to come from an app in front, and then the
+ * command waits for onResume instead.
  */
 open class DictationEntryActivity : Activity() {
 
-    /** Whether the activity is between onResume and onPause right now. */
-    private var resumed = false
+    /**
+     * A command waiting for this activity to resume: the restricted fallback (no overlay
+     * permission), where the microphone service must start from a top activity.
+     */
+    private var pendingCommand: EntryCommand? = null
 
-    /** The intent whose command has been taken, so a re-resume (the keyguard flow) cannot take it twice. */
+    /** The intent whose command has been taken, so a re-delivery cannot take it twice. */
     private var takenIntent: Intent? = null
 
     /** Bumped by every command; a keyguard dismissal answers only the latest one. */
@@ -42,25 +53,26 @@ open class DictationEntryActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Nothing is drawn and nothing is set as content: the theme is fully transparent.
+        // Nothing is drawn and nothing is set as content: the command runs and this finishes
+        // before the activity is ever started, let alone resumed.
+        takeCurrent()
     }
 
     override fun onResume() {
         super.onResume()
-        resumed = true
-        takeCurrent()
-    }
-
-    override fun onPause() {
-        resumed = false
-        super.onPause()
+        // The restricted fallback only: a command parked by [run] until an app is in front.
+        val command = pendingCommand
+        if (command != null) {
+            pendingCommand = null
+            execute(command)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // A live instance gets the next trigger here; one still being born gets it through onResume.
-        if (resumed && !isFinishing) takeCurrent()
+        // A live instance gets the next trigger here; one still being born got it in onCreate.
+        if (!isFinishing) takeCurrent()
     }
 
     /** Takes the current intent's command, once per intent. */
@@ -70,26 +82,29 @@ open class DictationEntryActivity : Activity() {
         takenIntent = current
         if (current == null) return finishQuietly()
         val command = EntryCommands.parse(current) ?: return finishQuietly()
-        val mine = ++generation
         // Triggers double-fire for one gesture (Samsung's back tap above all); the second within
         // the window is ignored, so one tap is one command.
         if (debounced()) return finishQuietly()
         if (keyguardLocked()) {
-            // The lock screen first; the command runs only once the user got past it.
+            // The lock screen first: this one path shows the activity (behind the keyguard) and
+            // runs the command only once the user got past it.
+            val mine = ++generation
             requestKeyguardDismissed {
-                if (generation == mine && !isFinishing) run(command)
+                if (generation == mine && !isFinishing) run(command, mayDefer = false)
             }
             return
         }
-        run(command)
+        run(command, mayDefer = true)
     }
 
     /**
      * Gates the command through, or shows why it cannot run (and where to fix it) and finishes.
      * Only a command that would start a session is gated: stopping or cancelling one in flight
-     * never needs the microphone or a field.
+     * never needs the microphone or a field. A session start the process cannot make on its own
+     * (no overlay permission) waits for [onResume] instead of running right now — unless
+     * [mayDefer] is false, when this activity is already the one in front (the keyguard flow).
      */
-    private fun run(command: EntryCommand) {
+    private fun run(command: EntryCommand, mayDefer: Boolean) {
         if (startsSession(command)) {
             refusal()?.let {
                 Toast.makeText(this, getString(it.message), Toast.LENGTH_SHORT).show()
@@ -97,9 +112,16 @@ open class DictationEntryActivity : Activity() {
                 finishQuietly()
                 return
             }
+            if (!canStartInBackground() && mayDefer) {
+                pendingCommand = command
+                return
+            }
         }
         execute(command)
     }
+
+    /** Overridable so tests can allow or refuse the no-window start. */
+    internal open fun canStartInBackground(): Boolean = Settings.canDrawOverlays(this)
 
     private fun startsSession(command: EntryCommand): Boolean = when (command) {
         is EntryCommand.Start -> DictationController.state.value is DictationState.Idle
@@ -150,11 +172,11 @@ open class DictationEntryActivity : Activity() {
             is EntryCommand.Start ->
                 if (command.command) {
                     // Command mode: the selection must be read in the user's app, not here. The
-                    // session (and the microphone service) starts now, while this activity is
-                    // resumed; only the selection read waits until the trampoline is gone
-                    // (selectionDelayMs), when the field the user had focused is in front again.
-                    // Best effort: a field whose app has not settled again in time reads as no
-                    // selection and the session ends with the "select some text" notice.
+                    // session (and the microphone service) starts at once — this window is gone
+                    // before it exists — and only the selection read waits the short delay, when
+                    // the field the user had focused is in front again. Best effort: a field
+                    // whose app has not settled again in time reads as no selection and the
+                    // session ends with the "select some text" notice.
                     DictationController.start(this, DictationMode.COMMAND, selectionDelayMs = COMMAND_SELECTION_DELAY_MS)
                 } else {
                     DictationController.start(this, DictationMode.HANDS_FREE)

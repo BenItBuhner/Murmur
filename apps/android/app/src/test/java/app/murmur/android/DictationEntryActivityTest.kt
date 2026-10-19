@@ -228,6 +228,37 @@ class DictationEntryActivityTest {
     // ---- the double-fire and the lock screen ------------------------------------------------------
 
     @Test
+    fun `a shortcut never comes to the front - the command runs before any window`() {
+        // The regression this class guards against: app shortcuts are fired with
+        // FLAG_ACTIVITY_TASK_ON_HOME, so a trampoline that ever becomes the visible task returns
+        // the user to the home screen when it finishes. With the overlay permission (the
+        // onboarding default) the dictation starts the way it does from the pill, from the
+        // accessibility service, and the trampoline is finished before it is ever started.
+        connectAccessibility()
+        val intent = Intent(context, TestEntryActivity::class.java).setAction(EntryActions.TOGGLE_DICTATION)
+        val controller = Robolectric.buildActivity(TestEntryActivity::class.java, intent)
+        controller.get().allowBackgroundStart = true
+        controller.create() // no start(), no setup(): there is nothing to resume
+        assertTrue("dictation starts with no window at all", DictationController.state.value is DictationState.Listening)
+        assertTrue(controller.get().isFinishing)
+        DictationController.cancel(context)
+    }
+
+    @Test
+    fun `without the overlay permission a session start waits until the trampoline is in front`() {
+        connectAccessibility()
+        val intent = Intent(context, TestEntryActivity::class.java).setAction(EntryActions.TOGGLE_DICTATION)
+        val controller = Robolectric.buildActivity(TestEntryActivity::class.java, intent)
+        controller.get().allowBackgroundStart = false
+        controller.create()
+        assertTrue("the microphone service waits for a top activity", DictationController.state.value is DictationState.Idle)
+        controller.start()
+        controller.resume()
+        assertTrue(DictationController.state.value is DictationState.Listening)
+        DictationController.cancel(context)
+    }
+
+    @Test
     fun `a trigger that double-fires inside the debounce window is one command`() {
         connectAccessibility()
         fire(EntryActions.TOGGLE_DICTATION)
@@ -274,15 +305,17 @@ class DictationEntryActivityTest {
     }
 }
 
-/** The trampoline with its keyguard and caller steered from the test. */
+/** The trampoline with its keyguard, caller and background-start permission steered from the test. */
 class TestEntryActivity : DictationEntryActivity() {
     var lockKeyguard = false
     var fromPackage: String? = null
+    var allowBackgroundStart = false
     var dismissals = 0
     var heldDismissal: (() -> Unit)? = null
 
     override fun keyguardLocked() = lockKeyguard
     override fun launchedFrom(): String? = fromPackage ?: super.launchedFrom()
+    override fun canStartInBackground(): Boolean = allowBackgroundStart
     override fun requestKeyguardDismissed(run: () -> Unit) {
         dismissals++
         heldDismissal = run

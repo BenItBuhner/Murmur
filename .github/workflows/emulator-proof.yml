@@ -1,0 +1,61 @@
+# One-off: proves on an emulator that an app action (static shortcut) no longer kicks the user out
+# of the app they are in. Builds main and this branch, runs .github/emulator-proof/run.sh on both
+# and pushes the screenshots and window dumps to the emulator-proof-results branch.
+name: Emulator proof
+on:
+  push:
+    branches: [claude/emulator-proof]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: base
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build the fix
+        working-directory: apps/android
+        run: ./gradlew :app:assembleDirectDebug
+      - name: Build main
+        working-directory: base/apps/android
+        run: ./gradlew :app:assembleDirectDebug
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: OUT=proof bash .github/emulator-proof/run.sh main=base/apps/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk fix=apps/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-proof
+          path: proof
+      - name: Publish results
+        if: always()
+        run: |
+          cd proof
+          git init -q -b emulator-proof-results
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Emulator proof for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" emulator-proof-results

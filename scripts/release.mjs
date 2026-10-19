@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.28': [
+    'Fixed for real this time: a back tap, Routine or Dictate shortcut no longer closes the app you are in. The app stays in front with the pill over it, also when a back tap double-fires, and Murmur no longer loses its own screens on every tap. Checked on an Android emulator over Settings, Chrome and Clock.'
+  ],
   '0.6.27': [
     'Fixed properly: a Dictate shortcut fired while you were in another app took you to the home screen. Your app is now put straight back in front of you, where it was, and the pill appears over it — no app closing, no home screen.'
   ],

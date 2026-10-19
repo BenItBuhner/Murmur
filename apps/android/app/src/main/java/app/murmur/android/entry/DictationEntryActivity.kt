@@ -55,6 +55,7 @@ open class DictationEntryActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         createdAt = SystemClock.uptimeMillis()
+        MurmurAccessibilityService.recordLaunch(createdAt)
         super.onCreate(savedInstanceState)
         // Nothing is drawn and nothing is set as content: the command runs and this finishes
         // before the activity is ever started, let alone resumed.
@@ -205,7 +206,14 @@ open class DictationEntryActivity : Activity() {
      */
     internal open fun bringBackTheAppTheyWereIn() {
         val intent = returnIntent() ?: return
-        runCatching { startActivity(intent) }
+        runCatching { startActivity(intent) }.onSuccess {
+            // Its window event may come late or not at all (an app brought back unchanged often
+            // reports nothing), and a second fire right behind this one has to know where the
+            // user is.
+            (intent.component?.packageName ?: intent.`package`)?.let {
+                MurmurAccessibilityService.recordFront(it, SystemClock.uptimeMillis(), activity = true)
+            }
+        }
     }
 
     /** The launch that puts the user's app back in front, or null when there is nothing to return to. */

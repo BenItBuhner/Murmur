@@ -307,11 +307,21 @@ class DictationEntryActivityTest {
     fun `window changes caused by the launch itself do not count as where the user was`() {
         val launchedAt = 100_000L
         MurmurAccessibilityService.recordFront("com.their.app", launchedAt - 20_000, activity = true)
-        // The shortcut launch moved home to the front, its feed panel came with it, and on a
-        // double fire the first trampoline's return of their app shows up again: all just now.
-        MurmurAccessibilityService.recordFront("com.home", launchedAt - 300, activity = true)
+        // The shortcut launch moved home to the front and its feed panel came with it, both
+        // stamped around the launch and delivered in no particular order.
         MurmurAccessibilityService.recordFront("com.google.android.googlequicksearchbox", launchedAt - 250, activity = false)
-        MurmurAccessibilityService.recordFront("com.their.app", launchedAt - 100, activity = true)
+        MurmurAccessibilityService.recordFront("com.home", launchedAt - 300, activity = true)
+        assertEquals("com.their.app", MurmurAccessibilityService.appToReturnTo("com.home", launchedAt))
+    }
+
+    @Test
+    fun `events are ordered by when they happened, not when they arrived`() {
+        val launchedAt = 100_000L
+        MurmurAccessibilityService.recordLaunch(launchedAt - 6_000)
+        // The previous command returned them to their app; home's event from that launch is
+        // stamped earlier but arrived later.
+        MurmurAccessibilityService.recordFront("com.their.app", launchedAt - 5_400, activity = true)
+        MurmurAccessibilityService.recordFront("com.home", launchedAt - 5_800, activity = true)
         assertEquals("com.their.app", MurmurAccessibilityService.appToReturnTo("com.home", launchedAt))
     }
 

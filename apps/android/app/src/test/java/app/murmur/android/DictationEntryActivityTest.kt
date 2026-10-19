@@ -52,6 +52,8 @@ class DictationEntryActivityTest {
         if (DictationController.isListening) DictationController.cancel(context)
         DictationController.dismiss()
         MurmurAccessibilityService.frontApp = null
+        MurmurAccessibilityService.previousFrontApp = null
+        MurmurAccessibilityService.frontAppSince = 0L
         shadowOf(context).grantPermissions(Manifest.permission.RECORD_AUDIO)
         SettingsStore.get(context).update {
             it.copy(onboardingComplete = true, useFixtureAudio = true, allowExternalTriggers = true, updateAutoCheck = false)
@@ -281,6 +283,54 @@ class DictationEntryActivityTest {
         // System furniture never counts as the app the user is in.
         windowOf("com.android.systemui")
         assertEquals("com.their.app", MurmurAccessibilityService.frontApp)
+        MurmurAccessibilityService.frontApp = null
+    }
+
+    @Test
+    fun `the return launch brings their existing task forward the way its icon does`() {
+        connectAccessibility()
+        shadowOf(context.packageManager).addActivityIfNotPresent(android.content.ComponentName("com.their.app", "com.their.app.Main"))
+        shadowOf(context.packageManager).addIntentFilterForActivity(
+            android.content.ComponentName("com.their.app", "com.their.app.Main"),
+            android.content.IntentFilter(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+        )
+        MurmurAccessibilityService.frontApp = "com.their.app"
+        val entry = fire(EntryActions.TOGGLE_DICTATION)
+        val started = takeStarted(entry)
+        assertNotNull("their app is launched back to the front", started)
+        assertEquals("com.their.app", started!!.component?.packageName)
+        val wanted = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+        assertEquals("an existing task comes forward instead of gaining a new screen",
+            wanted, started.flags and wanted)
+        DictationController.cancel(context)
+        MurmurAccessibilityService.frontApp = null
+    }
+
+    @Test
+    fun `home moved forward by the launch itself does not count as where the user was`() {
+        MurmurAccessibilityService.previousFrontApp = "com.their.app"
+        MurmurAccessibilityService.frontApp = "com.home"
+        MurmurAccessibilityService.frontAppSince = 10_000L
+        assertEquals("home came up a moment ago: the launch did that",
+            "com.their.app", MurmurAccessibilityService.appToReturnTo("com.home", now = 10_300L))
+        assertNull("home has been in front a while: the user was on it",
+            MurmurAccessibilityService.appToReturnTo("com.home", now = 30_000L))
+        MurmurAccessibilityService.frontApp = "com.their.app"
+        assertEquals("com.their.app", MurmurAccessibilityService.appToReturnTo("com.home", now = 30_000L))
+        MurmurAccessibilityService.frontApp = null
+        MurmurAccessibilityService.previousFrontApp = null
+        MurmurAccessibilityService.frontAppSince = 0L
+    }
+
+    @Test
+    fun `the ignored second fire of a double tap also puts their app back`() {
+        connectAccessibility()
+        MurmurAccessibilityService.frontApp = "com.their.app"
+        fire(EntryActions.TOGGLE_DICTATION)
+        val second = fire(EntryActions.TOGGLE_DICTATION)
+        assertEquals("its launch moved home forward too, so it returns them as well", 1, second.bringBacks)
+        assertTrue(second.isFinishing)
+        DictationController.cancel(context)
         MurmurAccessibilityService.frontApp = null
     }
 

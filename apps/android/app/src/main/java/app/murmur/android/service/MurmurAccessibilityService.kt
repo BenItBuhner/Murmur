@@ -612,7 +612,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val pkg = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return
         if (pkg == "com.android.systemui" || pkg == "android") return
         if (pkg == defaultKeyboardPackage() || pkg == lastKeyboardWindow?.packageName) return
+        if (pkg == frontApp) return
+        previousFrontApp = frontApp
         frontApp = pkg
+        frontAppSince = SystemClock.uptimeMillis()
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
@@ -1184,6 +1187,36 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         @Volatile
         var frontApp: String? = null
             internal set
+
+        /** The app that was in front before [frontApp]. Internal setter for tests. */
+        @Volatile
+        var previousFrontApp: String? = null
+            internal set
+
+        /** When [frontApp] came to the front, in uptimeMillis (0 when unknown). */
+        @Volatile
+        internal var frontAppSince = 0L
+
+        /**
+         * How recently the home screen must have come forward for it to count as the shortcut
+         * launch's own doing rather than the user's: the system moves home to the front as part
+         * of the launch (FLAG_ACTIVITY_TASK_ON_HOME), and its window event can reach this service
+         * before the trampoline reads the snapshot.
+         */
+        internal const val HOME_ANCHOR_WINDOW_MS = 1_500L
+
+        /**
+         * The app the entry trampoline should put back in front, or null when there is none (the
+         * user was on the home screen, or nothing is known). [home] is the launcher's package.
+         * When home is in front only because the launch just moved it there, the app before it
+         * is the one the user was in.
+         */
+        fun appToReturnTo(home: String?, now: Long = SystemClock.uptimeMillis()): String? {
+            val front = frontApp ?: return null
+            if (front != home) return front
+            if (frontAppSince == 0L || now - frontAppSince > HOME_ANCHOR_WINDOW_MS) return null
+            return previousFrontApp?.takeIf { it != home }
+        }
 
         /**
          * Whether the system lets this service filter key events. The capability is read when the

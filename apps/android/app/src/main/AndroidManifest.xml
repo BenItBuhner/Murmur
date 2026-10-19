@@ -24,6 +24,16 @@
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- Package visibility for the entry trampoline: after a shortcut launch (back tap, Routines,
+         Tasker) it puts the app the user was in back in front through that app's launch intent,
+         and on Android 11+ getLaunchIntentForPackage returns null for any app we cannot see. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <!-- usesCleartextTraffic: a self-hosted whisper server on the LAN (http://192.168.x.x:8000/v1)
          is a first-class provider, and Android otherwise refuses every plain-http base URL. Hosted
          providers keep using https.

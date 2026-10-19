@@ -614,8 +614,20 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         if (pkg == defaultKeyboardPackage() || pkg == lastKeyboardWindow?.packageName) return
         frontApp = pkg
         val cls = event.className?.toString()
-        recordFront(pkg, event.eventTime, cls != null && isActivity(pkg, cls))
+        // An app screen: the event names one of the app's activities, or the app owns the topmost
+        // application window. Apps often report a window of their own instead of the activity
+        // (Chrome coming back reports an obfuscated view class), while a panel another app keeps
+        // over the home screen reports itself without ever being the top application window.
+        val appScreen = (cls != null && isActivity(pkg, cls)) || topApplicationPackage() == pkg
+        recordFront(pkg, event.eventTime, appScreen)
     }
+
+    /** The package of the topmost application window on screen, or null when it cannot be read. */
+    private fun topApplicationPackage(): String? = runCatching {
+        windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .maxByOrNull { it.layer }
+            ?.let { readRoot(it)?.packageName?.toString() }
+    }.getOrNull()
 
     /** Activity class names seen in window events, and whether they really are activities. */
     private val activityClasses = HashMap<String, Boolean>()

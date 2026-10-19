@@ -379,6 +379,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 trace(describe(event, start))
                 if (event.contentChangeTypes == 0) event.packageName?.toString()?.let { windowOpenedAt[it] = start }
+                rememberFrontApp(event)
                 if (keyboard.visible) anotherAppComingUp(event)?.let { keyboardLeaving(it) }
                 updateKeyboardState(force = true)
             }
@@ -597,6 +598,21 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         KeyboardTimingLog.tally("anticipations cancelled")
         trace("anticipation cancelled after ${SystemClock.uptimeMillis() - a.since}ms: $reason")
         syncPillVisibility()
+    }
+
+    /**
+     * The app whose window last came to the front, system furniture aside (the system UI, the
+     * keyboard): what the entry trampoline brings back to the front after a shortcut launch,
+     * because the system fires shortcuts with FLAG_ACTIVITY_TASK_ON_HOME and a trampoline that
+     * finishes would otherwise land the user on the launcher, out of the app they were in. A
+     * window-less trampoline emits no window event of its own, so the snapshot it reads still
+     * names the app the user was in.
+     */
+    private fun rememberFrontApp(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return
+        if (pkg == "com.android.systemui" || pkg == "android") return
+        if (pkg == defaultKeyboardPackage() || pkg == lastKeyboardWindow?.packageName) return
+        frontApp = pkg
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
@@ -1160,6 +1176,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             private set
 
         val isRunning: Boolean get() = instance != null
+
+        /**
+         * The app whose window last came to the front (system furniture aside): the entry
+         * trampoline returns the user to it after a shortcut launch. Internal setter for tests.
+         */
+        @Volatile
+        var frontApp: String? = null
+            internal set
 
         /**
          * Whether the system lets this service filter key events. The capability is read when the

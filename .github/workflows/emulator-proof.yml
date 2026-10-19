@@ -43,7 +43,7 @@ jobs:
           profile: pixel_6
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: OUT=proof bash .github/emulator-proof/run.sh main=base/apps/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk fix=apps/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk
+          script: OUT=proof bash .github/emulator-proof/run.sh main=base/apps/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk fix=apps/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk fix-again=apps/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk
       - uses: actions/upload-artifact@v4
         if: always()
         with:

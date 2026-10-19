@@ -52,8 +52,7 @@ class DictationEntryActivityTest {
         if (DictationController.isListening) DictationController.cancel(context)
         DictationController.dismiss()
         MurmurAccessibilityService.frontApp = null
-        MurmurAccessibilityService.previousFrontApp = null
-        MurmurAccessibilityService.frontAppSince = 0L
+        MurmurAccessibilityService.clearFronts()
         shadowOf(context).grantPermissions(Manifest.permission.RECORD_AUDIO)
         SettingsStore.get(context).update {
             it.copy(onboardingComplete = true, useFixtureAudio = true, allowExternalTriggers = true, updateAutoCheck = false)
@@ -258,14 +257,12 @@ class DictationEntryActivityTest {
     }
 
     @Test
-    fun `nothing is brought back when Murmur itself was in front`() {
+    fun `nothing is brought back when the user was on the home screen`() {
         connectAccessibility()
-        MurmurAccessibilityService.frontApp = context.packageName
-        val entry = fire(EntryActions.TOGGLE_DICTATION)
-        assertEquals("the return was decided against", 1, entry.bringBacks)
-        assertTrue("Murmur does not relaunch itself", nothingStarted(entry))
-        DictationController.cancel(context)
-        MurmurAccessibilityService.frontApp = null
+        val now = android.os.SystemClock.uptimeMillis()
+        MurmurAccessibilityService.recordFront("com.their.app", now - 60_000, activity = true)
+        MurmurAccessibilityService.recordFront("com.home", now - 30_000, activity = true)
+        assertNull(MurmurAccessibilityService.appToReturnTo("com.home", launchedAt = now))
     }
 
     @Test
@@ -294,7 +291,7 @@ class DictationEntryActivityTest {
             android.content.ComponentName("com.their.app", "com.their.app.Main"),
             android.content.IntentFilter(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
         )
-        MurmurAccessibilityService.frontApp = "com.their.app"
+        MurmurAccessibilityService.recordFront("com.their.app", android.os.SystemClock.uptimeMillis() - 5_000, activity = true)
         val entry = fire(EntryActions.TOGGLE_DICTATION)
         val started = takeStarted(entry)
         assertNotNull("their app is launched back to the front", started)
@@ -307,25 +304,30 @@ class DictationEntryActivityTest {
     }
 
     @Test
-    fun `home moved forward by the launch itself does not count as where the user was`() {
-        MurmurAccessibilityService.previousFrontApp = "com.their.app"
-        MurmurAccessibilityService.frontApp = "com.home"
-        MurmurAccessibilityService.frontAppSince = 10_000L
-        assertEquals("home came up a moment ago: the launch did that",
-            "com.their.app", MurmurAccessibilityService.appToReturnTo("com.home", now = 10_300L))
-        assertNull("home has been in front a while: the user was on it",
-            MurmurAccessibilityService.appToReturnTo("com.home", now = 30_000L))
-        MurmurAccessibilityService.frontApp = "com.their.app"
-        assertEquals("com.their.app", MurmurAccessibilityService.appToReturnTo("com.home", now = 30_000L))
-        MurmurAccessibilityService.frontApp = null
-        MurmurAccessibilityService.previousFrontApp = null
-        MurmurAccessibilityService.frontAppSince = 0L
+    fun `window changes caused by the launch itself do not count as where the user was`() {
+        val launchedAt = 100_000L
+        MurmurAccessibilityService.recordFront("com.their.app", launchedAt - 20_000, activity = true)
+        // The shortcut launch moved home to the front, its feed panel came with it, and on a
+        // double fire the first trampoline's return of their app shows up again: all just now.
+        MurmurAccessibilityService.recordFront("com.home", launchedAt - 300, activity = true)
+        MurmurAccessibilityService.recordFront("com.google.android.googlequicksearchbox", launchedAt - 250, activity = false)
+        MurmurAccessibilityService.recordFront("com.their.app", launchedAt - 100, activity = true)
+        assertEquals("com.their.app", MurmurAccessibilityService.appToReturnTo("com.home", launchedAt))
+    }
+
+    @Test
+    fun `a panel another app adds over the home screen is not an app the user was in`() {
+        val launchedAt = 100_000L
+        MurmurAccessibilityService.recordFront("com.their.app", launchedAt - 60_000, activity = true)
+        MurmurAccessibilityService.recordFront("com.home", launchedAt - 30_000, activity = true)
+        MurmurAccessibilityService.recordFront("com.google.android.googlequicksearchbox", launchedAt - 29_000, activity = false)
+        assertNull("they were on home, so nothing is launched",
+            MurmurAccessibilityService.appToReturnTo("com.home", launchedAt))
     }
 
     @Test
     fun `the ignored second fire of a double tap also puts their app back`() {
         connectAccessibility()
-        MurmurAccessibilityService.frontApp = "com.their.app"
         fire(EntryActions.TOGGLE_DICTATION)
         val second = fire(EntryActions.TOGGLE_DICTATION)
         assertEquals("its launch moved home forward too, so it returns them as well", 1, second.bringBacks)

@@ -612,10 +612,21 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         val pkg = event.packageName?.toString()?.takeIf { it.isNotEmpty() } ?: return
         if (pkg == "com.android.systemui" || pkg == "android") return
         if (pkg == defaultKeyboardPackage() || pkg == lastKeyboardWindow?.packageName) return
-        if (pkg == frontApp) return
-        previousFrontApp = frontApp
         frontApp = pkg
-        frontAppSince = SystemClock.uptimeMillis()
+        val cls = event.className?.toString()
+        recordFront(pkg, event.eventTime, cls != null && isActivity(pkg, cls))
+    }
+
+    /** Activity class names seen in window events, and whether they really are activities. */
+    private val activityClasses = HashMap<String, Boolean>()
+
+    /**
+     * Whether [cls] is one of [pkg]'s activities: an app's own screen, as opposed to a window it
+     * adds over another app (the Google app's feed panel on the home screen reports itself as a
+     * FrameLayout of com.google.android.googlequicksearchbox).
+     */
+    private fun isActivity(pkg: String, cls: String): Boolean = activityClasses.getOrPut("$pkg/$cls") {
+        runCatching { packageManager.getActivityInfo(android.content.ComponentName(pkg, cls), 0) }.isSuccess
     }
 
     // ---- keyboard tracking ----------------------------------------------------------------
@@ -1188,34 +1199,39 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         var frontApp: String? = null
             internal set
 
-        /** The app that was in front before [frontApp]. Internal setter for tests. */
-        @Volatile
-        var previousFrontApp: String? = null
-            internal set
+        /** One window coming to the front: whose, when (event time, uptimeMillis), and whether it was an activity. */
+        internal data class FrontChange(val pkg: String, val at: Long, val activity: Boolean)
 
-        /** When [frontApp] came to the front, in uptimeMillis (0 when unknown). */
-        @Volatile
-        internal var frontAppSince = 0L
+        private const val FRONT_HISTORY = 16
+        private val fronts = ArrayDeque<FrontChange>()
 
-        /**
-         * How recently the home screen must have come forward for it to count as the shortcut
-         * launch's own doing rather than the user's: the system moves home to the front as part
-         * of the launch (FLAG_ACTIVITY_TASK_ON_HOME), and its window event can reach this service
-         * before the trampoline reads the snapshot.
-         */
-        internal const val HOME_ANCHOR_WINDOW_MS = 1_500L
+        /** Records a window coming to the front. Internal for tests. */
+        internal fun recordFront(pkg: String, at: Long, activity: Boolean) = synchronized(fronts) {
+            fronts.addLast(FrontChange(pkg, at, activity))
+            while (fronts.size > FRONT_HISTORY) fronts.removeFirst()
+        }
+
+        /** Tests start from a clean history. */
+        internal fun clearFronts() = synchronized(fronts) { fronts.clear() }
 
         /**
-         * The app the entry trampoline should put back in front, or null when there is none (the
-         * user was on the home screen, or nothing is known). [home] is the launcher's package.
-         * When home is in front only because the launch just moved it there, the app before it
-         * is the one the user was in.
+         * Window changes this close before the trampoline was created are the launch's own doing,
+         * not the user's: a shortcut launch moves the home screen (and its feed panel) to the
+         * front, and the trampoline's own return of the user's app shows up again on the second
+         * fire of a double-firing back tap. The window events can reach this service before the
+         * trampoline runs, so they are told apart by when they happened, not when they arrived.
          */
-        fun appToReturnTo(home: String?, now: Long = SystemClock.uptimeMillis()): String? {
-            val front = frontApp ?: return null
-            if (front != home) return front
-            if (frontAppSince == 0L || now - frontAppSince > HOME_ANCHOR_WINDOW_MS) return null
-            return previousFrontApp?.takeIf { it != home }
+        internal const val LAUNCH_SLACK_MS = 1_000L
+
+        /**
+         * The app the entry trampoline should put back in front: the last app screen that came to
+         * the front before the launch, or null when that was the home screen ([home]) or nothing
+         * is known. [launchedAt] is when the trampoline was created, in uptimeMillis.
+         */
+        fun appToReturnTo(home: String?, launchedAt: Long): String? {
+            val before = synchronized(fronts) { fronts.filter { it.at <= launchedAt - LAUNCH_SLACK_MS } }
+            val pick = before.lastOrNull { it.activity } ?: before.lastOrNull() ?: return null
+            return pick.pkg.takeIf { it != home }
         }
 
         /**

@@ -17,9 +17,18 @@ front() {
 
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 
-fire() {
-  adb shell am start -a app.murmur.android.action.TOGGLE_DICTATION -n $TRAMPOLINE -f $SHORTCUT_FLAGS >/dev/null
+AM_FIRE="am start -a app.murmur.android.action.TOGGLE_DICTATION -n $TRAMPOLINE -f $SHORTCUT_FLAGS"
+fire() { adb shell "$AM_FIRE" >/dev/null; }
+# Two launches 150 ms apart from inside the device, the way a back tap double-fires.
+double_fire() { adb shell "$AM_FIRE >/dev/null & sleep 0.15; $AM_FIRE >/dev/null; wait"; }
+
+# Whether a dictation is running: the microphone foreground service is up.
+listening() { adb shell dumpsys activity services $PKG | grep -q 'RecordingService' && echo yes || echo no; }
+expect_listening() {
+  local now; now=$(listening)
+  if [ "$now" = "$1" ]; then echo "  dictation running: $now (as expected)"; else echo "  dictation running: $now (EXPECTED $1)"; fi
 }
+ensure_idle() { if [ "$(listening)" = yes ]; then fire; sleep 4; fi; }
 
 open_their_app() {
   local cmp
@@ -62,17 +71,19 @@ XML
     adb shell pm path "$app" >/dev/null 2>&1 || { echo "--- $app not on this image, skipped"; continue; }
     short=${app##*.}
     echo "--- $app: one app action (start)"
+    ensure_idle
     open_their_app "$app"
-    echo " before:"; front; shot "$label-$short-1-before"
+    echo " before:"; front; expect_listening no; shot "$label-$short-1-before"
     fire; sleep 4
-    echo " after start:"; front; pass_or_fail "$app"; shot "$label-$short-2-after-start"
+    echo " after start:"; front; pass_or_fail "$app"; expect_listening yes; shot "$label-$short-2-after-start"
     fire; sleep 4
-    echo " after stop:"; front; pass_or_fail "$app"; shot "$label-$short-3-after-stop"
+    echo " after stop:"; front; pass_or_fail "$app"; expect_listening no; shot "$label-$short-3-after-stop"
     echo "--- $app: double-firing back tap (two launches 150 ms apart)"
+    ensure_idle
     open_their_app "$app"
-    fire; sleep 0.15; fire; sleep 4
-    echo " after:"; front; pass_or_fail "$app"; shot "$label-$short-4-after-double"
-    fire; sleep 4
+    double_fire; sleep 4
+    echo " after:"; front; pass_or_fail "$app"; expect_listening yes; shot "$label-$short-4-after-double"
+    ensure_idle
   done
   adb logcat -d | grep -E 'Background activity|ActivityTaskManager: START|Start proc .*murmur|WINDOW_STATE|AndroidRuntime' > "$OUT/$label-logcat.txt"
   echo " logcat: $(wc -l < "$OUT/$label-logcat.txt") lines kept"

@@ -26,11 +26,13 @@
     </style>
 
     <!--
-        The external-entry trampoline (entry/DictationEntryActivity.kt): fully transparent, no
-        window animation, nothing drawn. It has to actually reach onResume — the dictation is
-        started from the resumed activity, and the microphone foreground service must be started
-        by an app that is in front (Android 14/15 while-in-use rule) — so it is Translucent, not
-        NoDisplay, which never resumes.
+        The external-entry trampoline (entry/DictationEntryActivity.kt). In the common case it
+        never shows anything: the command runs and it finishes inside onCreate, before a window
+        exists (a trampoline that ever became the visible task would return the user to the home
+        screen, because shortcuts are fired with FLAG_ACTIVITY_TASK_ON_HOME). The window is still
+        needed for the paths that keep the activity alive — asking the keyguard to dismiss, and
+        taking the user to Murmur when a gate is shut — so it is fully transparent, no animation,
+        and Translucent rather than NoDisplay (NoDisplay must finish before it resumes).
     -->
     <style name="Theme.Murmur.Trampoline" parent="android:Theme.Translucent.NoTitleBar">
         <item name="android:windowIsTranslucent">true</item>

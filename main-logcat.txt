@@ -1,0 +1,68 @@
+10-19 15:36:12.441   516  1629 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.android.settings/.Settings} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:36:16.979  2992  2992 I MurmurKb: 59801 +1 ev WINDOW_STATE com.android.settings FrameLayout win=11 age=4382ms
+10-19 15:36:21.166  2992  2992 I MurmurKb: 63988 +52 ev WINDOW_STATE app.murmur.android View win=12 age=3693ms
+10-19 15:36:21.288  2992  2992 I MurmurKb: 64110 +0 ev WINDOW_STATE com.android.settings SettingsHomepageActivity win=14 age=3257ms
+10-19 15:36:21.559  2992  2992 I MurmurKb: 64381 +1 ev WINDOW_STATE com.android.settings SettingsHomepageActivity win=14 age=2083ms
+10-19 15:36:21.586  2992  2992 I MurmurKb: 64408 +26 ev WINDOW_STATE app.murmur.android View win=13 age=509ms
+10-19 15:36:27.384   516   530 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:36:28.735  2992  2992 I MurmurKb: 71556 +7146 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=1262ms
+10-19 15:36:28.739  2992  2992 I MurmurKb: 71560 +0 ev WINDOW_STATE com.google.android.googlequicksearchbox FrameLayout win=5 age=1142ms
+10-19 15:36:33.486  2992  2992 I MurmurKb: 76308 +178 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=3278ms
+10-19 15:36:39.558   516  2506 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:36:41.804  2992  2992 I MurmurKb: 84626 +7433 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=788ms
+10-19 15:36:47.843   516   896 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.android.settings/.Settings} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=2
+10-19 15:36:48.579  2992  2992 I MurmurKb: 91400 +522 ev WINDOW_STATE com.android.settings SettingsHomepageActivity win=14 age=578ms
+10-19 15:36:49.823  2992  2992 I MurmurKb: 92644 +289 ev WINDOW_STATE com.android.settings SettingsHomepageActivity win=14 age=7ms
+10-19 15:36:53.677   516   530 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:36:53.989   516   900 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:36:54.405   516  2427 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 pkg=com.android.settings cmp=com.android.settings/.Settings} with LAUNCH_MULTIPLE from uid 10192 (BAL_ALLOW_VISIBLE_WINDOW) result code=2
+10-19 15:36:54.529  2992  2992 I MurmurKb: 97350 +4591 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=745ms
+10-19 15:36:54.531  2992  2992 I MurmurKb: 97352 +0 ev WINDOW_STATE com.google.android.googlequicksearchbox FrameLayout win=5 age=658ms
+10-19 15:36:55.156  2992  2992 I MurmurKb: 97971 +617 ev WINDOW_STATE com.android.settings SettingsHomepageActivity win=14 age=563ms
+10-19 15:37:01.389   516  1687 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:37:02.128   516  2071 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 pkg=com.android.settings cmp=com.android.settings/.Settings} with LAUNCH_MULTIPLE from uid 10192 (BAL_ALLOW_VISIBLE_WINDOW) result code=2
+10-19 15:37:03.236  2992  2992 I MurmurKb: 106057 +7788 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=1462ms
+10-19 15:37:03.238  2992  2992 I MurmurKb: 106059 +0 ev WINDOW_STATE com.google.android.googlequicksearchbox FrameLayout win=5 age=1389ms
+10-19 15:37:04.794  2992  2992 I MurmurKb: 107616 +1556 ev WINDOW_STATE com.android.settings SettingsHomepageActivity win=14 age=2010ms
+10-19 15:37:06.492   516  2504 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.android.chrome/com.google.android.apps.chrome.Main} with LAUNCH_SINGLE_INSTANCE_PER_TASK from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:37:07.620  2992  2992 I MurmurKb: 110441 +2048 ev WINDOW_STATE com.android.chrome FrameLayout win=15 age=646ms
+10-19 15:37:08.918  2992  2992 I MurmurKb: 111740 +481 ev WINDOW_STATE com.android.chrome ChromeTabbedActivity win=16 age=505ms
+10-19 15:37:10.132  2992  2992 I MurmurKb: 112954 +1187 ev WINDOW_STATE com.android.chrome pU win=17 age=507ms
+10-19 15:37:11.582  2992  2992 I MurmurKb: 114404 +426 ev WINDOW_STATE com.android.chrome pU win=17 age=14ms
+10-19 15:37:17.530   516  2414 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:37:20.952  2992  2992 I MurmurKb: 123774 +1291 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=2974ms
+10-19 15:37:21.135  2992  2992 I MurmurKb: 123957 +2 ev WINDOW_STATE com.google.android.googlequicksearchbox FrameLayout win=5 age=2835ms
+10-19 15:37:21.281  2992  2992 I MurmurKb: 124103 +2 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=986ms
+10-19 15:37:28.619   516  2512 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:37:29.551  2992  2992 I MurmurKb: 132369 +8262 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=307ms
+10-19 15:37:35.925   516  2427 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.android.chrome/com.google.android.apps.chrome.Main} with LAUNCH_SINGLE_INSTANCE_PER_TASK from uid 2000 (BAL_ALLOW_PERMISSION) result code=2
+10-19 15:37:36.822  2992  2992 I MurmurKb: 139644 +50 ev WINDOW_STATE com.android.chrome pU win=17 age=6ms
+10-19 15:37:37.717  2992  2992 I MurmurKb: 140539 +127 ev WINDOW_STATE com.android.chrome ChromeTabbedActivity win=16 age=543ms
+10-19 15:37:37.777  2992  2992 I MurmurKb: 140598 +56 ev WINDOW_STATE com.android.chrome pU win=17 age=50ms
+10-19 15:37:41.194   516   900 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:37:41.515   516   901 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:37:42.583  2992  2992 I MurmurKb: 145405 +4777 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=1176ms
+10-19 15:37:42.605  2992  2992 I MurmurKb: 145426 +0 ev WINDOW_STATE com.google.android.googlequicksearchbox FrameLayout win=5 age=1064ms
+10-19 15:37:44.536  2992  2992 I MurmurKb: 147358 +554 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=643ms
+10-19 15:38:36.069   516   899 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:38:37.936  2992  2992 I MurmurKb: 200758 +53392 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=1264ms
+10-19 15:38:40.929   516  2265 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.google.android.deskclock/com.android.deskclock.DeskClock} with LAUNCH_SINGLE_TASK from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:38:41.676  2992  2992 I MurmurKb: 204497 +1431 ev WINDOW_STATE com.google.android.deskclock FrameLayout win=18 age=510ms
+10-19 15:38:43.342  2992  2992 I MurmurKb: 206164 +509 ev WINDOW_STATE com.google.android.deskclock DeskClock win=19 age=561ms
+10-19 15:38:44.963  2992  2992 I MurmurKb: 207785 +189 ev WINDOW_STATE com.google.android.deskclock DeskClock win=19 age=7ms
+10-19 15:38:45.479  2992  2992 I MurmurKb: 208301 +515 ev WINDOW_STATE com.google.android.deskclock FrameLayout win=20 age=547ms
+10-19 15:38:49.953   516   784 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:38:52.333  2992  2992 I MurmurKb: 215155 +0 ev WINDOW_STATE com.google.android.googlequicksearchbox FrameLayout win=22 age=2178ms
+10-19 15:38:52.583  2992  2992 I MurmurKb: 215405 +18 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=2260ms
+10-19 15:38:52.641  2992  2992 I MurmurKb: 215463 +1 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=1026ms
+10-19 15:39:01.799   516  2512 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:39:02.670  2992  2992 I MurmurKb: 225492 +10025 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=222ms
+10-19 15:39:07.741   516  2513 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.google.android.deskclock/com.android.deskclock.DeskClock} with LAUNCH_SINGLE_TASK from uid 2000 (BAL_ALLOW_PERMISSION) result code=2
+10-19 15:39:08.958  2992  2992 I MurmurKb: 231779 +217 ev WINDOW_STATE com.google.android.deskclock FrameLayout win=20 age=387ms
+10-19 15:39:09.325  2992  2992 I MurmurKb: 232147 +2 ev WINDOW_STATE com.google.android.deskclock DeskClock win=19 age=622ms
+10-19 15:39:09.336  2992  2992 I MurmurKb: 232158 +1 ev WINDOW_STATE com.google.android.deskclock DeskClock win=19 age=200ms
+10-19 15:39:13.446   516  2504 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:39:13.709   516   901 I ActivityTaskManager: START u0 {act=app.murmur.android.action.TOGGLE_DICTATION flg=0x1000c000 cmp=app.murmur.android/.entry.DictationEntryActivity} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+10-19 15:39:14.363  2992  2992 I MurmurKb: 237184 +5021 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=891ms
+10-19 15:39:14.374  2992  2992 I MurmurKb: 237195 +1 ev WINDOW_STATE com.google.android.googlequicksearchbox FrameLayout win=22 age=709ms
+10-19 15:39:16.400  2992  2992 I MurmurKb: 239222 +915 ev WINDOW_STATE com.google.android.apps.nexuslauncher NexusLauncherActivity win=1 age=842ms

@@ -1,0 +1,201 @@
+=================== main ===================
+Success
+accessibility bound: 2 mentions, murmur pid 2992
+--- com.android.settings: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.android.settings is no longer in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.android.settings is no longer in front)
+  dictation running: no (as expected)
+--- com.android.settings: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  RESULT: PASS (com.android.settings still in front)
+  dictation running: yes (as expected)
+--- com.android.chrome: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{c08a6ea u0 com.android.chrome/com.google.android.apps.chrome.Main t12}
+  focus:   mCurrentFocus=Window{ff656cd u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.android.chrome is no longer in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.android.chrome is no longer in front)
+  dictation running: no (as expected)
+--- com.android.chrome: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.android.chrome is no longer in front)
+  dictation running: yes (as expected)
+--- com.google.android.deskclock: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.google.android.deskclock is no longer in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.google.android.deskclock is no longer in front)
+  dictation running: no (as expected)
+--- com.google.android.deskclock: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{e802caf u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t7}
+  focus:   mCurrentFocus=Window{a404854 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+  RESULT: FAIL (com.google.android.deskclock is no longer in front)
+  dictation running: no (EXPECTED yes)
+ logcat: 68 lines kept
+=================== fix ===================
+Success
+accessibility bound: 2 mentions, murmur pid 7085
+--- com.android.settings: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  RESULT: PASS (com.android.settings still in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  RESULT: PASS (com.android.settings still in front)
+  dictation running: no (as expected)
+--- com.android.settings: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  RESULT: PASS (com.android.settings still in front)
+  dictation running: no (EXPECTED yes)
+--- com.android.chrome: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{b0470eb u0 com.android.chrome/com.google.android.apps.chrome.Main t26}
+  focus:   mCurrentFocus=Window{ac346c5 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{b0470eb u0 com.android.chrome/com.google.android.apps.chrome.Main t26}
+  focus:   mCurrentFocus=Window{ac346c5 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  RESULT: PASS (com.android.chrome still in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{b0470eb u0 com.android.chrome/com.google.android.apps.chrome.Main t26}
+  focus:   mCurrentFocus=Window{ac346c5 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  RESULT: PASS (com.android.chrome still in front)
+  dictation running: no (as expected)
+--- com.android.chrome: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{b0470eb u0 com.android.chrome/com.google.android.apps.chrome.Main t26}
+  focus:   mCurrentFocus=Window{ac346c5 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  RESULT: PASS (com.android.chrome still in front)
+  dictation running: no (EXPECTED yes)
+--- com.google.android.deskclock: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  RESULT: PASS (com.google.android.deskclock still in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  RESULT: PASS (com.google.android.deskclock still in front)
+  dictation running: no (as expected)
+--- com.google.android.deskclock: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  RESULT: PASS (com.google.android.deskclock still in front)
+  dictation running: yes (as expected)
+ logcat: 75 lines kept
+=================== fix-again ===================
+Success
+accessibility bound: 2 mentions, murmur pid 8139
+--- com.android.settings: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  RESULT: PASS (com.android.settings still in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  RESULT: PASS (com.android.settings still in front)
+  dictation running: no (as expected)
+--- com.android.settings: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{cb5ac79 u0 com.android.settings/.Settings t8}
+  focus:   mCurrentFocus=Window{8584858 u0 com.android.settings/com.android.settings.Settings}
+  RESULT: PASS (com.android.settings still in front)
+  dictation running: yes (as expected)
+--- com.android.chrome: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{9998644 u0 com.android.chrome/com.google.android.apps.chrome.Main t37}
+  focus:   mCurrentFocus=Window{bbeceb6 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{9998644 u0 com.android.chrome/com.google.android.apps.chrome.Main t37}
+  focus:   mCurrentFocus=Window{bbeceb6 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  RESULT: PASS (com.android.chrome still in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{9998644 u0 com.android.chrome/com.google.android.apps.chrome.Main t37}
+  focus:   mCurrentFocus=Window{bbeceb6 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  RESULT: PASS (com.android.chrome still in front)
+  dictation running: no (as expected)
+--- com.android.chrome: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{9998644 u0 com.android.chrome/com.google.android.apps.chrome.Main t37}
+  focus:   mCurrentFocus=Window{bbeceb6 u0 com.android.chrome/com.google.android.apps.chrome.Main}
+  RESULT: PASS (com.android.chrome still in front)
+  dictation running: no (EXPECTED yes)
+--- com.google.android.deskclock: one app action (start)
+ before:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  dictation running: no (as expected)
+ after start:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  RESULT: PASS (com.google.android.deskclock still in front)
+  dictation running: yes (as expected)
+ after stop:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  RESULT: PASS (com.google.android.deskclock still in front)
+  dictation running: no (as expected)
+--- com.google.android.deskclock: double-firing back tap (two launches 150 ms apart)
+ after:
+  resumed: topResumedActivity=ActivityRecord{c58ae3f u0 com.google.android.deskclock/com.android.deskclock.DeskClock t17}
+  focus:   mCurrentFocus=Window{a43eb69 u0 com.google.android.deskclock/com.android.deskclock.DeskClock}
+  RESULT: PASS (com.google.android.deskclock still in front)
+  dictation running: yes (as expected)
+ logcat: 77 lines kept

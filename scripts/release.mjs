@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.27': [
+    'Fixed properly: a Dictate shortcut fired while you were in another app took you to the home screen. Your app is now put straight back in front of you, where it was, and the pill appears over it — no app closing, no home screen.'
+  ],
   '0.6.26': [
     'Fixed: a Dictate shortcut fired while you were in another app took you to the home screen instead of leaving you there. Dictation now starts in place — the pill appears over the app you are in and nothing moves.'
   ],

@@ -214,6 +214,10 @@ object DictationController {
     private var listeningJob: Job? = null
     /** Long dictations to Murmur go up in pieces while they are spoken. */
     @Volatile private var streamer: ChunkStreamer? = null
+    /** Listens for the spoken stop phrase while recording, when the user turned it on. */
+    @Volatile private var stopWatcher: StopPhraseWatcher? = null
+    /** The session in flight was ended by its stop phrase (not a tap). */
+    @Volatile private var phraseStopped = false
     /** Precision mode: each streamed piece formatted on the gateway while the user keeps talking. */
     private var pieceFormats: MutableList<Deferred<PieceFormat>> = java.util.Collections.synchronizedList(ArrayList())
     /** The newest tail speculation's text job and its formatting, while recording. */
@@ -297,6 +301,7 @@ object DictationController {
         this.mode = mode
         locked = mode == DictationMode.HANDS_FREE
         selectionJob = null
+        phraseStopped = false
 
         if (mode == DictationMode.COMMAND) {
             val currentSink = sink
@@ -337,6 +342,7 @@ object DictationController {
             }
             _state.value = DictationState.Listening(0, 0f, mode, locked)
             streamer = if (mode != DictationMode.COMMAND && murmurSpeech(appContext)) newStreamer(appContext, settings) else null
+            stopWatcher = if (settings.stopPhraseEnabled) newStopWatcher(appContext, settings) else null
             // Open the connections to the gateway now, so the release does not pay for them.
             if (murmurSpeech(appContext)) scope.launch { runCatching { InferenceRouter.get(appContext).prewarm() } }
             listeningJob = scope.launch {
@@ -344,6 +350,7 @@ object DictationController {
                     val elapsed = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
                     _state.value = DictationState.Listening(elapsed, recorder.level, this@DictationController.mode, locked)
                     streamer?.let { st -> runCatching { st.poll(recorder.sampleCount()) } }
+                    stopWatcher?.let { w -> runCatching { w.poll(recorder.sampleCount()) } }
                     delay(80)
                 }
             }
@@ -370,6 +377,8 @@ object DictationController {
         listeningJob?.cancel()
         listeningJob = null
         streamer = null
+        stopWatcher?.close()
+        stopWatcher = null
         partialsOf(context).clear(sessionId)
         recorder.cancel()
         RecordingService.stop(context.applicationContext)
@@ -383,10 +392,13 @@ object DictationController {
         val appContext = context.applicationContext
         listeningJob?.cancel()
         listeningJob = null
+        stopWatcher?.close()
+        stopWatcher = null
         stoppedAt = System.currentTimeMillis()
         val settings = SettingsStore.get(appContext).get()
         val mode = this.mode
         val selectionJob = this.selectionJob
+        val phraseHeard = phraseStopped
         _state.value = DictationState.Processing("Transcribing…", mode)
         Haptics.play(appContext, Haptic.STOP)
         Cues.play(appContext, Cue.STOP)
@@ -428,7 +440,7 @@ object DictationController {
                 run = started
                 // A hard deadline: whatever stalls, the pill never sits on "Transcribing…" forever.
                 // The work runs on its own so a blocking request cannot hold the deadline up.
-                val work = scope.async { process(started, pcm, settings, appContext, InferenceRouter.get(appContext), streamed) }
+                val work = scope.async { process(started, pcm, settings, appContext, InferenceRouter.get(appContext), streamed, phraseHeard) }
                 val finished = withTimeoutOrNull(releaseDeadlineMs(pcm.size.toDouble() / SAMPLE_RATE)) { work.await(); true }
                 if (finished == null) {
                     work.cancel()
@@ -595,6 +607,30 @@ object DictationController {
             ) { wav, p -> router.transcribe(resolved, wav, p, Inference.TIER_BACKGROUND) }
             Log.i(TAG, "piece $index (${pcm.size / SAMPLE_RATE} s) transcribed in ${System.currentTimeMillis() - started} ms while recording")
             out.output.text.trim()
+        }
+    }
+
+    /**
+     * The stop phrase listener: on each pause the last few seconds go to the speech model on the
+     * background tier, and a match ends the session as a second tap would.
+     */
+    private fun newStopWatcher(context: Context, s: MurmurSettings): StopPhraseWatcher? {
+        if (StopPhrase.normalized(s.stopPhrase).isEmpty()) return null
+        val router = InferenceRouter.get(context)
+        val target = scope.async(start = CoroutineStart.LAZY) { router.stt() }
+        val id = sessionId
+        return StopPhraseWatcher(
+            scope,
+            read = { from -> recorder.read(from) },
+            sampleRate = SAMPLE_RATE,
+            phrase = s.stopPhrase,
+            log = { Log.i(TAG, it) },
+            transcribe = { pcm -> router.transcribe(target.await(), Wav.encodePcm16(pcm, SAMPLE_RATE), null, Inference.TIER_BACKGROUND).text }
+        ) {
+            if (sessionId != id || !isListening) return@StopPhraseWatcher
+            Log.i(TAG, "stop phrase heard; ending the dictation")
+            phraseStopped = true
+            stopAndInsert(context)
         }
     }
 
@@ -773,7 +809,9 @@ object DictationController {
         s: MurmurSettings,
         context: Context,
         router: InferenceRouter,
-        streamed: Streamed? = null
+        streamed: Streamed? = null,
+        /** The dictation ended on its stop phrase, which the transcript therefore ends with. */
+        phraseHeard: Boolean = false
     ) {
         val recordMs = run.recordMs
         // The destination's style is settled before the speech request: a per-app rule may pick the
@@ -879,7 +917,15 @@ object DictationController {
         if (complete.resumed > 0) {
             Log.i(TAG, "transcript recovered ${"%.1f".format(complete.recoveredSec)}s of speech in ${complete.resumed} extra request(s)")
         }
-        val raw = stt.text.trim()
+        var raw = stt.text.trim()
+        // The spoken stop phrase ends the dictation; it is not part of the text. Said across the
+        // seam between a streamed piece and the tail, the whole transcript is formatted instead.
+        if (s.stopPhraseEnabled) StopPhrase.strip(raw, s.stopPhrase, phraseHeard)?.let { stripped ->
+            Log.i(TAG, "stop phrase cut from the end of the transcript")
+            raw = stripped
+            val tail = streamedTail?.let { StopPhrase.strip(it, s.stopPhrase, phraseHeard) }
+            if (tail != null) streamedTail = tail else streamedTexts = null
+        }
         val sttMs = System.currentTimeMillis() - sttStarted
         val speedNote = stt.speed?.let { sp ->
             if (sp.fellBack) " speed=${sp.used} (asked ${sp.requested}, ${sp.fallback ?: "fallback"})" else " speed=${sp.used}"

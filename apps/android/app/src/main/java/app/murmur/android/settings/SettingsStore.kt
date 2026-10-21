@@ -204,6 +204,14 @@ data class MurmurSettings(
      */
     val keepRecordings: Boolean = true,
     /**
+     * End a dictation by saying [stopPhrase] at the very end of it, as a second tap would; the
+     * phrase is cut from the text. Off by default: each pause then sends the last few seconds to
+     * the speech model to listen for it. Device-local.
+     */
+    val stopPhraseEnabled: Boolean = false,
+    /** What to say to end a dictation when [stopPhraseEnabled] is on. */
+    val stopPhrase: String = app.murmur.android.dictation.StopPhrase.DEFAULT,
+    /**
      * Experimental keyboard support: also type through the Android 13+ accessibility input-method
      * connection, not only accessibility node actions. This is what lands text in apps that take
      * IME input through a custom view but expose no editable accessibility node — terminal
@@ -484,6 +492,8 @@ class SettingsStore(context: Context) {
             limitDuration = prefs.getBoolean("limitDuration", d.limitDuration),
             maxDurationSec = prefs.getInt("maxDurationSec", d.maxDurationSec).coerceIn(SettingsRanges.MAX_DURATION_SEC),
             keepRecordings = prefs.getBoolean("keepRecordings", d.keepRecordings),
+            stopPhraseEnabled = prefs.getBoolean("stopPhraseEnabled", d.stopPhraseEnabled),
+            stopPhrase = prefs.getString("stopPhrase", d.stopPhrase) ?: d.stopPhrase,
             experimentalKeyboard = prefs.getBoolean("experimentalKeyboard", d.experimentalKeyboard),
             dictionaryEntries = DictionaryCodec.decode(prefs.getString("dictionaryEntries", null)),
             snippets = SnippetCodec.decode(prefs.getString("snippets", null)),
@@ -547,6 +557,8 @@ class SettingsStore(context: Context) {
             .putBoolean("limitDuration", s.limitDuration)
             .putInt("maxDurationSec", s.maxDurationSec.coerceIn(SettingsRanges.MAX_DURATION_SEC))
             .putBoolean("keepRecordings", s.keepRecordings)
+            .putBoolean("stopPhraseEnabled", s.stopPhraseEnabled)
+            .putString("stopPhrase", s.stopPhrase)
             .putBoolean("experimentalKeyboard", s.experimentalKeyboard)
             .putString("dictionaryEntries", DictionaryCodec.encode(s.dictionaryEntries))
             .putString("snippets", SnippetCodec.encode(s.snippets))

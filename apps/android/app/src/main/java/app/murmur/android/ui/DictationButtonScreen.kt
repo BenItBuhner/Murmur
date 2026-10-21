@@ -41,6 +41,7 @@ import app.murmur.android.R
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.dictation.Haptic
 import app.murmur.android.dictation.Haptics
+import app.murmur.android.dictation.StopPhrase
 import app.murmur.android.entry.EntryCommand
 import app.murmur.android.entry.EntryCommands
 import app.murmur.android.keyboard.KeyboardPresence
@@ -232,6 +233,29 @@ fun DictationButtonScreen(store: SettingsStore, settings: MurmurSettings, nav: T
                 checked = settings.haptics,
                 onCheckedChange = { store.update { s -> s.copy(haptics = it) } }
             )
+        }
+
+        SectionGap()
+
+        Group("Stop by voice", rows = true) {
+            ToggleRow(
+                title = "End with a phrase",
+                description = "Say it at the very end and Murmur stops, cuts the phrase and inserts the rest, " +
+                    "as a second tap would. Each pause sends the last few seconds to the speech model to listen for it.",
+                checked = settings.stopPhraseEnabled,
+                onCheckedChange = { store.update { s -> s.copy(stopPhraseEnabled = it) } },
+                modifier = Modifier.testTag("stopPhraseEnabled")
+            )
+            if (settings.stopPhraseEnabled) {
+                Field(
+                    value = settings.stopPhrase,
+                    onValueChange = { v -> store.update { s -> s.copy(stopPhrase = v) } },
+                    label = "Stop phrase",
+                    placeholder = StopPhrase.DEFAULT,
+                    helper = "Matched only at the end of what you say; case, commas and \"ok\" or \"okay\" do not matter.",
+                    modifier = Modifier.testTag("stopPhrase")
+                )
+            }
         }
 
         SectionGap()

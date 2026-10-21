@@ -20,6 +20,15 @@ private const val TAG = "MurmurRecordingSvc"
  * Foreground service with the `microphone` type: modern Android only allows mic capture
  * from the background while a service like this is running. Started right before recording
  * begins (the overlay pill tap) and stopped as soon as the recording ends.
+ *
+ * The notice cannot be omitted. A microphone foreground service has to call [startForeground]
+ * with a notification, and a channel below [NotificationManager.IMPORTANCE_LOW] is discarded
+ * and replaced by the system's own "running in the background" notice. Dropping the service
+ * would drop the mic while Murmur is dictating into another app. Android 12+ then withholds
+ * that notice for about ten seconds — longer when the process has been in the background,
+ * which is the gap before it appears mid-dictation — and posts it as a new alert. The pill
+ * already shows recording state, so the notice stays at the lowest importance Android will
+ * keep: ongoing, silent, and not a heads-up.
  */
 class RecordingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -33,33 +42,8 @@ class RecordingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val channelId = "murmur_dictation"
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    channelId,
-                    getString(R.string.notification_channel_name),
-                    NotificationManager.IMPORTANCE_LOW
-                )
-            )
-        }
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
-        val contentIntent = launch?.let {
-            PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE)
-        }
-        val notification: Notification =
-            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Notification.Builder(this, channelId)
-            } else {
-                @Suppress("DEPRECATION") Notification.Builder(this)
-            })
-                .setSmallIcon(R.drawable.ic_mic_notification)
-                .setContentTitle(getString(R.string.app_name))
-                .setContentText(getString(R.string.notification_recording))
-                .apply { if (contentIntent != null) setContentIntent(contentIntent) }
-                .setOngoing(true)
-                .build()
+        val notification = recordingNotification(nm)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
@@ -78,6 +62,58 @@ class RecordingService : Service() {
         // pieces); the timeout is a backstop in case the service is never stopped.
         if (wakeLock == null) wakeLock = acquireWakeLock(this, "murmur:recording", RECORDING_WAKE_LOCK_MS)
         return START_NOT_STICKY
+    }
+
+    /**
+     * Lowest importance Android will actually display for a foreground service. Lower, and the
+     * system substitutes a louder notice of its own. A channel's importance is frozen once
+     * created, so the quiet one is a new id and the previous Dictation channel is removed.
+     */
+    private fun recordingNotification(nm: NotificationManager): Notification {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            )
+            channel.setSound(null, null)
+            channel.enableVibration(false)
+            channel.enableLights(false)
+            channel.setShowBadge(false)
+            nm.createNotificationChannel(channel)
+        }
+        val launch = packageManager.getLaunchIntentForPackage(packageName)
+        val contentIntent = launch?.let {
+            PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE)
+        }
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION") Notification.Builder(this)
+        }
+        // Channel importance is what current Android alerts on. Priority, defaults and
+        // vibration are what older builds and some OEM skins still use to decide a heads-up,
+        // and the defaults are high enough for that delayed post to pop over the screen.
+        @Suppress("DEPRECATION")
+        builder
+            .setSmallIcon(R.drawable.ic_mic_notification)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.notification_recording))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setSound(null, null)
+            .setDefaults(0)
+            .setVibrate(null)
+            .setPriority(Notification.PRIORITY_LOW)
+        if (contentIntent != null) builder.setContentIntent(contentIntent)
+        // Leave the platform's short-service deferral in place so a brief recording still
+        // shows nothing. When the deferral ends, the notice above is not allowed to alert.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_DEFERRED)
+        }
+        return builder.build()
     }
 
     companion object {
@@ -99,6 +135,8 @@ class RecordingService : Service() {
         }
 
         private const val NOTIFICATION_ID = 1291
+        private const val LEGACY_CHANNEL_ID = "murmur_dictation"
+        const val CHANNEL_ID = "murmur_dictation_quiet"
 
         fun start(context: Context) {
             val intent = Intent(context, RecordingService::class.java)

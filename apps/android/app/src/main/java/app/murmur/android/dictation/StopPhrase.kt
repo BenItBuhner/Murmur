@@ -1,6 +1,7 @@
 package app.murmur.android.dictation
 
 import app.murmur.android.stt.adaptiveThreshold
+import app.murmur.android.text.Hallucination
 import app.murmur.android.stt.rmsDb
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -95,9 +96,27 @@ object StopPhrase {
      * the text does not end with it. [heard] as for [matchStart].
      */
     fun strip(text: String, phrase: String, heard: Boolean = false): String? {
-        val at = matchStart(text, phrase, heard)
+        var body = text
+        var at = matchStart(body, phrase, heard)
+        // Heard while recording, nothing was said after the phrase: a stock line after it ("Thank
+        // you.") is the speech model talking to the silence that followed (Oct 2026: a 30 s
+        // dictation came back as "... Okay, send this now. Thank you.").
+        while (at < 0 && heard) {
+            val last = lastSentence(body) ?: break
+            if (!Hallucination.isSilencePhrase(body.substring(last))) break
+            body = body.substring(0, last).trimEnd()
+            at = matchStart(body, phrase, heard)
+        }
         if (at < 0) return null
-        return text.substring(0, at).trimEnd { it.isWhitespace() || it == ',' || it == ';' || it == ':' || it == '-' || it == '—' }
+        return body.substring(0, at).trimEnd { it.isWhitespace() || it == ',' || it == ';' || it == ':' || it == '-' || it == '—' }
+    }
+
+    /** Where the last sentence of [text] starts, or null when there is only one. */
+    private fun lastSentence(text: String): Int? {
+        val trimmed = text.trimEnd()
+        val end = trimmed.trimEnd('.', '!', '?', '…').length
+        val cut = trimmed.lastIndexOfAny(charArrayOf('.', '!', '?', '…'), end - 1)
+        return if (cut <= 0) null else cut + 1
     }
 }
 
@@ -124,7 +143,8 @@ class StopPhraseWatcher(
     private val now: () -> Long = System::currentTimeMillis,
     private val log: (String) -> Unit = {},
     private val transcribe: suspend (pcm: ShortArray) -> String,
-    private val onMatch: (heard: String) -> Unit
+    /** [speechEnd]: the sample where the phrase ended; what follows is silence. */
+    private val onMatch: (heard: String, speechEnd: Int) -> Unit
 ) {
     private val words = StopPhrase.normalized(phrase).size
 
@@ -191,7 +211,7 @@ class StopPhraseWatcher(
                 if (fired || lastSpeechEnd > speechEnd + frame * 2) return@launch
                 fired = true
             }
-            onMatch(heard)
+            onMatch(heard, speechEnd)
         }
     }
 

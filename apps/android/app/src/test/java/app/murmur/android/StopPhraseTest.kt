@@ -65,6 +65,17 @@ class StopPhraseTest {
     }
 
     @Test
+    fun `once heard, a stock line the speech model adds to the silence after the phrase is dropped with it`() {
+        // Captured Oct 2026 (murmur-bg-transcribe), a 30 s dictation ending on the phrase.
+        val whole = "Let me know if you have concerns before Friday. Okay, send this now. Thank you."
+        assertEquals("Let me know if you have concerns before Friday.", StopPhrase.strip(whole, phrase, heard = true))
+        assertEquals("Before Friday.", StopPhrase.strip("Before Friday. Okay, send this now. Thank you. Thanks for watching!", phrase, heard = true))
+        // Only when the phrase was heard, and only stock lines: real words after it keep it in.
+        assertNull(StopPhrase.strip(whole, phrase))
+        assertNull(StopPhrase.strip("Okay, send this now. Then call Sam.", phrase, heard = true))
+    }
+
+    @Test
     fun `a custom phrase works the same way, and an empty one listens for nothing`() {
         assertEquals("Lunch at noon.", StopPhrase.strip("Lunch at noon. Over and out.", "over and out"))
         assertEquals("Done.", StopPhrase.strip("Done. Murmur, send.", "murmur send"))
@@ -99,7 +110,7 @@ class StopPhraseTest {
             phrase = phrase,
             now = { clock },
             transcribe = { clip -> clips.add(clip.size / rate.toDouble()); answers(clips.size, clip.size / rate.toDouble()) }
-        ) { matchedAt = fed }
+        ) { _, _ -> matchedAt = fed }
         val step = rate * 80 / 1000
         while (fed < pcm.size && matchedAt == null) {
             fed = minOf(pcm.size, fed + step)
@@ -145,7 +156,7 @@ class StopPhraseTest {
             phrase = phrase,
             now = { fed * 1000L / rate },
             transcribe = { calls++; if (calls == 1) { gate.await(); "Okay, send this now." } else "and then call Sam." }
-        ) { matched = true }
+        ) { _, _ -> matched = true }
         val step = rate * 80 / 1000
         while (fed < pcm.size) {
             fed = minOf(pcm.size, fed + step)
@@ -167,7 +178,7 @@ class StopPhraseTest {
             sampleRate = rate,
             phrase = phrase,
             transcribe = { calls++; "" }
-        ) { }
+        ) { _, _ -> }
         watcher.close()
         fed = pcm.size
         watcher.poll(fed)

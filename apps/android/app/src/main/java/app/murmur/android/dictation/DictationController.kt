@@ -218,6 +218,8 @@ object DictationController {
     @Volatile private var stopWatcher: StopPhraseWatcher? = null
     /** The session in flight was ended by its stop phrase (not a tap). */
     @Volatile private var phraseStopped = false
+    /** Where the stop phrase ended in the recording (sample index), when it ended the session. */
+    @Volatile private var phraseEndSample = -1
     /** Precision mode: each streamed piece formatted on the gateway while the user keeps talking. */
     private var pieceFormats: MutableList<Deferred<PieceFormat>> = java.util.Collections.synchronizedList(ArrayList())
     /** The newest tail speculation's text job and its formatting, while recording. */
@@ -302,6 +304,7 @@ object DictationController {
         locked = mode == DictationMode.HANDS_FREE
         selectionJob = null
         phraseStopped = false
+        phraseEndSample = -1
 
         if (mode == DictationMode.COMMAND) {
             val currentSink = sink
@@ -399,6 +402,7 @@ object DictationController {
         val mode = this.mode
         val selectionJob = this.selectionJob
         val phraseHeard = phraseStopped
+        val phraseEnd = phraseEndSample
         _state.value = DictationState.Processing("Transcribing…", mode)
         Haptics.play(appContext, Haptic.STOP)
         Cues.play(appContext, Cue.STOP)
@@ -414,7 +418,12 @@ object DictationController {
                 val pcm: ShortArray = if (fixtureMode(settings)) {
                     loadFixture(appContext)
                 } else {
-                    val recorded = recorder.stop()
+                    // Ended on the stop phrase: the silence the watcher waited through (and the
+                    // post-roll) is dropped, so the speech model is not handed a second of quiet
+                    // to invent a "Thank you." in.
+                    val recorded = recorder.stop().let { all ->
+                        if (phraseHeard && phraseEnd > 0) all.copyOf(minOf(all.size, phraseEnd + PHRASE_TAIL_SAMPLES)) else all
+                    }
                     streamed = streamer?.takeIf { it.hasWork }?.finish()
                     streamer = null
                     RecordingService.stop(appContext)
@@ -626,10 +635,11 @@ object DictationController {
             phrase = s.stopPhrase,
             log = { Log.i(TAG, it) },
             transcribe = { pcm -> router.transcribe(target.await(), Wav.encodePcm16(pcm, SAMPLE_RATE), null, Inference.TIER_BACKGROUND).text }
-        ) {
+        ) { _, speechEnd ->
             if (sessionId != id || !isListening) return@StopPhraseWatcher
             Log.i(TAG, "stop phrase heard; ending the dictation")
             phraseStopped = true
+            phraseEndSample = speechEnd
             stopAndInsert(context)
         }
     }
@@ -1263,6 +1273,9 @@ const val SHORT_TAIL_WORDS = 6
 /** What the formatter is told about a piece of a longer dictation that is not the last. */
 private const val PIECE_NOTE =
     "This transcript is one part of a longer dictation and may stop mid-sentence; if it does, leave the end unpunctuated."
+
+/** Audio kept after the end of the stop phrase when it ended the session (0.3 s). */
+private const val PHRASE_TAIL_SAMPLES = SAMPLE_RATE * 3 / 10
 
 /** How long release waits for a tail speculation that is still running before sending the whole tail. */
 private const val SPEC_RELEASE_GRACE_MS = 150L

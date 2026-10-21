@@ -30,6 +30,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.murmur.android.service.KeyboardTimingLog
 import app.murmur.android.service.MurmurAccessibilityService
+import app.murmur.android.service.RecordingService
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.Card
 import app.murmur.android.ui.components.ControlRow
@@ -101,6 +102,11 @@ fun PermissionsScreen(nav: TopNav) {
         }
 
         SectionGap()
+        Group("Notifications", rows = true) {
+            RecordingNotificationRow()
+        }
+
+        SectionGap()
         Group("Diagnostics", rows = true) {
             KeyboardTimingLogRow()
         }
@@ -139,6 +145,34 @@ private fun KeyboardTimingLogRow() {
 }
 
 private const val COPIED_LABEL_MS = 2000L
+
+/**
+ * Opens the system settings for the recording notification. Android needs the notification for
+ * background microphone use and will not let an app hide it on its own, but the person can turn
+ * the channel off; recording keeps working without it.
+ */
+@Composable
+private fun RecordingNotificationRow() {
+    val context = LocalContext.current
+    ControlRow(
+        "Recording notification",
+        "Android requires a notification while the microphone is on. Turn it off in the system settings " +
+            "to hide its icon from the status bar; dictation keeps working. The green privacy dot stays."
+    ) {
+        SecondaryButton(
+            "Open",
+            onClick = {
+                RecordingService.ensureChannel(context)
+                context.startActivity(
+                    Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        .putExtra(Settings.EXTRA_CHANNEL_ID, RecordingService.CHANNEL_ID)
+                )
+            },
+            compact = true
+        )
+    }
+}
 
 /** The permission rows, shared by the settings screen and onboarding. */
 @Composable

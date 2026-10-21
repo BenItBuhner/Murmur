@@ -33,32 +33,36 @@ class RecordingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val channelId = "murmur_dictation"
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    channelId,
-                    getString(R.string.notification_channel_name),
-                    NotificationManager.IMPORTANCE_LOW
-                )
-            )
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ensureChannel(this, nm)
         val launch = packageManager.getLaunchIntentForPackage(packageName)
         val contentIntent = launch?.let {
             PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE)
         }
+        // Android requires this notification while the mic runs in the background. Keep it as quiet
+        // as the system allows: no sound, no timestamp, hidden on the lock screen, and on Android 12+
+        // held back for the first ten seconds so short dictations never show it at all.
         val notification: Notification =
             (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Notification.Builder(this, channelId)
+                Notification.Builder(this, CHANNEL_ID)
             } else {
-                @Suppress("DEPRECATION") Notification.Builder(this)
+                @Suppress("DEPRECATION") Notification.Builder(this).setPriority(Notification.PRIORITY_MIN)
             })
                 .setSmallIcon(R.drawable.ic_mic_notification)
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getString(R.string.notification_recording))
                 .apply { if (contentIntent != null) setContentIntent(contentIntent) }
                 .setOngoing(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setShowWhen(false)
+                .setOnlyAlertOnce(true)
+                .setLocalOnly(true)
+                .setVisibility(Notification.VISIBILITY_SECRET)
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_DEFERRED)
+                    }
+                }
                 .build()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -99,6 +103,38 @@ class RecordingService : Service() {
         }
 
         private const val NOTIFICATION_ID = 1291
+
+        /**
+         * The recording notification's channel. Minimum importance asks Android to keep it out of
+         * the status bar and at the bottom of the shade. Android lifts a foreground service's
+         * minimum-importance channel to low the first time it shows, but after that it respects
+         * the person's own choice, so they can minimise or turn it off in the system settings and
+         * recording keeps working. A channel's importance cannot change once created, so this is a
+         * new id and the old one is removed.
+         */
+        const val CHANNEL_ID = "murmur_recording"
+        private const val LEGACY_CHANNEL_ID = "murmur_dictation"
+
+        fun ensureChannel(context: Context, nm: NotificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            nm.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+            if (nm.getNotificationChannel(CHANNEL_ID) != null) return
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    context.getString(R.string.notification_channel_name),
+                    NotificationManager.IMPORTANCE_MIN
+                ).apply {
+                    description = context.getString(R.string.notification_channel_description)
+                    setSound(null, null)
+                    enableVibration(false)
+                    enableLights(false)
+                    setShowBadge(false)
+                    lockscreenVisibility = Notification.VISIBILITY_SECRET
+                }
+            )
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, RecordingService::class.java)

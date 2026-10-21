@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.30': [
+    'A quieter recording indicator on Android. The "Listening…" notification no longer makes sound, vibrates or shows on the lock screen, and you can hide it: Permissions → Notifications → Recording notification → turn it off. Dictation keeps working; the system privacy dot still shows while the mic is on.'
+  ],
   '0.6.29': [
     'New on Android: end a dictation by saying a phrase. Turn on Dictation button → Stop by voice, then finish with “okay, send this now” (or a phrase of your own): Murmur stops as a second back tap would, cuts the phrase out and inserts the rest. Off by default; while it is on, each pause sends the last few seconds to the speech model to listen for it.'
   ],

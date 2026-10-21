@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.29': [
+    'New on Android: end a dictation by saying a phrase. Turn on Dictation button → Stop by voice, then finish with “okay, send this now” (or a phrase of your own): Murmur stops as a second back tap would, cuts the phrase out and inserts the rest. Off by default; while it is on, each pause sends the last few seconds to the speech model to listen for it.'
+  ],
   '0.6.28': [
     'Fixed for real this time: a back tap, Routine or Dictate shortcut no longer closes the app you are in. The app stays in front with the pill over it, also when a back tap double-fires, and Murmur no longer loses its own screens on every tap. Checked on an Android emulator over Settings, Chrome and Clock.'
   ],

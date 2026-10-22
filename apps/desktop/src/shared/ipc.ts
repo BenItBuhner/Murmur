@@ -86,6 +86,10 @@ export const IPC = {
   overlayOpenModels: 'overlay:open-models',
   /** The pointer entered or left the pill; main makes the window clickable only while it is over. */
   overlayHover: 'overlay:hover',
+  /** Idle-bar size, so the overlay draws the width and height the user chose. */
+  overlayBar: 'overlay:bar',
+  /** A drag that moves the bar, or an edge drag that resizes it (overlay -> main). */
+  overlayGesture: 'overlay:gesture',
   audioConfigure: 'audio:configure',
   audioStart: 'audio:start',
   audioStop: 'audio:stop',
@@ -155,6 +159,21 @@ export interface AudioStatusMessage {
 }
 
 export type SoundName = 'start' | 'stop' | 'lock' | 'error' | 'cancel'
+
+/** The idle bar's size, in CSS pixels. Main sends it whenever the setting or a resize changes. */
+export interface OverlayBarMessage {
+  width: number
+  height: number
+}
+
+/** A pointer gesture on the bar. `screenX`/`screenY` are the cursor in screen pixels. */
+export interface OverlayGestureMessage {
+  phase: 'start' | 'move' | 'end' | 'cancel'
+  kind: 'move' | 'resize'
+  edge?: 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+  screenX: number
+  screenY: number
+}
 
 /** What the recordings directory holds, for the settings page. */
 export interface RecordingsInfo {

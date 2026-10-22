@@ -91,6 +91,10 @@ object SettingsRanges {
     val LLM_TIMEOUT_MS: IntRange = 1_000..60_000
     /** `audio.maxDurationSec`: how long a session may run when the limit is on. */
     val MAX_DURATION_SEC: IntRange = 5..1800
+    /** Idle bar width, in dp. The desktop uses the same numbers in CSS pixels. */
+    val OVERLAY_BAR_WIDTH: IntRange = 24..280
+    /** Idle bar height, in dp. */
+    val OVERLAY_BAR_HEIGHT: IntRange = 2..32
 }
 
 /** Resting shape of the floating dictation button. */

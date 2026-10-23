@@ -706,6 +706,12 @@ class OverlayPillView(context: Context) : View(context) {
         return p !is PillPresentation.Desktop || p.idleTap || toLook.kind != Kind.IDLE
     }
 
+    /** Whether a tap on the resting pill starts a dictation: always on the button, on the desktop bar only with [PillPresentation.Desktop.idleTap]. */
+    private fun idleTakesTap(): Boolean {
+        val p = presentation
+        return p !is PillPresentation.Desktop || p.idleTap
+    }
+
     /** Where a touch counts as being on the pill. */
     private fun hitBox(): Box =
         if (presentation is PillPresentation.Desktop) desktopTouchFrame(pillBox) else pillBox.inflate(dp(6f))
@@ -1793,6 +1799,10 @@ class OverlayPillView(context: Context) : View(context) {
     private fun tap(x: Float, y: Float) {
         when (toLook.kind) {
             Kind.IDLE -> onMicTap?.invoke()
+            // "Inserted" (or "Copied", "Edited") is the end of a dictation, not a pause before the
+            // mic comes back: a tap on it starts the next one at once, and the pill morphs straight
+            // from the message into the listening pill. Only where the idle pill takes a tap too.
+            Kind.SUCCESS -> if (idleTakesTap()) onMicTap?.invoke()
             // Without a cancel button (the desktop pill with a keyboard) a tap anywhere stops and inserts.
             Kind.LISTENING -> if (cancelBox != Box.EMPTY && cancelBox.inflate(dp(4f)).contains(x, y)) onCancelTap?.invoke() else onConfirmTap?.invoke()
             Kind.ERROR -> {

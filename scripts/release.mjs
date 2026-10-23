@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.31': [
+    'Faster back-to-back dictation on Android. When the button says “Inserted” after a dictation, tap it to start the next one right away: the pill goes straight into listening instead of making you wait for the mic to come back.'
+  ],
   '0.6.30': [
     'A quieter recording indicator on Android. The "Listening…" notification no longer makes sound, vibrates or shows on the lock screen, and you can hide it: Permissions → Notifications → Recording notification → turn it off. Dictation keeps working; the system privacy dot still shows while the mic is on.'
   ],

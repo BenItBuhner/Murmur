@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -318,6 +319,8 @@ private fun SpotRow(index: Int, spot: String, active: Boolean) {
 fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modifier) {
     var previewState by remember { mutableStateOf<DictationState>(DictationState.Idle) }
     var playing by remember { mutableStateOf(false) }
+    // Bumped by every tap that starts the demo, so a tap on "Inserted" plays it again from the start.
+    var takes by remember { mutableIntStateOf(0) }
     // The same colours the accessibility service gives the real button; a dark-mode flip or a new
     // wallpaper arrives as a configuration change.
     val context = LocalContext.current
@@ -331,7 +334,10 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
             factory = { ctx ->
                 OverlayPillView(ctx).apply {
                     previewMode = true
-                    onMicTap = { playing = true }
+                    onMicTap = {
+                        takes++
+                        playing = true
+                    }
                     onConfirmTap = { playing = false }
                 }
             },
@@ -351,7 +357,7 @@ fun PillPreview(settings: MurmurSettings, height: Dp, modifier: Modifier = Modif
         }
     }
 
-    LaunchedEffect(playing) {
+    LaunchedEffect(playing, takes) {
         if (!playing) {
             previewState = DictationState.Idle
             return@LaunchedEffect

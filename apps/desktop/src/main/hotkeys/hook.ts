@@ -56,6 +56,8 @@ export class HookService extends EventEmitter {
       pushToTalk: s.hotkeys.pushToTalk,
       handsFree: s.hotkeys.handsFree,
       commandMode: s.hotkeys.commandMode,
+      correctSelection: s.hotkeys.correctSelection,
+      selectAllThenCorrect: s.hotkeys.selectAllThenCorrect,
       handsFreeTrigger: s.hotkeys.handsFreeTrigger,
       tapThresholdMs: s.hotkeys.tapThresholdMs,
       doubleTapWindowMs: s.hotkeys.doubleTapWindowMs,
@@ -245,10 +247,12 @@ export class HookService extends EventEmitter {
 
   private registerGlobalShortcuts(): void {
     const s = this.settings
-    const entries: Array<[number[], 'ptt' | 'handsFree' | 'command']> = [
+    const entries: Array<[number[], 'ptt' | 'handsFree' | 'command' | 'correct' | 'correctAll']> = [
       [s.hotkeys.pushToTalk, 'ptt'],
       [s.hotkeys.handsFree, 'handsFree'],
-      [s.hotkeys.commandMode, 'command']
+      [s.hotkeys.commandMode, 'command'],
+      [s.hotkeys.correctSelection, 'correct'],
+      [s.hotkeys.selectAllThenCorrect, 'correctAll']
     ]
     for (const [keys, which] of entries) {
       const acc = electronAccelerator(keys)
@@ -283,8 +287,15 @@ export class HookService extends EventEmitter {
     this.registeredAccelerators = []
   }
 
-  private onGlobalShortcut(which: 'ptt' | 'handsFree' | 'command'): void {
+  private onGlobalShortcut(
+    which: 'ptt' | 'handsFree' | 'command' | 'correct' | 'correctAll'
+  ): void {
     if (this.capture) return
+    if (which === 'correct' || which === 'correctAll') {
+      if (this.engine.isListening) return
+      this.emit('action', { type: which } satisfies HotkeyAction)
+      return
+    }
     if (this.engine.isListening) {
       this.engine.externalStop()
       this.emit('action', { type: 'stop' } satisfies HotkeyAction)

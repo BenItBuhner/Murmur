@@ -1042,6 +1042,26 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         if (selected.isBlank()) null else Selection(selected, start, end)
     }
 
+    override suspend fun selectAll(): Boolean = withContext(Dispatchers.Main.immediate) {
+        val node = runCatching { findEditableTarget() }.getOrNull() ?: return@withContext false
+        if (node.isPassword || node.isShowingHintText) return@withContext false
+        val text = node.text?.toString() ?: return@withContext false
+        if (text.isEmpty()) return@withContext false
+        val args = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length)
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+    }
+
+    override suspend fun readField(): Selection? = withContext(Dispatchers.Main.immediate) {
+        val node = runCatching { findEditableTarget() }.getOrNull() ?: return@withContext null
+        if (node.isPassword || node.isShowingHintText) return@withContext null
+        val text = node.text?.toString() ?: return@withContext null
+        if (text.isBlank()) return@withContext null
+        Selection(text, 0, text.length)
+    }
+
     /**
      * Command mode: put the model's answer where the selection was. The selection is put back
      * first if the field lost it while the instruction was spoken; the insertion strategy then

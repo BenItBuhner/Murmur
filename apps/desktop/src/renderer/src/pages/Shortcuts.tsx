@@ -102,11 +102,38 @@ export function ShortcutsPage(): React.JSX.Element {
       <Section title="Command mode">
         <SettingRow
           title="Edit selection"
-          description="Highlight text anywhere, hold this key and say what to do: “make it shorter”, “translate to French”, “turn into bullet points”. Requires a smart formatting model."
+          description="Highlight text anywhere, hold this key and say what to do: “make it shorter”, “translate to French”, “turn into bullet points”. Requires a smart formatting model. Unbound until you set it."
         >
           <HotkeyRecorder
             value={h.commandMode}
             onChange={(keys) => void patch({ hotkeys: { commandMode: keys } })}
+            platform={platform}
+            sideSensitive={h.sideSensitive}
+            allowClear
+          />
+        </SettingRow>
+      </Section>
+
+      <Section title="Correction">
+        <SettingRow
+          title="Correct selection"
+          description="Send the highlighted text through the formatting model to fix grammar, spelling and punctuation, keeping the wording. Unbound until you set it."
+        >
+          <HotkeyRecorder
+            value={h.correctSelection}
+            onChange={(keys) => void patch({ hotkeys: { correctSelection: keys } })}
+            platform={platform}
+            sideSensitive={h.sideSensitive}
+            allowClear
+          />
+        </SettingRow>
+        <SettingRow
+          title="Select all, then correct"
+          description="Select everything in the focused field, then run the same correction. Its own shortcut — not Shift plus the one above. Unbound until you set it."
+        >
+          <HotkeyRecorder
+            value={h.selectAllThenCorrect}
+            onChange={(keys) => void patch({ hotkeys: { selectAllThenCorrect: keys } })}
             platform={platform}
             sideSensitive={h.sideSensitive}
             allowClear

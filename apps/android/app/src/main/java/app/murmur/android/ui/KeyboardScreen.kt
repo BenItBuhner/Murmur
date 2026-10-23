@@ -163,10 +163,31 @@ fun KeyboardScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) 
         Group("Command mode", rows = true) {
             ShortcutRow(
                 title = "Edit selection",
-                description = "Select text anywhere, hold this key and say what to do: \u201cmake it shorter\u201d, \u201ctranslate to French\u201d, \u201cturn into bullet points\u201d. Needs a formatting model.",
+                description = "Select text anywhere, hold this key and say what to do: \u201cmake it shorter\u201d, \u201ctranslate to French\u201d, \u201cturn into bullet points\u201d. Needs a formatting model. Unbound until you set it.",
                 value = k.commandMode,
                 sideSensitive = k.sideSensitive,
                 onChange = { keys -> update { it.copy(commandMode = keys) } },
+                allowClear = true
+            )
+        }
+
+        SectionGap()
+
+        Group("Correction", rows = true) {
+            ShortcutRow(
+                title = "Correct selection",
+                description = "Send the highlighted text through the formatting model to fix grammar, spelling and punctuation, keeping the wording. Unbound until you set it.",
+                value = k.correctSelection,
+                sideSensitive = k.sideSensitive,
+                onChange = { keys -> update { it.copy(correctSelection = keys) } },
+                allowClear = true
+            )
+            ShortcutRow(
+                title = "Select all, then correct",
+                description = "Select everything in the focused field, then run the same correction. Its own shortcut \u2014 not Shift plus the one above. Unbound until you set it.",
+                value = k.selectAllThenCorrect,
+                sideSensitive = k.sideSensitive,
+                onChange = { keys -> update { it.copy(selectAllThenCorrect = keys) } },
                 allowClear = true
             )
         }

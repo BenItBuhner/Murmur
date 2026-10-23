@@ -2,12 +2,19 @@ import { Key, canonicalChord, canonicalKey } from './keys'
 import type { DictationMode } from '@shared/types'
 
 export type HotkeyAction =
-  { type: 'start'; mode: DictationMode } | { type: 'lock' } | { type: 'stop' } | { type: 'cancel' }
+  | { type: 'start'; mode: DictationMode }
+  | { type: 'lock' }
+  | { type: 'stop' }
+  | { type: 'cancel' }
+  | { type: 'correct' }
+  | { type: 'correctAll' }
 
 export interface HotkeyEngineConfig {
   pushToTalk: number[]
   handsFree: number[]
   commandMode: number[]
+  correctSelection: number[]
+  selectAllThenCorrect: number[]
   handsFreeTrigger: 'tap' | 'double-tap' | 'off'
   tapThresholdMs: number
   doubleTapWindowMs: number
@@ -15,7 +22,7 @@ export interface HotkeyEngineConfig {
   escapeCancels: boolean
 }
 
-type ChordId = 'ptt' | 'handsFree' | 'command'
+type ChordId = 'ptt' | 'handsFree' | 'command' | 'correct' | 'correctAll'
 
 interface Session {
   mode: DictationMode
@@ -38,6 +45,8 @@ interface Session {
  *  - Dedicated hands-free chord toggles a locked session on press.
  *  - Hands-free chord pressed while holding push-to-talk upgrades the session to locked.
  *  - Esc while listening -> `cancel`.
+ *  - Correct / select-all-then-correct fire on press and never start a dictation session.
+ *    Empty chords are inert. During a dictation they are ignored.
  *
  * The engine never owns timers; the host feeds monotonic timestamps.
  */
@@ -45,7 +54,13 @@ export class HotkeyEngine {
   private down = new Set<number>()
   private session: Session | null = null
   private lastTapAt: number | null = null
-  private chords: Record<ChordId, number[]> = { ptt: [], handsFree: [], command: [] }
+  private chords: Record<ChordId, number[]> = {
+    ptt: [],
+    handsFree: [],
+    command: [],
+    correct: [],
+    correctAll: []
+  }
 
   constructor(private config: HotkeyEngineConfig) {
     this.applyConfig(config)
@@ -57,7 +72,9 @@ export class HotkeyEngine {
     this.chords = {
       ptt: c(config.pushToTalk),
       handsFree: c(config.handsFree),
-      command: c(config.commandMode)
+      command: c(config.commandMode),
+      correct: c(config.correctSelection),
+      correctAll: c(config.selectAllThenCorrect)
     }
   }
 
@@ -108,6 +125,12 @@ export class HotkeyEngine {
 
     // Prefer the most specific (longest) chord when several complete at once.
     const chord = activated[0]
+
+    if (chord === 'correct' || chord === 'correctAll') {
+      // Instant text actions: never start or stop a dictation.
+      if (this.session) return []
+      return [{ type: chord }]
+    }
 
     if (this.session) {
       if (this.session.locked) {
@@ -176,7 +199,7 @@ export class HotkeyEngine {
 
   /** Chords that are fully pressed and include the key that just went down, longest first. */
   private newlyActiveChords(code: number): ChordId[] {
-    const ids: ChordId[] = ['handsFree', 'command', 'ptt']
+    const ids: ChordId[] = ['correctAll', 'correct', 'handsFree', 'command', 'ptt']
     return ids
       .filter((id) => {
         const keys = this.chords[id]

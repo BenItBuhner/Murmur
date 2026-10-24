@@ -51,12 +51,16 @@ import type { Meter, Refusal } from './entitlements'
 import type { AccessState, Plan } from './plans'
 import { admitFormat, dedupeFormat, releaseFormat } from './formatGuard'
 import {
+  FAILOVER_ONLY_MS,
   callUpstream,
+  failoverWorthwhile,
   hedgeAfterMs,
+  llmHedgeAfterMs,
   hedged,
   readUpstreamBudgets,
   sttBudgetMs,
-  type UnavailableReason
+  type UnavailableReason,
+  type UpstreamOutcome
 } from './upstream'
 
 /**
@@ -75,6 +79,44 @@ import {
  */
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
+
+/**
+ * What one request did upstream, for the client's per-dictation diagnostics and the gateway's
+ * own log: which of the instance's models answered (by role, never the provider's model name),
+ * how long it took, and whether a hedge or a failover was needed. Sent as the `x-murmur-trace`
+ * header (JSON) on transcriptions and in the body of `/v1/format` and `/v1/dictate/release`.
+ */
+export const TRACE_HEADER = 'x-murmur-trace'
+
+export type ModelRole = 'fast' | 'normal' | 'pro' | 'background' | 'hedge'
+
+export interface CallTrace {
+  /** The model that gave the answer (or the primary's, when nothing usable came back). */
+  role: ModelRole
+  ms: number
+  ok: boolean
+  /** A second model was asked because the first was slow (hedge) or failed fast (failover). */
+  hedged?: boolean
+  failover?: boolean
+  /** Provider round trips this call made (a quick retry after a dropped connection makes 2). */
+  attempts?: number
+  /** HTTP status of a failed answer, or the reason no answer came. */
+  error?: string
+}
+
+export function roleOf(upstream: Upstream, model: string): ModelRole {
+  if (model === upstream.fastModel) return 'fast'
+  if (model === upstream.hedgeModel) return 'hedge'
+  if (model === upstream.bgModel) return 'background'
+  if (upstream.proModel && model === upstream.proModel) return 'pro'
+  return 'normal'
+}
+
+function outcomeError(o: { kind: string; res?: Response }): string | undefined {
+  if (o.kind === 'timeout') return 'timeout'
+  if (o.kind === 'unreachable') return 'unreachable'
+  return o.res && !o.res.ok ? String(o.res.status) : undefined
+}
 
 /** The provider's recent health as the gate saw it (the breaker in lib/upstream.ts). */
 export interface ProviderState {
@@ -280,28 +322,61 @@ export async function handleTranscriptions(
   const hedgeBase = hedgeAfterMs(hooks.env)
   const sttHedgeMs = hedgeBase === null ? null : hedgeBase + Math.round(seconds * 20)
   // The hedge goes to another provider pool when one is configured (_HEDGE_MODEL).
+  // A background piece is never raced, but one its pool failed is asked of the release's normal
+  // model at once (failover), so a piece is not lost to a pool in its rate-limit cooldown.
   const altStt =
     tier === 'release'
       ? (upstream.hedgeModel ?? (choice.model === normalStt ? upstream.fastModel : normalStt))
-      : undefined
+      : normalStt
+  let altResult: UpstreamOutcome | undefined
+  let primaryResult: UpstreamOutcome | undefined
   const first = await hedged(
-    () => transcribe(choice.model),
-    altStt && altStt !== choice.model ? () => transcribe(altStt) : null,
-    sttHedgeMs,
-    (a) => a.kind === 'response' && a.res.ok
+    async () => (primaryResult = await transcribe(choice.model)),
+    altStt && altStt !== choice.model ? async () => (altResult = await transcribe(altStt)) : null,
+    tier === 'release' ? sttHedgeMs : FAILOVER_ONLY_MS,
+    (a) => a.kind === 'response' && a.res.ok,
+    (a) =>
+      a.kind !== 'response' ||
+      failoverWorthwhile(a.res.status) ||
+      upstreamRejectedModel(a.res.status, a.text, choice.model)
   )
   let attempt = first.value
+  // The fast model is one the provider does not serve: that is the same story whether the
+  // failover or the repeat below reached the normal model, and the answer says so.
+  const rejected = primaryResult
+  const primaryRejected =
+    first.failover === true &&
+    choice.normalModel !== undefined &&
+    rejected?.kind === 'response' &&
+    !rejected.res.ok &&
+    upstreamRejectedModel(rejected.res.status, rejected.text, choice.model)
   if (first.winner === 'alternate') {
     usedModel = altStt!
     ran = altStt === upstream.fastModel ? 'fast' : 'normal'
+  } else if (primaryRejected && altStt === choice.normalModel && altResult) {
+    // Both failed and the failover already was the normal model: its answer is the one to report.
+    attempt = altResult
+    usedModel = altStt!
   }
-  if (first.hedged) console.log(`[gateway] stt hedged after ${sttHedgeMs} ms; ${first.winner} won`)
+  if (primaryRejected && rejected?.kind === 'response') {
+    console.warn(
+      `[gateway] stt fast model "${choice.model}" rejected by the provider (HTTP ${rejected.res.status}); using the normal model`
+    )
+    if (altStt === choice.normalModel) {
+      ran = 'normal'
+      fallback = 'model_not_found'
+    }
+  }
+  if (first.failover) console.warn(`[gateway] stt ${tier} primary failed (${outcomeError(first.value) ?? 'unusable'}) before the hedge; failed over, ${first.winner} won`)
+  else if (first.hedged) console.log(`[gateway] stt hedged after ${sttHedgeMs} ms; ${first.winner} won`)
   if (tier === 'background') console.log(`[gateway] stt tier=background model=${usedModel}`)
   if (attempt.kind !== 'response')
     return providerFailure(hooks, 'stt', describeUpstreamOutcome('stt', attempt), Date.now() - started)
   if (
     !attempt.res.ok &&
     choice.normalModel !== undefined &&
+    usedModel === choice.model &&
+    !(primaryRejected && altStt === choice.normalModel) &&
     upstreamRejectedModel(attempt.res.status, attempt.text, choice.model)
   ) {
     console.warn(
@@ -362,10 +437,22 @@ export async function handleTranscriptions(
   await hooks.record({ userId: gate.userId, identity, kind: 'stt', seconds: billed, words })
   await providerAnswered(hooks, 'stt', gate)
   const speedNote = fallback ? `${ran} (asked ${speed}, ${fallback})` : ran
+  const trace: CallTrace = {
+    role: roleOf(upstream, usedModel),
+    ms: Date.now() - started,
+    ok: true,
+    ...(first.hedged ? { hedged: true } : {}),
+    ...(first.failover ? { failover: true } : {}),
+    ...(attempt.attempts > 1 ? { attempts: attempt.attempts } : {})
+  }
   console.log(
-    `[gateway] stt plan=${gate.plan} speed=${speedNote} seconds=${billed.toFixed(1)} words=${words}${silenced ? ` silenced=${silenced}` : ''} upstreamMs=${Date.now() - started}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}`
+    `[gateway] stt plan=${gate.plan} tier=${tier} speed=${speedNote} model=${trace.role} seconds=${billed.toFixed(1)} words=${words}${silenced ? ` silenced=${silenced}` : ''} upstreamMs=${trace.ms}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}${first.hedged ? ` hedged=${first.failover ? 'failover' : 'slow'}` : ''}`
   )
-  const responseHeaders: Record<string, string> = { 'content-type': upstreamType, [SPEED_HEADER]: ran }
+  const responseHeaders: Record<string, string> = {
+    'content-type': upstreamType,
+    [SPEED_HEADER]: ran,
+    [TRACE_HEADER]: JSON.stringify(trace)
+  }
   if (fallback) responseHeaders[SPEED_FALLBACK_HEADER] = fallback
   return new Response(text, { status: 200, headers: responseHeaders })
 }
@@ -532,8 +619,14 @@ async function formatOnce(
   // Background pieces use the background pool; a release uses the fast or normal model, hedged
   // with the other one when it is slow.
   const { model, alternate } = chooseLlmModel(upstream, gate.plan, tier, speed)
-  const hedgeMs = hedgeAfterMs(hooks.env)
+  const hedgeMs = llmHedgeAfterMs(hooks.env)
+  // Background pieces are not hedged (nobody is waiting on them), but a piece whose model failed
+  // is asked of the hedge pool at once: a background pool in its rate-limit cooldown otherwise
+  // fails every piece, the release then formats the whole dictation, and the failures count
+  // against the breaker that the release itself is gated on.
+  const failoverModel = tier === 'background' && upstream.hedgeModel && upstream.hedgeModel !== model ? upstream.hedgeModel : null
   const budgetMs = readUpstreamBudgets(hooks.env).formatMs
+  const calls: CallTrace[] = []
   let tokens = 0
   /** Model round trips the provider answered; only those are usage. */
   let answered = 0
@@ -544,13 +637,26 @@ async function formatOnce(
     // Once the provider said it is busy or down, the rest of this request (other pieces, the
     // strict retry) does not ask it again.
     if (unavailable) throw new UpstreamError(unavailable.message, unavailable.status, unavailable.code)
-    const { value: answer, hedged: didHedge, winner } = await hedged(
+    const callStarted = Date.now()
+    const other = alternate ?? failoverModel
+    const { value: answer, hedged: didHedge, winner, failover } = await hedged(
       () => upstreamChat(upstream, model, messages, opts, budgetMs),
-      alternate ? () => upstreamChat(upstream, alternate, messages, opts, budgetMs) : null,
-      hedgeMs,
-      (a) => a.ok
+      other ? () => upstreamChat(upstream, other, messages, opts, budgetMs) : null,
+      // A failover-only alternate is never started on time alone.
+      alternate ? hedgeMs : failoverModel ? FAILOVER_ONLY_MS : null,
+      (a) => a.ok,
+      (a) => !a.ok && (a.failure.unavailable !== undefined || failoverWorthwhile(a.failure.status) || a.failure.code === 'upstream_error')
     )
-    if (didHedge) console.log(`[gateway] format hedged after ${hedgeMs} ms; ${winner} won`)
+    if (failover) console.warn(`[gateway] format ${tier} primary failed before the hedge; failed over, ${winner} won`)
+    else if (didHedge) console.log(`[gateway] format hedged after ${hedgeMs} ms; ${winner} won`)
+    calls.push({
+      role: roleOf(upstream, winner === 'alternate' && other ? other : model),
+      ms: Date.now() - callStarted,
+      ok: answer.ok,
+      ...(didHedge && !failover ? { hedged: true } : {}),
+      ...(failover ? { failover: true } : {}),
+      ...(answer.ok ? {} : { error: answer.failure.unavailable?.reason ?? String(answer.failure.status) })
+    })
     if (!answer.ok) {
       if (answer.failure.unavailable) unavailable = answer.failure
       else console.warn(`[gateway] llm upstream -> ${answer.failure.status} ${answer.failure.code}`)
@@ -590,17 +696,20 @@ async function formatOnce(
   } else if (answered > 0) {
     await providerAnswered(hooks, 'llm', gate)
   }
+  const ms = Date.now() - started
   console.log(
-    `[gateway] format plan=${gate.plan} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} tokens=${tokens} paused=${gate.paused !== null} breakerOpen=${gate.provider.openForSec !== null} ms=${Date.now() - started}`
+    `[gateway] format plan=${gate.plan} tier=${tier} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} models=${calls.map((c) => `${c.role}${c.ok ? '' : '!'}:${c.ms}${c.failover ? ':failover' : c.hedged ? ':hedged' : ''}`).join(',') || 'none'} tokens=${tokens} paused=${gate.paused !== null} breakerOpen=${gate.provider.openForSec !== null} ms=${ms}`
   )
+  const trace = { ms, calls, ...(gate.provider.openForSec !== null ? { breakerOpen: true } : {}) }
   return gate.paused
     ? {
         ...formatted,
         status: { ...formatted.status, detail: 'fair use' },
         limit: limitDetail(gate.paused, gate.plan, gate.planState, hooks.env),
-        model: MURMUR_MODELS.llm
+        model: MURMUR_MODELS.llm,
+        trace
       }
-    : { ...formatted, model: MURMUR_MODELS.llm }
+    : { ...formatted, model: MURMUR_MODELS.llm, trace }
 }
 
 class UpstreamError extends Error {
@@ -769,8 +878,17 @@ export async function handleDictateRelease(
       format = res.ok ? await res.json() : null
     }
   }
+  const totalMs = Date.now() - started
   console.log(
-    `[gateway] release sttMs=${sttMs} totalMs=${Date.now() - started} words=${countWords(raw)} rules=${rules} formatted=${format !== null}`
+    `[gateway] release sttMs=${sttMs} formatMs=${totalMs - sttMs} totalMs=${totalMs} words=${countWords(raw)} rules=${rules} formatted=${format !== null}`
   )
-  return new Response(JSON.stringify({ stt, transcript, format, rules }), { status: 200, headers })
+  let sttTrace: unknown = null
+  try {
+    sttTrace = JSON.parse(sttRes.headers.get(TRACE_HEADER) ?? 'null')
+  } catch {
+    sttTrace = null
+  }
+  // Where the release's time went, for the client's per-dictation diagnostics.
+  const timing = { sttMs, formatMs: totalMs - sttMs, totalMs, stt: sttTrace }
+  return new Response(JSON.stringify({ stt, transcript, format, rules, timing }), { status: 200, headers })
 }

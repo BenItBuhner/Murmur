@@ -498,5 +498,37 @@
     "expect": { "skipModel": false, "contains": ["morgen"] },
     "good": "Ich schicke dir das morgen.",
     "bad": []
+  },
+  {
+    "id": "pauses/split-after-verb",
+    "transcript": "The first milestone is the closed beta which opens. Next Monday for about 50 people from the waitlist.",
+    "context": { "category": "email", "tone": "professional" },
+    "expect": { "matches": "opens,? next Monday", "notContains": ["opens. Next"] },
+    "good": "The first milestone is the closed beta, which opens next Monday for about 50 people from the waitlist.",
+    "bad": ["The first milestone is the closed beta which opens. Next Monday for about 50 people from the waitlist."]
+  },
+  {
+    "id": "pauses/split-before-participle",
+    "transcript": "For the public launch, we are aiming for the end of next month. Assuming the beta feedback is mostly positive. Let me know if you have questions.",
+    "context": { "category": "email", "tone": "professional" },
+    "expect": { "matches": "month,? assuming the beta feedback is mostly positive\\. Let me know", "notContains": ["month. Assuming"] },
+    "good": "For the public launch, we are aiming for the end of next month, assuming the beta feedback is mostly positive. Let me know if you have questions.",
+    "bad": ["For the public launch, we are aiming for the end of next month. Assuming the beta feedback is mostly positive, let me know if you have questions."]
+  },
+  {
+    "id": "pauses/split-after-preposition",
+    "transcript": "Can you send the updated budget to. Sarah and Mike before the meeting on Thursday?",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "matches": "budget to Sarah and Mike", "notContains": ["to. Sarah"] },
+    "good": "Can you send the updated budget to Sarah and Mike before the meeting on Thursday?",
+    "bad": ["Can you send the updated budget to. Sarah and Mike before the meeting on Thursday?"]
+  },
+  {
+    "id": "pauses/real-boundaries-stay",
+    "transcript": "I fixed the login bug this morning. Next, I will look at the crash on older phones.",
+    "context": { "category": "chat", "tone": "casual" },
+    "expect": { "matches": "morning\\. Next" },
+    "good": "I fixed the login bug this morning. Next, I will look at the crash on older phones.",
+    "bad": ["I fixed the login bug this morning, next, I will look at the crash on older phones."]
   }
 ]

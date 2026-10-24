@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { chooseLlmModel, chooseSttModel, parseTier, type Upstream } from '../convex/lib/inference'
-import { hedgeAfterMs, hedged } from '../convex/lib/upstream'
+import { hedgeAfterMs, hedged, llmHedgeAfterMs } from '../convex/lib/upstream'
 
 const stt: Upstream = { baseUrl: 'http://p/v1', apiKey: '', model: 'transcribe-1', fastModel: 'transcribe-1-fast', bgModel: 'murmur-bg-transcribe' }
 const llm: Upstream = { baseUrl: 'http://p/v1', apiKey: '', model: 'complete', fastModel: 'murmur-fast-format', bgModel: 'murmur-bg-format' }
@@ -51,10 +51,29 @@ describe('hedged requests', () => {
     const r = await hedged(async () => (await sleep(40), 'err-a'), async () => 'err-b', 10, ok)
     expect(r.value).toBe('err-a')
   })
+  it('fails over to the alternate at once when the primary fails before the hedge delay', async () => {
+    const started = Date.now()
+    const r = await hedged(async () => 'err-a', async () => 'ok-b', 5_000, ok)
+    expect(r).toEqual({ value: 'ok-b', hedged: true, winner: 'alternate', failover: true })
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+  it("keeps the primary's failure when the failover fails too", async () => {
+    const r = await hedged(async () => 'err-a', async () => 'err-b', 5_000, ok)
+    expect(r).toEqual({ value: 'err-a', hedged: true, winner: 'primary', failover: true })
+  })
+  it('has nothing to fail over to without an alternate', async () => {
+    const r = await hedged(async () => 'err-a', null, 5_000, ok)
+    expect(r).toEqual({ value: 'err-a', hedged: false, winner: 'primary' })
+  })
   it('can be turned off', () => {
     expect(hedgeAfterMs({ MURMUR_INFERENCE_HEDGE_MS: 'off' })).toBeNull()
     expect(hedgeAfterMs({})).toBe(500)
     expect(hedgeAfterMs({ MURMUR_INFERENCE_HEDGE_MS: '900' })).toBe(900)
+  })
+  it('hedges formatting later than speech, and not at all with hedging off', () => {
+    expect(llmHedgeAfterMs({})).toBe(1_500)
+    expect(llmHedgeAfterMs({ MURMUR_INFERENCE_LLM_HEDGE_MS: '800' })).toBe(800)
+    expect(llmHedgeAfterMs({ MURMUR_INFERENCE_HEDGE_MS: 'off', MURMUR_INFERENCE_LLM_HEDGE_MS: '800' })).toBeNull()
   })
 })
 

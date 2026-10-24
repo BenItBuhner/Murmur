@@ -8,6 +8,7 @@ import {
   ENUMERATION_PHRASES,
   ENUMERATION_WORDS,
   FOREIGN_WORDS,
+  SPLIT_WORDS,
   HESITATION_PHRASES,
   HESITATION_WORDS,
   alreadyClean
@@ -194,6 +195,10 @@ const SKIP_CASES: SkipCase[] = [
   { name: 'answer no', transcript: 'No, that works for me.', context: CHAT },
   { name: 'repeated run', transcript: 'We need to, we need to ship it.', context: CHAT },
   { name: 'question then statement', transcript: 'Is it done? Yes.', context: CHAT },
+  { name: 'split at a pause after a preposition', transcript: 'Send the budget to. Sarah before Thursday.', context: CHAT },
+  { name: 'split at a pause after an article', transcript: 'The meeting is in the. Big room.', context: CHAT },
+  { name: 'split at a pause after a conjunction', transcript: 'I fixed the bug and. Pushed it.', context: CHAT },
+  { name: 'two short sentences', transcript: 'Running late. Be there soon.', context: CHAT },
   { name: 'later unmarked question', transcript: 'Thanks. Can you resend it.', context: CHAT },
   { name: 'spoken period', transcript: 'Send it today period.', context: CHAT },
   { name: 'press enter after a full stop', transcript: 'See you tomorrow. Press enter.', context: CHAT },
@@ -289,7 +294,8 @@ function build(): unknown {
       correctionPhrases: CORRECTION_PHRASES,
       enumerationWords: ENUMERATION_WORDS,
       enumerationPhrases: ENUMERATION_PHRASES,
-      foreignWords: FOREIGN_WORDS
+      foreignWords: FOREIGN_WORDS,
+      splitWords: SPLIT_WORDS
     }
   }
 }

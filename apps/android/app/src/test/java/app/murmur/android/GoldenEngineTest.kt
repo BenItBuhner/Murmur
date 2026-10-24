@@ -188,5 +188,6 @@ class GoldenEngineTest {
         assertEquals(lexicon.getJSONArray("enumerationWords").strings(), Clean.ENUMERATION_WORDS)
         assertEquals(lexicon.getJSONArray("enumerationPhrases").strings(), Clean.ENUMERATION_PHRASES)
         assertEquals(lexicon.getJSONArray("foreignWords").strings(), Clean.FOREIGN_WORDS)
+        assertEquals(lexicon.getJSONArray("splitWords").strings(), Clean.SPLIT_WORDS)
     }
 }

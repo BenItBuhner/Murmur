@@ -61,7 +61,9 @@ object Inference {
     /** Request header: `background` for a piece sent while recording (absent: release). */
     const val TIER_HEADER = "x-murmur-tier"
     const val TIER_BACKGROUND = "background"
-    /** Response header, only when the requested mode could not be honoured: why Normal ran instead. */
+    /** Response header (JSON): which of the instance's models answered, in how long, hedged or not. */
+    const val TRACE_HEADER = "x-murmur-trace"
+        /** Response header, only when the requested mode could not be honoured: why Normal ran instead. */
     const val SPEED_FALLBACK_HEADER = "x-murmur-speed-fallback"
     val SPEED_FALLBACKS = listOf("not_configured", "model_not_found")
 

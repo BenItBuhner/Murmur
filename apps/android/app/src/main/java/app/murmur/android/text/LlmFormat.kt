@@ -46,7 +46,7 @@ object Prompt {
         "You clean up voice dictation. A speech recognizer transcribed what the user said; each message gives you that transcript and a few facts about where the text is going. Reply with the text the user meant to type and nothing else: no preamble, no quotation marks around it, no code fences, no notes.",
         "",
         "Fix:",
-        "- Punctuation, capitalization and sentence boundaries.",
+        "- Punctuation, capitalization and sentence boundaries. The recognizer often ends a sentence where the speaker only paused; join such a fragment back onto its sentence (\"the beta opens. Next Monday\" -> \"the beta opens next Monday\", \"by the end of the month. Assuming it ships\" -> \"by the end of the month, assuming it ships\").",
         "- Fillers and hesitation (\"um\", \"uh\", \"you know\", \"I mean\", a pause \"like\"), stutters and accidental repeats of small words (\"the the\", \"I, I think\", \"we need to, we need to\"), false starts.",
         "- Spoken self-corrections: \"Tuesday, no, Wednesday\" means Wednesday; \"scratch that\" or \"delete that\" removes what was just said.",
         "- Spoken punctuation and layout: \"new line\", \"new paragraph\", \"question mark\", \"exclamation point\", and \"quote ... end quote\" (or \"unquote\") become the line break, the blank line, the \"?\" or \"!\" and the quotation marks.",
@@ -133,7 +133,7 @@ object Prompt {
     private fun exampleCtx(category: AppCategory, tone: Tone, app: String? = null, dictionary: List<DictionaryTerm> = emptyList(), precedingText: String? = null) =
         FormatContext(category = category, tone = tone, app = app, language = "auto", dictionary = dictionary, precedingText = precedingText)
 
-    /** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context. */
+    /** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context, sentences split at pauses. */
     val EXAMPLES: List<Triple<FormatContext, String, String>> = listOf(
         Triple(
             exampleCtx(AppCategory.CHAT, Tone.CASUAL, app = "Slack"),
@@ -154,6 +154,11 @@ object Prompt {
             exampleCtx(AppCategory.DOCUMENT, Tone.PROFESSIONAL, precedingText = "I think we should"),
             "probably go with the second option since it is like forty two percent cheaper",
             "probably go with the second option since it is 42% cheaper."
+        ),
+        Triple(
+            exampleCtx(AppCategory.EMAIL, Tone.PROFESSIONAL),
+            "We are aiming for the end of next month. Assuming the beta goes well. And we do not find any. Serious problems, I will send the update to. The whole team.",
+            "We are aiming for the end of next month, assuming the beta goes well and we do not find any serious problems. I will send the update to the whole team."
         )
     )
 

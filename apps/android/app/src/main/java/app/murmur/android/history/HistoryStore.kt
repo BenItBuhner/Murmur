@@ -102,7 +102,9 @@ data class HistoryEntry(
      */
     val deviceId: String? = null,
     val deviceName: String? = null,
-    val remote: Boolean = false
+    val remote: Boolean = false,
+    /** Where this dictation's time went (this phone's dictations only; null on older entries). */
+    val trace: DictationTrace? = null
 ) {
     val failed: Boolean get() = error != null
 

@@ -26,9 +26,14 @@
     "MURMUR_INFERENCE_STT_BG_MODEL": "murmur-bg-transcribe",
     "MURMUR_INFERENCE_LLM_URL": "https://infer.techlitnow.com/v1",
     "MURMUR_INFERENCE_LLM_MODEL": "complete",
-    "MURMUR_INFERENCE_LLM_FAST_MODEL": "murmur-fast-format",
+    // Releases format on gpt-oss-120b: on the eval corpus it passed 42 of 50 against 38 for the 20b
+    // (murmur-fast-format), for about 50 ms more at the median (0.74 s against 0.69 s).
+    "MURMUR_INFERENCE_LLM_FAST_MODEL": "complete",
     "MURMUR_INFERENCE_LLM_BG_MODEL": "complete",
-    "MURMUR_INFERENCE_LLM_HEDGE_MODEL": "murmur-bg-format",
+    // The release's backup formatter, on another provider than Groq so a Groq rate-limit cooldown
+    // (all Groq models at once) does not take it down too. murmur-bg-format (nvidia) took 7 s at the
+    // median and up to a minute; gemini-3.6-flash answered in about 1 s and passed 22 of 23 evals.
+    "MURMUR_INFERENCE_LLM_HEDGE_MODEL": "gemini-3.6-flash",
     "MURMUR_INFERENCE_LLM_RELEASE_FAST": "on",
     // Where limit errors link to; same value as MURMUR_SITE_URL in the Convex deployment.
     "MURMUR_SITE_URL": "https://murmur.techlitnow.com"

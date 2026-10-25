@@ -270,6 +270,21 @@ class OverlayPillView(context: Context) : View(context) {
     private var presenceTarget = 1f
     private var whenGone: (() -> Unit)? = null
 
+    /**
+     * How far the pill is pushed down below its spot, as a fraction of the way off the bottom of the
+     * screen: 0 at its spot, 1 fully below the bottom edge. With no keyboard to come and go with, the
+     * pill rises from the bottom of the screen when it is shown and sinks back down out of sight when
+     * it goes ([slideIn], [slideAway]), rather than popping in and out where it rests.
+     */
+    private var slide = 0f
+    private var slideFrom = 0f
+    private var slideTo = 0f
+
+    /** -1: at rest, 0: slide requested (clock starts on the first frame), otherwise the start time. */
+    private var slideStart = -1L
+    private var slideDuration = SLIDE_IN_MS
+    private var whenSlidAway: (() -> Unit)? = null
+
     // ---- dragging (both modes) ------------------------------------------------------------------
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
@@ -365,8 +380,13 @@ class OverlayPillView(context: Context) : View(context) {
         if (previewMode) return
         screenW = widthPx.toFloat()
         screenH = heightPx.toFloat()
+        val hadKeyboard = keyboardTop != null
         keyboardTop = keyboardTopPx?.toFloat()
-        retarget(anchorFollows = true)
+        // A keyboard coming up under a pill that was shown without one (or going from under it) is a
+        // move between two different resting lines, not the keyboard nudging its edge: the pill glides
+        // there instead of jumping.
+        val keyboardCameOrWent = hadKeyboard != (keyboardTop != null)
+        retarget(anchorFollows = !keyboardCameOrWent)
     }
 
     fun configure(shape: OverlayShape, layout: OverlayLayout) {
@@ -425,8 +445,85 @@ class OverlayPillView(context: Context) : View(context) {
     fun appear() {
         presenceTarget = 1f
         whenGone = null
+        // Sinking out of sight: turn round and rise back to the spot from wherever it had got to.
+        if (slideTo > 0f) {
+            whenSlidAway = null
+            startSlide(0f, SLIDE_IN_MS)
+        }
         invalidate()
     }
+
+    /**
+     * For a pill shown with no keyboard on screen: starts it fully below the bottom edge of the
+     * screen, rising to its spot. Call after [restart], before its windows are shown.
+     */
+    fun slideIn() {
+        if (previewMode) return
+        whenSlidAway = null
+        slide = 1f
+        slideFrom = 1f
+        startSlide(0f, SLIDE_IN_MS)
+    }
+
+    /**
+     * For a pill going with no keyboard on screen: it sinks from where it is down past the bottom edge
+     * of the screen; [onGone] runs once it is out of sight (unless it [appear]s again first).
+     */
+    fun slideAway(onGone: () -> Unit) {
+        // As a cancelled touch: a drag lands on its spot, so a pill that comes back is where it rests.
+        if (dragging) endFlick()
+        pressed = false
+        if (previewMode || presence <= 0f || (slideTo >= 1f && slide >= 1f)) {
+            whenSlidAway = null
+            onGone()
+            return
+        }
+        whenSlidAway = onGone
+        startSlide(1f, SLIDE_OUT_MS)
+    }
+
+    /** Starts a slide from wherever the pill is now to [to], over [fullMs] for the whole distance (less for part of it). */
+    private fun startSlide(to: Float, fullMs: Long) {
+        slideFrom = slide
+        slideTo = to
+        val distance = abs(to - slide)
+        if (distance < 0.001f) {
+            slide = to
+            slideStart = -1L
+            if (to >= 1f) whenSlidAway?.let { gone -> whenSlidAway = null; post(gone) }
+            invalidate()
+            return
+        }
+        slideDuration = max(SLIDE_MIN_MS, (fullMs * distance).toLong())
+        slideStart = 0L
+        invalidate()
+    }
+
+    /** Advances a slide in flight to the frame at [now]. */
+    private fun advanceSlide(now: Long) {
+        if (slideStart < 0L) return
+        if (slideStart == 0L) slideStart = now
+        val t = ((now - slideStart).toFloat() / slideDuration).coerceIn(0f, 1f)
+        // Rising decelerates into the spot; sinking accelerates away, the way a sheet leaves.
+        val eased = if (slideTo < slideFrom) easeOutCubic(t) else easeInCubic(t)
+        slide = lerp(slideFrom, slideTo, eased)
+        if (t >= 1f) {
+            slide = slideTo
+            slideStart = -1L
+            if (slideTo >= 1f) whenSlidAway?.let { gone -> whenSlidAway = null; post(gone) }
+        }
+    }
+
+    /** How far down [box] is drawn for the slide: at 1 its top (and its shadow) is just past the bottom edge. */
+    private fun slideOffset(box: Box): Float {
+        if (slide <= 0f) return 0f
+        val offScreen = max(0f, screenH - box.top) + dp(PRESENCE_LAYER_PAD_DP)
+        return slide * offScreen
+    }
+
+    /** Rising from or sinking to the bottom of the screen. */
+    val isSliding: Boolean get() = slideStart >= 0L
+
 
     /**
      * Starts over as a pill that has never been shown, for a host that keeps its windows between
@@ -438,6 +535,11 @@ class OverlayPillView(context: Context) : View(context) {
         presence = 1f
         presenceTarget = 1f
         whenGone = null
+        slide = 0f
+        slideFrom = 0f
+        slideTo = 0f
+        slideStart = -1L
+        whenSlidAway = null
         springX = null
         springY = null
         morphStart = -1L
@@ -471,7 +573,8 @@ class OverlayPillView(context: Context) : View(context) {
         invalidate()
     }
 
-    val isDismissing: Boolean get() = presenceTarget == 0f
+    /** Going: fading out where it is ([dismiss]) or sinking out of sight ([slideAway]). */
+    val isDismissing: Boolean get() = presenceTarget == 0f || slideTo > 0f
 
     fun setEditing(editing: Boolean) {
         // Spots belong to the floating button; the desktop pill has a position setting instead.
@@ -861,14 +964,18 @@ class OverlayPillView(context: Context) : View(context) {
             if (abs(presence - presenceTarget) < 0.001f) presence = presenceTarget
             if (presence == 0f) whenGone?.let { gone -> whenGone = null; post(gone) }
         }
-        onFrameDrawn?.invoke(presence, now)
+        advanceSlide(now)
+        onFrameDrawn?.invoke(presence * (1f - slide), now)
 
         val box = OverlayGeometry.place(curAx, curAy, curW, curH, screenW, screenH, density)
         pillBox = box
-        if (presence <= 0f) {
+        if (presence <= 0f || slide >= 1f) {
             hasDrawn = true
+            // Still below the bottom edge on a slide's first frame: keep the frames coming.
+            if (slideStart >= 0L) postInvalidateOnAnimation()
             return
         }
+        val slideDy = slideOffset(box)
         val scale = pressScale * lerp(PRESENCE_SCALE, 1f, easeOutCubic(presence))
         val drawn = if (abs(scale - 1f) > 0.001f) {
             Box.centered(box.centerX, box.centerY, box.width * scale, box.height * scale)
@@ -876,7 +983,7 @@ class OverlayPillView(context: Context) : View(context) {
 
         // Everything below is in screen coordinates.
         canvas.save()
-        canvas.translate(-windowFrame.left, -windowFrame.top)
+        canvas.translate(-windowFrame.left, -windowFrame.top + slideDy)
         if (presence < 1f) {
             val reach = drawn.inflate(dp(PRESENCE_LAYER_PAD_DP))
             canvas.saveLayerAlpha(reach.left, reach.top, reach.right, reach.bottom, (presence * 255f).toInt().coerceIn(0, 255))
@@ -1707,6 +1814,7 @@ class OverlayPillView(context: Context) : View(context) {
 
     private fun isAnimating(now: Long): Boolean {
         if (presence != presenceTarget) return true
+        if (slideStart >= 0L) return true
         if (morphStart >= 0L || editing || dragging || springX != null) return true
         if (releasedAt > 0L && now - releasedAt < FLICK_GHOST_FADE_MS) return true
         if (abs(pressScale - pressTarget()) > 0.002f) return true
@@ -1719,6 +1827,8 @@ class OverlayPillView(context: Context) : View(context) {
         val u = 1f - t
         return 1f - u * u * u
     }
+
+    private fun easeInCubic(t: Float): Float = t * t * t
 
     private fun smoothstep(a: Float, b: Float, x: Float): Float {
         if (b <= a) return if (x >= b) 1f else 0f
@@ -2035,6 +2145,18 @@ class OverlayPillView(context: Context) : View(context) {
          * out in about nine frames, so anything slower is seen sitting where the keyboard was.
          */
         const val DISMISS_MS = 16f
+
+        /**
+         * Rising from the bottom of the screen with no keyboard up, the whole way: quick enough not
+         * to hold up a dictation started from a shortcut, long enough to be seen to come from the edge.
+         */
+        const val SLIDE_IN_MS = 280L
+
+        /** Sinking back down out of sight, the whole way; a little quicker than coming, as things leave. */
+        const val SLIDE_OUT_MS = 220L
+
+        /** The shortest slide, for a pill turning round a little way from where it was headed. */
+        const val SLIDE_MIN_MS = 60L
 
         /** How small the pill ends when it goes (and starts when it comes back). */
         const val PRESENCE_SCALE = 0.86f

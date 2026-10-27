@@ -1,0 +1,32 @@
+20:18:56 accessibility service bound: 2 mentions
+20:19:19 screenshot 0-ready
+20:19:20 === 1. Correct a mis-heard name
+20:19:20 dictating (the speech model will hear): I use whisper flow every day and it saves me hours.
+20:19:56 murmur: inserted 52 chars via paste into com.android.chrome (web content)
+20:19:59 screenshot 1-dictated
+20:19:59 correcting 'whisper flow' -> 'Wispr Flow' (select it, type over it)
+20:20:19 screenshot 2-corrected
+   notification shade: ['Add “Wispr Flow” to your dictionary?', 'You changed “whisper flow” to “Wispr Flow”. Add it and Murmur spells it your way from now on.']
+20:20:33 screenshot 3-notification
+20:20:33 tapping Add on the notification
+20:20:37 === 2. Dictate the same thing again
+20:20:40 dictating (the speech model will hear): Trying whisper flow again tomorrow.
+20:20:56 murmur: inserted 34 chars via paste into com.android.chrome (web content)
+20:20:58 screenshot 4-learned
+20:20:58 === 3. Change a word (not a mis-hearing)
+20:21:02 dictating (the speech model will hear): Send the report on Tuesday.
+20:21:15 murmur: inserted 28 chars via paste into com.android.chrome (web content)
+20:21:15 correcting 'Tuesday' -> 'Wednesday' (select it, type over it)
+   notification shade: no dictionary suggestion
+20:21:40 screenshot 5-changed-mind
+20:21:41 === 4. Fix an everyday word
+20:21:43 dictating (the speech model will hear): This will effect the timeline.
+20:21:56 murmur: inserted 31 chars via paste into com.android.chrome (web content)
+20:21:56 correcting 'effect' -> 'affect' (select it, type over it)
+   notification shade: no dictionary suggestion
+20:22:24 screenshot 6-everyday-word
+20:22:28 field at the end: I use Wispr Flow every day and it saves me hours. |Trying Wispr Flow again tomorrow. |Send the report on Wednesday. |This will affect the timeline. |
+20:22:28 suggestions Murmur offered: 1
+20:22:28 === 5. Murmur's Dictionary screen
+20:22:34 screenshot 7-dictionary
+20:22:37 done

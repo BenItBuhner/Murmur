@@ -66,10 +66,12 @@ class CorrectionTracker(
     private val dictionary: () -> List<DictionaryEntry>,
     private val everyday: () -> Set<String>? = { null },
     private val onFound: (List<WordCorrection>) -> Unit,
-    private val clock: () -> Long = SystemClock::uptimeMillis
+    private val clock: () -> Long = SystemClock::uptimeMillis,
+    private val log: (String) -> Unit = {}
 ) {
     private class Session(val inserted: String, val read: () -> Pair<String, Int>?, val startedAt: Long) {
         var watch: CorrectionWatch? = null
+        var baselineTries = 0
     }
 
     private var session: Session? = null
@@ -103,10 +105,25 @@ class CorrectionTracker(
         handler.removeCallbacks(baseline)
     }
 
+    /**
+     * Find the dictation in the field. A web page (Chrome) reports a pasted text to accessibility
+     * a moment after the paste, so an empty or older read is retried for a couple of seconds.
+     */
     private fun takeBaseline() {
         val s = session ?: return
-        val (text, caret) = runCatching { s.read() }.getOrNull() ?: return stop()
-        s.watch = CorrectionWatch.locate(text, s.inserted, caret) ?: return stop()
+        val read = runCatching { s.read() }.getOrNull()
+        val watch = read?.let { (text, caret) -> CorrectionWatch.locate(text, s.inserted, caret) }
+        if (watch == null) {
+            if (++s.baselineTries < BASELINE_TRIES) {
+                handler.postDelayed(baseline, BASELINE_DELAY_MS)
+            } else {
+                log(if (read == null) "correction watch: the field is gone" else "correction watch: the dictation isn't in the field")
+                stop()
+            }
+            return
+        }
+        s.watch = watch
+        log("correction watch: watching ${watch.end - watch.start} chars")
         scheduleNext()
     }
 
@@ -130,12 +147,17 @@ class CorrectionTracker(
             handler.postDelayed(nudged, TYPING_MS)
             return
         }
-        if (found.isNotEmpty()) onFound(found)
+        if (found.isNotEmpty()) {
+            log("correction watch: found ${found.size} correction(s)")
+            onFound(found)
+        }
         scheduleNext()
     }
 
     companion object {
         const val BASELINE_DELAY_MS = 250L
+        /** Reads to find the dictation before giving up (about two seconds). */
+        const val BASELINE_TRIES = 8
         const val NUDGE_DELAY_MS = 1_200L
         /** The caret moved this recently: the user may still be in the middle of a word. */
         const val TYPING_MS = 3_000L

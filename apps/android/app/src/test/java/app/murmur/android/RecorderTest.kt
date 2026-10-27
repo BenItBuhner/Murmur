@@ -56,4 +56,19 @@ class RecorderTest {
         assertTrue("captured ${pcm.size} samples", pcm.size >= SAMPLE_RATE * 2L)
         assertTrue("captured ${pcm.size} samples", pcm.size <= SAMPLE_RATE * 2L + SAMPLE_RATE / 20)
     }
+
+    @Test
+    fun `a stop after the speaker went quiet skips the post-roll`() {
+        val recorder = Recorder()
+        recorder.start(null) {}
+        Thread.sleep(50)
+        val started = System.nanoTime()
+        recorder.stop(postRoll = false)
+        assertTrue("stopped in ${(System.nanoTime() - started) / 1_000_000} ms", System.nanoTime() - started < 150_000_000L)
+        recorder.start(null) {}
+        Thread.sleep(50)
+        val again = System.nanoTime()
+        recorder.stop()
+        assertTrue("the post-roll still runs by default", System.nanoTime() - again >= 190_000_000L)
+    }
 }

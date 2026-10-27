@@ -267,6 +267,7 @@ fun HistoryScreen(
                     retryNote = retryNote?.takeIf { it.first == entry.id }?.second,
                     onToggle = { open = if (open == entry.id) null else entry.id },
                     onCopy = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Murmur", entry.finalText))) } },
+                    onCopyDetails = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Murmur diagnostics", diagnostics(entry)))) } },
                     onPlay = { togglePlay(entry) },
                     onRetry = {
                         retryNote = null
@@ -396,6 +397,8 @@ private fun HistoryRow(
     retryNote: String?,
     onToggle: () -> Unit,
     onCopy: () -> Unit,
+    /** Copies where the dictation's time went, with what was heard and inserted, for a bug report. */
+    onCopyDetails: () -> Unit = {},
     onPlay: () -> Unit,
     onRetry: () -> Unit,
     onDelete: () -> Unit,
@@ -480,6 +483,20 @@ private fun HistoryRow(
                     LatencyBar(entry.timings)
                     Spacer(Modifier.height(18.dp))
                 }
+                val trace = entry.trace
+                if (showLatency && trace != null && (trace.steps.isNotEmpty() || trace.notes.isNotEmpty())) {
+                    Overline("Where the time went")
+                    Spacer(Modifier.height(8.dp))
+                    Well {
+                        Text(
+                            trace.describe(),
+                            style = Murmur.type.labelSmall,
+                            color = c.inkSoft,
+                            modifier = Modifier.testTag("history-trace")
+                        )
+                    }
+                    Spacer(Modifier.height(18.dp))
+                }
                 if (entry.stages.isNotEmpty() || entry.llm != null || entry.sttSpeed?.fellBack == true) {
                     Overline("Stages")
                     Spacer(Modifier.height(8.dp))
@@ -511,10 +528,28 @@ private fun HistoryRow(
                     )
                     if (entry.recording != null) TextLink(if (playing) "Stop" else "Play", onClick = onPlay, color = c.ink)
                     if (entry.finalText.isNotEmpty()) TextLink("Copy", onClick = onCopy, color = c.ink)
+                    if (entry.trace != null) TextLink("Details", onClick = onCopyDetails, color = c.ink, modifier = Modifier.testTag("history-copy-details"))
                     Spacer(Modifier.width(4.dp))
                     TextLink("Delete", onClick = onDelete, color = c.clay)
                 }
             }
         }
     }
+}
+
+/**
+ * One dictation as plain text for a bug report: when, how long each stage took and which of the
+ * instance's models answered (the trace), what was heard and what went in. Copied by the entry's
+ * Details link; nothing leaves the phone unless the user pastes it somewhere.
+ */
+internal fun diagnostics(entry: HistoryEntry): String = buildString {
+    append("Murmur ").append(app.murmur.android.BuildConfig.VERSION_NAME).append(" · ")
+    append(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date(entry.createdAt))).append('\n')
+    append("speech ").append(entry.speechMs).append(" ms, stop to inserted ").append(entry.timings.totalMs).append(" ms")
+    append(" (speech ").append(entry.timings.sttMs).append(", model ").append(entry.timings.llmMs).append(", insert ").append(entry.timings.injectMs).append(")\n")
+    append("formatting: ").append(entry.llm?.name?.lowercase() ?: "none").append(entry.llmDetail?.let { " ($it)" } ?: "").append('\n')
+    entry.error?.let { append("error: ").append(it).append('\n') }
+    entry.trace?.let { append(it.describe()).append('\n') }
+    append("heard: ").append(entry.rawText).append('\n')
+    append("inserted: ").append(entry.finalText)
 }

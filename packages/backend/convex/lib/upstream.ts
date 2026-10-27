@@ -241,6 +241,21 @@ export function serviceOf(kind: InferenceKind): 'speech' | 'formatting' {
 
 // ---- hedging ------------------------------------------------------------------------------------
 
+/**
+ * HTTP statuses another model may answer where this one did not: a rate limit, the provider (or
+ * the proxy in front of it) failing or busy, or a model it does not serve. Credentials and the
+ * other 4xx answers are about the request itself and are reported as they are.
+ */
+export function failoverWorthwhile(status: number): boolean {
+  return status === 404 || status === 408 || status === 409 || status === 429 || status >= 500
+}
+
+/**
+ * A hedge delay no request outlives (every budget here is far shorter): passed to `hedged` for an
+ * alternate that is only there to fail over to, never to race.
+ */
+export const FAILOVER_ONLY_MS = 600_000
+
 /** Default wait before a release request is hedged with a second model (MURMUR_INFERENCE_HEDGE_MS). */
 export const HEDGE_AFTER_MS = 500
 
@@ -252,25 +267,50 @@ export function hedgeAfterMs(env: Record<string, string | undefined>): number | 
 }
 
 /**
+ * Wait before release formatting is hedged (MURMUR_INFERENCE_LLM_HEDGE_MS, default 1.5 s). Longer
+ * than the speech hedge: the release formatter answers in about 0.75 s at the median and the
+ * backup in about 2 s, so a hedge at 0.5 s raced the backup on most releases (spending its quota)
+ * and almost never won. A formatter that fails is still failed over at once. Off with the speech
+ * hedge (MURMUR_INFERENCE_HEDGE_MS=off).
+ */
+export const LLM_HEDGE_AFTER_MS = 1_500
+
+export function llmHedgeAfterMs(env: Record<string, string | undefined>): number | null {
+  if (hedgeAfterMs(env) === null) return null
+  const n = Number((env.MURMUR_INFERENCE_LLM_HEDGE_MS ?? '').trim())
+  return Number.isFinite(n) && n > 0 ? n : LLM_HEDGE_AFTER_MS
+}
+
+/**
  * Run `primary`; when it has not answered usably within `afterMs`, start `alternate` too and take
  * whichever answers usably first (`ok`). When neither does, the primary's answer is returned. Cuts
  * the slow tail (a cold provider, a queued key) at the cost of a second call only for those.
+ *
+ * A primary that fails before `afterMs` is not the end either: the alternate is asked at once
+ * (`failover`). Oct 24 2026: with every Groq key in its rate-limit cooldown the model proxy
+ * answered the fast formatter with a 503 in ~130 ms, under the hedge delay, so the backup was
+ * never asked and dictations went in with the rule-based text (odd casing and punctuation).
  */
 export async function hedged<T>(
   primary: () => Promise<T>,
   alternate: (() => Promise<T>) | null,
   afterMs: number | null,
-  ok: (value: T) => boolean
-): Promise<{ value: T; hedged: boolean; winner: 'primary' | 'alternate' }> {
+  ok: (value: T) => boolean,
+  /** Whether a quick failure is one another model could answer (default: every failure). */
+  failoverOn: (value: T) => boolean = () => true
+): Promise<{ value: T; hedged: boolean; winner: 'primary' | 'alternate'; failover?: boolean }> {
   const first = primary()
   if (!alternate || afterMs === null) return { value: await first, hedged: false, winner: 'primary' }
   let timer: ReturnType<typeof setTimeout> | undefined
   const fired = new Promise<'hedge'>((resolve) => (timer = setTimeout(() => resolve('hedge'), afterMs)))
   const early = await Promise.race([first.then((v) => ({ v })), fired])
   if (early !== 'hedge') {
-    // Answered in time, usable or not (a failure is handled by the caller as before).
     clearTimeout(timer)
-    return { value: early.v, hedged: false, winner: 'primary' }
+    if (ok(early.v) || !failoverOn(early.v)) return { value: early.v, hedged: false, winner: 'primary' }
+    // Failed fast: the alternate is the answer if it has one, the primary's failure otherwise.
+    const second = await alternate()
+    if (ok(second)) return { value: second, hedged: true, winner: 'alternate', failover: true }
+    return { value: early.v, hedged: true, winner: 'primary', failover: true }
   }
   const second = alternate()
   const tagged = [first.then((v) => ({ v, w: 'primary' as const })), second.then((v) => ({ v, w: 'alternate' as const }))]

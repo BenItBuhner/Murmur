@@ -1,5 +1,6 @@
 package app.murmur.android.text
 
+import app.murmur.android.history.GatewayCall
 import app.murmur.android.inference.LimitNotice
 import app.murmur.android.llm.ChatMessage
 import app.murmur.android.settings.DictionaryEntry
@@ -49,7 +50,9 @@ data class FormatResult(
      * The plan limit a Murmur instance applied when it answered with rule-based text instead of
      * asking the model (a Pro account past its fair-use cap). Only ever set on a gateway answer.
      */
-    val limit: LimitNotice? = null
+    val limit: LimitNotice? = null,
+    /** What the Murmur gateway reported for each model call it made (empty off Murmur). */
+    val calls: List<GatewayCall> = emptyList()
 ) {
     companion object {
         /** The body of a `POST /v1/format` answer. */
@@ -69,7 +72,8 @@ data class FormatResult(
                 modelText = json.optString("modelText").takeIf { json.has("modelText") && !json.isNull("modelText") },
                 llmMs = json.optLong("llmMs", 0),
                 stages = stages,
-                limit = LimitNotice.fromJson(json.optJSONObject("limit"), status.optString("detail").takeIf { status.has("detail") })
+                limit = LimitNotice.fromJson(json.optJSONObject("limit"), status.optString("detail").takeIf { status.has("detail") }),
+                calls = GatewayCall.fromFormat(json)
             )
         }
     }

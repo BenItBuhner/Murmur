@@ -17,6 +17,7 @@ import app.murmur.android.history.PartialTranscript
 import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
+import app.murmur.android.history.TraceRecorder
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
 import app.murmur.android.inference.LimitNotice
@@ -90,6 +91,15 @@ private const val RETRY_HOLD_MS = 15_000L
  * on "Transcribing…" for minutes).
  */
 const val STREAM_WAIT_MS = 8_000L
+
+/**
+ * At release, the formatting done while the user spoke (the pieces' and the tail speculation's)
+ * gets this long, all of it together, before the whole text is formatted instead. It was 8 s for
+ * the speculation and then 8 s more for the pieces: a background model in its rate-limit cooldown
+ * could hold a release for 16 s before the same text was formatted again (Oct 24 2026). Formatting
+ * the whole text at release takes about a second.
+ */
+const val FORMAT_WAIT_MS = 3_000L
 
 /**
  * The longest a release may take before the pill shows an error with Retry: 30 s plus 0.1 s per
@@ -166,7 +176,10 @@ private class Run(
     val mode: DictationMode = DictationMode.HANDS_FREE,
     /** Command mode: the text that was selected when the session began, which the edit replaces. */
     val selection: Selection? = null
-)
+) {
+    /** Where this run's time goes; kept with its History entry, failed or not. */
+    val trace = TraceRecorder(if (previous != null) "retry" else "whole")
+}
 
 /** The selected text in the focused field and where it sits, as the accessibility node reports it. */
 data class Selection(val text: String, val start: Int, val end: Int)
@@ -683,7 +696,8 @@ object DictationController {
         texts: List<String>?,
         tail: String?,
         spec: Deferred<String>? = null,
-        preformatted: Pair<String, FormatResult>? = null
+        preformatted: Pair<String, FormatResult>? = null,
+        trace: TraceRecorder? = null
     ): FormatResult? {
         val specs = pieceFormats.toList()
         pieceFormats = java.util.Collections.synchronizedList(ArrayList())
@@ -697,10 +711,18 @@ object DictationController {
         var specHead: FormatResult? = null
         var tailText = tail
         var tailBefore = texts.lastOrNull().orEmpty()
+        // Formats made while speaking share one wait: past it the whole text is formatted now, which
+        // is quicker than waiting longer for a model that is stuck.
+        val formatDeadline = System.currentTimeMillis() + FORMAT_WAIT_MS
+        fun formatLeft() = (formatDeadline - System.currentTimeMillis()).coerceAtLeast(1)
+        val waitStarted = System.currentTimeMillis()
         if (spec != null) {
             if (specFormat == null || specFormat.first !== spec) return null
-            when (val f = withTimeoutOrNull(STREAM_WAIT_MS) { specFormat.second.await() } ?: PieceFormat.Unavailable) {
-                PieceFormat.Unavailable -> return null
+            when (val f = withTimeoutOrNull(formatLeft()) { specFormat.second.await() } ?: PieceFormat.Unavailable) {
+                PieceFormat.Unavailable -> {
+                    trace?.note("the tail speculation's formatting was not ready or failed; the whole text was formatted at release")
+                    return null
+                }
                 PieceFormat.Empty -> Unit
                 is PieceFormat.Done -> {
                     val at = lastSentenceStart(f.result.text)
@@ -730,8 +752,16 @@ object DictationController {
                 scope.async { runCatching { Engine.formatTranscript(tailInput, null) } }
             else -> scope.async { runCatching { formatter.format(tailInput) } }
         }
-        val done = withTimeoutOrNull(STREAM_WAIT_MS) { specs.awaitAll() } ?: return null
-        if (done.any { it is PieceFormat.Unavailable }) return null
+        val done = withTimeoutOrNull(formatLeft()) { specs.awaitAll() }
+        trace?.step("waiting for formatting done while speaking", System.currentTimeMillis() - waitStarted)
+        if (done == null) {
+            trace?.note("a piece's formatting was still running after ${FORMAT_WAIT_MS} ms; the whole text was formatted at release")
+            return null
+        }
+        if (done.any { it is PieceFormat.Unavailable }) {
+            trace?.note("a piece could not be formatted while speaking; the whole text was formatted at release")
+            return null
+        }
         val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
         specHead?.let { parts.add(it) }
         if (tailJob != null) parts.add(tailJob.await().getOrElse { return null }.let { it.copy(text = stripEcho(it.text, lastPiece)) })
@@ -750,7 +780,9 @@ object DictationController {
             modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
             llmMs = parts.last().llmMs,
             stages = stages,
-            limit = parts.firstNotNullOfOrNull { it.limit }
+            limit = parts.firstNotNullOfOrNull { it.limit },
+            // The release's own model calls (the tail); the pieces' ran while the user spoke.
+            calls = if (tailJob != null) parts.last().calls else emptyList()
         )
     }
 
@@ -784,7 +816,8 @@ object DictationController {
             modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
             llmMs = parts.sumOf { it.llmMs },
             stages = LinkedHashSet<String>().apply { parts.forEach { addAll(it.stages) } }.toList(),
-            limit = parts.firstNotNullOfOrNull { it.limit }
+            limit = parts.firstNotNullOfOrNull { it.limit },
+            calls = parts.flatMap { it.calls }
         )
     }
 
@@ -823,6 +856,7 @@ object DictationController {
         /** The dictation ended on its stop phrase, which the transcript therefore ends with. */
         phraseHeard: Boolean = false
     ) {
+        val trace = run.trace
         val recordMs = run.recordMs
         // The destination's style is settled before the speech request: a per-app rule may pick the
         // speed, which the speech model is asked for and which decides whether the formatting model runs.
@@ -853,7 +887,7 @@ object DictationController {
         // The whole recording at once (no streamed pieces, pieces that failed, Retry). A long one
         // goes up in pieces cut at pauses, never as one request: the gateway refuses clips over
         // 600 s, and one huge request is the slowest way to get a 30-minute dictation back.
-        suspend fun runWhole(): CompleteResult {
+        suspend fun runWholeUntimed(): CompleteResult {
             if (pcm.size.toDouble() / SAMPLE_RATE <= LONG_CLIP_SEC) return runStt(pcm)
             val started = System.currentTimeMillis()
             val texts = transcribeInPieces(pcm, SAMPLE_RATE, -48.0) { clip, _ -> runStt(clip).output.text }
@@ -861,6 +895,7 @@ object DictationController {
             Log.i(TAG, "${pcm.size / SAMPLE_RATE} s transcribed in ${texts.size} piece(s)")
             return CompleteResult(TranscribeOutput(text = joined.text, latencyMs = System.currentTimeMillis() - started), 0, 0.0, Coverage(null, 0.0, false))
         }
+        suspend fun runWhole(): CompleteResult = trace.timed("speech (whole recording)") { runWholeUntimed() }
         var streamedTexts: List<String>? = null
         // The tail formatted on the gateway in the same call as its speech (text it formatted, result).
         var preformatted: Pair<String, FormatResult>? = null
@@ -876,6 +911,10 @@ object DictationController {
         val specOk = streamed?.specText?.let { runCatching { withTimeout(SPEC_RELEASE_GRACE_MS) { it.await() } }.isSuccess } == true
         val specWaitMs = System.currentTimeMillis() - (streamDeadline - STREAM_WAIT_MS)
         Log.i(TAG, "release: spec ${if (streamed?.specText == null) "none" else if (specOk) "used" else "dropped"} after $specWaitMs ms")
+        if (streamed?.specText != null) {
+            trace.step("waiting for the tail speculation", specWaitMs)
+            if (!specOk) trace.note("the tail speculation was still running at release and was dropped")
+        }
         val from = if (specOk) streamed!!.specSamples!! else streamed?.samples ?: 0
         val complete = if (streamed != null && (from in 1 until pcm.size)) {
             // Only the audio after the pieces goes up now, alongside waiting for the pieces.
@@ -890,19 +929,32 @@ object DictationController {
                         runCatching { router.dictateRelease(resolved, Wav.encodePcm16(rest, SAMPLE_RATE), prompt, p.first, p.second) }
                             .onFailure { Log.w(TAG, "one-call release failed; using two calls", it) }.getOrNull()
                     }
-                    if (answer == null) runStt(rest)
+                    if (answer == null) trace.timed("speech (tail)") { runStt(rest) }
                     else {
                         answer.format?.let { preformatted = answer.transcript to FormatResult.fromJson(it) }
                         Log.i(TAG, "tail in one call: ${answer.stt.latencyMs} ms${if (answer.rules) " (short tail, rules)" else ""}")
+                        trace.path = "one-call"
+                        trace.step("speech + formatting of the tail (one call)", answer.stt.latencyMs)
+                        trace.call(answer.stt.trace)
+                        preformatted?.second?.calls?.let { trace.calls(it) }
+                        if (answer.rules) trace.note("short tail formatted by rules")
                         CompleteResult(answer.stt, 0, 0.0, Coverage(null, 0.0, false))
                     }
                 }
             }
+            if (trace.path != "retry") trace.path = "streamed"
+            val piecesStarted = System.currentTimeMillis()
             val texts = runCatching { withTimeout(streamLeft()) { streamed.texts() } }
+            trace.step("waiting for pieces sent while speaking", System.currentTimeMillis() - piecesStarted)
+            trace.pieces = texts.getOrNull()?.size ?: 0
             // The tail is new audio, not a stalled piece: it gets the stream wait plus its own STT time.
             val tailResult = tail?.let { t -> withTimeoutOrNull(streamLeft() + 10_000) { t.await() } ?: Result.failure(ReleaseTimeoutException()) }
             if (texts.isFailure || tailResult?.isFailure == true) {
                 Log.w(TAG, "a streamed piece failed; transcribing the whole dictation", texts.exceptionOrNull() ?: tailResult?.exceptionOrNull())
+                trace.note(
+                    if (texts.isFailure) "a piece sent while speaking failed or ran past ${STREAM_WAIT_MS} ms; the whole recording was transcribed again"
+                    else "the tail failed; the whole recording was transcribed again"
+                )
                 runWhole()
             } else {
                 var last = tailResult?.getOrNull()
@@ -924,8 +976,10 @@ object DictationController {
             }
         } else runWhole()
         val stt = complete.output
+        if (trace.path != "one-call") trace.call(stt.trace)
         if (complete.resumed > 0) {
             Log.i(TAG, "transcript recovered ${"%.1f".format(complete.recoveredSec)}s of speech in ${complete.resumed} extra request(s)")
+            trace.note("the transcript stopped short; ${complete.resumed} extra speech request(s) recovered the rest")
         }
         var raw = stt.text.trim()
         // The spoken stop phrase ends the dictation; it is not part of the text. Said across the
@@ -937,6 +991,7 @@ object DictationController {
             if (tail != null) streamedTail = tail else streamedTexts = null
         }
         val sttMs = System.currentTimeMillis() - sttStarted
+        trace.step("speech (total)", sttMs)
         val speedNote = stt.speed?.let { sp ->
             if (sp.fellBack) " speed=${sp.used} (asked ${sp.requested}, ${sp.fallback ?: "fallback"})" else " speed=${sp.used}"
         } ?: ""
@@ -1023,13 +1078,23 @@ object DictationController {
                 // text goes in and History says why. A Murmur instance past the fair-use cap answers
                 // with the rule-based text itself and says which limit paused the model.
                 formatted = try {
-                    (formatWithSpeculation(router, input, streamedTexts, streamedTail, streamedSpec, preformatted) ?: formatLong(router, input))
+                    (formatWithSpeculation(router, input, streamedTexts, streamedTail, streamedSpec, preformatted, trace)
+                        ?: trace.timed("formatting (whole text)") { formatLong(router, input) })
                         .also { softLimit = it.limit }
                 } catch (e: Exception) {
                     Log.w(TAG, "formatting unavailable, using rule-based text: ${e.message}")
                     softLimit = planLimitOf(e)
                     Engine.formatTranscript(input, null)
                         .copy(status = FormatStatus(FormatOutcome.FAILED, friendlyError(e), 0))
+                }
+            }
+            if (mode == FormattingMode.SMART) {
+                if (trace.path != "one-call") trace.calls(formatted.calls)
+                trace.step("formatting (total)", System.currentTimeMillis() - formatStarted)
+                when (formatted.status.outcome) {
+                    FormatOutcome.FAILED -> trace.note("formatting failed, rule-based text used: ${formatted.status.detail ?: "no detail"}")
+                    FormatOutcome.REJECTED -> trace.note("the model's text was rejected (${formatted.status.detail ?: "guard"}); rule-based text used")
+                    else -> Unit
                 }
             }
             val finished = finish(formatted.text, app.category, s.dictionaryEntries, style.trailingSpace, snippets = s.snippets)
@@ -1103,8 +1168,10 @@ object DictationController {
             timings = timings.copy(injectMs = now - injectStarted, totalMs = now - stoppedAt),
             error = error,
             recording = recording,
-            attempts = run.attempts
+            attempts = run.attempts,
+            trace = trace.also { it.step(if (run.insert) "inserting" else "copying", now - injectStarted) }.build()
         )
+        Log.i(TAG, "trace: ${entry.trace?.describe()?.replace("\n", " |")}")
         val history = HistoryStore.get(context)
         if (run.previous != null) history.replace(entry) else history.add(entry)
         if (error == null) {
@@ -1166,7 +1233,8 @@ object DictationController {
             timings = timings.copy(totalMs = (now - stoppedAt).coerceAtLeast(0)),
             error = error,
             recording = run.recording,
-            attempts = run.attempts
+            attempts = run.attempts,
+            trace = run.trace.build().takeIf { it.steps.isNotEmpty() || it.notes.isNotEmpty() || it.calls.isNotEmpty() }
         )
         val history = HistoryStore.get(context)
         if (previous != null) history.replace(entry) else history.add(entry)

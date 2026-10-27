@@ -48,6 +48,11 @@ object Clean {
     val ENUMERATION_PHRASES: List<String> = listOf("bullet point", "bullet points", "next item", "next point")
 
     /** Frequent function words of other languages in plain ASCII; words that are also English are left out. */
+    /** Words a sentence never ends on; a sentence that does was split at a pause (clean.ts SPLIT_WORDS). */
+    val SPLIT_WORDS: List<String> = listOf(
+        "a", "an", "the", "my", "your", "our", "their", "his", "its", "of", "to", "for", "from", "with", "into", "onto", "at", "and", "or", "but", "nor", "because", "although", "unless", "whether", "if", "than", "very"
+    )
+
     val FOREIGN_WORDS: List<String> = listOf(
         // German
         "aber", "auch", "bist", "bitte", "danke", "das", "dass", "der", "dich", "die", "du", "ein",
@@ -121,6 +126,7 @@ object Clean {
     private val COMMAND_SET = COMMAND_WORDS.toSet()
     private val ENUMERATION_SET = ENUMERATION_WORDS.toSet()
     private val FOREIGN_SET = FOREIGN_WORDS.toSet()
+    private val SPLIT_SET = SPLIT_WORDS.toSet()
 
     /** A word, or a run of two or three words, said twice in a row. */
     private fun hasStutter(words: List<String>): Boolean {
@@ -176,8 +182,14 @@ object Clean {
         if (has(COMMAND_SET) || COMMAND_PHRASE_RE.containsMatchIn(lower)) return no("command")
         if (has(ENUMERATION_SET) || ENUMERATION_PHRASE_RE.containsMatchIn(lower)) return no("enumeration")
         if (DIGIT.containsMatchIn(lower) || words.any { NumberSignature.isNumberWord(it) }) return no("number")
+        val sentences = text.split(SENTENCE_SPLIT)
+        // A sentence that ends on "to" or "the" was cut at a pause; the next one finishes it.
+        for (sentence in sentences.dropLast(1)) {
+            val last = WORD.findAll(sentence.lowercase()).lastOrNull()?.value
+            if (last != null && last in SPLIT_SET) return no("split")
+        }
         // A question the speech model ended with a period would come back with its "?".
-        for (sentence in text.split(SENTENCE_SPLIT)) {
+        for (sentence in sentences) {
             if (QUESTION_START.containsMatchIn(sentence) && !QUESTION_END.containsMatchIn(sentence)) return no("question")
         }
         if (has(FOREIGN_SET)) return no("foreign")

@@ -51,6 +51,7 @@ export type NotCleanReason =
   | 'number'
   | 'question'
   | 'foreign'
+  | 'split'
 
 export interface CleanDecision {
   /** True when the rule-based cleanup is the whole job and the model is not called. */
@@ -171,6 +172,16 @@ export const ENUMERATION_PHRASES: readonly string[] = [
 ]
 
 /**
+ * Words a sentence never ends on: articles, possessives, prepositions and conjunctions. The speech
+ * model ends a sentence wherever the speaker paused, so "Send the budget to. Sarah by Friday." is
+ * a sentence split at a pause, not two sentences; only the model can join it (Oct 24 2026: such
+ * short dictations were judged clean and inserted with the stray period and capital).
+ */
+export const SPLIT_WORDS: readonly string[] = [
+  'a', 'an', 'the', 'my', 'your', 'our', 'their', 'his', 'its', 'of', 'to', 'for', 'from', 'with', 'into', 'onto', 'at', 'and', 'or', 'but', 'nor', 'because', 'although', 'unless', 'whether', 'if', 'than', 'very'
+]
+
+/**
  * Frequent function words of other languages written in plain ASCII. The rules only know English
  * fillers, numbers and commands, so a transcript that carries one of these goes to the model even
  * when the language setting is "auto". Words that are also English ("is", "no", "met", "con",
@@ -252,6 +263,7 @@ const HESITATION_SET = new Set(HESITATION_WORDS)
 const COMMAND_SET = new Set(COMMAND_WORDS)
 const ENUMERATION_SET = new Set(ENUMERATION_WORDS)
 const FOREIGN_SET = new Set(FOREIGN_WORDS)
+const SPLIT_SET = new Set(SPLIT_WORDS)
 
 /** A word, or a run of two or three words, said twice in a row: "the the", "I, I think", "we need to we need to". */
 function hasStutter(words: readonly string[]): boolean {
@@ -313,8 +325,14 @@ export function alreadyClean(
   if (has(COMMAND_SET) || COMMAND_PHRASE_RE.test(lower)) return no('command')
   if (has(ENUMERATION_SET) || ENUMERATION_PHRASE_RE.test(lower)) return no('enumeration')
   if (/[0-9]/.test(lower) || words.some(isNumberWord)) return no('number')
+  const sentences = text.split(SENTENCE_SPLIT)
+  // A sentence that ends on "to" or "the" was cut at a pause; the next one finishes it.
+  for (const sentence of sentences.slice(0, -1)) {
+    const last = sentence.toLowerCase().match(WORD)?.pop()
+    if (last && SPLIT_SET.has(last)) return no('split')
+  }
   // A question the speech model ended with a period would come back with its "?".
-  for (const sentence of text.split(SENTENCE_SPLIT)) {
+  for (const sentence of sentences) {
     if (QUESTION_START.test(sentence) && !/\?$/.test(sentence)) return no('question')
   }
   if (has(FOREIGN_SET)) return no('foreign')

@@ -60,20 +60,22 @@ class RecorderTest {
     @Test
     fun `a stop after the speaker went quiet skips the post-roll`() {
         val recorder = Recorder()
-        // Joining the capture thread can take a while on a loaded CI runner, so the quickest of a
-        // few stops is checked: without the post-roll's 200 ms sleep it stays well under that.
-        val quickest = (1..3).minOf {
+        fun timedStop(postRoll: Boolean): Long {
             recorder.start(null) {}
             Thread.sleep(50)
             val started = System.nanoTime()
-            recorder.stop(postRoll = false)
-            System.nanoTime() - started
+            recorder.stop(postRoll)
+            return System.nanoTime() - started
         }
-        assertTrue("stopped in ${quickest / 1_000_000} ms", quickest < 150_000_000L)
-        recorder.start(null) {}
-        Thread.sleep(50)
-        val again = System.nanoTime()
-        recorder.stop()
-        assertTrue("the post-roll still runs by default", System.nanoTime() - again >= 190_000_000L)
+        // Wall time alone is not a reliable signal here: under Robolectric the capture thread spins
+        // and joining it can take 200+ ms on a loaded CI runner. So the two kinds of stop are
+        // compared, quickest of three each: the default one also sleeps through the 200 ms post-roll.
+        val skipped = (1..3).minOf { timedStop(postRoll = false) }
+        val full = (1..3).minOf { timedStop(postRoll = true) }
+        assertTrue("the post-roll still runs by default (${full / 1_000_000} ms)", full >= 190_000_000L)
+        assertTrue(
+            "skipping the post-roll saved ${(full - skipped) / 1_000_000} ms",
+            full - skipped >= 150_000_000L
+        )
     }
 }

@@ -189,4 +189,36 @@ object Verify {
             out = out.replace(Regex("[ \\t]*\\n+[ \\t]*"), " ")
         return out.trim()
     }
+
+    private val LOWER_I = Regex("(?<![\\p{L}\\p{N}'’._@/\\\\-])i(?=(?:['’](?:m|ll|ve|d))?(?![\\p{L}\\p{N}'’_@/\\\\-])(?!\\.\\p{L}))")
+    private val SENTENCE_LOWER = Regex("([.!?][\"')\\]]*\\s+)(\\p{Ll}[\\p{L}\\p{N}'’-]*)")
+    private val LOWER_INSTRUCTION = Regex("lower[\\s-]?case|no capital", RegexOption.IGNORE_CASE)
+
+    /**
+     * Capitals the model dropped: the pronoun "I" and a lower-case word right after a sentence end,
+     * unless the transcript wrote them that way, the word is mixed-case, or the period ends an
+     * abbreviation or an ellipsis. The first word is left alone. Not in code, a terminal, or when
+     * the instructions ask for lower case, or the text before the cursor is all lower case. Mirrors
+     * repairCase in verify.ts.
+     */
+    fun repairCase(transcript: String, text: String, category: AppCategory, instructions: String?, precedingText: String? = null): String {
+        if (category == AppCategory.CODE || category == AppCategory.TERMINAL) return text
+        if (instructions != null && LOWER_INSTRUCTION.containsMatchIn(instructions)) return text
+        val before = precedingText ?: ""
+        if (countWords(before) >= 3 && before.none { it.isUpperCase() }) return text
+        var out = text
+        if (!LOWER_I.containsMatchIn(transcript)) out = LOWER_I.replace(out, "I")
+        val whole = out
+        out = SENTENCE_LOWER.replace(whole) { m ->
+            val sep = m.groupValues[1]
+            val word = m.groupValues[2]
+            if (word.any { it.isUpperCase() }) return@replace m.value
+            val before = whole.substring(0, m.range.first + 1)
+            if (sep.startsWith(".") && (ABBREVIATION.containsMatchIn(before) || before.endsWith("..") || Regex("\\.\\p{L}+\\.$").containsMatchIn(before)))
+                return@replace m.value
+            if (transcript.contains("${sep.trim()} $word")) return@replace m.value
+            sep + word.substring(0, 1).uppercase() + word.substring(1)
+        }
+        return out
+    }
 }

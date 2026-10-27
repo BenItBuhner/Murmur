@@ -1,5 +1,6 @@
 import { countUnits, digitSignature, isNumberWord } from './numbers'
-import { QUESTION_START, countWords, isQuestion } from './text'
+import { ABBREVIATION, QUESTION_START, countWords, isQuestion } from './text'
+import type { FormatContext } from './types'
 
 /**
  * Trust, but verify. The model's answer is first cleaned of the wrapping models add (reasoning
@@ -228,6 +229,39 @@ export function repairOutput(transcript: string, text: string): string {
   if (out.includes('\n') && !LAYOUT_CUE.test(transcript) && !LIST_LINE.test(out))
     out = out.replace(/[ \t]*\n+[ \t]*/g, ' ')
   return out.trim()
+}
+
+/** The pronoun "i" alone or in a contraction, but not "i.e." or part of a longer word. */
+const LOWER_I = /(?<![\p{L}\p{N}'’._@/\\-])i(?=(?:['’](?:m|ll|ve|d))?(?![\p{L}\p{N}'’_@/\\-])(?!\.\p{L}))/gu
+const SENTENCE_LOWER = /([.!?]["')\]]*\s+)(\p{Ll}[\p{L}\p{N}'’-]*)/gu
+
+/**
+ * Capitals the model dropped. Told a piece continues an unfinished sentence ("mid-sentence means
+ * no capital"), a model sometimes lower-cases far more than the first word: "i need you to…",
+ * whole sentences after a period (Oct 27 2026, phone dictations). The pronoun "I" and a lower-case
+ * word right after a sentence end get their capital back, unless the transcript itself wrote them
+ * that way, the word is mixed-case ("iPhone"), or the period ends an abbreviation or an ellipsis.
+ * The first word is left alone (it may continue the text before the cursor). Not in code or a
+ * terminal, nor when the user's instructions ask for lower case.
+ */
+export function repairCase(
+  transcript: string,
+  text: string,
+  ctx: Pick<FormatContext, 'category' | 'instructions'>
+): string {
+  if (ctx.category === 'code' || ctx.category === 'terminal') return text
+  if (/lower[\s-]?case|no capital/i.test(ctx.instructions ?? '')) return text
+  let out = text
+  if (!new RegExp(LOWER_I.source, 'u').test(transcript)) out = out.replace(LOWER_I, 'I')
+  out = out.replace(SENTENCE_LOWER, (m: string, sep: string, word: string, offset: number, whole: string) => {
+    if (/\p{Lu}/u.test(word)) return m
+    const before = whole.slice(0, offset + 1)
+    if (sep.startsWith('.') && (ABBREVIATION.test(before) || /\.\.$/u.test(before) || /\.\p{L}+\.$/u.test(before)))
+      return m
+    if (transcript.includes(`${sep.trim()} ${word}`)) return m
+    return sep + word.charAt(0).toUpperCase() + word.slice(1)
+  })
+  return out
 }
 
 /**

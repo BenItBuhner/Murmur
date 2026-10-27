@@ -27,10 +27,11 @@ import {
   type FormatInput,
   type ResolvedStyle,
   isSilentStockPhrase,
+  carryInput,
+  joinCarried,
   joinPieces,
-  joinSeam,
-  lastSentenceStart,
   seamContext,
+  splitCarry,
   stripEcho
 } from '@engine'
 import {
@@ -116,12 +117,36 @@ const PIECE_NOTE =
   'This transcript is one part of a longer dictation and may stop mid-sentence; if it does, leave the end unpunctuated.'
 
 /**
+ * A piece formatted while recording. `carried`: formatted together with the previous piece's last
+ * sentence, which that piece's own text gives up when the parts are joined (joinCarried). `prior`:
+ * the text it was told precedes it.
+ */
+type CarriedOutcome = FormatOutcome & { carried?: boolean; prior?: string }
+
+/**
+ * How long a piece formatted while recording waits for the one before it, whose last sentence it
+ * carries; past it the piece is formatted on its own (the seam is then joined by joinSeam).
+ */
+const CARRY_WAIT_MS = 8_000
+
+/** Code and terminals keep their own line structure: no sentence is carried across a seam there. */
+const carriesSentences = (ctx: FormatContext): boolean => ctx.category !== 'code' && ctx.category !== 'terminal'
+
+/** The value of a promise that has settled already, else undefined (never waits). */
+async function settled<T>(p: Promise<T> | undefined): Promise<T | undefined> {
+  if (!p) return undefined
+  const PENDING = Symbol('pending')
+  const v = await Promise.race([p.catch(() => undefined), Promise.resolve(PENDING)])
+  return v === PENDING ? undefined : (v as T)
+}
+
+/**
  * Context for formatting one piece of a streamed dictation: the piece before it stands in for the
  * text before the cursor (when the platform gave none, or after it), and a piece that is not the
- * last may stop mid-sentence.
+ * last may stop mid-sentence. `before` is that piece's text, or (`isPrior`) its seamContext already.
  */
-function pieceContext(ctx: FormatContext, before: string, last = false): FormatContext {
-  const prior = seamContext(before)
+function pieceContext(ctx: FormatContext, before: string, last = false, isPrior = false): FormatContext {
+  const prior = isPrior ? before : seamContext(before)
   return {
     ...ctx,
     precedingText: prior ? `${ctx.precedingText ?? ''} ${prior}`.trim() : ctx.precedingText,
@@ -155,7 +180,7 @@ async function formatLong(formatter: Formatter, input: FormatInput): Promise<For
 }
 
 /** Pieces formatted separately, joined in order with their seams repaired; the last decides Enter. */
-function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
+function joinFormatted(parts: CarriedOutcome[]): FormatOutcome {
   const rank: Record<string, number> = {
     used: 0,
     'skipped-clean': 1,
@@ -169,11 +194,13 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const usedPart = parts.find((p) => p.status.outcome === 'used')
   const stages: string[] = []
   for (const p of parts) for (const st of p.stages) if (!stages.includes(st)) stages.push(st)
+  const joined = (texts: string[]): string =>
+    joinCarried(texts.map((text, i) => ({ text, carried: (parts[i] as CarriedOutcome).carried }))).text
   return {
-    text: joinPieces(parts.map((p) => p.text)).text,
+    text: joined(parts.map((p) => p.text)),
     pressEnter: parts[parts.length - 1].pressEnter,
     modelText: parts.every((p) => p.modelText !== undefined)
-      ? joinPieces(parts.map((p) => p.modelText!)).text
+      ? joined(parts.map((p) => p.modelText!))
       : undefined,
     llmMs: parts[parts.length - 1].llmMs,
     // A piece the model left as it was, or a short tail formatted by rules, does not make the
@@ -585,10 +612,12 @@ export class DictationController extends EventEmitter {
           texts: Array.from(partialTexts, (t) => t ?? null)
         })
         // The piece continues the one before it: the formatter sees that text as what precedes
-        // the cursor, so a sentence the cut split is not capitalized or closed as if complete.
+        // the cursor, so a sentence the cut split is not capitalized or closed as if complete;
+        // and once that piece is formatted, its last sentence is formatted again with this one.
         const before = index > 0 ? await pieceTexts[index - 1].catch(() => '') : ''
+        const prev = text && index > 0 ? await within(formats[index - 1], CARRY_WAIT_MS).catch(() => null) : null
         settle(
-          text ? this.speculateFormat(text, await resolveTarget()!, tag, index, before) : 'empty'
+          text ? this.speculateFormat(text, await resolveTarget()!, tag, index, before, prev) : 'empty'
         )
         return text
       } catch (err) {
@@ -625,8 +654,10 @@ export class DictationController extends EventEmitter {
       const n = pieceTexts.length
       const text = await transcribeOnly(pcm, n)
       const before = n > 0 ? await pieceTexts[n - 1].catch(() => '') : ''
+      // The speculation can be on the release's path: it carries only from a piece formatted already.
+      const prev = text && n > 0 ? await settled(formats[n - 1]) : undefined
       const format: Promise<FormatOutcome | 'empty' | null> = text
-        ? this.speculateFormat(text, (await resolveTarget())!, tag, n, before)
+        ? this.speculateFormat(text, (await resolveTarget())!, tag, n, before, prev)
         : Promise.resolve('empty')
       format.catch(() => undefined)
       return { text, format }
@@ -656,26 +687,35 @@ export class DictationController extends EventEmitter {
     t: { smart: boolean; context: FormatContext },
     tag: string,
     index: number,
-    before = ''
-  ): Promise<FormatOutcome | null> {
+    before = '',
+    prev?: FormatOutcome | 'empty' | null
+  ): Promise<CarriedOutcome | null> {
     if (!t.smart) return null
     try {
       const formatter = await this.deps.inference.formatter()
       if (formatter.source !== 'murmur') return null
       const started = performance.now()
+      // The cut before this piece fell at a pause, often mid-sentence: the previous piece's last
+      // sentence is formatted again with this piece's words, so the model decides that boundary
+      // with both sides in view (joinCarried drops it from the previous piece).
+      const split = prev && prev !== 'empty' && carriesSentences(t.context) ? splitCarry(prev.text) : null
+      const carried = !!split?.carry
+      const prior = split?.carry
+        ? seamContext(split.head) || ((prev as CarriedOutcome).prior ?? '')
+        : seamContext(before)
       const out = await formatter.format(
         {
-          transcript: text,
+          transcript: split?.carry ? carryInput(split.carry, text) : text,
           mode: 'smart',
-          context: pieceContext(t.context, before)
+          context: pieceContext(t.context, prior, false, true)
         },
         { tier: 'background' }
       )
       log.info(
-        `session ${tag}: piece ${index} formatted in ${Math.round(performance.now() - started)} ms while recording`
+        `session ${tag}: piece ${index} formatted in ${Math.round(performance.now() - started)} ms while recording${carried ? ' (carried the last sentence before it)' : ''}`
       )
       if (out.status.outcome === 'failed') return null
-      return { ...out, text: stripEcho(out.text, seamContext(before)) }
+      return { ...out, text: stripEcho(out.text, prior), carried, prior }
     } catch {
       return null
     }
@@ -842,7 +882,8 @@ export class DictationController extends EventEmitter {
               { wav: encodeWavPcm16(clip, SAMPLE_RATE), prompt },
               resolved.cfg,
               plan.prefix,
-              { ...plan.format, context: pieceContext(this.formatContext(s, style, app), plan.before, true) }
+              { ...plan.format, context: pieceContext(this.formatContext(s, style, app), plan.before, true) },
+              carriesSentences(this.formatContext(s, style, app))
             )
             if (answer) {
               if (answer.format) preformatted = [answer.transcript, answer.format as FormatOutcome]
@@ -1220,37 +1261,46 @@ export class DictationController extends EventEmitter {
     if (streamed.formats.length !== stt.streamed.texts.length) return null
     const tail = stt.streamed.tail
     const lastPiece = stt.streamed.texts[stt.streamed.texts.length - 1] ?? ''
-    // A tail speculation already formatted: its last sentence is formatted again with the words
-    // that followed, so the model sees that sentence whole; the rest of it stands.
-    let specHead: FormatOutcome | null = null
+    // The tail carries the last sentence before it (the speculation's, or the last piece's when
+    // that is formatted already): formatted again with the words that followed, so the model sees
+    // that sentence whole; the rest stands (joinCarried).
+    let specPart: CarriedOutcome | null = null
     let tailInput = tail
-    let tailBefore = lastPiece
+    let tailCarried = false
+    let tailPrior = seamContext(lastPiece)
+    const carryFrom = (f: CarriedOutcome, soft = true): void => {
+      const split = splitCarry(f.text)
+      if (!split.carry) {
+        tailPrior = seamContext(f.text)
+        return
+      }
+      tailInput = carryInput(split.carry, tail, { soft })
+      tailCarried = true
+      tailPrior = seamContext(split.head) || (f.prior ?? '')
+    }
     if (stt.streamed.spec) {
       const f = await within(stt.streamed.spec.format, STREAM_WAIT_MS).catch(() => null)
       if (f === null) return null
       if (f !== 'empty') {
-        const at = lastSentenceStart(f.text)
-        const head = f.text.slice(0, at).trim()
-        const lastSentence = f.text.slice(at)
-        if (!tail) specHead = f
-        else {
-          if (head) specHead = { ...f, text: head }
-          tailInput = joinSeam(lastSentence, tail).text
-          tailBefore = head || lastPiece
-        }
+        specPart = f
+        if (tail) carryFrom(f, carriesSentences(input.context))
       }
+    } else if (tail && carriesSentences(input.context)) {
+      // Only a piece formatted already: waiting for it here would put it on the release's path.
+      const last = await settled(streamed.formats[streamed.formats.length - 1])
+      if (last && last !== 'empty') carryFrom(last)
     }
     const tailRequest: FormatInput = {
       ...input,
       transcript: tailInput,
-      context: pieceContext(input.context, tailBefore, true)
+      context: pieceContext(input.context, tailPrior, true, true)
     }
     const tailFormat = !tailInput
       ? null
       : preformatted && preformatted[0] === tailInput
         ? Promise.resolve(preformatted[1])
         : // A few words after formatted text: rule-based formatting, no model round trip.
-          countWords(tail) > 0 && countWords(tail) <= SHORT_TAIL_WORDS && (specHead || stt.streamed.texts.length)
+          countWords(tail) > 0 && countWords(tail) <= SHORT_TAIL_WORDS && (specPart || stt.streamed.texts.length)
           ? formatTranscript(tailRequest, null)
           : formatter.format(tailRequest)
     tailFormat?.catch(() => undefined)
@@ -1264,8 +1314,8 @@ export class DictationController extends EventEmitter {
       )
       return null
     }
-    const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty' && p !== null)
-    if (specHead) parts.push(specHead)
+    const parts: CarriedOutcome[] = pieces.filter((p): p is FormatOutcome => p !== 'empty' && p !== null)
+    if (specPart) parts.push(specPart)
     if (tailFormat) {
       try {
         let t = await tailFormat
@@ -1275,7 +1325,7 @@ export class DictationController extends EventEmitter {
           log.warn(`session ${tag}: formatted tail lost its ending; using rule-based formatting`)
           t = await formatTranscript(tailRequest, null)
         }
-        parts.push({ ...t, text: stripEcho(t.text, seamContext(tailBefore)) })
+        parts.push({ ...t, text: stripEcho(t.text, tailPrior), carried: tailCarried })
       } catch {
         return null
       }
@@ -1485,10 +1535,10 @@ async function releasePlan(
   if (spec === PENDING || spec === null) return null
   const f = await Promise.race([spec.format.catch(() => null), Promise.resolve(PENDING)])
   if (f === PENDING || f === null || f === 'empty') return null
-  const at = lastSentenceStart(f.text)
-  const head = f.text.slice(0, at).trim()
-  if (!head) return null
-  return { prefix: f.text.slice(at), before: head, format: {} }
+  // The same split formatWithSpeculation makes, so the gateway's transcript matches its tail.
+  const { head, carry } = splitCarry(f.text)
+  if (!head || !carry) return null
+  return { prefix: carry, before: head, format: {} }
 }
 export const RELEASE_TIMEOUT_MESSAGE = 'Murmur took too long to transcribe this — tap Retry'
 

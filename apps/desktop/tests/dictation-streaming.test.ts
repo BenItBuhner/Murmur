@@ -287,7 +287,10 @@ describe('precision mode formats pieces while the user speaks', () => {
     // and never one for the whole transcript.
     expect(inference.formatCalls.length).toBe(before)
     const text = history.list().entries[0].finalText
-    for (let i = 1; i < provider.requests; i++) expect(text).toContain(`[piece ${i}]`)
+    // Each piece was formatted with the one before it carried in (its last sentence, here the
+    // whole of it), and every piece's words appear exactly once in the result.
+    for (let i = 1; i < provider.requests; i++) expect(text.match(new RegExp(`piece ${i}\\]`, 'g'))).toHaveLength(1)
+    expect(inference.formatCalls.some((t) => /^\[piece 1\] piece 2/.test(t))).toBe(true)
     expect(text).toMatch(new RegExp(`Piece ${provider.requests}\\.?$`))
   })
 })

@@ -77,7 +77,12 @@ private fun looksLikeName(word: String, vararg texts: String): Boolean {
     return texts.any { re.containsMatchIn(it) }
 }
 
-fun joinSeam(prev: String, next: String): SeamJoin {
+/**
+ * [soft]: the cut is where a clip ended, not a boundary anyone decided. A period or ellipsis at
+ * the end of [prev] is dropped and [next] continues in lower case (names and "I" keep their
+ * capital), for the formatter to decide with both sides in view. Mirrors SeamOptions.soft in seam.ts.
+ */
+fun joinSeam(prev: String, next: String, soft: Boolean = false): SeamJoin {
     var h = prev.trimEnd()
     var t = next.trimStart()
     if (t.isEmpty()) return SeamJoin(h, 0, false)
@@ -110,6 +115,17 @@ fun joinSeam(prev: String, next: String): SeamJoin {
         t = t.substring(tw[deduped - 1].end).replace(Regex("""^[\s,;:.!?…-]+"""), "")
         if (t.isEmpty()) return SeamJoin(h, deduped, false)
         tw = seamWords(t).take(SEAM_WINDOW)
+    }
+
+    if (soft) {
+        val first = tw.firstOrNull()
+        val marked = Regex("""(\.{1,3}|…)(["')\]]*)$""").find(h)
+        if (marked != null) h = h.substring(0, marked.range.first) + marked.groupValues[2]
+        if (first != null && first.start == 0 && !Regex("""[!?]["')\]]*$""").containsMatchIn(h)) {
+            val keepCap = ALWAYS_CAPITAL.matches(first.text) || looksLikeName(first.text, h, t.substring(first.end))
+            if (!keepCap) t = first.text.lowercase() + t.substring(first.end)
+        }
+        return SeamJoin("$h $t", deduped, marked != null)
     }
 
     // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
@@ -150,6 +166,75 @@ fun joinSeam(prev: String, next: String): SeamJoin {
 }
 
 data class PiecesJoin(val text: String, val deduped: Int, val joined: Int)
+
+/** A carried sentence longer than this stays where it is; mirrors CARRY_MAX_WORDS in seam.ts. */
+const val CARRY_MAX_WORDS = 40
+private val LIST_ITEM = Regex("""^\s*(?:[-*•]|\d+[.)])\s""")
+
+data class CarrySplit(val head: String, val carry: String)
+
+/**
+ * A formatted piece split for the piece after it: [CarrySplit.carry] is its last sentence (or
+ * last line), formatted again with the next piece's words; [CarrySplit.head] stands. Nothing is
+ * carried when that sentence is long, a list item, or absent. Mirrors splitCarry in seam.ts.
+ */
+fun splitCarry(text: String, maxWords: Int = CARRY_MAX_WORDS): CarrySplit {
+    val t = text.trimEnd()
+    var at = lastSentenceStart(t)
+    val nl = t.lastIndexOf('\n')
+    if (nl + 1 > at) at = nl + 1
+    val carry = t.substring(at).trim()
+    val n = seamWords(carry).size
+    if (n == 0 || n > maxWords || LIST_ITEM.containsMatchIn(t.substring(nl + 1))) return CarrySplit(t, "")
+    return CarrySplit(t.substring(0, at).replace(Regex("""[^\S\n]+$"""), ""), carry)
+}
+
+/** A release tail of at most this many words is formatted by rules (SHORT_TAIL_WORDS). */
+private const val RULES_TAIL_WORDS = 6
+
+/**
+ * What a piece that carries [carry] sends to the formatter, soft-joined; joined by joinSeam when
+ * the model would not see it (a rules-formatted tail, or short enough to pass as already clean),
+ * and always when not [soft] (code, terminals). Mirrors carryInput in seam.ts.
+ */
+fun carryInput(carry: String, raw: String, soft: Boolean = true): String {
+    if (!soft) return joinSeam(carry, raw).text.trim()
+    val joined = joinSeam(carry, raw, soft = true).text.trim()
+    if (countWords(raw) > RULES_TAIL_WORDS && countWords(joined) > Clean.MAX_WORDS) return joined
+    return joinSeam(carry, raw).text.trim()
+}
+
+/** A formatted piece; [carried] when it was formatted with the previous piece's last sentence. */
+data class CarriedPart(val text: String, val carried: Boolean = false)
+
+/**
+ * Formatted pieces in order: a piece that carried the previous one's last sentence follows that
+ * piece's head as is; other seams are repaired by joinSeam. Mirrors joinCarried in seam.ts.
+ */
+fun joinCarried(parts: List<CarriedPart>): PiecesJoin {
+    val texts = ArrayList<String>()
+    for (p in parts) {
+        if (p.carried && texts.isNotEmpty()) texts[texts.size - 1] = splitCarry(texts.last()).head
+        texts.add(p.text)
+    }
+    var text = ""
+    var deduped = 0
+    var joined = 0
+    for ((i, p) in texts.withIndex()) {
+        if (p.isBlank()) continue
+        if (parts[i].carried && text.isNotBlank()) {
+            val gap = Regex("""\s+$""").find(text)?.value ?: ""
+            val sep = if ('\n' in gap) gap.filter { it == '\n' } else " "
+            text = text.trimEnd() + sep + p.trimStart()
+            continue
+        }
+        val j = joinSeam(text, p)
+        text = j.text
+        deduped += j.deduped
+        if (j.joined) joined++
+    }
+    return PiecesJoin(text.trim(), deduped, joined)
+}
 
 fun joinPieces(pieces: List<String>): PiecesJoin {
     var text = ""

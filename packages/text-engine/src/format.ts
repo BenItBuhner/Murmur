@@ -3,7 +3,7 @@ import { basicCleanup, prepareTranscript } from './cleanup'
 import { buildFormatMessages, maxTokensFor } from './prompt'
 import { countWords, isMeaningful } from './text'
 import type { ChatResult, Complete, FormatContext, FormatResult, FormattingMode } from './types'
-import { cleanModelOutput, verifyOutput, repairOutput } from './verify'
+import { cleanModelOutput, verifyOutput, repairCase, repairOutput } from './verify'
 
 export interface FormatInput {
   /** The transcript as the speech model returned it. */
@@ -211,13 +211,14 @@ export async function formatTranscript(
             keepVerbatim: input.context.keepVerbatim
           })
     if (verdict.ok) {
+      const cased = repairCase(prepared.text, text, input.context)
       return {
         ...base,
-        text,
+        text: cased,
         modelText: text,
         llmMs: now() - started,
         status: { outcome: 'used', attempts, retriedAfter: firstReason },
-        stages: [...prepared.stages, attempt > 0 ? 'llm-strict' : 'llm']
+        stages: [...prepared.stages, attempt > 0 ? 'llm-strict' : 'llm', ...(cased !== text ? ['case'] : [])]
       }
     }
     const detail =

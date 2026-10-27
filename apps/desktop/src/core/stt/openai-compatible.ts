@@ -229,7 +229,9 @@ export async function dictateRelease(
   input: TranscribeInput,
   cfg: SttConfig,
   prefix: string | undefined,
-  format: Record<string, unknown> | undefined
+  format: Record<string, unknown> | undefined,
+  /** The prefix is the last sentence the tail carries: the gateway joins them as carryInput does. */
+  carry = false
 ): Promise<ReleaseAnswer | null> {
   const base = normalizeBaseUrl(cfg.baseUrl)
   if (!base || releaseUnsupported.has(base)) return null
@@ -252,6 +254,7 @@ export async function dictateRelease(
   if (input.prompt) form.append('prompt', input.prompt)
   if (cfg.speed) form.append(MURMUR_SPEED_FIELD, cfg.speed)
   if (prefix?.trim()) form.append('prefix', prefix)
+  if (prefix?.trim() && carry) form.append('join', 'carry')
   if (format) form.append('format', JSON.stringify(format))
   const headers: Record<string, string> = {}
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`

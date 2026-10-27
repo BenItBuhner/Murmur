@@ -77,6 +77,7 @@ export {
 export {
   cleanModelOutput,
   endingKept,
+  repairCase,
   verifyOutput,
   type Verdict,
   type VerifyReason,
@@ -116,6 +117,12 @@ export {
 export {
   joinSeam,
   joinPieces,
+  joinCarried,
+  splitCarry,
+  carryInput,
+  CARRY_MAX_WORDS,
+  type CarriedPart,
+  type SeamOptions,
   lastSentenceStart,
   seamContext,
   stripEcho,

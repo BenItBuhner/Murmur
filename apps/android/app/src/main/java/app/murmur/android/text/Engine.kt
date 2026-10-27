@@ -148,13 +148,14 @@ object Engine {
             val verdict = if (answer.finishReason == "length") Verify.Verdict(false, "too-long")
             else Verify.verifyOutput(prepared.text, text, language = input.context.language, keepVerbatim = input.context.keepVerbatim)
             if (verdict.ok) {
+                val cased = Verify.repairCase(prepared.text, text, input.context.category, input.context.instructions)
                 return FormatResult(
-                    text = text,
+                    text = cased,
                     pressEnter = prepared.pressEnter,
                     status = FormatStatus(FormatOutcome.USED, null, attempts, firstReason),
                     modelText = text,
                     llmMs = System.currentTimeMillis() - started,
-                    stages = prepared.stages + (if (attempt > 0) "llm-strict" else "llm")
+                    stages = prepared.stages + (if (attempt > 0) "llm-strict" else "llm") + (if (cased != text) listOf("case") else emptyList())
                 )
             }
             val detail = when (verdict.reason) {

@@ -1,3 +1,6 @@
+import { CLEAN_MAX_WORDS } from './clean'
+import { countWords } from './text'
+
 /**
  * Joining the pieces of a long dictation that were transcribed (and formatted) separately.
  *
@@ -116,11 +119,21 @@ function looksLikeName(word: string, ...texts: string[]): boolean {
   return texts.some((t) => re.test(t))
 }
 
+export interface SeamOptions {
+  /**
+   * The cut is known to be an artifact of where a clip ended, not a sentence boundary anyone
+   * decided: a period (or ellipsis) at the end of `prev` is dropped and `next` continues in lower
+   * case (names and "I" keep their capital). Used when the result goes to the formatter, which
+   * then decides the boundary with both sides in view.
+   */
+  soft?: boolean
+}
+
 /**
  * Join two consecutive pieces of one dictation. `prev` and `next` may each be raw speech
  * recognition or formatted text.
  */
-export function joinSeam(prev: string, next: string): SeamJoin {
+export function joinSeam(prev: string, next: string, opts: SeamOptions = {}): SeamJoin {
   let h = prev.replace(/\s+$/u, '')
   let t = next.replace(/^\s+/u, '')
   if (!t) return { text: h, deduped: 0, joined: false }
@@ -161,6 +174,17 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     t = t.slice(tw[deduped - 1].end).replace(/^[\s,;:.!?…-]+/u, '')
     if (!t) return { text: h, deduped, joined: false }
     tw = words(t).slice(0, SEAM_WINDOW)
+  }
+
+  if (opts.soft) {
+    const first = tw[0]
+    const marked = /(\.{1,3}|…)(["')\]]*)$/u.exec(h)
+    if (marked) h = h.slice(0, marked.index) + marked[2]
+    if (first && first.start === 0 && !/[!?]["')\]]*$/u.test(h)) {
+      const keepCap = ALWAYS_CAPITAL.test(first.text) || looksLikeName(first.text, h, t.slice(first.end))
+      if (!keepCap) t = first.text.toLowerCase() + t.slice(first.end)
+    }
+    return { text: `${h} ${t}`, deduped, joined: !!marked }
   }
 
   // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
@@ -209,6 +233,87 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     h = `${h}.`
   }
   return { text: `${h} ${t}`, deduped, joined }
+}
+
+/** A carried sentence longer than this stays where it is; that seam is joined by joinSeam. */
+export const CARRY_MAX_WORDS = 40
+
+const LIST_ITEM = /^\s*(?:[-*•]|\d+[.)])\s/u
+
+/**
+ * A formatted piece of a longer dictation, split for the piece after it: `carry` is its last
+ * sentence (or last line), which the next piece formats again together with its own words, and
+ * `head` the rest, which stands. The cut that ended the piece is where the speaker paused, often
+ * mid-sentence, and whatever the formatter made of that sentence alone (a period, a fragment) is
+ * decided again with the words that follow it. Nothing is carried when that sentence is long, a
+ * list item, or absent.
+ */
+export function splitCarry(text: string, maxWords = CARRY_MAX_WORDS): { head: string; carry: string } {
+  const t = text.replace(/\s+$/u, '')
+  let at = lastSentenceStart(t)
+  const nl = t.lastIndexOf('\n')
+  if (nl + 1 > at) at = nl + 1
+  const carry = t.slice(at).trim()
+  const n = words(carry).length
+  if (!n || n > maxWords || LIST_ITEM.test(t.slice(nl + 1))) return { head: t, carry: '' }
+  // A head that ends a line keeps its line break; the carried text goes back on its own line.
+  return { head: t.slice(0, at).replace(/[^\S\n]+$/u, ''), carry }
+}
+
+/** A release tail of at most this many words is formatted by rules (SHORT_TAIL_WORDS on every client and the gateway). */
+const RULES_TAIL_WORDS = 6
+
+/**
+ * What a piece that carries `carry` sends to the formatter: that sentence, then its own words,
+ * soft-joined (the period the clip end added is gone; the model decides). A text the model would
+ * not see (a tail short enough for the rules, or a result short enough to pass as already clean)
+ * is joined by joinSeam instead: rules cannot punctuate a run-on. `soft: false` (code, terminals,
+ * where a lower-cased identifier would be wrong): always joinSeam.
+ */
+export function carryInput(carry: string, raw: string, opts: SeamOptions = { soft: true }): string {
+  if (!opts.soft) return joinSeam(carry, raw).text.trim()
+  const soft = joinSeam(carry, raw, { soft: true }).text.trim()
+  if (countWords(raw) > RULES_TAIL_WORDS && countWords(soft) > CLEAN_MAX_WORDS) return soft
+  return joinSeam(carry, raw).text.trim()
+}
+
+/** A formatted piece; `carried` when it was formatted with the previous piece's last sentence. */
+export interface CarriedPart {
+  text: string
+  carried?: boolean
+}
+
+/**
+ * Formatted pieces in order. A piece that carried the previous one's last sentence follows that
+ * piece's head (splitCarry) as is: the formatter already decided that boundary. Other seams are
+ * repaired by joinSeam.
+ */
+export function joinCarried(parts: readonly CarriedPart[]): { text: string; deduped: number; joined: number } {
+  const texts: string[] = []
+  const carried: boolean[] = []
+  for (const p of parts) {
+    if (p.carried && texts.length) texts[texts.length - 1] = splitCarry(texts[texts.length - 1]).head
+    texts.push(p.text)
+    carried.push(!!p.carried)
+  }
+  let text = ''
+  let deduped = 0
+  let joined = 0
+  for (let i = 0; i < texts.length; i++) {
+    const p = texts[i]
+    if (!p.trim()) continue
+    if (carried[i] && text.trim()) {
+      const gap = /\s+$/u.exec(text)?.[0] ?? ''
+      const sep = gap.includes('\n') ? gap.replace(/[^\n]/gu, '') : ' '
+      text = `${text.replace(/\s+$/u, '')}${sep}${p.replace(/^\s+/u, '')}`
+      continue
+    }
+    const j = joinSeam(text, p)
+    text = j.text
+    deduped += j.deduped
+    if (j.joined) joined++
+  }
+  return { text: text.trim(), deduped, joined }
 }
 
 /** joinSeam over a whole list of pieces, in order. */

@@ -1,7 +1,7 @@
 import { formatTranscript } from '../../../text-engine/src/format'
 import { dropSilentSegments } from '../../../text-engine/src/hallucination'
 import { sttLanguageField } from '../../../text-engine/src/languages'
-import { joinSeam } from '../../../text-engine/src/seam'
+import { carryInput, joinSeam } from '../../../text-engine/src/seam'
 import { countWords } from '../../../text-engine/src/text'
 import type { ChatMessage, ChatOptions, ChatResult } from '../../../text-engine/src/types'
 import {
@@ -799,6 +799,8 @@ export const SHORT_TAIL_WORDS = 6
  *
  *   prefix   text the tail continues (the already-formatted last sentence of the tail speculation);
  *            the transcript is seam-joined onto it before formatting
+ *   join     "carry": join them as carryInput does (the period the pause put at the prefix's end
+ *            is dropped for the model to decide); absent: joinSeam
  *   format   JSON: the `/v1/format` request without `transcript` (its `context`); absent: no formatting
  *
  * Answers `{ stt, transcript, format, rules }`: the speech answer as `/v1/audio/transcriptions`
@@ -840,7 +842,10 @@ export async function handleDictateRelease(
   const sttMs = Date.now() - started
   const raw = typeof stt.text === 'string' ? stt.text.trim() : ''
   const prefix = (fields.prefix?.[0] ?? '').trim()
-  const transcript = prefix ? joinSeam(prefix, raw).text : raw
+  // join=carry: the prefix is the last sentence the tail carries, joined the way the client joins
+  // it (carryInput), so the model decides the boundary the pause put there. Older clients: joinSeam.
+  const carry = fields.join?.[0] === 'carry'
+  const transcript = prefix ? (carry ? carryInput(prefix, raw) : joinSeam(prefix, raw).text) : raw
   const headers: Record<string, string> = { ...JSON_HEADERS }
   for (const h of [SPEED_HEADER, SPEED_FALLBACK_HEADER]) {
     const v = sttRes.headers.get(h)

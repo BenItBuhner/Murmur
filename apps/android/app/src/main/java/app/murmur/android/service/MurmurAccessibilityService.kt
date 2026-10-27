@@ -244,7 +244,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                     Log.i(TAG, "offering ${fresh.size} dictionary suggestion(s) from a correction")
                     WordSuggestionNotifier.show(this, fresh.first())
                 }
-            }
+            },
+            log = { Log.d(TAG, it) }
         )
     }
 

@@ -140,6 +140,9 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.32': [
+    'Smoother dictation pill on Android. With no keyboard on screen, the pill now rises in from the bottom edge and sinks back off the bottom when you are done, instead of popping in and out; with a keyboard open it still glides smoothly along with it.'
+  ],
   '0.6.31': [
     'Faster back-to-back dictation on Android. When the button says “Inserted” after a dictation, tap it to start the next one right away: the pill goes straight into listening instead of making you wait for the mic to come back.'
   ],

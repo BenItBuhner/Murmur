@@ -143,6 +143,14 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
 
     /** The pill's windows are on screen. Hidden, they have no surface: nothing is drawn or composited, and no touch reaches them. */
     private var pillShown = false
+
+    /**
+     * The pill is up for the keyboard (sitting on it, or ahead of it), as opposed to up with no keyboard
+     * at all (a dictation or the spot editor started without one, or the desktop pill). One up for the
+     * keyboard goes the instant the keyboard does, as it always has; one up without a keyboard has
+     * nothing to go with, so it sinks to the bottom of the screen instead of vanishing where it is.
+     */
+    private var pillRidesKeyboard = false
     private var shortcuts: HardwareShortcuts? = null
     private var presence: KeyboardPresence? = null
     private var presentation: PillPresentation = PillPresentation.Button
@@ -789,15 +797,44 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             trace("pill $reason")
         }
         when (val p = presentation) {
-            is PillPresentation.Desktop -> if (busy || p.showIdle) showPill() else hidePill()
+            is PillPresentation.Desktop -> {
+                pillRidesKeyboard = false
+                if (busy || p.showIdle) showPill() else slideAwayPill()
+            }
             PillPresentation.Button -> when {
-                busy || OverlayEditor.editing.value -> showPill()
-                keyboard.visible && keyboard.ready && !keyboard.displaced && !leaving -> showPill()
-                keyboard.visible -> dismissPill()
-                ahead != null -> showPill()
-                else -> hidePill()
+                busy || OverlayEditor.editing.value -> {
+                    pillRidesKeyboard = keyboard.visible
+                    showPill()
+                }
+                keyboard.visible && keyboard.ready && !keyboard.displaced && !leaving -> {
+                    pillRidesKeyboard = true
+                    showPill()
+                }
+                keyboard.visible -> {
+                    pillRidesKeyboard = true
+                    dismissPill()
+                }
+                ahead != null -> {
+                    pillRidesKeyboard = true
+                    showPill()
+                }
+                // Up for a keyboard that has gone (or never came): gone with it, at once. Up without one
+                // (a dictation or the editor that has just finished): down to the bottom of the screen.
+                pillRidesKeyboard -> hidePill()
+                else -> slideAwayPill()
             }
         }
+    }
+
+    /**
+     * Sinks the pill from where it is down past the bottom of the screen and hides its windows once it
+     * is out of sight: how a pill shown with no keyboard goes, rather than vanishing where it rests.
+     */
+    private fun slideAwayPill() {
+        val view = pill ?: return
+        if (!pillShown || view.isDismissing) return
+        trace("pill sliding down off the bottom of the screen")
+        view.slideAway { hidePill() }
     }
 
     /** Fades the pill out where it is and hides its windows once it is gone. */
@@ -864,7 +901,10 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         trace("pill windows ${if (attached) "added, hidden," else "could not be added"} in ${SystemClock.uptimeMillis() - started}ms")
     }
 
-    /** Shows the pill, drawn fully there from its first frame; one that was going comes back. */
+    /**
+     * Shows the pill, drawn fully there from its first frame when it comes with (or ahead of) the
+     * keyboard, risen from the bottom of the screen when there is no keyboard; one that was going comes back.
+     */
     private fun showPill() {
         val view = pill ?: return
         val (screenW, screenH) = screenSize()
@@ -872,7 +912,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             view.setScreen(screenW, screenH, keyboardReference())
             if (view.isDismissing) {
                 view.appear()
-                trace("pill coming back from fading out")
+                trace("pill coming back from going")
                 watchFirstFrames(view, SystemClock.uptimeMillis(), "coming back")
             }
             return
@@ -889,11 +929,15 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         view.restart()
         view.setScreen(screenW, screenH, keyboardReference())
         view.render(DictationController.state.value)
+        // With no keyboard on screen (nor one about to come up) there is nothing for the pill to
+        // arrive with: it rises from the bottom of the screen rather than popping up where it rests.
+        val noKeyboard = !keyboard.visible && anticipation == null
+        if (noKeyboard) view.slideIn()
         canvas.show()
         touch.show()
         pillShown = true
         val shown = SystemClock.uptimeMillis()
-        trace("pill windows made visible in ${shown - started}ms, keyboard edge ${keyboardReference()}")
+        trace("pill windows made visible in ${shown - started}ms, keyboard edge ${keyboardReference()}" + if (noKeyboard) ", rising from the bottom of the screen (no keyboard)" else "")
         watchFirstFrames(view, shown, "its windows were made visible")
         watchFirstCommit(view, shown)
     }

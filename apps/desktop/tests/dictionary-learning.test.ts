@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { findCorrections } from '@engine'
+import type { DictionaryEntry } from '@shared/settings'
 import { withCorrection } from '../src/renderer/src/lib/dictionary'
 
-const entry = (word: string, aliases: string[] = []) => ({
+const entry = (word: string, aliases: string[] = []): DictionaryEntry => ({
   id: word,
   word,
   aliases,
@@ -27,7 +28,11 @@ describe('learning dictionary words from a corrected dictation', () => {
   })
 
   it('takes the user casing for a word already in the list', () => {
-    const next = withCorrection([entry('convex')], { heard: 'convex', word: 'Convex', kind: 'alias' })
+    const next = withCorrection([entry('convex')], {
+      heard: 'convex',
+      word: 'Convex',
+      kind: 'alias'
+    })
     expect(next[0].word).toBe('Convex')
   })
 })

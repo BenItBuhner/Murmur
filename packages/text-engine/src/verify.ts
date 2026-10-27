@@ -242,15 +242,18 @@ const SENTENCE_LOWER = /([.!?]["')\]]*\s+)(\p{Ll}[\p{L}\p{N}'’-]*)/gu
  * word right after a sentence end get their capital back, unless the transcript itself wrote them
  * that way, the word is mixed-case ("iPhone"), or the period ends an abbreviation or an ellipsis.
  * The first word is left alone (it may continue the text before the cursor). Not in code or a
- * terminal, nor when the user's instructions ask for lower case.
+ * terminal, nor when the user's instructions ask for lower case or the text before the cursor is
+ * written all in lower case (the model was told to match its style).
  */
 export function repairCase(
   transcript: string,
   text: string,
-  ctx: Pick<FormatContext, 'category' | 'instructions'>
+  ctx: Pick<FormatContext, 'category' | 'instructions' | 'precedingText'>
 ): string {
   if (ctx.category === 'code' || ctx.category === 'terminal') return text
   if (/lower[\s-]?case|no capital/i.test(ctx.instructions ?? '')) return text
+  const before = ctx.precedingText ?? ''
+  if (countWords(before) >= 3 && !/\p{Lu}/u.test(before)) return text
   let out = text
   if (!new RegExp(LOWER_I.source, 'u').test(transcript)) out = out.replace(LOWER_I, 'I')
   out = out.replace(SENTENCE_LOWER, (m: string, sep: string, word: string, offset: number, whole: string) => {

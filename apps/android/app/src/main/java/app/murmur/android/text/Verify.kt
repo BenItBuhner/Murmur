@@ -198,11 +198,14 @@ object Verify {
      * Capitals the model dropped: the pronoun "I" and a lower-case word right after a sentence end,
      * unless the transcript wrote them that way, the word is mixed-case, or the period ends an
      * abbreviation or an ellipsis. The first word is left alone. Not in code, a terminal, or when
-     * the instructions ask for lower case. Mirrors repairCase in verify.ts.
+     * the instructions ask for lower case, or the text before the cursor is all lower case. Mirrors
+     * repairCase in verify.ts.
      */
-    fun repairCase(transcript: String, text: String, category: AppCategory, instructions: String?): String {
+    fun repairCase(transcript: String, text: String, category: AppCategory, instructions: String?, precedingText: String? = null): String {
         if (category == AppCategory.CODE || category == AppCategory.TERMINAL) return text
         if (instructions != null && LOWER_INSTRUCTION.containsMatchIn(instructions)) return text
+        val before = precedingText ?: ""
+        if (countWords(before) >= 3 && before.none { it.isUpperCase() }) return text
         var out = text
         if (!LOWER_I.containsMatchIn(transcript)) out = LOWER_I.replace(out, "I")
         val whole = out

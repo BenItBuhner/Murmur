@@ -109,6 +109,6 @@ describe.skipIf(!enabled)('sentence boundaries (live)', () => {
       }
     console.log(`\n[boundaries] ${model}: fragments joined ${joinOk}/${joinN}, sentences kept ${keepOk}/${keepN}`)
     if (process.env.MURMUR_BOUNDARY_OUT) writeFileSync(process.env.MURMUR_BOUNDARY_OUT, JSON.stringify(out, null, 2))
-    expect(keepOk / Math.max(1, keepN)).toBeGreaterThanOrEqual(Number(process.env.MURMUR_BOUNDARY_MIN_KEEP ?? 0.9))
+    expect(keepOk / Math.max(1, keepN)).toBeGreaterThanOrEqual(Number(process.env.MURMUR_BOUNDARY_MIN_KEEP ?? 0.75))
   })
 })

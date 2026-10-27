@@ -148,7 +148,7 @@ object Engine {
             val verdict = if (answer.finishReason == "length") Verify.Verdict(false, "too-long")
             else Verify.verifyOutput(prepared.text, text, language = input.context.language, keepVerbatim = input.context.keepVerbatim)
             if (verdict.ok) {
-                val cased = Verify.repairCase(prepared.text, text, input.context.category, input.context.instructions)
+                val cased = Verify.repairCase(prepared.text, text, input.context.category, input.context.instructions, input.context.precedingText)
                 return FormatResult(
                     text = cased,
                     pressEnter = prepared.pressEnter,

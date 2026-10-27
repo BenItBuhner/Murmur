@@ -121,6 +121,9 @@ class SeamCarryTest {
         assertEquals("git commit. then push", fix("a", "git commit. then push", AppCategory.CODE))
         assertEquals("git commit. then push", fix("a", "git commit. then push", AppCategory.TERMINAL))
         assertEquals("hey. i am here", fix("a", "hey. i am here", AppCategory.CHAT, "Write everything in lowercase."))
+        assertEquals("ok. i will be there", Verify.repairCase("a", "ok. i will be there", AppCategory.CHAT, null, "yo are we still on for tonight"))
+        assertEquals("ok. I will be there", Verify.repairCase("a", "ok. i will be there", AppCategory.CHAT, null, "Are we still on for tonight?"))
+        assertEquals("ok. I will be there", Verify.repairCase("a", "ok. i will be there", AppCategory.CHAT, null, "ok"))
         val t = "I think it's fine. We'll see. I'm sure."
         assertEquals(t, fix(t, t))
     }

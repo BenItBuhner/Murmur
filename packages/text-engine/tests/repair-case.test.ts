@@ -53,6 +53,15 @@ describe('repairCase', () => {
       'hey. i am here'
     )
   })
+  it('keeps the lower-case style of the text before the cursor', () => {
+    expect(fix('a', 'ok. i will be there', { category: 'chat', precedingText: 'yo are we still on for tonight' })).toBe(
+      'ok. i will be there'
+    )
+    expect(fix('a', 'ok. i will be there', { category: 'chat', precedingText: 'Are we still on for tonight?' })).toBe(
+      'ok. I will be there'
+    )
+    expect(fix('a', 'ok. i will be there', { category: 'chat', precedingText: 'ok' })).toBe('ok. I will be there')
+  })
   it('handles questions, exclamations and closing quotes', () => {
     expect(fix('a', 'Really? because I doubt it! and "yes." then go')).toBe('Really? Because I doubt it! And "yes." Then go')
   })

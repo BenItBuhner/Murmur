@@ -1,63 +1,12 @@
 package app.murmur.android
 
 import app.murmur.android.text.AppCategory
-import app.murmur.android.text.CarriedPart
-import app.murmur.android.text.CarrySplit
 import app.murmur.android.text.Verify
-import app.murmur.android.text.carryInput
-import app.murmur.android.text.joinCarried
-import app.murmur.android.text.splitCarry
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Mirrors packages/text-engine/tests/seam-carry.test.ts and repair-case.test.ts. */
-class SeamCarryTest {
-    @Test
-    fun `splitCarry carries the last sentence, never a list item or a long one`() {
-        assertEquals(CarrySplit("There are issues.", "I want you to dig deeper."), splitCarry("There are issues. I want you to dig deeper."))
-        assertEquals(CarrySplit("We shipped it.", "Then the build"), splitCarry("We shipped it. Then the build"))
-        assertEquals(CarrySplit("", "Just one sentence here."), splitCarry("Just one sentence here."))
-        val long = "Start. " + "word ".repeat(45).trim() + "."
-        assertEquals(CarrySplit(long, ""), splitCarry(long))
-        val list = "Three things:\n1. Finish the deck\n2. Email the vendor"
-        assertEquals(CarrySplit(list, ""), splitCarry(list))
-        assertEquals(CarrySplit("Dear Sam,\n\n", "Thanks for the notes"), splitCarry("Dear Sam,\n\nThanks for the notes"))
-        assertEquals(CarrySplit("", ""), splitCarry("   "))
-        assertEquals(CarrySplit("She said \"go.\"", "Then we went"), splitCarry("She said \"go.\" Then we went"))
-    }
-
-    @Test
-    fun `carryInput keeps the pause period for the model and drops echoes`() {
-        assertEquals(
-            "I want you to dig deeper. And actually merge things yourself. I only want you to hold them when I say.",
-            carryInput("I want you to dig deeper.", "And actually merge things yourself. I only want you to hold them when I say.")
-        )
-        assertEquals("It was past its prime. I still want this to work.", carryInput("It was past its prime.", "I still want this to work."))
-        assertEquals(
-            "so we should test the whole thing again tomorrow morning before the release goes out.",
-            carryInput("so we should test the whole.", "The whole thing again tomorrow morning before the release goes out.")
-        )
-    }
-
-    @Test
-    fun `joinCarried replaces the carried sentence and chains`() {
-        assertEquals(
-            "There are issues. I want you to dig deeper and actually merge things yourself. Hold only what I say.",
-            joinCarried(listOf(
-                CarriedPart("There are issues. I want you to dig deeper."),
-                CarriedPart("I want you to dig deeper and actually merge things yourself. Hold only what I say.", carried = true)
-            )).text
-        )
-        assertEquals(
-            "One. Two three four five. Six.",
-            joinCarried(listOf(CarriedPart("One. Two three"), CarriedPart("Two three four", true), CarriedPart("Two three four five. Six.", true))).text
-        )
-        assertEquals("Everything that would otherwise be picked up.", joinCarried(listOf(CarriedPart("Everything that would otherwise."), CarriedPart("Otherwise, be picked up."))).text)
-        assertEquals("Dear Sam,\n\nThanks for the notes.", joinCarried(listOf(CarriedPart("Dear Sam,\n\nThanks for the"), CarriedPart("Thanks for the notes.", true))).text)
-        assertEquals("A b. C d.", joinCarried(listOf(CarriedPart("A b."), CarriedPart(""), CarriedPart("C d."))).text)
-        assertEquals("Hi there.", joinCarried(listOf(CarriedPart("Hi there.", true))).text)
-    }
-
+/** Mirrors packages/text-engine/tests/repair-case.test.ts. */
+class RepairCaseTest {
     private fun fix(raw: String, text: String, category: AppCategory = AppCategory.CHAT, instructions: String? = null) =
         Verify.repairCase(raw, text, category, instructions)
 

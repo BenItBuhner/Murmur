@@ -37,7 +37,6 @@ import app.murmur.android.stt.TranscribeOutput
 import app.murmur.android.stt.adaptiveThreshold
 import app.murmur.android.stt.lastVoicedSec
 import app.murmur.android.stt.transcribeComplete
-import app.murmur.android.text.AppCategory
 import app.murmur.android.text.AppContext
 import app.murmur.android.text.CommandPromptInput
 import app.murmur.android.text.DictionaryTerm
@@ -58,10 +57,8 @@ import app.murmur.android.text.classifyPackage
 import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
 import app.murmur.android.text.joinPieces
-import app.murmur.android.text.CarriedPart
-import app.murmur.android.text.carryInput
-import app.murmur.android.text.joinCarried
-import app.murmur.android.text.splitCarry
+import app.murmur.android.text.joinSeam
+import app.murmur.android.text.lastSentenceStart
 import app.murmur.android.text.seamContext
 import app.murmur.android.text.stripEcho
 import app.murmur.android.text.resolveStyle
@@ -244,12 +241,7 @@ object DictationController {
     private sealed interface PieceFormat {
         data object Empty : PieceFormat
         data object Unavailable : PieceFormat
-        /**
-         * [carried]: formatted together with the previous piece's last sentence, which that
-         * piece's own text gives up when the parts are joined (joinCarried). [prior]: the text it
-         * was told precedes it.
-         */
-        data class Done(val result: FormatResult, val carried: Boolean = false, val prior: String = "") : PieceFormat
+        data class Done(val result: FormatResult) : PieceFormat
     }
     /** Cancelled from the UI thread, replaced from the pipeline: a stale read lets an old job blank the pill early. */
     @Volatile private var resetJob: Job? = null
@@ -592,30 +584,21 @@ object DictationController {
         pieceFormats = formats
         val textJobs = java.util.Collections.synchronizedList(ArrayList<Deferred<String>>())
         tailSpecFormat = null
-        fun formatPiece(textJob: Deferred<String>, before: Deferred<String>?, beforeFormat: Deferred<PieceFormat>?, carryWaitMs: Long): Deferred<PieceFormat> = scope.async {
+        fun formatPiece(textJob: Deferred<String>, before: Deferred<String>?): Deferred<PieceFormat> = scope.async {
             try {
                 val text = textJob.await()
                 if (text.isEmpty()) return@async PieceFormat.Empty
                 val (pkg, app, style) = styleAt.await()
                 if (style.effectiveMode != FormattingMode.SMART || !murmurFormatting(context)) return@async PieceFormat.Unavailable
                 val started = System.currentTimeMillis()
-                // The cut before this piece fell at a pause, often mid-sentence: the previous
-                // piece's last sentence is formatted again together with this piece's words, so
-                // the model decides that boundary with both sides in view (joinCarried drops it
-                // from the previous piece). Otherwise the piece only sees the one before it as the
-                // text before the cursor.
-                val prev = beforeFormat?.takeIf { carryWaitMs > 0 || it.isCompleted }
-                    ?.let { f -> withTimeoutOrNull(carryWaitMs.coerceAtLeast(1)) { runCatching { f.await() }.getOrNull() } } as? PieceFormat.Done
-                val split = if (prev != null && carriesSentences(app.category)) splitCarry(prev.result.text) else null
-                val carried = split != null && split.carry.isNotEmpty()
-                val prior = if (carried) seamContext(split.head).ifEmpty { prev!!.prior }
-                else seamContext(before?.let { runCatching { it.await() }.getOrNull() }.orEmpty())
-                val transcript = if (carried) carryInput(split.carry, text) else text
-                val base = formatInputFor(transcript, FormattingMode.SMART, style, app, pkg, s, context, precedingText = prior.ifEmpty { null })
+                // The piece continues the one before it (seen as the text before the cursor), and
+                // may itself stop mid-sentence.
+                val prior = seamContext(before?.let { runCatching { it.await() }.getOrNull() }.orEmpty())
+                val base = formatInputFor(text, FormattingMode.SMART, style, app, pkg, s, context, precedingText = prior.ifEmpty { null })
                 val out = router.formatter().formatBackground(base.copy(context = base.context.copy(instructions = listOfNotNull(base.context.instructions, PIECE_NOTE).joinToString(" "))))
-                Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording${if (carried) " (carried the last sentence before it)" else ""}")
+                Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording")
                 if (out.status.outcome == FormatOutcome.FAILED) PieceFormat.Unavailable
-                else PieceFormat.Done(out.copy(text = stripEcho(out.text, prior)), carried, prior)
+                else PieceFormat.Done(out.copy(text = stripEcho(out.text, prior)))
             } catch (e: Exception) {
                 PieceFormat.Unavailable
             }
@@ -634,13 +617,12 @@ object DictationController {
                 partials.save(PartialTranscript(partialId, partialAt, partialMode, (0 until n).map { partialTexts[it] }))
             }
             textJobs.add(textJob)
-            formats.add(formatPiece(textJob, if (index > 0) textJobs[index - 1] else null, if (index > 0) formats[index - 1] else null, CARRY_WAIT_MS))
+            formats.add(formatPiece(textJob, if (index > 0) textJobs[index - 1] else null))
         }
         // The stretch after the last piece, up to its latest pause: release then only waits for
         // the words after that pause.
         val onSpec: (Int, Deferred<String>) -> Unit = { index, textJob ->
             val before = if (index > 0) textJobs[index - 1] else null
-            val beforeFormat = if (index > 0) formats[index - 1] else null
             val format = kotlinx.coroutines.CompletableDeferred<PieceFormat>()
             tailSpecFormat = textJob to format
             // A short dictation (no pieces yet) is not formatted while speaking: the release formats
@@ -651,8 +633,7 @@ object DictationController {
                 // Not formatted: a speculation overtaken by a newer one before its text came back.
                 format.complete(
                     if (tailSpecFormat?.first !== textJob) PieceFormat.Unavailable
-                    // On the release's path: it carries only from a piece formatted already.
-                    else formatPiece(textJob, before, beforeFormat, 0).await()
+                    else formatPiece(textJob, before).await()
                 )
             }
         }
@@ -750,23 +731,11 @@ object DictationController {
         if (texts == null || tail == null || specs.size != texts.size) return null
         val formatter = router.formatter()
         if (formatter.source != InferenceSource.MURMUR) return null
-        // The tail carries the last sentence before it (the speculation's, or the last piece's when
-        // that is formatted already): formatted again with the words that followed, so the model
-        // sees that sentence whole; the rest stands (joinCarried).
-        var specPart: PieceFormat.Done? = null
+        // A formatted tail speculation: its last sentence is formatted again with the words that
+        // followed, so the model sees that sentence whole; the rest of it stands.
+        var specHead: FormatResult? = null
         var tailText = tail
-        var tailCarried = false
-        var lastPiece = seamContext(texts.lastOrNull().orEmpty())
-        fun carryFrom(f: PieceFormat.Done) {
-            val split = splitCarry(f.result.text)
-            if (split.carry.isEmpty()) {
-                lastPiece = seamContext(f.result.text)
-                return
-            }
-            tailText = carryInput(split.carry, tail)
-            tailCarried = true
-            lastPiece = seamContext(split.head).ifEmpty { f.prior }
-        }
+        var tailBefore = texts.lastOrNull().orEmpty()
         // Formats made while speaking share one wait: past it the whole text is formatted now, which
         // is quicker than waiting longer for a model that is stuck.
         val formatDeadline = System.currentTimeMillis() + FORMAT_WAIT_MS
@@ -784,15 +753,18 @@ object DictationController {
                 }
                 PieceFormat.Empty -> Unit
                 is PieceFormat.Done -> {
-                    specPart = f
-                    if (tail.isNotEmpty()) carryFrom(f)
+                    val at = lastSentenceStart(f.result.text)
+                    val head = f.result.text.substring(0, at).trim()
+                    if (tail.isEmpty()) specHead = f.result
+                    else {
+                        if (head.isNotEmpty()) specHead = f.result.copy(text = head)
+                        tailText = joinSeam(f.result.text.substring(at), tail).text
+                        tailBefore = head.ifEmpty { tailBefore }
+                    }
                 }
             }
-        } else if (tail.isNotEmpty() && carriesSentences(input.context.category)) {
-            // Only a piece formatted already: waiting for it here would put it on the release's path.
-            val last = specs.lastOrNull()
-            if (last != null && last.isCompleted) (runCatching { last.await() }.getOrNull() as? PieceFormat.Done)?.let { carryFrom(it) }
         }
+        val lastPiece = seamContext(tailBefore)
         val tailInput = input.copy(
             transcript = tailText,
             context = input.context.copy(
@@ -804,7 +776,7 @@ object DictationController {
             tailText.isEmpty() -> null
             ready != null -> kotlinx.coroutines.CompletableDeferred(Result.success(ready))
             // A few words after formatted text: rule-based formatting, no model round trip.
-            countWords(tail) in 1..SHORT_TAIL_WORDS && (specPart != null || texts.isNotEmpty()) ->
+            countWords(tail) in 1..SHORT_TAIL_WORDS && (specHead != null || texts.isNotEmpty()) ->
                 scope.async { runCatching { Engine.formatTranscript(tailInput, null) } }
             else -> scope.async { runCatching { formatter.format(tailInput) } }
         }
@@ -818,31 +790,22 @@ object DictationController {
             trace?.note("a piece could not be formatted while speaking; the whole text was formatted at release")
             return null
         }
-        val pieces = done.filterIsInstance<PieceFormat.Done>()
-        val parts = pieces.map { it.result }.toMutableList()
-        val carried = pieces.map { it.carried }.toMutableList()
-        specPart?.let {
-            parts.add(it.result)
-            carried.add(it.carried)
-        }
-        if (tailJob != null) {
-            parts.add(tailJob.await().getOrElse { return null }.let { it.copy(text = stripEcho(it.text, lastPiece)) })
-            carried.add(tailCarried)
-        }
+        val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
+        specHead?.let { parts.add(it) }
+        if (tailJob != null) parts.add(tailJob.await().getOrElse { return null }.let { it.copy(text = stripEcho(it.text, lastPiece)) })
         if (parts.isEmpty()) return null
-        fun joined(texts: List<String>) = joinCarried(texts.zip(carried) { t, c -> CarriedPart(t, c) }).text
         Log.i(TAG, "${done.size} piece(s) formatted while speaking; tail formatted at release")
         val worst = parts.maxBy { it.status.outcome.ordinal.let { o -> listOf(0, 2, 1, 3, 4)[o] } }
         val stages = LinkedHashSet<String>().apply { parts.forEach { addAll(it.stages) } }.toList()
         return FormatResult(
-            text = joined(parts.map { it.text }),
+            text = joinPieces(parts.map { it.text }).text,
             pressEnter = parts.last().pressEnter,
             // A piece the model left as it was, or a short tail formatted by rules, does not make the
             // dictation "not formatted" (desktop: joinFormatted; Oct 15: 13 formatted pieces, llmUsed=false).
             status = (parts.firstOrNull { it.status.outcome == FormatOutcome.USED }
                 ?.takeIf { worst.status.outcome in setOf(FormatOutcome.USED, FormatOutcome.SKIPPED_CLEAN, FormatOutcome.SKIPPED) }
                 ?.status?.copy(detail = "${parts.size} pieces, formatted while speaking")) ?: worst.status,
-            modelText = if (parts.all { it.modelText != null }) joined(parts.map { it.modelText!! }) else null,
+            modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
             llmMs = parts.last().llmMs,
             stages = stages,
             limit = parts.firstNotNullOfOrNull { it.limit },
@@ -904,11 +867,11 @@ object DictationController {
         val spec = tailSpecFormat ?: return null
         if (spec.first !== streamed.specText || !spec.second.isCompleted) return null
         val f = spec.second.await() as? PieceFormat.Done ?: return null
-        // The same split formatWithSpeculation makes, so the gateway's transcript matches its tail.
-        val split = splitCarry(f.result.text)
-        if (split.head.isEmpty() || split.carry.isEmpty()) return null
-        val input = formatInputFor("", FormattingMode.SMART, style, app, focusedPackage, s, context, precedingText = seamContext(split.head).ifEmpty { null })
-        return split.carry to input.toJson().apply { remove("transcript") }
+        val at = lastSentenceStart(f.result.text)
+        val head = f.result.text.substring(0, at).trim()
+        if (head.isEmpty()) return null
+        val input = formatInputFor("", FormattingMode.SMART, style, app, focusedPackage, s, context, precedingText = seamContext(head).ifEmpty { null })
+        return f.result.text.substring(at) to input.toJson().apply { remove("transcript") }
     }
 
     private suspend fun process(
@@ -1430,15 +1393,6 @@ object DictationController {
         else -> err.message ?: "Something went wrong"
     }
 }
-
-/**
- * How long a piece formatted while recording waits for the one before it, whose last sentence it
- * carries; past it the piece is formatted on its own (the seam is then joined by joinSeam).
- */
-private const val CARRY_WAIT_MS = 8_000L
-
-/** Code and terminals keep their own line structure: no sentence is carried across a seam there. */
-private fun carriesSentences(category: AppCategory) = category != AppCategory.CODE && category != AppCategory.TERMINAL
 
 /** A release tail of at most this many words is formatted by rules (mirrors SHORT_TAIL_WORDS in the gateway). */
 const val SHORT_TAIL_WORDS = 6

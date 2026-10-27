@@ -639,8 +639,22 @@ object DictationController {
         // The stretch after the last piece, up to its latest pause: release then only waits for
         // the words after that pause.
         val onSpec: (Int, Deferred<String>) -> Unit = { index, textJob ->
-            // The speculation can be on the release's path: it carries only from a piece formatted already.
-            tailSpecFormat = textJob to formatPiece(textJob, if (index > 0) textJobs[index - 1] else null, if (index > 0) formats[index - 1] else null, 0)
+            val before = if (index > 0) textJobs[index - 1] else null
+            val beforeFormat = if (index > 0) formats[index - 1] else null
+            val format = kotlinx.coroutines.CompletableDeferred<PieceFormat>()
+            tailSpecFormat = textJob to format
+            // A short dictation (no pieces yet) is not formatted while speaking: the release formats
+            // its whole text about as quickly, hedged, and each format here is a call on the shared pool.
+            if (index == 0) format.complete(PieceFormat.Unavailable)
+            else scope.launch {
+                runCatching { textJob.await() }
+                // Not formatted: a speculation overtaken by a newer one before its text came back.
+                format.complete(
+                    if (tailSpecFormat?.first !== textJob) PieceFormat.Unavailable
+                    // On the release's path: it carries only from a piece formatted already.
+                    else formatPiece(textJob, before, beforeFormat, 0).await()
+                )
+            }
         }
         val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
         return ChunkStreamer(scope, { from -> recorder.read(from) }, SAMPLE_RATE, -48.0, onPiece = onPiece, onSpec = onSpec) { pcm, index ->
@@ -760,6 +774,9 @@ object DictationController {
         val waitStarted = System.currentTimeMillis()
         if (spec != null) {
             if (specFormat == null || specFormat.first !== spec) return null
+            // A short dictation: its speculation is not formatted while speaking (see onSpec), so the
+            // whole text is formatted at release.
+            if (texts.isEmpty()) return null
             when (val f = withTimeoutOrNull(formatLeft()) { specFormat.second.await() } ?: PieceFormat.Unavailable) {
                 PieceFormat.Unavailable -> {
                     trace?.note("the tail speculation's formatting was not ready or failed; the whole text was formatted at release")
@@ -956,22 +973,53 @@ object DictationController {
         fun streamLeft() = (streamDeadline - System.currentTimeMillis()).coerceAtLeast(1)
         // A speculation still running at release is dropped, not waited for: the tail was sent only after
         // it came back, which put the background-tier speculation on the critical path (2-3 s releases).
-        val specOk = streamed?.specText?.let { runCatching { withTimeout(SPEC_RELEASE_GRACE_MS) { it.await() } }.isSuccess } == true
+        // Unless nothing was said after it: then it covers the whole dictation, and sending the same
+        // audio again would take as long as letting it finish (a stop in a pause, the usual case).
+        val quietAfterSpec = streamed?.specSamples?.let { at ->
+            Wav.voicedMs(pcm.copyOfRange(at.coerceIn(0, pcm.size), pcm.size), SAMPLE_RATE, threshold) < Hallucination.MIN_SPEECH_MS
+        } == true
+        // A short dictation (no pieces) that went on after its speculation is sent whole, as before:
+        // splitting it would save little and give the speech model a short clip with less context.
+        // One stopped in a pause, its speculation still running: the whole recording goes up at
+        // release priority at once, and whichever comes back first is used, so a slow background
+        // request never holds the release (and never costs more than before).
+        var raced: CompleteResult? = null
+        val specOk = streamed?.specText?.let { spec ->
+            if (streamed.samples == 0 && !quietAfterSpec) false
+            else if (streamed.samples == 0 && !spec.isCompleted) {
+                val fresh = scope.async { runCatching { runWholeUntimed() } }
+                val specDone = scope.async { runCatching { spec.await() } }
+                val specFirst = kotlinx.coroutines.selects.select<Boolean> {
+                    specDone.onAwait { true }
+                    fresh.onAwait { false }
+                }
+                if (specFirst && specDone.await().isSuccess) { fresh.cancel(); true }
+                else if (!specFirst && fresh.await().isSuccess) { raced = fresh.await().getOrThrow(); false }
+                // The first to finish failed: the other one decides.
+                else if (specFirst) { raced = fresh.await().getOrThrow(); false }
+                else specDone.await().isSuccess.also { ok -> if (!ok) raced = fresh.await().getOrThrow() }
+            } else runCatching { withTimeout(SPEC_RELEASE_GRACE_MS) { spec.await() } }.isSuccess
+        } == true
         val specWaitMs = System.currentTimeMillis() - (streamDeadline - STREAM_WAIT_MS)
         Log.i(TAG, "release: spec ${if (streamed?.specText == null) "none" else if (specOk) "used" else "dropped"} after $specWaitMs ms")
         if (streamed?.specText != null) {
             trace.step("waiting for the tail speculation", specWaitMs)
-            if (!specOk) trace.note("the tail speculation was still running at release and was dropped")
+            if (specOk && quietAfterSpec) trace.note("nothing was said after the last pause: the text transcribed while speaking was used as it was")
+            if (raced != null) trace.note("the speculation was still running at release; the whole recording was sent at once and answered first")
+            else if (!specOk && streamed.samples == 0 && !quietAfterSpec) trace.note("the speaker went on after the last pause; the whole recording was sent")
+            else if (!specOk) trace.note("the tail speculation was still running at release and was dropped")
         }
         val from = if (specOk) streamed!!.specSamples!! else streamed?.samples ?: 0
-        val complete = if (streamed != null && (from in 1 until pcm.size)) {
+        val complete = raced?.also { trace.step("speech (whole recording)", System.currentTimeMillis() - sttStarted) }
+            ?: if (streamed != null && (from in 1 until pcm.size)) {
             // Only the audio after the pieces goes up now, alongside waiting for the pieces.
             val rest = pcm.copyOfRange(from, pcm.size)
             // One call for the tail when the rest is formatted already: speech, then formatting of the
             // speculation's last sentence + the tail, on the gateway (no second phone round trip).
             val plan = if (run.mode != DictationMode.COMMAND && style.effectiveMode == FormattingMode.SMART && murmurFormatting(context))
                 releasePlan(streamed, specOk, style, app, focusedPackage, s, context) else null
-            val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async {
+            // Nothing said after the speculation: it is the whole text, and its formatting the result.
+            val tail = if (Wav.peakDb(rest) < -48.0 || (specOk && quietAfterSpec)) null else scope.async {
                 runCatching {
                     val answer = plan?.let { p ->
                         runCatching { router.dictateRelease(resolved, Wav.encodePcm16(rest, SAMPLE_RATE), prompt, p.first, p.second) }
@@ -1404,6 +1452,7 @@ private const val PHRASE_TAIL_SAMPLES = SAMPLE_RATE * 3 / 10
 
 /** How long release waits for a tail speculation that is still running before sending the whole tail. */
 private const val SPEC_RELEASE_GRACE_MS = 150L
+
 
 /** Silence at the end of a recording that makes the stop skip its post-roll. */
 private const val QUIET_STOP_MS = 300

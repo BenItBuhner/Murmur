@@ -5,6 +5,7 @@ import {
   Copy,
   CornerDownLeft,
   Loader2,
+  PenLine,
   Play,
   RotateCcw,
   Search,
@@ -22,6 +23,7 @@ import { Empty, PageHeader } from '@renderer/components/SettingRow'
 import { SyncBadge } from '@renderer/components/SyncBadge'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, formatRelative } from '@renderer/lib/utils'
+import { TeachWords } from '@renderer/components/TeachWords'
 import { LatencyBar } from './Home'
 
 /**
@@ -126,6 +128,8 @@ export function HistoryPage(): React.JSX.Element {
   /** Entry whose recording is being sent again right now. */
   const [retrying, setRetrying] = useState<string | null>(null)
   const [playing, setPlaying] = useState<string | null>(null)
+  /** Entry being corrected so Murmur can learn its words. */
+  const [teaching, setTeaching] = useState<string | null>(null)
   const player = useRef<{ audio: HTMLAudioElement; url: string } | null>(null)
 
   const load = async (): Promise<void> => {
@@ -425,6 +429,15 @@ export function HistoryPage(): React.JSX.Element {
                           <Button
                             variant="ghost"
                             size="sm"
+                            onClick={() => setTeaching(teaching === e.id ? null : e.id)}
+                            disabled={!e.finalText}
+                            title="Fix mis-heard words and add them to the dictionary"
+                          >
+                            <PenLine /> Fix words
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => reinsert(e.id)}
                             disabled={!e.finalText}
                           >
@@ -435,6 +448,9 @@ export function HistoryPage(): React.JSX.Element {
                           </Button>
                         </span>
                       </div>
+                      {teaching === e.id && (
+                        <TeachWords text={e.finalText} onClose={() => setTeaching(null)} />
+                      )}
                     </div>
                   </Appear>
                 </motion.div>

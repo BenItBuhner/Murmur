@@ -140,6 +140,12 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.35': [
+    'Faster finishes on Android. Short dictations now start transcribing during your pauses, so when you tap Done in a pause the words are already there: about 0.7 s quicker on average in testing, with the same text. The stop also no longer waits an extra 0.2 s when you had already stopped talking.',
+    'A simpler dictionary that learns. The dictionary is now a plain list of words Murmur should spell your way. When you fix a misheard word right after dictating, Android offers to add it (Add / Not a word), and on desktop History has a Fix words option.',
+    'Sentences stay whole. A short pause mid-sentence no longer leaves a fragment like "And actually merge things yourself." as its own sentence, and a dropped capital "I" or sentence start is put back.',
+    'Replaces v0.6.34, whose Android build did not finish.'
+  ],
   '0.6.34': [
     'Faster finishes on Android. Short dictations now start transcribing during your pauses, so when you tap Done in a pause the words are already there: about 0.7 s quicker on average in testing, with the same text. The stop also no longer waits an extra 0.2 s when you had already stopped talking.',
     'A simpler dictionary that learns. The dictionary is now a plain list of words Murmur should spell your way. When you fix a misheard word right after dictating, Android offers to add it (Add / Not a word), and on desktop History has a Fix words option.'

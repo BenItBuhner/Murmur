@@ -18,8 +18,8 @@ if sys.argv[1] == "button":
     for n in nodes:
         if (n.get("text") or "").strip().lower() == label.lower() or (n.get("content-desc") or "").lower() == label.lower():
             print(center(n))
-            break
-    sys.exit(0)
+            sys.exit(0)
+    sys.exit(1)
 fields = [n for n in nodes if n.get("class") == "android.widget.EditText"]
 if not fields:
     sys.exit(1)

@@ -82,13 +82,24 @@ for _ in $(seq 1 20); do adb shell pidof $PKG >/dev/null && break; sleep 1; done
 sleep 3
 log "accessibility service bound: $(adb shell dumpsys accessibility | grep -c 'app.murmur.android') mentions"
 
+adb shell pm grant com.android.chrome android.permission.POST_NOTIFICATIONS 2>/dev/null
 adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1
 adb shell 'echo "chrome --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line'
 adb shell am start -a android.intent.action.VIEW -d http://10.0.2.2:8000/pad com.android.chrome >/dev/null
 sleep 8
+# Chrome's first-run prompts (notifications, sign-in) cover the page; dismiss any that show.
+for _ in 1 2 3; do
+  dump
+  xy=$(python3 "$HERE/field.py" button "No thanks" || python3 "$HERE/field.py" button "Not now" || python3 "$HERE/field.py" button "Don't allow") || break
+  log "dismissing a Chrome prompt"; adb shell input tap $xy; sleep 2
+done
 dump; xy=$(python3 "$HERE/field.py" center) && adb shell input tap $xy
 sleep 2
+adb logcat -G 16M >/dev/null 2>&1
 adb logcat -c
+adb logcat -v time > /tmp/logcat-full.txt 2>/dev/null &
+LOGCAT=$!
+shot 0-ready
 adb shell screenrecord --bit-rate 4000000 --time-limit 170 /sdcard/demo.mp4 &
 REC=$!
 sleep 1
@@ -140,5 +151,6 @@ shot 7-dictionary
 
 kill -INT $REC 2>/dev/null; sleep 3
 adb pull /sdcard/demo.mp4 "$OUT/demo.mp4" >/dev/null 2>&1
-adb logcat -d | grep -iE 'murmur|suggest|inserted' | grep -v -i 'chatty' | tail -200 > "$OUT/logcat.txt"
+kill $LOGCAT 2>/dev/null
+grep -iE 'murmur|suggest|inserted' /tmp/logcat-full.txt | grep -v -i 'chatty' | grep -v 'TransitionRequestInfo' > "$OUT/logcat.txt"
 log "done"

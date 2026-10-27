@@ -388,6 +388,18 @@ object DictationController {
         }
     }
 
+    /**
+     * The last [QUIET_STOP_MS] before the stop held no speech: the post-roll that catches a last
+     * word still sounding has nothing to catch, and the stop skips its 200 ms.
+     */
+    private fun silentAtStop(): Boolean = runCatching {
+        val n = recorder.sampleCount()
+        val recent = recorder.read(maxOf(0, n - 5 * SAMPLE_RATE))
+        if (recent.size < SAMPLE_RATE) return@runCatching false
+        val end = recent.copyOfRange(recent.size - QUIET_STOP_MS * SAMPLE_RATE / 1000, recent.size)
+        Wav.voicedMs(end, SAMPLE_RATE, adaptiveThreshold(recent, SAMPLE_RATE, -48.0)) == 0
+    }.getOrDefault(false)
+
     fun cancel(context: Context) {
         if (!isListening) return
         listeningJob?.cancel()
@@ -434,7 +446,7 @@ object DictationController {
                     // Ended on the stop phrase: the silence the watcher waited through (and the
                     // post-roll) is dropped, so the speech model is not handed a second of quiet
                     // to invent a "Thank you." in.
-                    val recorded = recorder.stop().let { all ->
+                    val recorded = recorder.stop(postRoll = !silentAtStop()).let { all ->
                         if (phraseHeard && phraseEnd > 0) all.copyOf(minOf(all.size, phraseEnd + PHRASE_TAIL_SAMPLES)) else all
                     }
                     streamed = streamer?.takeIf { it.hasWork }?.finish()
@@ -1347,3 +1359,6 @@ private const val PHRASE_TAIL_SAMPLES = SAMPLE_RATE * 3 / 10
 
 /** How long release waits for a tail speculation that is still running before sending the whole tail. */
 private const val SPEC_RELEASE_GRACE_MS = 150L
+
+/** Silence at the end of a recording that makes the stop skip its post-roll. */
+private const val QUIET_STOP_MS = 300

@@ -135,12 +135,13 @@ class Recorder {
         }
     }
 
-    fun stop(): ShortArray {
+    /** [postRoll] false: the speaker was already silent at the stop, so nothing is left to catch. */
+    fun stop(postRoll: Boolean = true): ShortArray {
         // Post-roll: the button comes up while the last word is still sounding.
         // The cap is 200 ms of audio. On a device, read() blocks and wall time matches that.
         // Robolectric's shadow returns a full buffer immediately, so an uncapped sleep here
         // invents minutes of samples and the concat runs out of heap.
-        if (running) {
+        if (running && postRoll) {
             captureUntil = peekSampleCount() + STOP_POST_ROLL_MS * SAMPLE_RATE / 1000
             Thread.sleep(STOP_POST_ROLL_MS)
         }

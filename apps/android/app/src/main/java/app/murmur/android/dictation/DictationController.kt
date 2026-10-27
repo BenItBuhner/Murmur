@@ -608,9 +608,9 @@ object DictationController {
                     ?.let { f -> withTimeoutOrNull(carryWaitMs.coerceAtLeast(1)) { runCatching { f.await() }.getOrNull() } } as? PieceFormat.Done
                 val split = if (prev != null && carriesSentences(app.category)) splitCarry(prev.result.text) else null
                 val carried = split != null && split.carry.isNotEmpty()
-                val prior = if (carried) seamContext(split!!.head).ifEmpty { prev!!.prior }
+                val prior = if (carried) seamContext(split.head).ifEmpty { prev!!.prior }
                 else seamContext(before?.let { runCatching { it.await() }.getOrNull() }.orEmpty())
-                val transcript = if (carried) carryInput(split!!.carry, text) else text
+                val transcript = if (carried) carryInput(split.carry, text) else text
                 val base = formatInputFor(transcript, FormattingMode.SMART, style, app, pkg, s, context, precedingText = prior.ifEmpty { null })
                 val out = router.formatter().formatBackground(base.copy(context = base.context.copy(instructions = listOfNotNull(base.context.instructions, PIECE_NOTE).joinToString(" "))))
                 Log.i(TAG, "piece formatted in ${System.currentTimeMillis() - started} ms while recording${if (carried) " (carried the last sentence before it)" else ""}")

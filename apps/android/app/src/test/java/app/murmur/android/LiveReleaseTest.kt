@@ -42,7 +42,7 @@ import java.io.File
  * and what was inserted. Opt-in:
  *
  *   MURMUR_LIVE=1 MURMUR_GATEWAY_ORIGIN=http://127.0.0.1:3299 MURMUR_TEST_JWT_FILE=/tmp/android.jwt \
- *   MURMUR_LIVE_CLIPS=/path/a.wav,/path/b.wav [MURMUR_LIVE_ROUNDS=3] \
+ *   MURMUR_LIVE_CLIPS=/path/a.wav,/path/b.wav [MURMUR_LIVE_ROUNDS=3] [MURMUR_LIVE_STOP_MS=600] \
  *   ./gradlew :app:testDirectDebugUnitTest --tests '*LiveReleaseTest*'
  *
  * MURMUR_GATEWAY_ORIGIN can be the deployed Worker with a real session token, or a local server
@@ -105,6 +105,7 @@ class LiveReleaseTest {
         val clips = env("MURMUR_LIVE_CLIPS").split(',').map { it.trim() }.filter { it.isNotEmpty() }
         assumeTrue("Set MURMUR_GATEWAY_ORIGIN, MURMUR_TEST_JWT_FILE and MURMUR_LIVE_CLIPS", origin.isNotEmpty() && File(tokenFile).isFile && clips.isNotEmpty())
         val rounds = env("MURMUR_LIVE_ROUNDS").toIntOrNull() ?: 1
+        val stopAfterMs = env("MURMUR_LIVE_STOP_MS").toLongOrNull() ?: 600
 
         shadowOf(context).grantPermissions(Manifest.permission.RECORD_AUDIO)
         val activity: Activity = Robolectric.buildActivity(Activity::class.java).setup().get()
@@ -154,8 +155,8 @@ class LiveReleaseTest {
                 playIntoMicrophone(pcm)
                 DictationController.start(activity)
                 assertTrue(DictationController.state.value is DictationState.Listening)
-                // The tap comes 0.6 s after the last sample, as a person's would.
-                assertTrue(idleUntil(pcm.size * 1000L / SAMPLE_RATE + 10_000) { clipEndedAt > 0 && System.currentTimeMillis() - clipEndedAt >= 600 })
+                // The tap comes a moment after the last sample (0.6 s by default), as a person's would.
+                assertTrue(idleUntil(pcm.size * 1000L / SAMPLE_RATE + 10_000) { clipEndedAt > 0 && System.currentTimeMillis() - clipEndedAt >= stopAfterMs })
                 val stoppedAt = System.currentTimeMillis()
                 DictationController.stopAndInsert(activity)
                 val finished = idleUntil(90_000) { DictationController.state.value.let { it is DictationState.Success || it is DictationState.Error } }

@@ -34,7 +34,9 @@ dictate() {
   log "murmur: $(grep -o 'MurmurA11y.*inserted [0-9]* chars.*' /tmp/logcat-full.txt | tail -1 | sed 's/^MurmurA11y([ 0-9]*): //')"
 }
 key() { adb shell input keyevent "$@"; }
-focus_field() { dump; local xy; xy=$(python3 "$HERE/field.py" center) && adb shell input tap $xy; sleep 1; }
+# Taps where the text box was found at the start: reading the screen again would rebind Murmur.
+FIELD_XY=""
+focus_field() { [ -n "$FIELD_XY" ] && adb shell input tap $FIELD_XY; sleep 1; }
 combo() { adb shell input keycombination "$@"; }
 
 # Select `old` in the last dictation (the caret is at its end) with Shift+Left, type `new` over it.
@@ -98,7 +100,7 @@ for _ in 1 2 3; do
   xy=$(python3 "$HERE/field.py" button "No thanks" || python3 "$HERE/field.py" button "Not now" || python3 "$HERE/field.py" button "Don't allow") || break
   log "dismissing a Chrome prompt"; adb shell input tap $xy; sleep 2
 done
-dump; xy=$(python3 "$HERE/field.py" center) && adb shell input tap $xy
+dump; xy=$(python3 "$HERE/field.py" center) && { FIELD_XY=$xy; adb shell input tap $xy; }
 sleep 2
 adb logcat -G 16M >/dev/null 2>&1
 adb logcat -c

@@ -743,13 +743,13 @@ object DictationController {
         var tailText = tail
         var tailCarried = false
         var lastPiece = seamContext(texts.lastOrNull().orEmpty())
-        fun carryFrom(f: PieceFormat.Done, soft: Boolean = true) {
+        fun carryFrom(f: PieceFormat.Done) {
             val split = splitCarry(f.result.text)
             if (split.carry.isEmpty()) {
                 lastPiece = seamContext(f.result.text)
                 return
             }
-            tailText = carryInput(split.carry, tail, soft)
+            tailText = carryInput(split.carry, tail)
             tailCarried = true
             lastPiece = seamContext(split.head).ifEmpty { f.prior }
         }
@@ -768,7 +768,7 @@ object DictationController {
                 PieceFormat.Empty -> Unit
                 is PieceFormat.Done -> {
                     specPart = f
-                    if (tail.isNotEmpty()) carryFrom(f, soft = carriesSentences(input.context.category))
+                    if (tail.isNotEmpty()) carryFrom(f)
                 }
             }
         } else if (tail.isNotEmpty() && carriesSentences(input.context.category)) {
@@ -974,7 +974,7 @@ object DictationController {
             val tail = if (Wav.peakDb(rest) < -48.0) null else scope.async {
                 runCatching {
                     val answer = plan?.let { p ->
-                        runCatching { router.dictateRelease(resolved, Wav.encodePcm16(rest, SAMPLE_RATE), prompt, p.first, p.second, carry = carriesSentences(app.category)) }
+                        runCatching { router.dictateRelease(resolved, Wav.encodePcm16(rest, SAMPLE_RATE), prompt, p.first, p.second) }
                             .onFailure { Log.w(TAG, "one-call release failed; using two calls", it) }.getOrNull()
                     }
                     if (answer == null) trace.timed("speech (tail)") { runStt(rest) }

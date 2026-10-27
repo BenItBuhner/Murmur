@@ -298,16 +298,16 @@ object SttClient {
      * The end of a dictation in one round trip to Murmur's gateway: speech, then (with [format])
      * formatting of [prefix] + the transcript, on the edge. Null when the gateway has no such route.
      */
-    suspend fun dictateRelease(wav: ByteArray, prompt: String?, cfg: SttConfig, prefix: String?, format: JSONObject?, carry: Boolean = false): ReleaseAnswer? =
+    suspend fun dictateRelease(wav: ByteArray, prompt: String?, cfg: SttConfig, prefix: String?, format: JSONObject?): ReleaseAnswer? =
         withContext(Dispatchers.IO) {
             try {
-                releaseOnce(wav, prompt, cfg, prefix, format, carry)
+                releaseOnce(wav, prompt, cfg, prefix, format)
             } catch (e: Exception) {
                 throw toSttException(e)
             }
         }
 
-    private fun releaseOnce(wav: ByteArray, prompt: String?, cfg: SttConfig, prefix: String?, format: JSONObject?, carry: Boolean): ReleaseAnswer? {
+    private fun releaseOnce(wav: ByteArray, prompt: String?, cfg: SttConfig, prefix: String?, format: JSONObject?): ReleaseAnswer? {
         val base = normalizeBaseUrl(cfg.baseUrl)
         if (base.isEmpty() || base in releaseUnsupported) return null
         val started = System.nanoTime()
@@ -324,8 +324,6 @@ object SttClient {
         if (!prompt.isNullOrEmpty()) form.addFormDataPart("prompt", prompt)
         cfg.speed?.let { form.addFormDataPart(Inference.SPEED_FIELD, it) }
         if (!prefix.isNullOrBlank()) form.addFormDataPart("prefix", prefix)
-        // The prefix is the last sentence the tail carries, joined as carryInput joins it (Seam.kt).
-        if (!prefix.isNullOrBlank() && carry) form.addFormDataPart("join", "carry")
         if (format != null) form.addFormDataPart("format", format.toString())
         val req = Request.Builder().url("$base/dictate/release").post(form.build())
             .apply { if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}") }.build()

@@ -122,7 +122,6 @@ export {
   carryInput,
   CARRY_MAX_WORDS,
   type CarriedPart,
-  type SeamOptions,
   lastSentenceStart,
   seamContext,
   stripEcho,

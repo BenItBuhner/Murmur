@@ -283,15 +283,15 @@ class InferenceRouter(
      * The release tail in one call (speech + formatting on the gateway). Null when it cannot be used
      * (not Murmur, or an instance without the route): the caller makes the two calls instead.
      */
-    suspend fun dictateRelease(resolved: ResolvedStt, wav: ByteArray, prompt: String?, prefix: String?, format: org.json.JSONObject?, carry: Boolean = false): SttClient.ReleaseAnswer? {
+    suspend fun dictateRelease(resolved: ResolvedStt, wav: ByteArray, prompt: String?, prefix: String?, format: org.json.JSONObject?): SttClient.ReleaseAnswer? {
         if (resolved.source != InferenceSource.MURMUR) return null
         return try {
-            SttClient.dictateRelease(wav, prompt, resolved.cfg, prefix, format, carry)
+            SttClient.dictateRelease(wav, prompt, resolved.cfg, prefix, format)
         } catch (e: SttException) {
             if (e.kind != SttErrorKind.AUTH) throw e
             val fresh = resolved.cfg.copy(apiKey = sessionToken(true))
             resolved.cfg = fresh
-            SttClient.dictateRelease(wav, prompt, fresh, prefix, format, carry)
+            SttClient.dictateRelease(wav, prompt, fresh, prefix, format)
         }
     }
 

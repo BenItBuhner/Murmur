@@ -1,6 +1,3 @@
-import { CLEAN_MAX_WORDS } from './clean'
-import { countWords } from './text'
-
 /**
  * Joining the pieces of a long dictation that were transcribed (and formatted) separately.
  *
@@ -119,21 +116,11 @@ function looksLikeName(word: string, ...texts: string[]): boolean {
   return texts.some((t) => re.test(t))
 }
 
-export interface SeamOptions {
-  /**
-   * The cut is known to be an artifact of where a clip ended, not a sentence boundary anyone
-   * decided: a period (or ellipsis) at the end of `prev` is dropped and `next` continues in lower
-   * case (names and "I" keep their capital). Used when the result goes to the formatter, which
-   * then decides the boundary with both sides in view.
-   */
-  soft?: boolean
-}
-
 /**
  * Join two consecutive pieces of one dictation. `prev` and `next` may each be raw speech
  * recognition or formatted text.
  */
-export function joinSeam(prev: string, next: string, opts: SeamOptions = {}): SeamJoin {
+export function joinSeam(prev: string, next: string): SeamJoin {
   let h = prev.replace(/\s+$/u, '')
   let t = next.replace(/^\s+/u, '')
   if (!t) return { text: h, deduped: 0, joined: false }
@@ -174,17 +161,6 @@ export function joinSeam(prev: string, next: string, opts: SeamOptions = {}): Se
     t = t.slice(tw[deduped - 1].end).replace(/^[\s,;:.!?…-]+/u, '')
     if (!t) return { text: h, deduped, joined: false }
     tw = words(t).slice(0, SEAM_WINDOW)
-  }
-
-  if (opts.soft) {
-    const first = tw[0]
-    const marked = /(\.{1,3}|…)(["')\]]*)$/u.exec(h)
-    if (marked) h = h.slice(0, marked.index) + marked[2]
-    if (first && first.start === 0 && !/[!?]["')\]]*$/u.test(h)) {
-      const keepCap = ALWAYS_CAPITAL.test(first.text) || looksLikeName(first.text, h, t.slice(first.end))
-      if (!keepCap) t = first.text.toLowerCase() + t.slice(first.end)
-    }
-    return { text: `${h} ${t}`, deduped, joined: !!marked }
   }
 
   // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
@@ -260,20 +236,13 @@ export function splitCarry(text: string, maxWords = CARRY_MAX_WORDS): { head: st
   return { head: t.slice(0, at).replace(/[^\S\n]+$/u, ''), carry }
 }
 
-/** A release tail of at most this many words is formatted by rules (SHORT_TAIL_WORDS on every client and the gateway). */
-const RULES_TAIL_WORDS = 6
-
 /**
  * What a piece that carries `carry` sends to the formatter: that sentence, then its own words,
- * soft-joined (the period the clip end added is gone; the model decides). A text the model would
- * not see (a tail short enough for the rules, or a result short enough to pass as already clean)
- * is joined by joinSeam instead: rules cannot punctuate a run-on. `soft: false` (code, terminals,
- * where a lower-cased identifier would be wrong): always joinSeam.
+ * joined by joinSeam. The period the pause put at the cut stays: the formatter decides it with
+ * both sides in view, as it does every pause period. (Dropping it erased real sentence ends: on
+ * 24 real dictations only 40% of sentence ends at a cut survived.)
  */
-export function carryInput(carry: string, raw: string, opts: SeamOptions = { soft: true }): string {
-  if (!opts.soft) return joinSeam(carry, raw).text.trim()
-  const soft = joinSeam(carry, raw, { soft: true }).text.trim()
-  if (countWords(raw) > RULES_TAIL_WORDS && countWords(soft) > CLEAN_MAX_WORDS) return soft
+export function carryInput(carry: string, raw: string): string {
   return joinSeam(carry, raw).text.trim()
 }
 

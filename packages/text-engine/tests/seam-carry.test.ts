@@ -1,46 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { carryInput, joinCarried, joinSeam, splitCarry } from '../src/seam'
-
-describe('joinSeam soft (the cut is a clip end, the formatter decides)', () => {
-  const soft = (a: string, b: string): string => joinSeam(a, b, { soft: true }).text
-  it('drops the period the clip end added and continues in lower case', () => {
-    expect(soft('I want you to dig deeper.', 'And actually merge things yourself.')).toBe(
-      'I want you to dig deeper and actually merge things yourself.'
-    )
-    expect(soft('or make any decisions.', 'Any major mistakes.')).toBe(
-      'or make any decisions any major mistakes.'
-    )
-  })
-  it('drops an ellipsis too', () => {
-    expect(soft('It is a question of...', 'If we can.')).toBe('It is a question of if we can.')
-    expect(soft('Every single…', 'Clip is cut.')).toBe('Every single clip is cut.')
-  })
-  it('keeps a question or exclamation mark and the capital after it', () => {
-    expect(soft('Is it done?', 'Yes it is.')).toBe('Is it done? Yes it is.')
-    expect(soft('Wow!', 'That was fast.')).toBe('Wow! That was fast.')
-  })
-  it('keeps "I" and names capitalized', () => {
-    expect(soft('That is the plan.', "I'll send it later.")).toBe("That is the plan I'll send it later.")
-    expect(soft('I sent it to.', 'Sarah, and Sarah said no.')).toBe('I sent it to Sarah, and Sarah said no.')
-    expect(soft('We moved it to the.', 'API gateway.')).toBe('We moved it to the API gateway.')
-  })
-  it('still drops words heard by both pieces', () => {
-    expect(soft('Everything that would otherwise.', 'Otherwise, be picked up.')).toBe(
-      'Everything that would otherwise be picked up.'
-    )
-    expect(soft('It adds a', 'An extra step.')).toBe('It adds an extra step.')
-  })
-  it('handles a bare end and empty sides', () => {
-    expect(soft('the build is', 'Green now.')).toBe('the build is green now.')
-    expect(soft('', 'Hello there.')).toBe('Hello there.')
-    expect(soft('Hello there.', '')).toBe('Hello there.')
-  })
-  it('does not touch an inner period', () => {
-    expect(soft('Version 2.0 shipped. We tested it.', 'Then it broke.')).toBe(
-      'Version 2.0 shipped. We tested it then it broke.'
-    )
-  })
-})
+import { carryInput, joinCarried, splitCarry } from '../src/seam'
 
 describe('splitCarry', () => {
   it('carries the last sentence and keeps the rest', () => {
@@ -74,28 +33,18 @@ describe('splitCarry', () => {
 })
 
 describe('carryInput', () => {
-  it('is the carried sentence, soft-joined to the raw words', () => {
+  it('is the carried sentence, then the raw words, with the pause period kept for the model', () => {
     expect(
       carryInput('I want you to dig deeper.', 'And actually merge things yourself. I only want you to hold them when I say.')
-    ).toBe('I want you to dig deeper and actually merge things yourself. I only want you to hold them when I say.')
+    ).toBe('I want you to dig deeper. And actually merge things yourself. I only want you to hold them when I say.')
+    expect(carryInput('It was past its prime.', 'I still want this to work.')).toBe(
+      'It was past its prime. I still want this to work.'
+    )
   })
   it('drops an echo of the carry at the start of the raw piece', () => {
     expect(carryInput('so we should test the whole.', 'The whole thing again tomorrow morning before the release goes out.')).toBe(
       'so we should test the whole thing again tomorrow morning before the release goes out.'
     )
-  })
-  it('joins the old way when the rules, not the model, would format it', () => {
-    // A short tail is formatted by rules, which cannot punctuate a run-on.
-    expect(carryInput('That is the whole plan for this week and the next.', 'Send it now.')).toBe(
-      'That is the whole plan for this week and the next. Send it now.'
-    )
-    // Short enough overall to pass as already clean.
-    expect(carryInput('Okay.', 'Send it to Sarah tomorrow morning please.')).toBe('Okay. Send it to Sarah tomorrow morning please.')
-  })
-  it('joins by joinSeam when not soft (code, terminals)', () => {
-    expect(
-      carryInput('I want you to dig deeper.', 'And actually merge things yourself. I only want you to hold them when I say.', { soft: false })
-    ).toBe('I want you to dig deeper. And actually merge things yourself. I only want you to hold them when I say.')
   })
 })
 

@@ -882,8 +882,7 @@ export class DictationController extends EventEmitter {
               { wav: encodeWavPcm16(clip, SAMPLE_RATE), prompt },
               resolved.cfg,
               plan.prefix,
-              { ...plan.format, context: pieceContext(this.formatContext(s, style, app), plan.before, true) },
-              carriesSentences(this.formatContext(s, style, app))
+              { ...plan.format, context: pieceContext(this.formatContext(s, style, app), plan.before, true) }
             )
             if (answer) {
               if (answer.format) preformatted = [answer.transcript, answer.format as FormatOutcome]
@@ -1268,13 +1267,13 @@ export class DictationController extends EventEmitter {
     let tailInput = tail
     let tailCarried = false
     let tailPrior = seamContext(lastPiece)
-    const carryFrom = (f: CarriedOutcome, soft = true): void => {
+    const carryFrom = (f: CarriedOutcome): void => {
       const split = splitCarry(f.text)
       if (!split.carry) {
         tailPrior = seamContext(f.text)
         return
       }
-      tailInput = carryInput(split.carry, tail, { soft })
+      tailInput = carryInput(split.carry, tail)
       tailCarried = true
       tailPrior = seamContext(split.head) || (f.prior ?? '')
     }
@@ -1283,7 +1282,7 @@ export class DictationController extends EventEmitter {
       if (f === null) return null
       if (f !== 'empty') {
         specPart = f
-        if (tail) carryFrom(f, carriesSentences(input.context))
+        if (tail) carryFrom(f)
       }
     } else if (tail && carriesSentences(input.context)) {
       // Only a piece formatted already: waiting for it here would put it on the release's path.

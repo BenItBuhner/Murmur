@@ -77,12 +77,7 @@ private fun looksLikeName(word: String, vararg texts: String): Boolean {
     return texts.any { re.containsMatchIn(it) }
 }
 
-/**
- * [soft]: the cut is where a clip ended, not a boundary anyone decided. A period or ellipsis at
- * the end of [prev] is dropped and [next] continues in lower case (names and "I" keep their
- * capital), for the formatter to decide with both sides in view. Mirrors SeamOptions.soft in seam.ts.
- */
-fun joinSeam(prev: String, next: String, soft: Boolean = false): SeamJoin {
+fun joinSeam(prev: String, next: String): SeamJoin {
     var h = prev.trimEnd()
     var t = next.trimStart()
     if (t.isEmpty()) return SeamJoin(h, 0, false)
@@ -115,17 +110,6 @@ fun joinSeam(prev: String, next: String, soft: Boolean = false): SeamJoin {
         t = t.substring(tw[deduped - 1].end).replace(Regex("""^[\s,;:.!?…-]+"""), "")
         if (t.isEmpty()) return SeamJoin(h, deduped, false)
         tw = seamWords(t).take(SEAM_WINDOW)
-    }
-
-    if (soft) {
-        val first = tw.firstOrNull()
-        val marked = Regex("""(\.{1,3}|…)(["')\]]*)$""").find(h)
-        if (marked != null) h = h.substring(0, marked.range.first) + marked.groupValues[2]
-        if (first != null && first.start == 0 && !Regex("""[!?]["')\]]*$""").containsMatchIn(h)) {
-            val keepCap = ALWAYS_CAPITAL.matches(first.text) || looksLikeName(first.text, h, t.substring(first.end))
-            if (!keepCap) t = first.text.lowercase() + t.substring(first.end)
-        }
-        return SeamJoin("$h $t", deduped, marked != null)
     }
 
     // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
@@ -189,20 +173,12 @@ fun splitCarry(text: String, maxWords: Int = CARRY_MAX_WORDS): CarrySplit {
     return CarrySplit(t.substring(0, at).replace(Regex("""[^\S\n]+$"""), ""), carry)
 }
 
-/** A release tail of at most this many words is formatted by rules (SHORT_TAIL_WORDS). */
-private const val RULES_TAIL_WORDS = 6
-
 /**
- * What a piece that carries [carry] sends to the formatter, soft-joined; joined by joinSeam when
- * the model would not see it (a rules-formatted tail, or short enough to pass as already clean),
- * and always when not [soft] (code, terminals). Mirrors carryInput in seam.ts.
+ * What a piece that carries [carry] sends to the formatter: that sentence, then its own words,
+ * joined by joinSeam. The period the pause put at the cut stays: the formatter decides it with
+ * both sides in view, as it does every pause period. Mirrors carryInput in seam.ts.
  */
-fun carryInput(carry: String, raw: String, soft: Boolean = true): String {
-    if (!soft) return joinSeam(carry, raw).text.trim()
-    val joined = joinSeam(carry, raw, soft = true).text.trim()
-    if (countWords(raw) > RULES_TAIL_WORDS && countWords(joined) > Clean.MAX_WORDS) return joined
-    return joinSeam(carry, raw).text.trim()
-}
+fun carryInput(carry: String, raw: String): String = joinSeam(carry, raw).text.trim()
 
 /** A formatted piece; [carried] when it was formatted with the previous piece's last sentence. */
 data class CarriedPart(val text: String, val carried: Boolean = false)

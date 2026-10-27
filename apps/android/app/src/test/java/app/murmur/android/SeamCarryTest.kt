@@ -6,38 +6,12 @@ import app.murmur.android.text.CarrySplit
 import app.murmur.android.text.Verify
 import app.murmur.android.text.carryInput
 import app.murmur.android.text.joinCarried
-import app.murmur.android.text.joinSeam
 import app.murmur.android.text.splitCarry
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /** Mirrors packages/text-engine/tests/seam-carry.test.ts and repair-case.test.ts. */
 class SeamCarryTest {
-    private fun soft(a: String, b: String) = joinSeam(a, b, soft = true).text
-
-    @Test
-    fun `soft join drops the clip-end period and continues in lower case`() {
-        assertEquals("I want you to dig deeper and actually merge things yourself.", soft("I want you to dig deeper.", "And actually merge things yourself."))
-        assertEquals("or make any decisions any major mistakes.", soft("or make any decisions.", "Any major mistakes."))
-        assertEquals("It is a question of if we can.", soft("It is a question of...", "If we can."))
-        assertEquals("Every single clip is cut.", soft("Every single…", "Clip is cut."))
-    }
-
-    @Test
-    fun `soft join keeps question marks, I and names, and still dedupes`() {
-        assertEquals("Is it done? Yes it is.", soft("Is it done?", "Yes it is."))
-        assertEquals("Wow! That was fast.", soft("Wow!", "That was fast."))
-        assertEquals("That is the plan I'll send it later.", soft("That is the plan.", "I'll send it later."))
-        assertEquals("I sent it to Sarah, and Sarah said no.", soft("I sent it to.", "Sarah, and Sarah said no."))
-        assertEquals("We moved it to the API gateway.", soft("We moved it to the.", "API gateway."))
-        assertEquals("Everything that would otherwise be picked up.", soft("Everything that would otherwise.", "Otherwise, be picked up."))
-        assertEquals("It adds an extra step.", soft("It adds a", "An extra step."))
-        assertEquals("the build is green now.", soft("the build is", "Green now."))
-        assertEquals("Hello there.", soft("", "Hello there."))
-        assertEquals("Hello there.", soft("Hello there.", ""))
-        assertEquals("Version 2.0 shipped. We tested it then it broke.", soft("Version 2.0 shipped. We tested it.", "Then it broke."))
-    }
-
     @Test
     fun `splitCarry carries the last sentence, never a list item or a long one`() {
         assertEquals(CarrySplit("There are issues.", "I want you to dig deeper."), splitCarry("There are issues. I want you to dig deeper."))
@@ -53,20 +27,15 @@ class SeamCarryTest {
     }
 
     @Test
-    fun `carryInput soft-joins only what the model will see`() {
+    fun `carryInput keeps the pause period for the model and drops echoes`() {
         assertEquals(
-            "I want you to dig deeper and actually merge things yourself. I only want you to hold them when I say.",
+            "I want you to dig deeper. And actually merge things yourself. I only want you to hold them when I say.",
             carryInput("I want you to dig deeper.", "And actually merge things yourself. I only want you to hold them when I say.")
         )
+        assertEquals("It was past its prime. I still want this to work.", carryInput("It was past its prime.", "I still want this to work."))
         assertEquals(
             "so we should test the whole thing again tomorrow morning before the release goes out.",
             carryInput("so we should test the whole.", "The whole thing again tomorrow morning before the release goes out.")
-        )
-        assertEquals("That is the whole plan for this week and the next. Send it now.", carryInput("That is the whole plan for this week and the next.", "Send it now."))
-        assertEquals("Okay. Send it to Sarah tomorrow morning please.", carryInput("Okay.", "Send it to Sarah tomorrow morning please."))
-        assertEquals(
-            "I want you to dig deeper. And actually merge things yourself. I only want you to hold them when I say.",
-            carryInput("I want you to dig deeper.", "And actually merge things yourself. I only want you to hold them when I say.", soft = false)
         )
     }
 

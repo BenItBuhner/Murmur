@@ -2,7 +2,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { handle, type Env } from '../src/index'
 import { resetJwksCache, verifyClerkToken } from '../src/clerk'
 import { GRANT_TTL_MS, pendingUsage, queueUsage, resetState } from '../src/state'
-import { carryInput } from '../../../packages/text-engine/src/seam'
 
 const ISSUER = 'https://clerk.example.test'
 const SITE = 'https://convex.example.test'
@@ -207,14 +206,6 @@ describe('one-call release and prewarm', () => {
     const body = (await res.json()) as { transcript: string; format: unknown }
     expect(body.transcript).toBe('And I said hello there world')
     expect(body.format).toBeNull()
-  })
-
-  it('joins a carried prefix the way the client does (join=carry)', async () => {
-    const auth = `Bearer ${await token({})}`
-    const prefix = 'That is the whole plan for this week and the next.'
-    const res = await handle(await releaseRequest(auth, { prefix, join: 'carry' }), env, ctx, fetcher)
-    const body = (await res.json()) as { transcript: string }
-    expect(body.transcript).toBe(carryInput(prefix, 'hello there world'))
   })
 
   it('prewarm answers 204 at once and warms the grant', async () => {

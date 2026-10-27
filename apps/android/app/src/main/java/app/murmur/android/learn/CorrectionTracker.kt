@@ -14,12 +14,28 @@ import app.murmur.android.text.findCorrections
 class CorrectionWatch(val before: String, val start: Int, val end: Int) {
     private val offered = HashSet<String>()
 
-    /** The corrections in the field's text now that were not reported by an earlier check. */
-    fun check(current: String, dictionary: List<DictionaryEntry>): List<WordCorrection> {
+    /**
+     * The corrections in the field's text now that were not reported by an earlier check, or null
+     * when the user is still typing a word inside the dictation (the caret right after a letter
+     * there, moments after it moved): "Conve" on the way to "Convex" resembles "convex" too, so
+     * a half-typed word is never judged.
+     */
+    fun check(
+        current: String,
+        dictionary: List<DictionaryEntry>,
+        everyday: Set<String>? = null,
+        caret: Int = -1,
+        typing: Boolean = false
+    ): List<WordCorrection>? {
         val span = editedSpan(before, current, start, end) ?: return emptyList()
-        return findCorrections(span.original, span.edited, dictionary)
-            .filter { offered.add("${it.word.lowercase()}|${it.heard.lowercase()}") }
+        val found = findCorrections(span.original, span.edited, dictionary, everyday)
+        if (typing && found.any { endsAtCaret(current, it.word, caret) }) return null
+        return found.filter { offered.add("${it.word.lowercase()}|${it.heard.lowercase()}") }
     }
+
+    /** The word is the one the caret sits at the end of: the user may not have finished typing it. */
+    private fun endsAtCaret(current: String, word: String, caret: Int): Boolean =
+        caret >= word.length && caret <= current.length && current.regionMatches(caret - word.length, word, 0, word.length)
 
     companion object {
         /**
@@ -48,6 +64,7 @@ class CorrectionWatch(val before: String, val start: Int, val end: Int) {
 class CorrectionTracker(
     private val handler: Handler,
     private val dictionary: () -> List<DictionaryEntry>,
+    private val everyday: () -> Set<String>? = { null },
     private val onFound: (List<WordCorrection>) -> Unit,
     private val clock: () -> Long = SystemClock::uptimeMillis
 ) {
@@ -56,6 +73,7 @@ class CorrectionTracker(
     }
 
     private var session: Session? = null
+    private var lastNudgeAt = Long.MIN_VALUE / 2
     private val tick = Runnable { check() }
     private val nudged = Runnable { check() }
     private val baseline = Runnable { takeBaseline() }
@@ -73,6 +91,7 @@ class CorrectionTracker(
     fun nudge() {
         val s = session ?: return
         if (s.watch == null) return
+        lastNudgeAt = clock()
         handler.removeCallbacks(nudged)
         handler.postDelayed(nudged, NUDGE_DELAY_MS)
     }
@@ -102,8 +121,15 @@ class CorrectionTracker(
     private fun check() {
         val s = session ?: return
         val watch = s.watch ?: return
-        val (text, _) = runCatching { s.read() }.getOrNull() ?: return stop()
-        val found = watch.check(text, dictionary())
+        val (text, caret) = runCatching { s.read() }.getOrNull() ?: return stop()
+        val typing = clock() - lastNudgeAt < TYPING_MS
+        val found = watch.check(text, dictionary(), everyday(), caret, typing)
+        if (found == null) {
+            // Still typing a word: look again once the caret has rested.
+            handler.removeCallbacks(nudged)
+            handler.postDelayed(nudged, TYPING_MS)
+            return
+        }
         if (found.isNotEmpty()) onFound(found)
         scheduleNext()
     }
@@ -111,6 +137,8 @@ class CorrectionTracker(
     companion object {
         const val BASELINE_DELAY_MS = 250L
         const val NUDGE_DELAY_MS = 1_200L
+        /** The caret moved this recently: the user may still be in the middle of a word. */
+        const val TYPING_MS = 3_000L
         /** Checks, counted from the insertion; watching ends after the last. */
         val CHECKS_MS = longArrayOf(4_000, 10_000, 20_000, 40_000, 60_000).toList()
     }

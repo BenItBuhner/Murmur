@@ -1,4 +1,5 @@
-import type { WordCorrection } from '@engine'
+import { parseLexicon, type WordCorrection } from '@engine'
+import lexiconText from '@engine/../lexicon/everyday-words.txt?raw'
 import type { DictionaryEntry } from '@shared/settings'
 import { uid } from './utils'
 
@@ -30,4 +31,12 @@ export function withCorrection(
       : entries.map((e) => (e.id === existing.id ? { ...e, word: c.word } : e))
   if (existing.aliases.some((a) => a.toLowerCase() === heard.toLowerCase())) return [...entries]
   return entries.map((e) => (e.id === existing.id ? { ...e, aliases: [...e.aliases, heard] } : e))
+}
+
+let lexicon: Set<string> | null = null
+
+/** The text engine's everyday-word list, parsed on first use. */
+export function everydayWords(): Set<string> {
+  lexicon ??= parseLexicon(lexiconText)
+  return lexicon
 }

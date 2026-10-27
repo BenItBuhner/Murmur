@@ -5,7 +5,7 @@ import { findCorrections, type WordCorrection } from '@engine'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/input'
 import { useSettings } from '@renderer/hooks/useSettings'
-import { withCorrection } from '@renderer/lib/dictionary'
+import { everydayWords, withCorrection } from '@renderer/lib/dictionary'
 
 /**
  * Correct a past dictation and let Murmur learn from it: fix the words it got wrong, and each fix
@@ -24,7 +24,8 @@ export function TeachWords({
   const [found, setFound] = useState<WordCorrection[] | null>(null)
   const [added, setAdded] = useState<string[]>([])
 
-  const look = (): void => setFound(findCorrections(text, draft, settings.dictionary))
+  const look = (): void =>
+    setFound(findCorrections(text, draft, settings.dictionary, { everyday: everydayWords() }))
   const add = async (c: WordCorrection): Promise<void> => {
     await patch({ dictionary: withCorrection(settings.dictionary, c) })
     setAdded((a) => [...a, c.word])

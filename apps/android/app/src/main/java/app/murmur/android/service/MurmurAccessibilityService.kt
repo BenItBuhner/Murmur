@@ -46,6 +46,7 @@ import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.WordSuggestions
 import app.murmur.android.learn.CorrectionTracker
+import app.murmur.android.text.EverydayWords
 import app.murmur.android.learn.WordSuggestionNotifier
 import app.murmur.android.ui.Route
 import app.murmur.android.update.Updates
@@ -236,6 +237,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         CorrectionTracker(
             mainHandler,
             dictionary = { SettingsStore.get(this).get().dictionaryEntries },
+            everyday = { EverydayWords.get(this) },
             onFound = { found ->
                 val fresh = WordSuggestions.get(this).offer(found, SettingsStore.get(this).get().dictionaryEntries)
                 if (fresh.isNotEmpty()) {
@@ -278,6 +280,8 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             reads = Executor { handler.post(it) }
         }
         createPill()
+        // Read the everyday-word list off the main thread before the first correction check needs it.
+        reads.execute { EverydayWords.get(applicationContext) }
         mainScope.launch {
             DictationController.state.collect { state ->
                 pill?.render(state)

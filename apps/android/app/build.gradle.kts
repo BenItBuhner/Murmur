@@ -91,6 +91,10 @@ android {
         buildConfigField("String", "ACCOUNT_MODE", "\"${envOrProp("MURMUR_ACCOUNT_MODE")}\"")
     }
 
+    // The text engine's everyday-word list (what a correction to an ordinary word is checked against
+    // before Murmur offers it for the dictionary) ships from its one copy in packages/text-engine.
+    sourceSets["main"].assets.srcDir("../../../packages/text-engine/lexicon")
+
     // ---- Distribution flavors -------------------------------------------------------------------
     // One codebase, two ways to ship it. Only the update layer and the manifest differ:
     //  - direct (the default, what GitHub Releases carry): the in-app updater in src/direct checks

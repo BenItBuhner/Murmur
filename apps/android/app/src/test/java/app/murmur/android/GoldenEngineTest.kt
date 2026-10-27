@@ -13,6 +13,7 @@ import app.murmur.android.text.Verify
 import app.murmur.android.text.applyDictionary
 import app.murmur.android.text.editedSpan
 import app.murmur.android.text.findCorrections
+import app.murmur.android.text.parseLexicon
 import app.murmur.android.text.prepareTranscript
 import org.json.JSONArray
 import org.json.JSONObject
@@ -179,10 +180,19 @@ class GoldenEngineTest {
         }
     }
 
+    private val lexicon: Set<String> by lazy {
+        val file = listOf(
+            File("../../../packages/text-engine/lexicon/everyday-words.txt"),
+            File("../../packages/text-engine/lexicon/everyday-words.txt"),
+            File("packages/text-engine/lexicon/everyday-words.txt")
+        ).first { it.exists() }
+        parseLexicon(file.readText())
+    }
+
     @Test
     fun `correction suggestions agree`() {
         val cases = golden.getJSONArray("corrections")
-        assertTrue(cases.length() >= 15)
+        assertTrue(cases.length() >= 90)
         for (i in 0 until cases.length()) {
             val c = cases.getJSONObject(i)
             val dictionary = c.getJSONArray("dictionary").let { arr ->
@@ -197,7 +207,7 @@ class GoldenEngineTest {
                     Triple(r.getString("heard"), r.getString("word"), r.getString("kind"))
                 }
             }
-            val actual = findCorrections(c.getString("original"), c.getString("edited"), dictionary).map { Triple(it.heard, it.word, it.kind) }
+            val actual = findCorrections(c.getString("original"), c.getString("edited"), dictionary, lexicon).map { Triple(it.heard, it.word, it.kind) }
             assertEquals(c.getString("original") + " -> " + c.getString("edited"), expected, actual)
         }
         val spans = golden.getJSONArray("spans")

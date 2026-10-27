@@ -60,6 +60,9 @@ private val SPACES = Regex("\\s+")
 private const val MAX_HUNK_WORDS = 3
 private const val MAX_SUGGESTIONS = 3
 private const val MAX_DIFF_WORDS = 300
+private const val MAX_SPLIT_WORDS = 6
+private val CALL_AFTER = Regex("[(\\[]")
+private val SIGIL_BEFORE = Regex("[.@#$/\\\\_]")
 
 private fun tokenize(text: String): List<Tok> =
     CORRECTION_TOKEN.findAll(text).map { Tok(it.value, it.range.first, it.range.last + 1) }.toList()
@@ -101,12 +104,44 @@ private fun diffWords(a: List<Tok>, b: List<Tok>): List<Hunk>? {
 private fun letters(s: String): String =
     NON_ALNUM.replace(COMBINING.replace(Normalizer.normalize(s, Normalizer.Form.NFD), "").lowercase(), "")
 
-private fun isCommon(word: String): Boolean =
-    word.split(SPACES).all { COMMON.contains(it.lowercase().replace('’', '\'')) }
+/** The everyday-word list (packages/text-engine/lexicon/everyday-words.txt), one lower-case word per line. */
+fun parseLexicon(text: String): Set<String> =
+    text.split('\n').map { it.trim() }.filter { it.isNotEmpty() }.toHashSet()
+
+private val SENTENCE_OPENER = Regex("[\\s\"'“‘(\\[*-]")
+private val SENTENCE_END = Regex("[.!?…:\\n]")
+
+/** Whether the token at [index] of [text] begins a sentence (corrections.ts `startsSentence`). */
+private fun startsSentence(text: String, index: Int): Boolean {
+    var i = index - 1
+    while (i >= 0 && (text[i].isWhitespace() || SENTENCE_OPENER.matches(text[i].toString()))) i--
+    return i < 0 || SENTENCE_END.matches(text[i].toString())
+}
+
+/** Everyday words written the everyday way (corrections.ts `everydayWords`). */
+private fun everydayWords(tokens: List<Tok>, text: String, lexicon: Set<String>?): Boolean = tokens.all { t ->
+    val lower = t.text.lowercase().replace('’', '\'')
+    fun known(w: String) = COMMON.contains(w) || lexicon?.contains(w) == true
+    val joined = lower.replace(Regex("['-]"), "")
+    if (!known(lower) && !known(joined) && !lower.split('-').all { it.isNotEmpty() && known(it) }) return@all false
+    if (t.text == t.text.lowercase()) return@all true
+    t.text.substring(1) == t.text.substring(1).lowercase() && startsSentence(text, t.start)
+}
+
+private fun isPictographic(word: String): Boolean = word.codePoints().anyMatch { c ->
+    c in 0x2600..0x27BF || c in 0x2B00..0x2BFF || c in 0x1F000..0x1FAFF
+}
+
+private fun isSubsequence(short: String, long: String): Boolean {
+    var i = 0
+    for (c in long) { if (i < short.length && short[i] == c) i++ }
+    return i == short.length
+}
 
 private fun notAWord(word: String): Boolean {
     if (NOT_A_WORD_CHARS.containsMatchIn(word)) return true
     if (HEX_ID.matches(word) && DIGIT.containsMatchIn(word)) return true
+    if (isPictographic(word)) return true
     return NUMBER_CHAR.findAll(word).count() > LETTER_CHAR.findAll(word).count()
 }
 
@@ -118,6 +153,10 @@ private fun resembles(heard: String, word: String): Boolean {
     val keyA = heard.split(SPACES).joinToString("") { soundKey(it) }
     val keyB = word.split(Regex("[\\s.-]+")).joinToString("") { soundKey(it) }
     if (keyA.length >= 2 && keyA == keyB) return true
+    if (keyA.isNotEmpty() && keyB.isNotEmpty() && keyA[0] == keyB[0]) {
+        val (short, long) = if (keyA.length <= keyB.length) keyA to keyB else keyB to keyA
+        if (short.length >= 3 && short.length.toDouble() / long.length > 0.6 && isSubsequence(short, long)) return true
+    }
     val longest = maxOf(a.length, b.length)
     if (longest < 3) return false
     val allowed = if (longest <= 4) 1 else maxOf(1, (longest * 0.4).toInt())
@@ -125,7 +164,12 @@ private fun resembles(heard: String, word: String): Boolean {
 }
 
 /** The dictionary-worthy corrections in one edit of text Murmur typed (corrections.ts `findCorrections`). */
-fun findCorrections(original: String, edited: String, dictionary: List<DictionaryEntry> = emptyList()): List<WordCorrection> {
+fun findCorrections(
+    original: String,
+    edited: String,
+    dictionary: List<DictionaryEntry> = emptyList(),
+    everyday: Set<String>? = null
+): List<WordCorrection> {
     val before = tokenize(original)
     val after = tokenize(edited)
     if (before.isEmpty() || after.isEmpty()) return emptyList()
@@ -148,29 +192,35 @@ fun findCorrections(original: String, edited: String, dictionary: List<Dictionar
     val seen = HashSet<String>()
     for (h in hunks) {
         if (h.removed.isEmpty() || h.added.isEmpty()) continue
-        if (h.removed.size > MAX_HUNK_WORDS || h.added.size > MAX_HUNK_WORDS) continue
+        if (h.added.size > MAX_HUNK_WORDS || h.removed.size > MAX_SPLIT_WORDS) continue
         val heard = h.removed.joinToString(" ") { it.text }
         val word = edited.substring(h.added.first().start, h.added.last().end).trim()
+        if (h.removed.size > MAX_HUNK_WORDS && letters(heard) != letters(word)) continue
         if (!LETTER_CHAR.containsMatchIn(word) || word.length < 2 || word.length > 60) continue
         if (notAWord(word)) continue
+        val end = h.added.last().end
+        val startAt = h.added.first().start
+        if ((end < edited.length && CALL_AFTER.matches(edited[end].toString())) ||
+            (startAt > 0 && SIGIL_BEFORE.matches(edited[startAt - 1].toString()))) continue
         val heardLower = heard.lowercase()
         val wordLower = word.lowercase()
         if (wordLower in seen) continue
+        val entry = byWord[wordLower]
         if (heardLower == wordLower.replace(SPACES, " ")) {
-            if (word == word.lowercase() || isCommon(word)) continue
-            if (byWord[wordLower]?.word == word) continue
+            if (word == word.lowercase()) continue
+            if (entry?.word == word) continue
+            if (entry == null && everydayWords(h.added, edited, everyday)) continue
             seen.add(wordLower)
-            out.add(WordCorrection(heard, word, if (byWord.containsKey(wordLower)) "alias" else "add"))
+            out.add(WordCorrection(heard, word, if (entry != null) "alias" else "add"))
         } else {
-            if (isCommon(word) && word == word.lowercase()) continue
             if (!resembles(heard, word)) continue
-            val entry = byWord[wordLower]
             if (entry != null) {
                 if (byVariant[heardLower] === entry) continue
                 if (byWord.containsKey(heardLower)) continue
                 seen.add(wordLower)
                 out.add(WordCorrection(heard, entry.word, "alias"))
             } else {
+                if (everydayWords(h.added, edited, everyday)) continue
                 seen.add(wordLower)
                 out.add(WordCorrection(heard, word, "add"))
             }
@@ -201,4 +251,15 @@ fun editedSpan(before: String, after: String, start: Int, end: Int): EditedSpan?
     while (to < before.length && isWord(to)) to++
     val delta = after.length - before.length
     return EditedSpan(before.substring(from, to), after.substring(from, to + delta))
+}
+
+/** The everyday-word list from the app's assets, read once. Empty if the asset is missing. */
+object EverydayWords {
+    @Volatile private var words: Set<String>? = null
+
+    fun get(context: android.content.Context): Set<String> = words ?: synchronized(this) {
+        words ?: runCatching {
+            context.assets.open("everyday-words.txt").bufferedReader().use { parseLexicon(it.readText()) }
+        }.getOrDefault(emptySet()).also { words = it }
+    }
 }

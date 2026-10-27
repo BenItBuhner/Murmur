@@ -35,6 +35,8 @@ export { applyDictionary, soundKey, buildSttPrompt, STT_BASE_PROMPT } from './di
 export {
   findCorrections,
   editedSpan,
+  parseLexicon,
+  type CorrectionOptions,
   type WordCorrection,
   type EditedSpan
 } from './corrections'

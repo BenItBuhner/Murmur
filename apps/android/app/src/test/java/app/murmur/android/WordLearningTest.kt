@@ -17,18 +17,18 @@ class WordLearningTest {
         val watch = CorrectionWatch.locate(field, "I use whisper flow daily. ", field.length)!!
         assertEquals(9, watch.start)
         val edited = field.replace("whisper flow", "Wispr Flow")
-        val found = watch.check(edited, emptyList())
+        val found = watch.check(edited, emptyList())!!
         assertEquals(listOf("Wispr Flow"), found.map { it.word })
         assertEquals("whisper flow", found.single().heard)
         // The same edit seen again by a later check is not news.
-        assertTrue(watch.check(edited, emptyList()).isEmpty())
+        assertTrue(watch.check(edited, emptyList())!!.isEmpty())
     }
 
     @Test
     fun `ignores typing after the dictation and a dictation it cannot find`() {
         val field = "I use whisper flow daily."
         val watch = CorrectionWatch.locate(field, "I use whisper flow daily.", field.length)!!
-        assertTrue(watch.check("$field Also Kubernetes.", emptyList()).isEmpty())
+        assertTrue(watch.check("$field Also Kubernetes.", emptyList())!!.isEmpty())
         assertNull(CorrectionWatch.locate("something else", "I use whisper flow", 5))
     }
 
@@ -48,5 +48,34 @@ class WordLearningTest {
         val convex = DictionaryEntry("2", "convex")
         val recased = WordSuggestions.withSuggestion(listOf(convex), WordSuggestion("Convex", "convex", "alias", 0))
         assertEquals("Convex", recased.single().word)
+    }
+
+    @Test
+    fun `a word half-typed over a mis-heard one is never judged while the caret is in it`() {
+        val field = "We moved the backend to convex today."
+        val watch = CorrectionWatch.locate(field, field, field.length)!!
+        val head = "We moved the backend to "
+        var held = 0
+        for (n in 1 until "Convex".length) {
+            val typed = head + "Convex".take(n)
+            val now = "$typed today."
+            val result = watch.check(now, emptyList(), caret = typed.length, typing = true)
+            assertTrue("while typing \"${"Convex".take(n)}\": $result", result.isNullOrEmpty())
+            if (result == null) held++
+        }
+        // "Conv" and "Conve" resemble "convex" closely enough that only the caret guard holds them back.
+        assertTrue(held >= 2)
+        // The caret rests (or leaves the word): the finished word is judged.
+        val done = "${head}Convex today."
+        assertEquals(listOf("Convex"), watch.check(done, emptyList(), caret = (head + "Convex").length, typing = false)!!.map { it.word })
+    }
+
+    @Test
+    fun `typing after the dictation is not mistaken for typing inside it`() {
+        val field = "Ask Bennet about it."
+        val watch = CorrectionWatch.locate(field, field, field.length)!!
+        val now = "Ask Bennett about it. Also"
+        // The caret is past the dictation, so the fixed name is judged even mid-typing.
+        assertEquals(listOf("Bennett"), watch.check(now, emptyList(), caret = now.length, typing = true)!!.map { it.word })
     }
 }

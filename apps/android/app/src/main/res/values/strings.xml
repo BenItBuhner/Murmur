@@ -7,6 +7,8 @@
     <string name="notification_channel_description">Shown while Murmur is listening, because Android requires it for the microphone. Turn it off here to hide it; dictation keeps working.</string>
     <string name="notification_recording">Listening…</string>
     <string name="notification_channel_updates">Updates</string>
+    <string name="notification_channel_words">Dictionary suggestions</string>
+    <string name="notification_channel_words_description">When you correct a word Murmur typed, it offers to add your spelling to the dictionary.</string>
 
     <!-- External entry points: the static launcher shortcuts, the Quick Settings tile, and what
          the entry trampoline says when a gate refuses a command. -->

@@ -14,6 +14,7 @@ import {
   alreadyClean
 } from '../src/clean'
 import { prepareTranscript } from '../src/cleanup'
+import { editedSpan, findCorrections, parseLexicon } from '../src/corrections'
 import { applyDictionary } from '../src/dictionary'
 import { digitSignature } from '../src/numbers'
 import { buildCommandMessages, buildFormatMessages, type CommandPromptInput } from '../src/prompt'
@@ -191,23 +192,60 @@ const SKIP_CASES: SkipCase[] = [
   { name: 'verb like', transcript: 'I like the new design a lot.', context: CHAT },
   { name: 'opener', transcript: 'Okay so we ship tomorrow.', context: CHAT },
   { name: 'mid-sentence so', transcript: "It's late, so let's stop here.", context: CHAT },
-  { name: 'correction without second comma', transcript: 'Send it Tuesday, no Wednesday.', context: CHAT },
+  {
+    name: 'correction without second comma',
+    transcript: 'Send it Tuesday, no Wednesday.',
+    context: CHAT
+  },
   { name: 'answer no', transcript: 'No, that works for me.', context: CHAT },
   { name: 'repeated run', transcript: 'We need to, we need to ship it.', context: CHAT },
   { name: 'question then statement', transcript: 'Is it done? Yes.', context: CHAT },
-  { name: 'split at a pause after a preposition', transcript: 'Send the budget to. Sarah before Thursday.', context: CHAT },
-  { name: 'split at a pause after an article', transcript: 'The meeting is in the. Big room.', context: CHAT },
-  { name: 'split at a pause after a conjunction', transcript: 'I fixed the bug and. Pushed it.', context: CHAT },
+  {
+    name: 'split at a pause after a preposition',
+    transcript: 'Send the budget to. Sarah before Thursday.',
+    context: CHAT
+  },
+  {
+    name: 'split at a pause after an article',
+    transcript: 'The meeting is in the. Big room.',
+    context: CHAT
+  },
+  {
+    name: 'split at a pause after a conjunction',
+    transcript: 'I fixed the bug and. Pushed it.',
+    context: CHAT
+  },
   { name: 'two short sentences', transcript: 'Running late. Be there soon.', context: CHAT },
   { name: 'later unmarked question', transcript: 'Thanks. Can you resend it.', context: CHAT },
   { name: 'spoken period', transcript: 'Send it today period.', context: CHAT },
-  { name: 'press enter after a full stop', transcript: 'See you tomorrow. Press enter.', context: CHAT },
+  {
+    name: 'press enter after a full stop',
+    transcript: 'See you tomorrow. Press enter.',
+    context: CHAT
+  },
   { name: 'press enter without one', transcript: 'See you tomorrow press enter', context: CHAT },
-  { name: 'preceding new line', transcript: 'Sounds good.', context: { ...CHAT, precedingText: 'Hi Sarah,\n\n' } },
-  { name: 'preceding comma', transcript: 'Sounds good.', context: { ...CHAT, precedingText: 'Hi Sarah,' } },
+  {
+    name: 'preceding new line',
+    transcript: 'Sounds good.',
+    context: { ...CHAT, precedingText: 'Hi Sarah,\n\n' }
+  },
+  {
+    name: 'preceding comma',
+    transcript: 'Sounds good.',
+    context: { ...CHAT, precedingText: 'Hi Sarah,' }
+  },
   { name: 'regional english', transcript: 'Sounds good.', context: { ...CHAT, language: 'en-US' } },
-  { name: 'neutral notes', transcript: 'Sounds good.', context: { ...CHAT, category: 'notes', tone: 'neutral' } },
-  { name: 'raised cap', transcript: 'Please review the attached document and let me know your thoughts by tomorrow.', context: CHAT, maxWords: 20 },
+  {
+    name: 'neutral notes',
+    transcript: 'Sounds good.',
+    context: { ...CHAT, category: 'notes', tone: 'neutral' }
+  },
+  {
+    name: 'raised cap',
+    transcript: 'Please review the attached document and let me know your thoughts by tomorrow.',
+    context: CHAT,
+    maxWords: 20
+  },
   { name: 'cap of zero', transcript: 'Sounds good.', context: CHAT, maxWords: 0 }
 ]
 
@@ -232,17 +270,55 @@ const DICTIONARY_CASES: DictionaryCase[] = [
   { name: 'curly possessive of an alias', text: 'that is bennet’s phone', entries: [BENNETT] },
   { name: 'capitalized possessive', text: "Bennet's phone rang", entries: [BENNETT] },
   { name: 'possessive of a phrase alias', text: "whisper flow's new build", entries: [WISPR] },
-  { name: 'curly possessive of a phrase alias', text: 'whisper flow’s new build', entries: [WISPR] },
+  {
+    name: 'curly possessive of a phrase alias',
+    text: 'whisper flow’s new build',
+    entries: [WISPR]
+  },
   { name: 'plural possessive of a plural alias', text: "the bennets' house", entries: [BENNETTS] },
-  { name: 'curly plural possessive of a plural alias', text: 'the bennets’ house', entries: [BENNETTS] },
+  {
+    name: 'curly plural possessive of a plural alias',
+    text: 'the bennets’ house',
+    entries: [BENNETTS]
+  },
   { name: 'plural possessive already canonical', text: "the Bennetts' house", entries: [BENNETTS] },
   { name: 'plural possessive of a singular alias', text: "the bennets' house", entries: [BENNETT] },
   { name: 'possessive already canonical', text: "Bennett's phone", entries: [BENNETT] },
-  { name: 'quoted entry keeps its closing quote', text: "call it 'Bennet' for now", entries: [BENNETT] },
+  {
+    name: 'quoted entry keeps its closing quote',
+    text: "call it 'Bennet' for now",
+    entries: [BENNETT]
+  },
   { name: 'first half of a hyphenated name', text: 'the bennet-smith account', entries: [BENNETT] },
   { name: 'identifier is one word', text: 'bennet_id = 3', entries: [BENNETT] },
-  { name: 'contraction of an entry (the apostrophe ends the word)', text: "i don't know", entries: [{ word: 'Don', aliases: [] }] },
+  {
+    name: 'contraction of an entry (the apostrophe ends the word)',
+    text: "i don't know",
+    entries: [{ word: 'Don', aliases: [] }]
+  },
   { name: 'straight and curly in one sentence', text: "bennet's and bennet’s", entries: [BENNETT] }
+]
+
+/**
+ * What counts as a correction worth a dictionary entry: the whole corrections corpus, judged with
+ * the everyday-word lexicon. The Android port must agree on every case.
+ */
+const CORRECTION_LEXICON = parseLexicon(
+  readFileSync(resolve(__dirname, '../lexicon/everyday-words.txt'), 'utf8')
+)
+const CORRECTION_CASES: Array<{ original: string; edited: string; dictionary?: DictionaryTerm[] }> =
+  JSON.parse(readFileSync(resolve(__dirname, 'fixtures/corrections.json'), 'utf8')).cases
+
+const SPAN_BEFORE = 'Hi team, I use whisper flow daily. Cheers'
+const SPAN_CASES: Array<[string, string, number, number]> = [
+  [SPAN_BEFORE, SPAN_BEFORE.replace('whisper flow', 'Wispr Flow'), 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('whisper', 'wispr'), 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('ily', 'ly'), 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE, 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('Hi team', 'Hello all'), 9, 34],
+  [SPAN_BEFORE, `${SPAN_BEFORE} and more`, 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('use ', 'use only '), 9, 34],
+  [SPAN_BEFORE, 'Cheers', 9, 34]
 ]
 
 function build(): unknown {
@@ -285,6 +361,21 @@ function build(): unknown {
       text: c.text,
       entries: c.entries,
       result: applyDictionary(c.text, c.entries)
+    })),
+    corrections: CORRECTION_CASES.map((c) => ({
+      original: c.original,
+      edited: c.edited,
+      dictionary: c.dictionary ?? [],
+      result: findCorrections(c.original, c.edited, c.dictionary ?? [], {
+        everyday: CORRECTION_LEXICON
+      })
+    })),
+    spans: SPAN_CASES.map(([before, after, start, end]) => ({
+      before,
+      after,
+      start,
+      end,
+      result: editedSpan(before, after, start, end)
     })),
     cleanLexicon: {
       hesitationWords: HESITATION_WORDS,

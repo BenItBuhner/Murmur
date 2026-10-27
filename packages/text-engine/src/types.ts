@@ -14,8 +14,12 @@ export type FormattingMode = 'off' | 'light' | 'smart'
 
 export interface DictionaryTerm {
   word: string
+  /** Ways the speech model mis-heard the word, usually learned from the user's own corrections. */
   aliases: readonly string[]
-  /** Correct near-misses by spelling or sound even when the transcript token is lower-case. */
+  /**
+   * Retired: the sound-alike autocorrect it switched on is gone (the model reads the list instead).
+   * Still accepted so entries stored or synced by older builds keep parsing.
+   */
   fuzzy?: boolean
 }
 

@@ -2025,6 +2025,905 @@
       "result": "Bennett's and Bennett’s"
     }
   ],
+  "corrections": [
+    {
+      "original": "Ask Bennet about the launch.",
+      "edited": "Ask Bennett about the launch.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "Bennet",
+          "word": "Bennett",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Thanks, Kathrine, see you Monday.",
+      "edited": "Thanks, Katherine, see you Monday.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "Kathrine",
+          "word": "Katherine",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "I met with sarah and john.",
+      "edited": "I met with Sara and John.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "sarah",
+          "word": "Sara",
+          "kind": "add"
+        },
+        {
+          "heard": "john",
+          "word": "John",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Send it to Zoe.",
+      "edited": "Send it to Zoë.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "Zoe",
+          "word": "Zoë",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Call Shawn tomorrow.",
+      "edited": "Call Sean tomorrow.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "Shawn",
+          "word": "Sean",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Meeting with Nguyen Win at noon.",
+      "edited": "Meeting with Nguyen Huynh at noon.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Ping Siobhan about it.",
+      "edited": "Ping Siobhan about it.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Lunch with Shiv on Friday.",
+      "edited": "Lunch with Shiv on Friday!",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I use whisper flow every day.",
+      "edited": "I use Wispr Flow every day.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "whisper flow",
+          "word": "Wispr Flow",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "We deploy on versel.",
+      "edited": "We deploy on Vercel.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "versel",
+          "word": "Vercel",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "The data lives in superbase.",
+      "edited": "The data lives in Supabase.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "superbase",
+          "word": "Supabase",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Ask clod to review it.",
+      "edited": "Ask Claude to review it.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "clod",
+          "word": "Claude",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "We moved the backend to convex.",
+      "edited": "We moved the backend to Convex.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "convex",
+          "word": "Convex",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Open it in fig ma.",
+      "edited": "Open it in Figma.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "fig ma",
+          "word": "Figma",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Push it to git hub tonight.",
+      "edited": "Push it to GitHub tonight.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "git hub",
+          "word": "GitHub",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "I asked chat g p t about it.",
+      "edited": "I asked ChatGPT about it.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "chat g p t",
+          "word": "ChatGPT",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "The model is from open a i.",
+      "edited": "The model is from OpenAI.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "open a i",
+          "word": "OpenAI",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Transcription runs on deep gram.",
+      "edited": "Transcription runs on Deepgram.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "deep gram",
+          "word": "Deepgram",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Try eleven labs for the voice.",
+      "edited": "Try ElevenLabs for the voice.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "eleven labs",
+          "word": "ElevenLabs",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "I bought a new eye phone.",
+      "edited": "I bought a new iPhone.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "eye phone",
+          "word": "iPhone",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "It runs on macos and windows.",
+      "edited": "It runs on macOS and Windows.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "macos",
+          "word": "macOS",
+          "kind": "add"
+        },
+        {
+          "heard": "windows",
+          "word": "Windows",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Run cube control get pods.",
+      "edited": "Run kubectl get pods.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "cube control",
+          "word": "kubectl",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Parse the jason first.",
+      "edited": "Parse the JSON first.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "jason",
+          "word": "JSON",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "The query hits post gress.",
+      "edited": "The query hits Postgres.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "post gress",
+          "word": "Postgres",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Rewrite it in type script.",
+      "edited": "Rewrite it in TypeScript.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "type script",
+          "word": "TypeScript",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "The app is written in cotton.",
+      "edited": "The app is written in Kotlin.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "cotton",
+          "word": "Kotlin",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Upgrade next js to the latest.",
+      "edited": "Upgrade Next.js to the latest.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "next js",
+          "word": "Next.js",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Install it with n p m.",
+      "edited": "Install it with npm.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "n p m",
+          "word": "npm",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "open the read me file",
+      "edited": "open the README.md file",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "read me",
+          "word": "README.md",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Open mermer now.",
+      "edited": "Open Murmur now.",
+      "dictionary": [
+        {
+          "word": "Murmur",
+          "aliases": [
+            "murmer"
+          ]
+        }
+      ],
+      "result": [
+        {
+          "heard": "mermer",
+          "word": "Murmur",
+          "kind": "alias"
+        }
+      ]
+    },
+    {
+      "original": "Open murmer now.",
+      "edited": "Open Murmur now.",
+      "dictionary": [
+        {
+          "word": "Murmur",
+          "aliases": [
+            "murmer"
+          ]
+        }
+      ],
+      "result": []
+    },
+    {
+      "original": "Open Murmur now.",
+      "edited": "Open Murmur now!",
+      "dictionary": [
+        {
+          "word": "Murmur",
+          "aliases": []
+        }
+      ],
+      "result": []
+    },
+    {
+      "original": "I use wisper flo daily.",
+      "edited": "I use Wispr Flow daily.",
+      "dictionary": [
+        {
+          "word": "Wispr Flow",
+          "aliases": [
+            "whisper flow"
+          ]
+        }
+      ],
+      "result": [
+        {
+          "heard": "wisper flo",
+          "word": "Wispr Flow",
+          "kind": "alias"
+        }
+      ]
+    },
+    {
+      "original": "Deploy to convex.",
+      "edited": "Deploy to Convex.",
+      "dictionary": [
+        {
+          "word": "convex",
+          "aliases": []
+        }
+      ],
+      "result": [
+        {
+          "heard": "convex",
+          "word": "Convex",
+          "kind": "alias"
+        }
+      ]
+    },
+    {
+      "original": "Send it on Tuesday.",
+      "edited": "Send it on Wednesday.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Let's meet at five.",
+      "edited": "Let's meet at six.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Invite Sarah to the call.",
+      "edited": "Invite John to the call.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Please send the report.",
+      "edited": "Please forward the report.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Paint it red.",
+      "edited": "Paint it blue.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "It was a big problem.",
+      "edited": "It was a huge problem.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Book the meeting room.",
+      "edited": "Book the conference room.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "We should ship it now.",
+      "edited": "We should ship it later.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Order the large pizza.",
+      "edited": "Order the small pizza.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "It costs 5 dollars.",
+      "edited": "It costs 6 dollars.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I think their right.",
+      "edited": "I think they're right.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Your welcome.",
+      "edited": "You're welcome.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "This will affect the timeline.",
+      "edited": "This will effect the timeline.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "It's better then before.",
+      "edited": "It's better than before.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Let's meat at noon.",
+      "edited": "Let's meet at noon.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I accept everything accept that.",
+      "edited": "I accept everything except that.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "The principle reason is cost.",
+      "edited": "The principal reason is cost.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Their going to love it.",
+      "edited": "They're going to love it.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "We need to by milk.",
+      "edited": "We need to buy milk.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I'm gonna call you.",
+      "edited": "I'm going to call you.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Its fine.",
+      "edited": "It's fine.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "That is alright.",
+      "edited": "That is all right.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "ok see you soon",
+      "edited": "okay see you soon",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Thanks for the advise.",
+      "edited": "Thanks for the advice.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I could of done it.",
+      "edited": "I could have done it.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Their is a problem.",
+      "edited": "There is a problem.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Whether is nice today.",
+      "edited": "Weather is nice today.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "the build is green.",
+      "edited": "The build is green.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "We sell apples. apple pie too.",
+      "edited": "We sell apples. Apple pie too.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "The colour is wrong.",
+      "edited": "The color is wrong.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Can we meet at the cafe tomorrow?",
+      "edited": "Could we maybe meat at a café today?",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Hey, just checking in on the report.",
+      "edited": "Hi Dana, any update on the quarterly numbers?",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I will send the slides tonight.",
+      "edited": "Slides tonight.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "The quick brown fox jumps over the lazy dog.",
+      "edited": "A slow red fox walks under the sleepy cat.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Ship it.",
+      "edited": "Ship it today, Kubernetes.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Ship it right now.",
+      "edited": "Ship it.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Thanks so much for the help.",
+      "edited": "Thanks for the help.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "See you",
+      "edited": "See you, Anneliese",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Um so the plan is fine.",
+      "edited": "So the plan is fine.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Sounds good see you then",
+      "edited": "Sounds good, see you then.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "first item second item",
+      "edited": "- first item\n- second item",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Hello world.",
+      "edited": "Hello, world!",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "e mail me",
+      "edited": "e-mail me",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "set user id",
+      "edited": "set user_id",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "mail bob at example",
+      "edited": "mail bob@example",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "see commit abc",
+      "edited": "see commit abc1234f",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "go to example dot com",
+      "edited": "go to example.com/path",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "the file is in source slash main",
+      "edited": "the file is in src/main",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "call me at five five five",
+      "edited": "call me at 555",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "it is due on the third",
+      "edited": "it is due on the 3rd",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "use the get user function",
+      "edited": "use the getUser() function",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "press control c",
+      "edited": "press Ctrl+C",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "great job",
+      "edited": "great job 🎉",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Version two",
+      "edited": "Version 2",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I told bennet to try whisper flow on versel.",
+      "edited": "I told Bennett to try Wispr Flow on Vercel.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "bennet",
+          "word": "Bennett",
+          "kind": "add"
+        },
+        {
+          "heard": "whisper flow",
+          "word": "Wispr Flow",
+          "kind": "add"
+        },
+        {
+          "heard": "versel",
+          "word": "Vercel",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Send the jason to Kathrine on Tuesday.",
+      "edited": "Send the JSON to Katherine on Wednesday.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "jason",
+          "word": "JSON",
+          "kind": "add"
+        },
+        {
+          "heard": "Kathrine",
+          "word": "Katherine",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "ping jon, jon and jon",
+      "edited": "ping John, Jon and Jonh",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Ask Christopher about it.",
+      "edited": "Ask Chris about it.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Ask Mark about it.",
+      "edited": "Ask Mike about it.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Thanks, Sarah.",
+      "edited": "Thanks, Sandra.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Dinner with Aoife tonight.",
+      "edited": "Dinner with Aoife tonight.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Ask Aiden to join.",
+      "edited": "Ask Aidan to join.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "Aiden",
+          "word": "Aidan",
+          "kind": "add"
+        }
+      ]
+    }
+  ],
+  "spans": [
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use Wispr Flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use Wispr Flow daily."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use wispr flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use wispr flow daily."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use whisper flow daly. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use whisper flow daly."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use whisper flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": null
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hello all, I use whisper flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": null
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use whisper flow daily. Cheers and more",
+      "start": 9,
+      "end": 34,
+      "result": null
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use only whisper flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use only whisper flow daily."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "Hi team, I use whisper flow daily. Cheers",
+        "edited": "Cheers"
+      }
+    }
+  ],
   "cleanLexicon": {
     "hesitationWords": [
       "um",

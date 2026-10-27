@@ -13,11 +13,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.murmur.android.settings.DictionaryCodec
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.settings.WordSuggestions
 import app.murmur.android.settings.Snippet
 import app.murmur.android.settings.SnippetCodec
 import app.murmur.android.ui.components.Card
@@ -167,6 +169,8 @@ fun DictionaryEditor(store: SettingsStore) {
         aliases = ""
     }
 
+    WordSuggestionsSection(store)
+
     // The add form is a card; its fields are wells sunk into it.
     Card {
         Field(
@@ -179,9 +183,9 @@ fun DictionaryEditor(store: SettingsStore) {
         Field(
             value = aliases,
             onValueChange = { aliases = it },
-            label = "Sounds like",
+            label = "Often heard as",
             placeholder = "whisper flow, wisper flow",
-            helper = "Optional. Ways it tends to be misheard, comma-separated; each is corrected to the word above."
+            helper = "Optional. Murmur learns these by itself when you correct a word it typed."
         )
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Add to dictionary", onClick = ::add, enabled = word.isNotBlank(), modifier = Modifier.fillMaxWidth())
@@ -217,10 +221,39 @@ private fun DictionaryRow(entry: DictionaryEntry, onRemove: () -> Unit) {
             Text(entry.word, style = Murmur.type.headline, color = Murmur.colors.ink)
             if (entry.aliases.isNotEmpty()) {
                 Spacer(Modifier.height(3.dp))
-                Text(entry.aliases.joinToString(", "), style = Murmur.type.bodySmall, color = Murmur.colors.inkSoft)
+                Text("heard as " + entry.aliases.joinToString(", "), style = Murmur.type.bodySmall, color = Murmur.colors.inkSoft)
             }
         }
         Spacer(Modifier.width(12.dp))
         TextLink("Remove", onClick = onRemove)
     }
+}
+
+/**
+ * Words Murmur saw the user correct in a field it typed into, waiting for a yes or no. Shown only
+ * while there are some; the same choice is offered on the notification.
+ */
+@Composable
+private fun WordSuggestionsSection(store: SettingsStore) {
+    val context = LocalContext.current
+    val suggestions = remember { WordSuggestions.get(context) }
+    val pending by suggestions.pending.collectAsState()
+    if (pending.isEmpty()) return
+    Overline("Suggested from your corrections")
+    Spacer(Modifier.height(10.dp))
+    ListCard {
+        for (s in pending) {
+            ListRow {
+                Column(Modifier.weight(1f)) {
+                    Text(s.word, style = Murmur.type.headline, color = Murmur.colors.ink)
+                    Spacer(Modifier.height(3.dp))
+                    Text("you changed “${s.heard}” to this", style = Murmur.type.bodySmall, color = Murmur.colors.inkSoft)
+                }
+                Spacer(Modifier.width(12.dp))
+                TextLink("Not a word", onClick = { suggestions.decline(s.word) })
+                TextLink("Add", onClick = { suggestions.accept(s.word, store) }, color = Murmur.colors.ink)
+            }
+        }
+    }
+    SectionGap()
 }

@@ -67,12 +67,21 @@ describe('basicCleanup', () => {
 describe('finish', () => {
   const base = { category: 'chat' as const, dictionary: [], trailingSpace: true }
   it('re-asserts dictionary spellings, adds the trailing space and never re-cases (mid-sentence continuations)', () => {
-    const f = finish('talk to Konvex about it.', {
+    const f = finish('talk to convex about it, and to konvicks.', {
       ...base,
-      dictionary: [{ word: 'Convex', aliases: [], fuzzy: true }]
+      dictionary: [{ word: 'Convex', aliases: ['konvicks'] }]
     })
-    expect(f.text).toBe('talk to Convex about it. ')
+    expect(f.text).toBe('talk to Convex about it, and to Convex. ')
     expect(f.stages).toEqual(['dictionary'])
+  })
+  it('never guesses a dictionary word from a sound-alike (the model reads the list instead)', () => {
+    const dictionary = [
+      { word: 'Convex', aliases: [], fuzzy: true },
+      { word: 'Wispr Flow', aliases: [] },
+      { word: 'Bennett', aliases: [] }
+    ]
+    const text = 'a konvex lens, a whisper flow of air, and Bennet from accounts.'
+    expect(finish(text, { ...base, dictionary, trailingSpace: false }).text).toBe(text)
   })
   it('expands snippets after the model and keeps their content verbatim', () => {
     const f = finish('sign off with my sig', {

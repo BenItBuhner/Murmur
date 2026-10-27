@@ -11,6 +11,9 @@ import app.murmur.android.text.NumberSignature
 import app.murmur.android.text.Prompt
 import app.murmur.android.text.Verify
 import app.murmur.android.text.applyDictionary
+import app.murmur.android.text.editedSpan
+import app.murmur.android.text.findCorrections
+import app.murmur.android.text.parseLexicon
 import app.murmur.android.text.prepareTranscript
 import org.json.JSONArray
 import org.json.JSONObject
@@ -174,6 +177,45 @@ class GoldenEngineTest {
                 }
             }
             assertEquals(c.getString("name"), c.getString("result"), applyDictionary(c.getString("text"), entries))
+        }
+    }
+
+    private val lexicon: Set<String> by lazy {
+        val file = listOf(
+            File("../../../packages/text-engine/lexicon/everyday-words.txt"),
+            File("../../packages/text-engine/lexicon/everyday-words.txt"),
+            File("packages/text-engine/lexicon/everyday-words.txt")
+        ).first { it.exists() }
+        parseLexicon(file.readText())
+    }
+
+    @Test
+    fun `correction suggestions agree`() {
+        val cases = golden.getJSONArray("corrections")
+        assertTrue(cases.length() >= 90)
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val dictionary = c.getJSONArray("dictionary").let { arr ->
+                (0 until arr.length()).map { k ->
+                    val e = arr.getJSONObject(k)
+                    DictionaryEntry("g$k", e.getString("word"), e.optJSONArray("aliases")?.strings() ?: emptyList())
+                }
+            }
+            val expected = c.getJSONArray("result").let { arr ->
+                (0 until arr.length()).map { k ->
+                    val r = arr.getJSONObject(k)
+                    Triple(r.getString("heard"), r.getString("word"), r.getString("kind"))
+                }
+            }
+            val actual = findCorrections(c.getString("original"), c.getString("edited"), dictionary, lexicon).map { Triple(it.heard, it.word, it.kind) }
+            assertEquals(c.getString("original") + " -> " + c.getString("edited"), expected, actual)
+        }
+        val spans = golden.getJSONArray("spans")
+        for (i in 0 until spans.length()) {
+            val c = spans.getJSONObject(i)
+            val expected = if (c.isNull("result")) null else c.getJSONObject("result").let { it.getString("original") to it.getString("edited") }
+            val actual = editedSpan(c.getString("before"), c.getString("after"), c.getInt("start"), c.getInt("end"))?.let { it.original to it.edited }
+            assertEquals(c.getString("after"), expected, actual)
         }
     }
 

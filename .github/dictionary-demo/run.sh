@@ -15,33 +15,37 @@ dump() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb pull /sd
 field_text() { dump; python3 "$HERE/field.py" text; }
 say() { printf '%s' "$1" > /tmp/next.txt; }
 SHORTCUT_FLAGS=0x1000C000
+# uiautomator dumps rebind every accessibility service, which would end Murmur's watch on the
+# field, so after a dictation the script reads nothing from the screen until the check is done:
+# it follows Murmur's own log instead.
+inserted_count() { grep -c 'MurmurDictation.*inserted .* words' /tmp/logcat-full.txt 2>/dev/null || true; }
+LAST=""; LAST_CHARS=0
 dictate() {
-  say "$1"
+  local before
+  say "$1"; LAST=$1
   log "dictating (the speech model will hear): $1"
+  before=$(inserted_count)
   adb shell am start -a app.murmur.android.action.START_DICTATION -n $PKG/.entry.DictationEntryActivity -f $SHORTCUT_FLAGS >/dev/null
   sleep 3
   adb shell am start -a app.murmur.android.action.STOP_DICTATION -n $PKG/.entry.DictationEntryActivity -f $SHORTCUT_FLAGS >/dev/null
-  sleep 6
-  log "field now: $(field_text)"
+  for _ in $(seq 1 60); do [ "$(inserted_count)" -gt "$before" ] && break; sleep 1; done
+  sleep 1
+  LAST_CHARS=$(grep -o 'MurmurA11y.*inserted [0-9]* chars[^)]*' /tmp/logcat-full.txt | tail -1 | grep -o 'inserted [0-9]*' | grep -o '[0-9]*')
+  log "murmur: $(grep -o 'MurmurA11y.*inserted [0-9]* chars.*' /tmp/logcat-full.txt | tail -1 | sed 's/^MurmurA11y([ 0-9]*): //')"
 }
 key() { adb shell input keyevent "$@"; }
 combo() { adb shell input keycombination "$@"; }
 
-# Select `old` (its last occurrence in the field) with Shift+Left and type `new` over it.
+# Select `old` in the last dictation (the caret is at its end) with Shift+Left, type `new` over it.
 correct() {
-  local old=$1 new=$2 text pos len left
-  text=$(field_text)
-  pos=$(python3 -c 'import sys; t,o=sys.argv[1],sys.argv[2]; print(t.rfind(o))' "$text" "$old")
-  if [ "$pos" -lt 0 ]; then log "!! '$old' not in the field"; return 1; fi
-  len=${#text}
-  left=$(( len - pos - ${#old} ))
+  local old=$1 new=$2 pos left
+  pos=$(python3 -c 'import sys; print(sys.argv[1].rfind(sys.argv[2]))' "$LAST" "$old")
+  if [ "$pos" -lt 0 ]; then log "!! '$old' not in the dictation"; return 1; fi
+  left=$(( ${LAST_CHARS:-${#LAST}} - pos - ${#old} ))
   log "correcting '$old' -> '$new' (select it, type over it)"
-  combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END
   for _ in $(seq 1 $left); do key KEYCODE_DPAD_LEFT; done
   for _ in $(seq 1 ${#old}); do combo KEYCODE_SHIFT_LEFT KEYCODE_DPAD_LEFT; done
   adb shell input text "${new// /%s}"
-  sleep 1
-  log "field now: $(field_text)"
 }
 
 notifications() {
@@ -119,13 +123,13 @@ adb shell cmd statusbar collapse; sleep 1
 
 # ---- 2. the learned spelling is used next time ------------------------------------------
 log "=== 2. Dictate the same thing again"
-key KEYCODE_ENTER
+combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
 dictate "Trying whisper flow again tomorrow."
 shot 4-learned
 
 # ---- 3. the user changes their mind: Murmur stays quiet ---------------------------------
 log "=== 3. Change a word (not a mis-hearing)"
-key KEYCODE_ENTER
+combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
 dictate "Send the report on Tuesday."
 correct "Tuesday" "Wednesday"
 sleep 12
@@ -135,7 +139,7 @@ adb shell cmd statusbar collapse; sleep 1
 
 # ---- 4. an everyday-word fix: quiet too --------------------------------------------------
 log "=== 4. Fix an everyday word"
-key KEYCODE_ENTER
+combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
 dictate "This will effect the timeline."
 correct "effect" "affect"
 sleep 12
@@ -144,6 +148,8 @@ shot 6-everyday-word
 adb shell cmd statusbar collapse; sleep 1
 
 # ---- 5. the dictionary --------------------------------------------------------------------
+log "field at the end: $(field_text | tr '\n' '|')"
+log "suggestions Murmur offered: $(grep -c 'offering .* dictionary suggestion' /tmp/logcat-full.txt)"
 log "=== 5. Murmur's Dictionary screen"
 adb shell am start -n $PKG/.MainActivity --es app.murmur.android.ROUTE DICTIONARY >/dev/null
 sleep 4

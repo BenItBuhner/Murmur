@@ -23,5 +23,10 @@ if sys.argv[1] == "button":
 fields = [n for n in nodes if n.get("class") == "android.widget.EditText"]
 if not fields:
     sys.exit(1)
-f = next((n for n in fields if n.get("focused") == "true"), fields[0])
+# The page's text box, not Chrome's address bar: the biggest field that isn't the URL bar.
+def area(n):
+    a, b, c, d = map(int, re.findall(r"\d+", n.get("bounds")))
+    return (c - a) * (d - b)
+page = [n for n in fields if "url_bar" not in (n.get("resource-id") or "")] or fields
+f = max(page, key=area)
 print(f.get("text") or "" if sys.argv[1] == "text" else center(f))

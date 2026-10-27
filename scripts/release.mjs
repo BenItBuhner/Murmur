@@ -140,6 +140,10 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.34': [
+    'Faster finishes on Android. Short dictations now start transcribing during your pauses, so when you tap Done in a pause the words are already there: about 0.7 s quicker on average in testing, with the same text. The stop also no longer waits an extra 0.2 s when you had already stopped talking.',
+    'A simpler dictionary that learns. The dictionary is now a plain list of words Murmur should spell your way. When you fix a misheard word right after dictating, Android offers to add it (Add / Not a word), and on desktop History has a Fix words option.'
+  ],
   '0.6.33': [
     'Faster, steadier dictation. When a speech or formatting model is busy or rate-limited, Murmur now switches to a backup straight away instead of stalling or falling back to plain text, so the rare 10–30 second waits and odd capitalization are gone. Formatting is also more accurate: a short pause mid-sentence no longer splits it into two sentences. On Android, History shows where each dictation’s time went (turn on latency in History), and Details copies it for a bug report.'
   ],

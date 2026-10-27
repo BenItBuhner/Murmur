@@ -14,6 +14,7 @@ import {
   alreadyClean
 } from '../src/clean'
 import { prepareTranscript } from '../src/cleanup'
+import { editedSpan, findCorrections } from '../src/corrections'
 import { applyDictionary } from '../src/dictionary'
 import { digitSignature } from '../src/numbers'
 import { buildCommandMessages, buildFormatMessages, type CommandPromptInput } from '../src/prompt'
@@ -245,6 +246,48 @@ const DICTIONARY_CASES: DictionaryCase[] = [
   { name: 'straight and curly in one sentence', text: "bennet's and bennet’s", entries: [BENNETT] }
 ]
 
+interface CorrectionCase {
+  original: string
+  edited: string
+  dictionary: DictionaryTerm[]
+}
+
+/** What counts as a correction worth a dictionary entry; the Android port must agree exactly. */
+const CORRECTION_CASES: CorrectionCase[] = [
+  { original: 'I use whisper flow every day.', edited: 'I use Wispr Flow every day.', dictionary: [] },
+  { original: 'Ask Bennet about it.', edited: 'Ask Bennett about it.', dictionary: [] },
+  { original: 'we deploy on convex.', edited: 'we deploy on Convex.', dictionary: [] },
+  { original: 'the build is green.', edited: 'The build is green.', dictionary: [] },
+  { original: 'open mermer now', edited: 'open Murmur now', dictionary: [{ word: 'Murmur', aliases: ['murmer'] }] },
+  { original: 'open murmer now', edited: 'open Murmur now', dictionary: [{ word: 'Murmur', aliases: ['murmer'] }] },
+  { original: 'open murmur now', edited: 'open Murmur now', dictionary: [{ word: 'Murmur', aliases: [] }] },
+  { original: 'Send it on Tuesday.', edited: 'Send it on Wednesday.', dictionary: [] },
+  { original: 'Please send the report.', edited: 'Please forward the report.', dictionary: [] },
+  { original: 'I think their right.', edited: "I think they're right.", dictionary: [] },
+  { original: 'It costs 5 dollars.', edited: 'It costs 6 dollars.', dictionary: [] },
+  { original: 'Can we meet at the cafe tomorrow?', edited: 'Could we maybe meat at a café today?', dictionary: [] },
+  { original: 'Ship it.', edited: 'Ship it today, Kubernetes.', dictionary: [] },
+  { original: 'open the read me file', edited: 'open the README.md file', dictionary: [] },
+  { original: 'set user id', edited: 'set user_id', dictionary: [] },
+  { original: 'mail bob at example', edited: 'mail bob@example', dictionary: [] },
+  { original: 'see commit abc', edited: 'see commit abc1234f', dictionary: [] },
+  { original: 'run cube control apply and cube control get', edited: 'run kubectl apply and kubectl get', dictionary: [] },
+  { original: 'Zoe and Chloe', edited: 'Zoë and Chloé', dictionary: [] },
+  { original: 'ping jon, jon and jon', edited: 'ping John, Jon and Jonh', dictionary: [] }
+]
+
+const SPAN_BEFORE = 'Hi team, I use whisper flow daily. Cheers'
+const SPAN_CASES: Array<[string, string, number, number]> = [
+  [SPAN_BEFORE, SPAN_BEFORE.replace('whisper flow', 'Wispr Flow'), 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('whisper', 'wispr'), 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('ily', 'ly'), 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE, 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('Hi team', 'Hello all'), 9, 34],
+  [SPAN_BEFORE, `${SPAN_BEFORE} and more`, 9, 34],
+  [SPAN_BEFORE, SPAN_BEFORE.replace('use ', 'use only '), 9, 34],
+  [SPAN_BEFORE, 'Cheers', 9, 34]
+]
+
 function build(): unknown {
   return {
     prompts: PROMPT_CASES.map((c) => ({
@@ -285,6 +328,17 @@ function build(): unknown {
       text: c.text,
       entries: c.entries,
       result: applyDictionary(c.text, c.entries)
+    })),
+    corrections: CORRECTION_CASES.map((c) => ({
+      ...c,
+      result: findCorrections(c.original, c.edited, c.dictionary)
+    })),
+    spans: SPAN_CASES.map(([before, after, start, end]) => ({
+      before,
+      after,
+      start,
+      end,
+      result: editedSpan(before, after, start, end)
     })),
     cleanLexicon: {
       hesitationWords: HESITATION_WORDS,

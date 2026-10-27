@@ -5,7 +5,6 @@ import type { DictionaryEntry } from '@shared/settings'
 import { Button } from '@renderer/components/ui/button'
 import { Input, Textarea } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
-import { Switch } from '@renderer/components/ui/switch'
 import { Badge } from '@renderer/components/ui/misc'
 import { Empty, PageHeader } from '@renderer/components/SettingRow'
 import { SyncBadge } from '@renderer/components/SyncBadge'
@@ -25,7 +24,6 @@ export function DictionaryPage(): React.JSX.Element {
   const synced = !!status?.signedIn
   const [word, setWord] = useState('')
   const [aliases, setAliases] = useState('')
-  const [fuzzy, setFuzzy] = useState(false)
   const [preview, setPreview] = useState('')
   const [previewOut, setPreviewOut] = useState<{ text: string; stages: string[] } | null>(null)
 
@@ -43,18 +41,15 @@ export function DictionaryPage(): React.JSX.Element {
         .split(/[,;\n]/)
         .map((a) => a.trim())
         .filter((a) => a && a.toLowerCase() !== w.toLowerCase()),
-      fuzzy,
+      fuzzy: false,
       createdAt: Date.now()
     }
     await patch({ dictionary: [entry, ...settings.dictionary] })
     setWord('')
     setAliases('')
-    setFuzzy(false)
   }
   const remove = (id: string): Promise<void> =>
     patch({ dictionary: settings.dictionary.filter((d) => d.id !== id) })
-  const toggleFuzzy = (id: string, v: boolean): Promise<void> =>
-    patch({ dictionary: settings.dictionary.map((d) => (d.id === id ? { ...d, fuzzy: v } : d)) })
 
   useEffect(() => {
     if (!preview.trim()) {
@@ -78,7 +73,7 @@ export function DictionaryPage(): React.JSX.Element {
         description={
           synced
             ? 'Names, jargon and spellings the transcriber should get right, and short cues that paste longer text. Saved to your account and shared with every device you sign in on.'
-            : 'Names, jargon and spellings the transcriber should get right, and short cues that paste longer text. Words are sent to the speech model as a hint and enforced in the text afterwards.'
+            : 'Names, jargon and spellings the transcriber should get right, and short cues that paste longer text. Your words go to the speech model as a hint and to the formatting model as your spelling list.'
         }
         actions={<SyncBadge />}
       />
@@ -87,8 +82,9 @@ export function DictionaryPage(): React.JSX.Element {
         <div>
           <h2 className="eyebrow">Dictionary</h2>
           <p className="mt-2 text-note text-muted-foreground">
-            Words and phrases the speech model gets wrong on its own, with the ways they tend to
-            come out.
+            A plain list of words and phrases, spelled your way. Murmur also learns how each one
+            gets mis-heard: use Fix words on a dictation in History and it offers what you
+            corrected.
           </p>
         </div>
 
@@ -105,7 +101,7 @@ export function DictionaryPage(): React.JSX.Element {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="dict-alias">Sounds like (optional)</Label>
+              <Label htmlFor="dict-alias">Often heard as (optional)</Label>
               <Input
                 id="dict-alias"
                 placeholder="whisper flow, wisper flow"
@@ -115,11 +111,7 @@ export function DictionaryPage(): React.JSX.Element {
               />
             </div>
           </div>
-          <div className="mt-4 flex items-center justify-between">
-            <label className="flex items-center gap-2 text-note text-muted-foreground">
-              <Switch checked={fuzzy} onCheckedChange={setFuzzy} /> Also fix near-misses (one or two
-              letters off)
-            </label>
+          <div className="mt-4 flex items-center justify-end">
             <Button onClick={add} disabled={!word.trim()}>
               <Plus /> Add word
             </Button>
@@ -130,7 +122,7 @@ export function DictionaryPage(): React.JSX.Element {
           <Empty
             icon={<BookA />}
             title="Your dictionary is empty"
-            description="Add the names of people, products and tools you say often. Capitalized names are fuzzy-matched automatically."
+            description="Add the names of people, products and tools you say often, spelled the way you write them."
           />
         ) : (
           /* A list card: each word is a row one radius step in from the card (20 - 8 = 12). */
@@ -143,7 +135,8 @@ export function DictionaryPage(): React.JSX.Element {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium">{d.word}</div>
                   {d.aliases.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      <span className="text-meta text-muted-foreground">heard as</span>
                       {d.aliases.map((a) => (
                         <Badge key={a} variant="secondary">
                           {a}
@@ -152,13 +145,6 @@ export function DictionaryPage(): React.JSX.Element {
                     </div>
                   )}
                 </div>
-                <label
-                  className="flex items-center gap-2 text-meta text-muted-foreground"
-                  title="Correct near-miss spellings too"
-                >
-                  <Switch checked={d.fuzzy} onCheckedChange={(v) => void toggleFuzzy(d.id, v)} />{' '}
-                  fuzzy
-                </label>
                 <Button
                   variant="ghost"
                   size="icon-sm"

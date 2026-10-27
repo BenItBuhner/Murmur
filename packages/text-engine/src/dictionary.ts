@@ -1,32 +1,5 @@
 import type { DictionaryTerm } from './types'
-import { WB_END, WB_START, editDistance, escapeRegex, isCapitalized } from './text'
-
-interface FuzzyTerm {
-  term: string
-  canonical: string
-  fuzzy: boolean
-  key: string
-  vowel: string
-}
-
-interface PhraseTerm {
-  canonical: string
-  /** Lower-cased words of the term or alias. */
-  words: string[]
-  key: string
-  vowel: string
-  fuzzy: boolean
-}
-
-interface Compiled {
-  exact: RegExp | null
-  canonical: Map<string, string>
-  fuzzyTerms: FuzzyTerm[]
-  phrases: PhraseTerm[]
-  allLower: Set<string>
-}
-
-const cache = new WeakMap<readonly DictionaryTerm[], Compiled>()
+import { WB_END, WB_START, escapeRegex } from './text'
 
 /**
  * A rough sound key for a Latin-script word, in the spirit of Metaphone: what it sounds like
@@ -62,55 +35,29 @@ export function soundKey(word: string): string {
 }
 
 /** The first vowel sound of a word: the one piece of vowel information the sound key keeps. */
-function firstVowel(word: string): string {
+export function firstVowel(word: string): string {
   const m = word.toLowerCase().match(/[aeiouy]/)
   if (!m) return ''
   return m[0] === 'y' ? 'i' : m[0]
 }
 
-function phraseKey(words: readonly string[]): string {
-  return words.map(soundKey).join('')
+interface Compiled {
+  exact: RegExp | null
+  canonical: Map<string, string>
 }
+
+const cache = new WeakMap<readonly DictionaryTerm[], Compiled>()
 
 function compile(entries: readonly DictionaryTerm[]): Compiled {
   const cached = cache.get(entries)
   if (cached) return cached
   const canonical = new Map<string, string>()
-  const fuzzyTerms: FuzzyTerm[] = []
-  const phrases: PhraseTerm[] = []
-  const allLower = new Set<string>()
   for (const e of entries) {
     const word = e.word.trim()
     if (!word) continue
-    allLower.add(word.toLowerCase())
-    // The words of a canonical spelling are final; the fuzzy pass must not touch them.
-    for (const part of word.toLowerCase().split(/[\s-]+/)) if (part) allLower.add(part)
     for (const variant of [word, ...e.aliases]) {
-      const v = variant.trim()
-      if (!v) continue
-      const key = v.toLowerCase().replace(/\s+/g, ' ')
-      if (!canonical.has(key)) canonical.set(key, word)
-      const words = key.split(/[\s-]+/).filter(Boolean)
-      if (words.length === 1) {
-        fuzzyTerms.push({
-          term: key,
-          canonical: word,
-          fuzzy: e.fuzzy === true,
-          key: soundKey(key),
-          vowel: firstVowel(key)
-        })
-      } else if (words.length <= 5) {
-        const phrase = phraseKey(words)
-        // Too little sound to go on ("Go To" is just "gt"); exact and alias matching still apply.
-        if (phrase.length < 4) continue
-        phrases.push({
-          canonical: word,
-          words,
-          key: phrase,
-          vowel: firstVowel(words.join('')),
-          fuzzy: e.fuzzy === true
-        })
-      }
+      const key = variant.trim().toLowerCase().replace(/\s+/g, ' ')
+      if (key && !canonical.has(key)) canonical.set(key, word)
     }
   }
   const keys = [...canonical.keys()].sort((a, b) => b.length - a.length)
@@ -120,156 +67,24 @@ function compile(entries: readonly DictionaryTerm[]): Compiled {
         'giu'
       )
     : null
-  phrases.sort((a, b) => b.words.length - a.words.length || b.key.length - a.key.length)
-  const compiled = { exact, canonical, fuzzyTerms, phrases, allLower }
+  const compiled = { exact, canonical }
   cache.set(entries, compiled)
   return compiled
 }
 
-/** Same sound and the same first vowel: a mis-spelling or mis-hearing of the term. */
-function soundsLike(
-  key: string,
-  vowel: string,
-  term: { key: string; vowel: string },
-  allowNear: boolean
-): boolean {
-  if (!key || !term.key || vowel !== term.vowel) return false
-  if (key === term.key) return true
-  if (!allowNear || term.key.length < 5) return false
-  return Math.abs(key.length - term.key.length) <= 1 && editDistance(key, term.key, 1) <= 1
-}
-
-interface Token {
-  text: string
-  start: number
-  end: number
-}
-
-const TOKEN_RE = /[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu
-
-function tokenize(text: string): Token[] {
-  const out: Token[] = []
-  for (const m of text.matchAll(TOKEN_RE))
-    out.push({ text: m[0], start: m.index, end: m.index + m[0].length })
-  return out
-}
-
 /**
- * Multi-word terms: "Wispr Flow" comes back from the recognizer as "whisper flow", "Whisper Flo"
- * or "whisperflow". Windows of n-1..n+1 words are compared by sound; a matching window becomes
- * the canonical spelling. An exact sound match is trusted for every entry (two or more words
- * that happen to sound like the term are rarely a coincidence); a near match needs the entry to
- * opt in to fuzzy matching or the window to be capitalized like a name.
- */
-function applyPhrases(text: string, c: Compiled): string {
-  if (!c.phrases.length) return text
-  const tokens = tokenize(text)
-  if (tokens.length < 1) return text
-  const tokenKeys = tokens.map((t) => soundKey(t.text))
-  const matches: Array<{ start: number; end: number; replacement: string }> = []
-  const taken: boolean[] = new Array(tokens.length).fill(false)
-  // Words that already spell a term (or an alias) are final; no window may swallow them.
-  if (c.exact) {
-    for (const m of text.matchAll(c.exact)) {
-      const from = m.index
-      const to = from + m[0].length
-      tokens.forEach((t, i) => {
-        if (t.start >= from && t.end <= to) taken[i] = true
-      })
-    }
-  }
-  for (const phrase of c.phrases) {
-    const n = phrase.words.length
-    for (const size of [n, n - 1, n + 1]) {
-      if (size < 1 || size > tokens.length) continue
-      // A merged or split rendering ("whisperflow", "wisp or flow") needs a longer sound to match.
-      if (size !== n && phrase.key.length < 5) continue
-      for (let i = 0; i + size <= tokens.length; i++) {
-        let free = true
-        for (let k = i; k < i + size && free; k++) free = !taken[k]
-        if (!free) continue
-        // Only whitespace or hyphens may sit between the words of a phrase.
-        let contiguous = true
-        for (let k = i + 1; k < i + size && contiguous; k++)
-          contiguous = /^[\s-]*$/.test(text.slice(tokens[k - 1].end, tokens[k].start))
-        if (!contiguous) continue
-        const window = tokens.slice(i, i + size)
-        const joined = window
-          .map((t) => t.text)
-          .join(' ')
-          .toLowerCase()
-          .replace(/\s+/g, ' ')
-        if (joined === phrase.canonical.toLowerCase() || c.canonical.has(joined)) continue
-        const letters = window.map((t) => t.text).join('')
-        const key = tokenKeys.slice(i, i + size).join('')
-        const capitalized = window.some((t) => isCapitalized(t.text))
-        // A near match is only trusted when the word count lines up; a merged or split
-        // rendering has to sound exactly right.
-        const allowNear = size === n && (phrase.fuzzy || capitalized)
-        if (!soundsLike(key, firstVowel(letters), phrase, allowNear)) continue
-        matches.push({
-          start: window[0].start,
-          end: window[window.length - 1].end,
-          replacement: phrase.canonical
-        })
-        for (let k = i; k < i + size; k++) taken[k] = true
-      }
-    }
-  }
-  if (!matches.length) return text
-  matches.sort((a, b) => a.start - b.start)
-  let out = ''
-  let pos = 0
-  for (const m of matches) {
-    out += text.slice(pos, m.start) + m.replacement
-    pos = m.end
-  }
-  return out + text.slice(pos)
-}
-
-/**
- * Enforce dictionary spellings. Exact (case-insensitive) matches of a word or any of its
- * aliases become the canonical spelling. Then multi-word terms are matched by sound, and a fuzzy
- * pass corrects single-word near-misses (by spelling or by sound) for terms that opted in
- * (`fuzzy`) or when the transcript token is capitalized (a probable name).
+ * Enforce dictionary spellings, and nothing else. The dictionary is a plain list: the formatting
+ * model reads it (see `dictionaryLine`) and decides from context where a word was meant, which is
+ * the judgement a rule cannot make. What the rules still do is exact: a word typed in any casing
+ * gets the dictionary's casing ("convex" -> "Convex"), and a mis-hearing the user recorded (an
+ * alias, usually learned from one of their own corrections) becomes the word. There is no guessing
+ * by sound or spelling here any more; that used to turn ordinary words into dictionary terms.
  */
 export function applyDictionary(text: string, entries: readonly DictionaryTerm[]): string {
   if (!entries.length || !text) return text
   const c = compile(entries)
-  let out = text
-  if (c.exact) {
-    out = out.replace(c.exact, (m) => c.canonical.get(m.toLowerCase().replace(/\s+/g, ' ')) ?? m)
-  }
-  out = applyPhrases(out, c)
-  if (c.fuzzyTerms.length) {
-    out = out.replace(/[\p{L}][\p{L}\p{N}'’-]{3,}/gu, (token) => {
-      // Punctuation the token ends with — a plural possessive's apostrophe ("the Bennetts' house"),
-      // a closing quote, a dash — is not part of the word. It takes part in the comparison (one
-      // more character of distance, which is what keeps "bennets'" away from a singular "Bennett")
-      // but never in the replacement: the word is corrected, the mark stays.
-      const tail = token.match(/['’-]+$/u)?.[0] ?? ''
-      const lower = token.toLowerCase()
-      if (c.allLower.has(lower) || c.canonical.has(lower)) return token
-      const capitalized = isCapitalized(token)
-      const key = soundKey(lower)
-      const vowel = firstVowel(lower)
-      let best: { canonical: string; d: number } | null = null
-      for (const t of c.fuzzyTerms) {
-        if (!t.fuzzy && !capitalized) continue
-        let d = Infinity
-        if (Math.abs(t.term.length - lower.length) <= 2) {
-          const maxD = t.term.length >= 8 ? 2 : 1
-          const spelling = editDistance(lower, t.term, maxD)
-          if (spelling <= maxD) d = spelling
-        }
-        if (d > 1 && t.term.length >= 4 && soundsLike(key, vowel, t, true))
-          d = Math.min(d, key === t.key ? 0.5 : 1.5)
-        if (d !== Infinity && (!best || d < best.d)) best = { canonical: t.canonical, d }
-      }
-      return best ? best.canonical + tail : token
-    })
-  }
-  return out
+  if (!c.exact) return text
+  return text.replace(c.exact, (m) => c.canonical.get(m.toLowerCase().replace(/\s+/g, ' ')) ?? m)
 }
 
 /** Style hint that goes to the speech model on its own; nothing in it can be mistaken for speech. */

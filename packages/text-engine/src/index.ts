@@ -33,6 +33,12 @@ export {
 export { removeFillers, DEFAULT_FILLERS } from './fillers'
 export { applyDictionary, soundKey, buildSttPrompt, STT_BASE_PROMPT } from './dictionary'
 export {
+  findCorrections,
+  editedSpan,
+  type WordCorrection,
+  type EditedSpan
+} from './corrections'
+export {
   expandSnippets,
   fillPlaceholders,
   type Snippet,

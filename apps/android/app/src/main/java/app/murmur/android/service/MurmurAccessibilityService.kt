@@ -44,6 +44,9 @@ import app.murmur.android.overlay.PillPresentation
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.settings.WordSuggestions
+import app.murmur.android.learn.CorrectionTracker
+import app.murmur.android.learn.WordSuggestionNotifier
 import app.murmur.android.ui.Route
 import app.murmur.android.update.Updates
 import kotlinx.coroutines.CoroutineScope
@@ -228,6 +231,21 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** Watches a field after a dictation for the user correcting a word (see [CorrectionTracker]). */
+    private val corrections by lazy {
+        CorrectionTracker(
+            mainHandler,
+            dictionary = { SettingsStore.get(this).get().dictionaryEntries },
+            onFound = { found ->
+                val fresh = WordSuggestions.get(this).offer(found, SettingsStore.get(this).get().dictionaryEntries)
+                if (fresh.isNotEmpty()) {
+                    Log.i(TAG, "offering ${fresh.size} dictionary suggestion(s) from a correction")
+                    WordSuggestionNotifier.show(this, fresh.first())
+                }
+            }
+        )
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -315,6 +333,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
         mainHandler.removeCallbacks(arrivalCheck)
         mainHandler.removeCallbacks(leaveCheck)
         mainHandler.removeCallbacks(watchExpiry)
+        corrections.stop()
         anticipation = null
         watch = null
         destroyPill()
@@ -376,6 +395,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
                 trace(describe(event, start))
+                if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) corrections.nudge()
                 readView(event, start)
                 updateKeyboardState(force = false)
             }
@@ -1145,6 +1165,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                         else -> node.packageName.toString()
                     }
                     Log.i(TAG, "inserted ${text.length} chars via ${outcome.method} into $where")
+                    if (node != null && !node.isPassword) watchForCorrections(node, text)
                     null
                 }
                 is InsertOutcome.Failed -> {
@@ -1153,6 +1174,16 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
                 }
             }
         }
+
+    /** Re-read [node] over the next minute to learn from the user's corrections of [text]. */
+    private fun watchForCorrections(node: AccessibilityNodeInfo, text: String) {
+        corrections.start(text) {
+            if (!runCatching { node.refresh() }.getOrDefault(false)) return@start null
+            if (node.isShowingHintText) return@start null
+            val current = node.text?.toString() ?: return@start null
+            current to (node.textSelectionEnd.takeIf { it >= 0 } ?: current.length)
+        }
+    }
 
     /**
      * Whether the Android 13+ accessibility input-method connection can carry this dictation, and

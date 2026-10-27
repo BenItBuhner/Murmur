@@ -1993,6 +1993,261 @@
       "result": "Bennett's and Bennett’s"
     }
   ],
+  "corrections": [
+    {
+      "original": "I use whisper flow every day.",
+      "edited": "I use Wispr Flow every day.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "whisper flow",
+          "word": "Wispr Flow",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "Ask Bennet about it.",
+      "edited": "Ask Bennett about it.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "Bennet",
+          "word": "Bennett",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "we deploy on convex.",
+      "edited": "we deploy on Convex.",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "convex",
+          "word": "Convex",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "the build is green.",
+      "edited": "The build is green.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "open mermer now",
+      "edited": "open Murmur now",
+      "dictionary": [
+        {
+          "word": "Murmur",
+          "aliases": [
+            "murmer"
+          ]
+        }
+      ],
+      "result": [
+        {
+          "heard": "mermer",
+          "word": "Murmur",
+          "kind": "alias"
+        }
+      ]
+    },
+    {
+      "original": "open murmer now",
+      "edited": "open Murmur now",
+      "dictionary": [
+        {
+          "word": "Murmur",
+          "aliases": [
+            "murmer"
+          ]
+        }
+      ],
+      "result": []
+    },
+    {
+      "original": "open murmur now",
+      "edited": "open Murmur now",
+      "dictionary": [
+        {
+          "word": "Murmur",
+          "aliases": []
+        }
+      ],
+      "result": []
+    },
+    {
+      "original": "Send it on Tuesday.",
+      "edited": "Send it on Wednesday.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Please send the report.",
+      "edited": "Please forward the report.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "I think their right.",
+      "edited": "I think they're right.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "It costs 5 dollars.",
+      "edited": "It costs 6 dollars.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Can we meet at the cafe tomorrow?",
+      "edited": "Could we maybe meat at a café today?",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Ship it.",
+      "edited": "Ship it today, Kubernetes.",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "open the read me file",
+      "edited": "open the README.md file",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "read me",
+          "word": "README.md",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "set user id",
+      "edited": "set user_id",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "mail bob at example",
+      "edited": "mail bob@example",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "see commit abc",
+      "edited": "see commit abc1234f",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "run cube control apply and cube control get",
+      "edited": "run kubectl apply and kubectl get",
+      "dictionary": [],
+      "result": []
+    },
+    {
+      "original": "Zoe and Chloe",
+      "edited": "Zoë and Chloé",
+      "dictionary": [],
+      "result": [
+        {
+          "heard": "Zoe",
+          "word": "Zoë",
+          "kind": "add"
+        },
+        {
+          "heard": "Chloe",
+          "word": "Chloé",
+          "kind": "add"
+        }
+      ]
+    },
+    {
+      "original": "ping jon, jon and jon",
+      "edited": "ping John, Jon and Jonh",
+      "dictionary": [],
+      "result": []
+    }
+  ],
+  "spans": [
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use Wispr Flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use Wispr Flow daily."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use wispr flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use wispr flow daily."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use whisper flow daly. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use whisper flow daly."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use whisper flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": null
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hello all, I use whisper flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": null
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use whisper flow daily. Cheers and more",
+      "start": 9,
+      "end": 34,
+      "result": null
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Hi team, I use only whisper flow daily. Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "I use whisper flow daily.",
+        "edited": "I use only whisper flow daily."
+      }
+    },
+    {
+      "before": "Hi team, I use whisper flow daily. Cheers",
+      "after": "Cheers",
+      "start": 9,
+      "end": 34,
+      "result": {
+        "original": "Hi team, I use whisper flow daily. Cheers",
+        "edited": "Cheers"
+      }
+    }
+  ],
   "cleanLexicon": {
     "hesitationWords": [
       "um",

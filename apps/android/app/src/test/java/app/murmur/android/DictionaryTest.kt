@@ -27,12 +27,11 @@ class DictionaryTest {
     }
 
     @Test
-    fun `fuzzy entries fix near misses, exact-only entries do not`() {
-        assertEquals("Wispr Flow", applyDictionary("Wisper", listOf(wispr)).let { if (it == "Wisper") "Wispr Flow" else it })
-        // "Konvex" is capitalized, so probable-name fuzzy matching applies even without opt-in.
-        assertEquals("Convex", applyDictionary("Konvex", listOf(convex)))
-        // Lower-case near-miss of an exact-only entry is left alone.
-        assertEquals("konvex", applyDictionary("konvex", listOf(convex)))
+    fun `never guesses a dictionary word from a sound-alike, the model reads the list instead`() {
+        val bennett = DictionaryEntry("3", "Bennett", emptyList(), fuzzy = true)
+        val entries = listOf(wispr.copy(aliases = emptyList()), convex.copy(fuzzy = true), bennett)
+        val text = "a Konvex lens, a whisper flow of air, and Bennet from accounts"
+        assertEquals(text, applyDictionary(text, entries))
     }
 
     @Test
@@ -40,11 +39,6 @@ class DictionaryTest {
         assertEquals("convexity", applyDictionary("convexity", listOf(convex)))
         assertEquals("hello", applyDictionary("hello", listOf(convex)))
         assertEquals("", applyDictionary("", listOf(convex)))
-        val bennett = DictionaryEntry("3", "Bennett", emptyList(), fuzzy = true)
-        assertEquals("Bonnets are hats", applyDictionary("Bonnets are hats", listOf(bennett)))
-        // Same consonants as Bennett, different vowel: a different name, not a mis-hearing.
-        assertEquals("Ask Bonnet about it", applyDictionary("Ask Bonnet about it", listOf(bennett)))
-        assertEquals("Ask Bennett about it", applyDictionary("Ask Bennet about it", listOf(bennett)))
     }
 
     @Test
@@ -69,34 +63,10 @@ class DictionaryTest {
     }
 
     @Test
-    fun `matches multi-word terms by sound however the recognizer split or spelt them`() {
-        val exactOnly = DictionaryEntry("1", "Wispr Flow", emptyList(), fuzzy = false)
-        assertEquals("I use Wispr Flow every day", applyDictionary("I use Wisper Flo every day", listOf(exactOnly)))
-        assertEquals("I use Wispr Flow every day", applyDictionary("I use whisper flow every day", listOf(exactOnly)))
-        assertEquals("implement this in Wispr Flow", applyDictionary("implement this in whisperflow", listOf(exactOnly)))
-        assertEquals("Wispr Flow is great", applyDictionary("Whisper Floh is great", listOf(exactOnly)))
-        // Punctuation between the words means they were not spoken as one term.
-        assertEquals("a whisper, flow of air", applyDictionary("a whisper, flow of air", listOf(exactOnly)))
-        // Already canonical text is left alone, and its neighbours are never swallowed into it.
-        assertEquals("Also cc Wispr Flow support", applyDictionary("Also cc Wispr Flow support", listOf(exactOnly)))
-        assertEquals("The water flow is fine", applyDictionary("The water flow is fine", listOf(exactOnly)))
+    fun `multi-word aliases match across any whitespace`() {
         val kubectl = DictionaryEntry("2", "kubectl", listOf("cube control"), fuzzy = false)
-        assertEquals("run kubectl get pods", applyDictionary("run kube control get pods", listOf(kubectl)))
-    }
-
-    @Test
-    fun `corrects single words by sound only for names and opted-in terms`() {
-        val wisprWord = DictionaryEntry("4", "Wispr", emptyList(), fuzzy = false)
-        assertEquals("the Wispr team", applyDictionary("the Whisper team", listOf(wisprWord)))
-        assertEquals("she began to whisper", applyDictionary("she began to whisper", listOf(wisprWord)))
-        assertEquals("we moved to Convex", applyDictionary("we moved to Konvex", listOf(convex)))
-    }
-
-    @Test
-    fun `ignores phrases with too little sound to be safe`() {
-        val goTo = DictionaryEntry("5", "Go To", emptyList(), fuzzy = true)
-        assertEquals("I got it", applyDictionary("I got it", listOf(goTo)))
-        assertEquals("please Go To the store", applyDictionary("please go to the store", listOf(goTo)))
+        assertEquals("run kubectl get pods", applyDictionary("run cube  control get pods", listOf(kubectl)))
+        assertEquals("please Go To the store", applyDictionary("please go to the store", listOf(DictionaryEntry("5", "Go To", emptyList()))))
     }
 
     @Test
@@ -111,7 +81,6 @@ class DictionaryTest {
         // Words that dissolve entirely ("why") never match anything.
         assertEquals("", soundKey("why"))
         assertEquals("", soundKey(""))
-        assertEquals("why not", applyDictionary("why not", listOf(DictionaryEntry("w", "Wye", emptyList(), fuzzy = true))))
     }
 
     @Test
@@ -128,6 +97,7 @@ class DictionaryTest {
         assertEquals(0, editDistance("clerk", "clerk", 2))
         assertEquals(1, editDistance("clark", "clerk", 2))
         assertEquals(3, editDistance("abc", "xyz", 2)) // capped at max + 1
+        assertEquals(1, editDistance("form", "from", 2)) // a swap is one edit, as in text.ts
     }
 
     @Test

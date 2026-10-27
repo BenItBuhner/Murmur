@@ -34,6 +34,7 @@ dictate() {
   log "murmur: $(grep -o 'MurmurA11y.*inserted [0-9]* chars.*' /tmp/logcat-full.txt | tail -1 | sed 's/^MurmurA11y([ 0-9]*): //')"
 }
 key() { adb shell input keyevent "$@"; }
+focus_field() { dump; local xy; xy=$(python3 "$HERE/field.py" center) && adb shell input tap $xy; sleep 1; }
 combo() { adb shell input keycombination "$@"; }
 
 # Select `old` in the last dictation (the caret is at its end) with Shift+Left, type `new` over it.
@@ -123,13 +124,13 @@ adb shell cmd statusbar collapse; sleep 1
 
 # ---- 2. the learned spelling is used next time ------------------------------------------
 log "=== 2. Dictate the same thing again"
-combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
+focus_field; combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
 dictate "Trying whisper flow again tomorrow."
 shot 4-learned
 
 # ---- 3. the user changes their mind: Murmur stays quiet ---------------------------------
 log "=== 3. Change a word (not a mis-hearing)"
-combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
+focus_field; combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
 dictate "Send the report on Tuesday."
 correct "Tuesday" "Wednesday"
 sleep 12
@@ -139,7 +140,7 @@ adb shell cmd statusbar collapse; sleep 1
 
 # ---- 4. an everyday-word fix: quiet too --------------------------------------------------
 log "=== 4. Fix an everyday word"
-combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
+focus_field; combo KEYCODE_CTRL_LEFT KEYCODE_MOVE_END; key KEYCODE_ENTER
 dictate "This will effect the timeline."
 correct "effect" "affect"
 sleep 12

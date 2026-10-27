@@ -2,7 +2,7 @@
 text the demo script put in NEXT_TEXT, and serves a plain text area at /pad to dictate into."""
 import json
 import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NEXT = os.environ.get("NEXT_TEXT", "/tmp/next.txt")
 PAD = b"""<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
@@ -34,4 +34,5 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
+# Threaded: Chrome opens idle preconnect sockets that would block a one-at-a-time server.
+ThreadingHTTPServer(("0.0.0.0", 8000), Handler).serve_forever()

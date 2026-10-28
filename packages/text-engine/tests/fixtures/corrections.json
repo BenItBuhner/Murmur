@@ -1,0 +1,797 @@
+{
+ "about": "Edits a user makes to text Murmur typed, and what Murmur should offer for the dictionary. `expect` lists [heard, word] pairs; an empty list means Murmur must stay quiet. Shared by the TypeScript tests and (through the golden file) the Android port.",
+ "cases": [
+  {
+   "group": "names",
+   "original": "Ask Bennet about the launch.",
+   "edited": "Ask Bennett about the launch.",
+   "expect": [
+    [
+     "Bennet",
+     "Bennett"
+    ]
+   ]
+  },
+  {
+   "group": "names",
+   "original": "Thanks, Kathrine, see you Monday.",
+   "edited": "Thanks, Katherine, see you Monday.",
+   "expect": [
+    [
+     "Kathrine",
+     "Katherine"
+    ]
+   ]
+  },
+  {
+   "group": "names",
+   "original": "I met with sarah and john.",
+   "edited": "I met with Sara and John.",
+   "expect": [
+    [
+     "sarah",
+     "Sara"
+    ],
+    [
+     "john",
+     "John"
+    ]
+   ]
+  },
+  {
+   "group": "names",
+   "original": "Send it to Zoe.",
+   "edited": "Send it to Zoë.",
+   "expect": [
+    [
+     "Zoe",
+     "Zoë"
+    ]
+   ]
+  },
+  {
+   "group": "names",
+   "original": "Call Shawn tomorrow.",
+   "edited": "Call Sean tomorrow.",
+   "expect": [
+    [
+     "Shawn",
+     "Sean"
+    ]
+   ]
+  },
+  {
+   "group": "accepted misses",
+   "original": "Meeting with Nguyen Win at noon.",
+   "edited": "Meeting with Nguyen Huynh at noon.",
+   "expect": []
+  },
+  {
+   "group": "names",
+   "original": "Ping Siobhan about it.",
+   "edited": "Ping Siobhan about it.",
+   "expect": []
+  },
+  {
+   "group": "names",
+   "original": "Lunch with Shiv on Friday.",
+   "edited": "Lunch with Shiv on Friday!",
+   "expect": []
+  },
+  {
+   "group": "products",
+   "original": "I use whisper flow every day.",
+   "edited": "I use Wispr Flow every day.",
+   "expect": [
+    [
+     "whisper flow",
+     "Wispr Flow"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "We deploy on versel.",
+   "edited": "We deploy on Vercel.",
+   "expect": [
+    [
+     "versel",
+     "Vercel"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "The data lives in superbase.",
+   "edited": "The data lives in Supabase.",
+   "expect": [
+    [
+     "superbase",
+     "Supabase"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "Ask clod to review it.",
+   "edited": "Ask Claude to review it.",
+   "expect": [
+    [
+     "clod",
+     "Claude"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "We moved the backend to convex.",
+   "edited": "We moved the backend to Convex.",
+   "expect": [
+    [
+     "convex",
+     "Convex"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "Open it in fig ma.",
+   "edited": "Open it in Figma.",
+   "expect": [
+    [
+     "fig ma",
+     "Figma"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "Push it to git hub tonight.",
+   "edited": "Push it to GitHub tonight.",
+   "expect": [
+    [
+     "git hub",
+     "GitHub"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "I asked chat g p t about it.",
+   "edited": "I asked ChatGPT about it.",
+   "expect": [
+    [
+     "chat g p t",
+     "ChatGPT"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "The model is from open a i.",
+   "edited": "The model is from OpenAI.",
+   "expect": [
+    [
+     "open a i",
+     "OpenAI"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "Transcription runs on deep gram.",
+   "edited": "Transcription runs on Deepgram.",
+   "expect": [
+    [
+     "deep gram",
+     "Deepgram"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "Try eleven labs for the voice.",
+   "edited": "Try ElevenLabs for the voice.",
+   "expect": [
+    [
+     "eleven labs",
+     "ElevenLabs"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "I bought a new eye phone.",
+   "edited": "I bought a new iPhone.",
+   "expect": [
+    [
+     "eye phone",
+     "iPhone"
+    ]
+   ]
+  },
+  {
+   "group": "products",
+   "original": "It runs on macos and windows.",
+   "edited": "It runs on macOS and Windows.",
+   "expect": [
+    [
+     "macos",
+     "macOS"
+    ],
+    [
+     "windows",
+     "Windows"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "Run cube control get pods.",
+   "edited": "Run kubectl get pods.",
+   "expect": [
+    [
+     "cube control",
+     "kubectl"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "Parse the jason first.",
+   "edited": "Parse the JSON first.",
+   "expect": [
+    [
+     "jason",
+     "JSON"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "The query hits post gress.",
+   "edited": "The query hits Postgres.",
+   "expect": [
+    [
+     "post gress",
+     "Postgres"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "Rewrite it in type script.",
+   "edited": "Rewrite it in TypeScript.",
+   "expect": [
+    [
+     "type script",
+     "TypeScript"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "The app is written in cotton.",
+   "edited": "The app is written in Kotlin.",
+   "expect": [
+    [
+     "cotton",
+     "Kotlin"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "Upgrade next js to the latest.",
+   "edited": "Upgrade Next.js to the latest.",
+   "expect": [
+    [
+     "next js",
+     "Next.js"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "Install it with n p m.",
+   "edited": "Install it with npm.",
+   "expect": [
+    [
+     "n p m",
+     "npm"
+    ]
+   ]
+  },
+  {
+   "group": "tech",
+   "original": "open the read me file",
+   "edited": "open the README.md file",
+   "expect": [
+    [
+     "read me",
+     "README.md"
+    ]
+   ]
+  },
+  {
+   "group": "alias",
+   "dictionary": [
+    {
+     "word": "Murmur",
+     "aliases": [
+      "murmer"
+     ]
+    }
+   ],
+   "original": "Open mermer now.",
+   "edited": "Open Murmur now.",
+   "expect": [
+    [
+     "mermer",
+     "Murmur"
+    ]
+   ]
+  },
+  {
+   "group": "alias",
+   "dictionary": [
+    {
+     "word": "Murmur",
+     "aliases": [
+      "murmer"
+     ]
+    }
+   ],
+   "original": "Open murmer now.",
+   "edited": "Open Murmur now.",
+   "expect": []
+  },
+  {
+   "group": "alias",
+   "dictionary": [
+    {
+     "word": "Murmur",
+     "aliases": []
+    }
+   ],
+   "original": "Open Murmur now.",
+   "edited": "Open Murmur now!",
+   "expect": []
+  },
+  {
+   "group": "alias",
+   "dictionary": [
+    {
+     "word": "Wispr Flow",
+     "aliases": [
+      "whisper flow"
+     ]
+    }
+   ],
+   "original": "I use wisper flo daily.",
+   "edited": "I use Wispr Flow daily.",
+   "expect": [
+    [
+     "wisper flo",
+     "Wispr Flow"
+    ]
+   ]
+  },
+  {
+   "group": "alias",
+   "dictionary": [
+    {
+     "word": "convex",
+     "aliases": []
+    }
+   ],
+   "original": "Deploy to convex.",
+   "edited": "Deploy to Convex.",
+   "expect": [
+    [
+     "convex",
+     "Convex"
+    ]
+   ]
+  },
+  {
+   "group": "changed mind",
+   "original": "Send it on Tuesday.",
+   "edited": "Send it on Wednesday.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Let's meet at five.",
+   "edited": "Let's meet at six.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Invite Sarah to the call.",
+   "edited": "Invite John to the call.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Please send the report.",
+   "edited": "Please forward the report.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Paint it red.",
+   "edited": "Paint it blue.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "It was a big problem.",
+   "edited": "It was a huge problem.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Book the meeting room.",
+   "edited": "Book the conference room.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "We should ship it now.",
+   "edited": "We should ship it later.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Order the large pizza.",
+   "edited": "Order the small pizza.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "It costs 5 dollars.",
+   "edited": "It costs 6 dollars.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "I think their right.",
+   "edited": "I think they're right.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "Your welcome.",
+   "edited": "You're welcome.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "This will affect the timeline.",
+   "edited": "This will effect the timeline.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "It's better then before.",
+   "edited": "It's better than before.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "Let's meat at noon.",
+   "edited": "Let's meet at noon.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "I accept everything accept that.",
+   "edited": "I accept everything except that.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "The principle reason is cost.",
+   "edited": "The principal reason is cost.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "Their going to love it.",
+   "edited": "They're going to love it.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "We need to by milk.",
+   "edited": "We need to buy milk.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "I'm gonna call you.",
+   "edited": "I'm going to call you.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "Its fine.",
+   "edited": "It's fine.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "That is alright.",
+   "edited": "That is all right.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "ok see you soon",
+   "edited": "okay see you soon",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "Thanks for the advise.",
+   "edited": "Thanks for the advice.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "I could of done it.",
+   "edited": "I could have done it.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "Their is a problem.",
+   "edited": "There is a problem.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "Whether is nice today.",
+   "edited": "Weather is nice today.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "the build is green.",
+   "edited": "The build is green.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "We sell apples. apple pie too.",
+   "edited": "We sell apples. Apple pie too.",
+   "expect": []
+  },
+  {
+   "group": "everyday words",
+   "original": "The colour is wrong.",
+   "edited": "The color is wrong.",
+   "expect": []
+  },
+  {
+   "group": "rewrites",
+   "original": "Can we meet at the cafe tomorrow?",
+   "edited": "Could we maybe meat at a café today?",
+   "expect": []
+  },
+  {
+   "group": "rewrites",
+   "original": "Hey, just checking in on the report.",
+   "edited": "Hi Dana, any update on the quarterly numbers?",
+   "expect": []
+  },
+  {
+   "group": "rewrites",
+   "original": "I will send the slides tonight.",
+   "edited": "Slides tonight.",
+   "expect": []
+  },
+  {
+   "group": "rewrites",
+   "original": "The quick brown fox jumps over the lazy dog.",
+   "edited": "A slow red fox walks under the sleepy cat.",
+   "expect": []
+  },
+  {
+   "group": "additions and deletions",
+   "original": "Ship it.",
+   "edited": "Ship it today, Kubernetes.",
+   "expect": []
+  },
+  {
+   "group": "additions and deletions",
+   "original": "Ship it right now.",
+   "edited": "Ship it.",
+   "expect": []
+  },
+  {
+   "group": "additions and deletions",
+   "original": "Thanks so much for the help.",
+   "edited": "Thanks for the help.",
+   "expect": []
+  },
+  {
+   "group": "additions and deletions",
+   "original": "See you",
+   "edited": "See you, Anneliese",
+   "expect": []
+  },
+  {
+   "group": "additions and deletions",
+   "original": "Um so the plan is fine.",
+   "edited": "So the plan is fine.",
+   "expect": []
+  },
+  {
+   "group": "punctuation and layout",
+   "original": "Sounds good see you then",
+   "edited": "Sounds good, see you then.",
+   "expect": []
+  },
+  {
+   "group": "punctuation and layout",
+   "original": "first item second item",
+   "edited": "- first item\n- second item",
+   "expect": []
+  },
+  {
+   "group": "punctuation and layout",
+   "original": "Hello world.",
+   "edited": "Hello, world!",
+   "expect": []
+  },
+  {
+   "group": "punctuation and layout",
+   "original": "e mail me",
+   "edited": "e-mail me",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "set user id",
+   "edited": "set user_id",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "mail bob at example",
+   "edited": "mail bob@example",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "see commit abc",
+   "edited": "see commit abc1234f",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "go to example dot com",
+   "edited": "go to example.com/path",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "the file is in source slash main",
+   "edited": "the file is in src/main",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "call me at five five five",
+   "edited": "call me at 555",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "it is due on the third",
+   "edited": "it is due on the 3rd",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "use the get user function",
+   "edited": "use the getUser() function",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "press control c",
+   "edited": "press Ctrl+C",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "great job",
+   "edited": "great job 🎉",
+   "expect": []
+  },
+  {
+   "group": "not words",
+   "original": "Version two",
+   "edited": "Version 2",
+   "expect": []
+  },
+  {
+   "group": "several in one edit",
+   "original": "I told bennet to try whisper flow on versel.",
+   "edited": "I told Bennett to try Wispr Flow on Vercel.",
+   "expect": [
+    [
+     "bennet",
+     "Bennett"
+    ],
+    [
+     "whisper flow",
+     "Wispr Flow"
+    ],
+    [
+     "versel",
+     "Vercel"
+    ]
+   ]
+  },
+  {
+   "group": "several in one edit",
+   "original": "Send the jason to Kathrine on Tuesday.",
+   "edited": "Send the JSON to Katherine on Wednesday.",
+   "expect": [
+    [
+     "jason",
+     "JSON"
+    ],
+    [
+     "Kathrine",
+     "Katherine"
+    ]
+   ]
+  },
+  {
+   "group": "several in one edit",
+   "original": "ping jon, jon and jon",
+   "edited": "ping John, Jon and Jonh",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Ask Christopher about it.",
+   "edited": "Ask Chris about it.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Ask Mark about it.",
+   "edited": "Ask Mike about it.",
+   "expect": []
+  },
+  {
+   "group": "changed mind",
+   "original": "Thanks, Sarah.",
+   "edited": "Thanks, Sandra.",
+   "expect": []
+  },
+  {
+   "group": "names",
+   "original": "Dinner with Aoife tonight.",
+   "edited": "Dinner with Aoife tonight.",
+   "expect": []
+  },
+  {
+   "group": "names",
+   "original": "Ask Aiden to join.",
+   "edited": "Ask Aidan to join.",
+   "expect": [
+    [
+     "Aiden",
+     "Aidan"
+    ]
+   ]
+  }
+ ]
+}

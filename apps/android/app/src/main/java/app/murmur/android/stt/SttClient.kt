@@ -1,5 +1,6 @@
 package app.murmur.android.stt
 
+import app.murmur.android.history.GatewayCall
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.LimitNotice
 import app.murmur.android.inference.ServiceNotice
@@ -223,7 +224,9 @@ data class TranscribeOutput(
      */
     val spans: List<TimedSpan>? = null,
     /** What a Murmur instance said about the speed mode that ran; null from any other server. */
-    val speed: SpeedOutcome? = null
+    val speed: SpeedOutcome? = null,
+    /** What a Murmur instance said about the request (model, server time, hedge); null elsewhere. */
+    val trace: GatewayCall? = null
 )
 
 /**
@@ -282,7 +285,14 @@ object SttClient {
     }
 
     /** What `/v1/dictate/release` answers: the tail's speech, the text formatted, and its formatting. */
-    data class ReleaseAnswer(val stt: TranscribeOutput, val transcript: String, val format: JSONObject?, val rules: Boolean)
+    data class ReleaseAnswer(
+        val stt: TranscribeOutput,
+        val transcript: String,
+        val format: JSONObject?,
+        val rules: Boolean,
+        /** The gateway's split of the call: `sttMs`, `formatMs`, `totalMs`. */
+        val timing: JSONObject? = null
+    )
 
     /**
      * The end of a dictation in one round trip to Murmur's gateway: speech, then (with [format])
@@ -330,9 +340,10 @@ object SttClient {
                 language = languageFromResponse(stt),
                 durationSec = if (stt.has("duration")) stt.optDouble("duration") else null,
                 latencyMs = (System.nanoTime() - started) / 1_000_000,
-                speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed)
+                speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed),
+                trace = GatewayCall.parse("speech", json.optJSONObject("timing")?.optJSONObject("stt"))
             )
-            return ReleaseAnswer(out, json.optString("transcript", ""), json.optJSONObject("format"), json.optBoolean("rules"))
+            return ReleaseAnswer(out, json.optString("transcript", ""), json.optJSONObject("format"), json.optBoolean("rules"), json.optJSONObject("timing"))
         }
     }
 
@@ -468,7 +479,8 @@ object SttClient {
                 noSpeechProb = noSpeech,
                 latencyMs = (System.nanoTime() - started) / 1_000_000,
                 spans = spans,
-                speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed)
+                speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed),
+                trace = GatewayCall.fromHeader("speech", r.header(Inference.TRACE_HEADER))
             )
         }
     }

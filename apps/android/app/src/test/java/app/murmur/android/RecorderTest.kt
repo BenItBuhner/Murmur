@@ -56,4 +56,26 @@ class RecorderTest {
         assertTrue("captured ${pcm.size} samples", pcm.size >= SAMPLE_RATE * 2L)
         assertTrue("captured ${pcm.size} samples", pcm.size <= SAMPLE_RATE * 2L + SAMPLE_RATE / 20)
     }
+
+    @Test
+    fun `a stop after the speaker went quiet skips the post-roll`() {
+        val recorder = Recorder()
+        fun timedStop(postRoll: Boolean): Long {
+            recorder.start(null) {}
+            Thread.sleep(50)
+            val started = System.nanoTime()
+            recorder.stop(postRoll)
+            return System.nanoTime() - started
+        }
+        // Wall time alone is not a reliable signal here: under Robolectric the capture thread spins
+        // and joining it can take 200+ ms on a loaded CI runner. So the two kinds of stop are
+        // compared, quickest of three each: the default one also sleeps through the 200 ms post-roll.
+        val skipped = (1..3).minOf { timedStop(postRoll = false) }
+        val full = (1..3).minOf { timedStop(postRoll = true) }
+        assertTrue("the post-roll still runs by default (${full / 1_000_000} ms)", full >= 190_000_000L)
+        assertTrue(
+            "skipping the post-roll saved ${(full - skipped) / 1_000_000} ms",
+            full - skipped >= 150_000_000L
+        )
+    }
 }

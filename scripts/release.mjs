@@ -140,6 +140,25 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.35': [
+    'Faster finishes on Android. Short dictations now start transcribing during your pauses, so when you tap Done in a pause the words are already there: about 0.7 s quicker on average in testing, with the same text. The stop also no longer waits an extra 0.2 s when you had already stopped talking.',
+    'A simpler dictionary that learns. The dictionary is now a plain list of words Murmur should spell your way. When you fix a misheard word right after dictating, Android offers to add it (Add / Not a word), and on desktop History has a Fix words option.',
+    'Sentences stay whole. A short pause mid-sentence no longer leaves a fragment like "And actually merge things yourself." as its own sentence, and a dropped capital "I" or sentence start is put back.',
+    'Replaces v0.6.34, whose Android build did not finish.'
+  ],
+  '0.6.34': [
+    'Faster finishes on Android. Short dictations now start transcribing during your pauses, so when you tap Done in a pause the words are already there: about 0.7 s quicker on average in testing, with the same text. The stop also no longer waits an extra 0.2 s when you had already stopped talking.',
+    'A simpler dictionary that learns. The dictionary is now a plain list of words Murmur should spell your way. When you fix a misheard word right after dictating, Android offers to add it (Add / Not a word), and on desktop History has a Fix words option.'
+  ],
+  '0.6.33': [
+    'Faster, steadier dictation. When a speech or formatting model is busy or rate-limited, Murmur now switches to a backup straight away instead of stalling or falling back to plain text, so the rare 10–30 second waits and odd capitalization are gone. Formatting is also more accurate: a short pause mid-sentence no longer splits it into two sentences. On Android, History shows where each dictation’s time went (turn on latency in History), and Details copies it for a bug report.'
+  ],
+  '0.6.32': [
+    'Smoother dictation pill on Android. With no keyboard on screen, the pill now rises in from the bottom edge and sinks back off the bottom when you are done, instead of popping in and out; with a keyboard open it still glides smoothly along with it.'
+  ],
+  '0.6.31': [
+    'Faster back-to-back dictation on Android. When the button says “Inserted” after a dictation, tap it to start the next one right away: the pill goes straight into listening instead of making you wait for the mic to come back.'
+  ],
   '0.6.30': [
     'A quieter recording indicator on Android. The "Listening…" notification no longer makes sound, vibrates or shows on the lock screen, and you can hide it: Permissions → Notifications → Recording notification → turn it off. Dictation keeps working; the system privacy dot still shows while the mic is on.'
   ],

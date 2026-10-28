@@ -1,0 +1,152 @@
+[
+  {
+    "id": "join/and-imperative",
+    "transcript": "I want you to dig deeper. And actually merge things yourself. I only want you to hold them when I tell you to.",
+    "join": [["deeper", "and"]],
+    "keep": [["yourself", "I"]]
+  },
+  {
+    "id": "join/noun-phrase-after-pause",
+    "transcript": "Review everything with the best etiquette possible so you never miss anything or make any decisions. Any major mistakes. That is all I ask.",
+    "join": [["decisions", "any"]],
+    "keep": [["mistakes", "that"]]
+  },
+  {
+    "id": "join/even-the-likes",
+    "transcript": "We should offer bank transfers, crypto and much more as fallbacks. Even the likes of Cash App and PayPal. Most of these are not optimal though.",
+    "join": [["fallbacks", "even"]],
+    "keep": [["paypal", "most"]]
+  },
+  {
+    "id": "join/because-clause",
+    "transcript": "We don't want to deploy anything yet. Because the build is stale. It's old.",
+    "join": [["yet", "because"]],
+    "keep": [["stale", "it's"]]
+  },
+  {
+    "id": "join/and-essentially-everything",
+    "transcript": "That includes the system prompts and the tools they have permission to use. And essentially everything. Dig deep so we can make it robust.",
+    "join": [["use", "and"]],
+    "keep": [["everything", "dig"]]
+  },
+  {
+    "id": "join/especially",
+    "transcript": "The animation is more fluid than a plain rectangle. Especially on the closing. Yours feels stiff and static.",
+    "join": [["rectangle", "especially"]],
+    "keep": [["closing", "yours"]]
+  },
+  {
+    "id": "join/and-see",
+    "transcript": "Make the bad case as conservative as possible. And see where the worst case really is. Treat it like ground truth.",
+    "join": [["possible", "and"]],
+    "keep": [["is", "treat"]]
+  },
+  {
+    "id": "join/list-continues",
+    "transcript": "Update the tables to include the other months, such as months three, four, five. And six and so on. But don't go past six.",
+    "join": [["five|5", "and"]],
+    "keep": []
+  },
+  {
+    "id": "join/even-farther-question",
+    "transcript": "So there is really no other way we can scale the existing edges. Even farther? I doubt it.",
+    "join": [["edges", "even"]],
+    "keep": [["farther", "i"]]
+  },
+  {
+    "id": "join/to-infinitive",
+    "transcript": "I need you to check the deployment logs. To see how fast that release actually was. Then report back.",
+    "join": [["logs", "to"]],
+    "keep": [["was", "then"]]
+  },
+  {
+    "id": "join/assuming",
+    "transcript": "We are aiming for the end of the month. Assuming the beta goes well. I'll send the update after that.",
+    "join": [["month", "assuming"]],
+    "keep": [["well", "i'll"]]
+  },
+  {
+    "id": "join/which-clause",
+    "transcript": "The worker restarts every few minutes. Which is why the latency spikes. Can you look into it?",
+    "join": [["minutes", "which"]],
+    "keep": [["spikes", "can"]]
+  },
+  {
+    "id": "join/mid-clause-cut",
+    "transcript": "The more we can offer, the more customers we can actually. Convert in the first month. That is the whole point.",
+    "join": [["actually", "convert"]],
+    "keep": [["month", "that"]]
+  },
+  {
+    "id": "join/and-keep-going",
+    "transcript": "We want to take advantage of the foundation and build upon it. And keep on going. Every lane should be able to scale.",
+    "join": [["it", "and"]],
+    "keep": [["going", "every"]]
+  },
+  {
+    "id": "keep/short-emphatic",
+    "transcript": "That's awful. That's bad. That's really bad. That sacrifices a lot of accuracy just for a preview.",
+    "join": [],
+    "keep": [["awful", "that's"], ["bad", "that's"], ["bad", "that"]]
+  },
+  {
+    "id": "keep/and-full-clause",
+    "transcript": "The refraction on the inside still doesn't look right. And the behavior is not spot on yet. Try to refine it further.",
+    "join": [],
+    "keep": [["right", "and"], ["yet", "try"]]
+  },
+  {
+    "id": "keep/and-i-know",
+    "transcript": "Work on all of these accordingly. And I know you can do this. I believe in you.",
+    "join": [],
+    "keep": [["accordingly", "and"], ["this", "i"]]
+  },
+  {
+    "id": "keep/question-then-because",
+    "transcript": "Do you know the timelines? Because if so, that would be perfect. Let me know.",
+    "join": [],
+    "keep": [["timelines", "because"], ["perfect", "let"]]
+  },
+  {
+    "id": "keep/imperatives",
+    "transcript": "Just figure this out. I'm tired of it. Fix the tables. Complete the task.",
+    "join": [],
+    "keep": [["out", "i'm"], ["it", "fix"], ["tables", "complete"]]
+  },
+  {
+    "id": "keep/so-sentence",
+    "transcript": "We're out of usage on that account. So it literally can't do anything right now. I can't even talk to it.",
+    "join": [],
+    "keep": [["now", "i"]]
+  },
+  {
+    "id": "keep/but-sentence",
+    "transcript": "Okay, keep on working on that. But on top of that, there's another problem now. The upfront cost is too high.",
+    "join": [],
+    "keep": [["that", "but"], ["now", "the"]]
+  },
+  {
+    "id": "keep/and-yet",
+    "transcript": "I thought that was going to be unified. And yet here we are. It's clearly not.",
+    "join": [],
+    "keep": [["are", "it's"]]
+  },
+  {
+    "id": "keep/and-that-includes",
+    "transcript": "I get a great rate because I have the premium subscription. And that includes the six percent APY. I have it right now.",
+    "join": [],
+    "keep": [["subscription", "and"], ["apy", "i"]]
+  },
+  {
+    "id": "keep/maybe-not-sure",
+    "transcript": "Maybe it shouldn't be a monorepo. I'm not sure. Let's think about it tomorrow.",
+    "join": [],
+    "keep": [["monorepo", "i'm"], ["sure", "let's"]]
+  },
+  {
+    "id": "mixed/long-rant",
+    "transcript": "There are multiple issues with this. I would like to standardize our workflow. Right now it's decent. But it's not where I want it. I want demonstrations on Android. To actually show the changes in action. And I want terse explanations of how they work. Especially compared to competitors.",
+    "join": [["android", "to"], ["work", "especially"]],
+    "keep": [["this", "i"], ["workflow", "right"], ["it", "i"]]
+  }
+]

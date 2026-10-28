@@ -101,7 +101,8 @@ export function fixPunctuationSpacing(text: string): string {
   )
 }
 
-const ABBREVIATION =
+/** A word ending in a period that does not end a sentence ("e.g.", "Dr.", an initial). */
+export const ABBREVIATION =
   /(?:^|[\s(])(?:e\.g|i\.e|etc|vs|mr|mrs|ms|dr|st|jr|sr|approx|no|inc|ltd|co|fig|est|dept|p|pp|\p{L})\.$/iu
 
 export function capitalizeSentences(text: string): string {

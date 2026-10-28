@@ -100,8 +100,10 @@ class TextEngineTest {
         assertEquals("Send it to Wispr Flow today", light.text)
         assertEquals("One million two hundred thousand dollars", basicCleanup("one million two hundred thousand dollars", emptyList()).text)
 
-        val finished = finish("talk to Konvex about it.", AppCategory.CHAT, listOf(DictionaryEntry("2", "Convex", emptyList(), fuzzy = true)), trailingSpace = true)
-        assertEquals("talk to Convex about it. ", finished.text)
+        // The dictionary only fixes exact words and "heard as" spellings; it never guesses at sound-alikes.
+        val convex = listOf(DictionaryEntry("2", "Convex", listOf("konvex"), fuzzy = true))
+        assertEquals("talk to Convex about it. ", finish("talk to Konvex about it.", AppCategory.CHAT, convex, trailingSpace = true).text)
+        assertEquals("talk to Konvecks about it. ", finish("talk to Konvecks about it.", AppCategory.CHAT, convex, trailingSpace = true).text)
         assertEquals("git commit -m \"fix\"", finish("git commit -m \"fix\".\n", AppCategory.TERMINAL, emptyList(), trailingSpace = false).text)
         assertTrue(finish("...", AppCategory.CHAT, emptyList(), trailingSpace = true).empty)
     }

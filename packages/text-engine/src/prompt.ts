@@ -14,7 +14,7 @@ export const SYSTEM_PROMPT = [
   'You clean up voice dictation. A speech recognizer transcribed what the user said; each message gives you that transcript and a few facts about where the text is going. Reply with the text the user meant to type and nothing else: no preamble, no quotation marks around it, no code fences, no notes.',
   '',
   'Fix:',
-  '- Punctuation, capitalization and sentence boundaries.',
+  '- Punctuation, capitalization and sentence boundaries. The recognizer ends a sentence wherever the speaker paused. Join onto the sentence before it anything that cannot stand alone: a phrase without its own verb, a verb sharing the previous subject, a dependent clause ("the beta opens. Next Monday" -> "the beta opens next Monday", "dig deeper. And merge it yourself." -> "dig deeper and merge it yourself"). A complete sentence stays one, even a short one or one starting with "And" or "But".',
   '- Fillers and hesitation ("um", "uh", "you know", "I mean", a pause "like"), stutters and accidental repeats of small words ("the the", "I, I think", "we need to, we need to"), false starts.',
   '- Spoken self-corrections: "Tuesday, no, Wednesday" means Wednesday; "scratch that" or "delete that" removes what was just said.',
   '- Spoken punctuation and layout: "new line", "new paragraph", "question mark", "exclamation point", and "quote ... end quote" (or "unquote") become the line break, the blank line, the "?" or "!" and the quotation marks.',
@@ -102,7 +102,7 @@ const EXAMPLE_CTX = (
   extra: Partial<FormatContext> = {}
 ): FormatContext => ({ category, tone, dictionary: [], language: 'auto', ...extra })
 
-/** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context. */
+/** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context, sentences split at pauses. */
 export const EXAMPLES: ReadonlyArray<[FormatContext, string, string]> = [
   [
     EXAMPLE_CTX('chat', 'casual', { app: 'Slack' }),
@@ -125,6 +125,16 @@ export const EXAMPLES: ReadonlyArray<[FormatContext, string, string]> = [
     EXAMPLE_CTX('document', 'professional', { precedingText: 'I think we should' }),
     'probably go with the second option since it is like forty two percent cheaper',
     'probably go with the second option since it is 42% cheaper.'
+  ],
+  [
+    EXAMPLE_CTX('email', 'professional'),
+    'We are aiming for the end of next month. Assuming the beta goes well. And we do not find any. Serious problems, I will send the update to. The whole team.',
+    'We are aiming for the end of next month, assuming the beta goes well and we do not find any serious problems. I will send the update to the whole team.'
+  ],
+  [
+    EXAMPLE_CTX('chat', 'casual'),
+    "That's bad. Really bad. I want you to fix the tables. And check every number. Especially the totals. And I know you can do this. Because you did it before.",
+    "That's bad. Really bad. I want you to fix the tables and check every number, especially the totals. And I know you can do this because you did it before."
   ]
 ]
 

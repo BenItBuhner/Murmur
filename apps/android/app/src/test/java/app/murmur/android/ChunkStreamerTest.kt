@@ -66,10 +66,31 @@ class ChunkStreamerTest {
     }
 
     @Test
-    fun `does not speculate before the first piece`() = runBlocking {
-        val clip = loud(12.0)
-        clip.fill(0, 3 * rate, (5.6 * rate).toInt())
-        clip.fill(0, 8 * rate, (10.6 * rate).toInt())
+    fun `a pause still going on at the end is a speculation point only when asked for`() {
+        val q = loud(6.0)
+        q.fill(0, (5.0 * rate).toInt(), q.size)
+        assertNull(findSpecCut(q, rate, -30.0))
+        val c = findSpecCut(q, rate, -30.0, trailingPauseMs = 450)!!
+        assertTrue(c.trailing)
+        // At most 0.3 s into the pause, so a word that starts again is not cut.
+        assertTrue(kotlin.math.abs(c.at.toDouble() / rate - 5.3) < 0.05)
+        // Too short a trailing pause, or one before the minimum, is not.
+        val short = loud(6.0)
+        short.fill(0, (5.7 * rate).toInt(), short.size)
+        assertNull(findSpecCut(short, rate, -30.0, trailingPauseMs = 450))
+        val early = loud(2.5)
+        early.fill(0, (1.5 * rate).toInt(), early.size)
+        assertNull(findSpecCut(early, rate, -30.0, trailingPauseMs = 450))
+    }
+
+    @Test
+    fun `speculates on a short dictation, up to the pause the speaker stopped in`() = runBlocking {
+        // Under the first piece cut: a second before speaking, 3 s of speech, a 1 s pause, 3 s more
+        // and then silence (some quiet up front, as in a real recording, sets the noise floor).
+        val clip = loud(10.0)
+        clip.fill(0, 0, rate)
+        clip.fill(0, 4 * rate, 5 * rate)
+        clip.fill(0, 8 * rate, clip.size)
         var fed = 0
         var specs = 0
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -79,9 +100,12 @@ class ChunkStreamerTest {
             streamer.poll(fed)
         }
         val streamed = streamer.finish()
-        assertEquals(0, specs)
-        assertNull(streamed.specSamples)
-        assertNull(streamed.specText)
+        assertEquals(0, streamed.texts().size)
+        assertEquals(2, specs)
+        // The newest speculation covers everything said; the rest is the silence after it.
+        val text = streamed.specText!!.await()
+        assertTrue(text.substringAfter(':').toInt() in (8 * rate)..(8.35 * rate).toInt())
+        assertTrue(streamed.specSamples!! in (8 * rate)..(8.3 * rate).toInt())
     }
 
     @Test

@@ -49,7 +49,7 @@ fun fixPunctuationSpacing(text: String): String = text
     .replace(Regex("\\s+\\)"), ")")
     .replace(Regex("[ \\t]{2,}"), " ")
 
-private val ABBREVIATION = Regex(
+internal val ABBREVIATION = Regex(
     "(?:^|[\\s(])(?:e\\.g|i\\.e|etc|vs|mr|mrs|ms|dr|st|jr|sr|approx|no|inc|ltd|co|fig|est|dept|p|pp|\\p{L})\\.$",
     RegexOption.IGNORE_CASE
 )

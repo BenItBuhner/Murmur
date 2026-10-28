@@ -40,8 +40,11 @@ const val FORCED_OVERLAP_SEC = 1.0
 /** After a clean cut, the next piece starts this far back (still inside the pause). */
 const val PAUSE_LEAD_IN_SEC = 0.3
 
-/** A cut: sample index, the pause it sits in (ms), and whether it may split a word. */
-data class ChunkCut(val at: Int, val pauseMs: Int, val forced: Boolean)
+/**
+ * A cut: sample index, the pause it sits in (ms), whether it may split a word, and whether the
+ * pause is still going on at the end of the audio (the speaker may be done).
+ */
+data class ChunkCut(val at: Int, val pauseMs: Int, val forced: Boolean, val trailing: Boolean = false)
 
 fun findChunkCutDetail(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, plan: ChunkPlan = ChunkPlan()): ChunkCut? {
     val frame = sampleRate * FRAME_MS / 1000
@@ -71,18 +74,38 @@ fun findChunkCutDetail(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, pl
     return if (quietest >= 0) ChunkCut(quietest + frame / 2, 0, true) else null
 }
 
-/** How often the stretch after the last piece is checked for a pause to speculate up to. */
-const val SPEC_CHECK_SEC = 0.5
+/**
+ * How often the stretch after the last piece is checked for a pause to speculate up to: often
+ * enough that a trailing pause is caught within ~0.1 s of reaching [SPEC_TRAILING_PAUSE_MS].
+ */
+const val SPEC_CHECK_SEC = 0.1
 /** A new speculation needs at least this much more audio than the last one covered. */
 const val SPEC_MIN_GAIN_SEC = 2.0
 /** Pauses at least this long are speculation points (the join repairs mid-sentence ones). */
 const val SPEC_PAUSE_MS = 600
+/**
+ * A pause still going on at the end of the audio is a speculation point once it is this long: the
+ * speaker may be about to stop, and a stop in that pause then finds everything said already
+ * transcribed (Oct 27 2026: dictations under ~18 s did nothing while spoken, so
+ * every stop waited for the whole speech + formatting round trip).
+ */
+const val SPEC_TRAILING_PAUSE_MS = 600
+/** How far into a trailing pause its cut sits, at most (the rest of the pause goes up with the tail). */
+private const val SPEC_TRAILING_CUT_MS = 300
 
 /**
  * The last pause of at least [minPauseMs] in `pcm` that has ended, at least [minSec] in; mirrors
- * findSpecCut in apps/desktop/src/core/audio/chunker.ts.
+ * findSpecCut in apps/desktop/src/core/audio/chunker.ts. With [trailingPauseMs], a pause of at
+ * least that long still going on at the end counts too (cut [SPEC_TRAILING_CUT_MS] into it at most).
  */
-fun findSpecCut(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, minPauseMs: Int = SPEC_PAUSE_MS, minSec: Double = 2.0): ChunkCut? {
+fun findSpecCut(
+    pcm: ShortArray,
+    sampleRate: Int,
+    thresholdDb: Double,
+    minPauseMs: Int = SPEC_PAUSE_MS,
+    minSec: Double = 2.0,
+    trailingPauseMs: Int? = null
+): ChunkCut? {
     val frame = sampleRate * FRAME_MS / 1000
     val need = (minPauseMs + FRAME_MS - 1) / FRAME_MS
     val from = (minSec * sampleRate).toInt()
@@ -96,6 +119,13 @@ fun findSpecCut(pcm: ShortArray, sampleRate: Int, thresholdDb: Double, minPauseM
             run = 0
         }
         at += frame
+    }
+    if (trailingPauseMs != null && run * FRAME_MS >= trailingPauseMs) {
+        val start = at - run * frame
+        if (start >= from) {
+            val into = minOf(run * frame / 2, SPEC_TRAILING_CUT_MS * sampleRate / 1000)
+            return ChunkCut(start + into, run * FRAME_MS, false, trailing = true)
+        }
     }
     return best
 }
@@ -179,14 +209,19 @@ class ChunkStreamer(
 
     private fun maybeSpeculate(total: Int) {
         val notify = onSpec ?: return
-        // Short dictations never reach a piece cut (~18 s). Speculating on them makes release wait
-        // for an in-flight STT+format of almost the whole clip. Only speculate after a piece.
-        if (committed == 0) return
+        // Short dictations (no piece yet) speculate only at a pause still going on, where the speaker
+        // may be done: a speculation at a pause they spoke on after saves little there (the tail
+        // still goes up at release) and each one re-sends the whole stretch (Oct 27 2026: one at
+        // every pause overloaded the background speech pool, which is also the release's hedge).
         if (total - committed < nextSpecCheck) return
         nextSpecCheck = total - committed + (SPEC_CHECK_SEC * sampleRate).toInt()
         val pending = read(committed)
-        val cut = findSpecCut(pending, sampleRate, adaptiveThreshold(pending, sampleRate, floorDb)) ?: return
+        val cut = findSpecCut(pending, sampleRate, adaptiveThreshold(pending, sampleRate, floorDb), trailingPauseMs = SPEC_TRAILING_PAUSE_MS) ?: return
+        if (committed == 0 && !cut.trailing) return
         if (specAt >= 0 && cut.at < specAt + SPEC_MIN_GAIN_SEC * sampleRate) return
+        // One speculation at a time: a newer one waits for the last to come back, so a slow pool is
+        // not handed more of the same audio while it is behind.
+        if (specText?.isActive == true) return
         val pcm = if (overlap > 0) read(committed - overlap).copyOfRange(0, overlap + cut.at) else pending.copyOfRange(0, cut.at)
         val index = pieces.size
         val text = scope.async { transcribe(pcm, index) }

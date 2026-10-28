@@ -19,7 +19,7 @@ fun envOrProp(name: String): String =
 
 // Single source of truth for the Android version. Bump it with `npm run release -- <version>` from
 // the repo root, which keeps it in sync with the desktop app and the README download links.
-val murmurVersion = "0.6.30"
+val murmurVersion = "0.6.35"
 
 // Android needs a monotonically increasing integer versionCode. Derive it from the semver so nothing
 // has to be bumped by hand: 1.2.3 -> 1_020_399, 1.2.3-beta.4 -> 1_020_304. Pre-releases sort below
@@ -90,6 +90,10 @@ android {
         )
         buildConfigField("String", "ACCOUNT_MODE", "\"${envOrProp("MURMUR_ACCOUNT_MODE")}\"")
     }
+
+    // The text engine's everyday-word list (what a correction to an ordinary word is checked against
+    // before Murmur offers it for the dictionary) ships from its one copy in packages/text-engine.
+    sourceSets["main"].assets.srcDir("../../../packages/text-engine/lexicon")
 
     // ---- Distribution flavors -------------------------------------------------------------------
     // One codebase, two ways to ship it. Only the update layer and the manifest differ:

@@ -754,11 +754,12 @@ describe('speed modes on /v1/audio/transcriptions', () => {
     expect(sent(second).map((c) => c.model)).toEqual([FAST_MODEL, NORMAL])
   })
 
-  it('a real failure of the fast model is reported as it is, never masked by the normal model', async () => {
+  it('a failure about the request is reported as it is; a busy or failing fast model fails over to the normal model', async () => {
     stubEnv({ ...STT_ENV, ...FAST_ENV })
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     let upstream: Response = jsonResponse({ error: { message: 'timestamp_granularities is not supported for this model' } }, 400)
-    const calls = stubFetch(() => upstream)
+    // A fresh copy per call: a request can now reach the provider twice (fast, then normal).
+    const calls = stubFetch(() => upstream.clone())
     const t = setup()
     const asAda = t.withIdentity(ada)
     // A parameter the fast model rejects: passed through, so the client can adapt as it does today.
@@ -767,17 +768,40 @@ describe('speed modes on /v1/audio/transcriptions', () => {
     expect((await param.json()).error).toMatchObject({ code: 'bad_request', message: /timestamp_granularities/ })
     upstream = new Response('Invalid API key', { status: 401 })
     expect((await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))).status).toBe(502)
+    // A bad request and bad credentials: one provider call each, the normal model was never tried.
+    expect(sent(calls)).toEqual(Array(2).fill({ model: FAST_MODEL, speed: null }))
+    // A rate limit or a failing provider is what the normal model is there for (Oct 24 2026: a
+    // pool in its rate-limit cooldown answered in ~130 ms and the backup was never asked); when
+    // it fails too, the fast model's error is the answer.
     upstream = new Response('slow down', { status: 429 })
     expect((await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))).status).toBe(503)
     upstream = new Response('boom', { status: 500 })
     const down = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
     expect(down.status).toBe(502)
     expect((await down.json()).error.code).toBe('upstream_error')
-    // One provider call per request: the normal model was never tried.
-    expect(sent(calls)).toEqual(Array(4).fill({ model: FAST_MODEL, speed: null }))
+    expect(sent(calls).slice(2)).toEqual([
+      { model: FAST_MODEL, speed: null },
+      { model: NORMAL, speed: null },
+      { model: FAST_MODEL, speed: null },
+      { model: NORMAL, speed: null }
+    ])
     for (const status of [param, down]) expect(status.headers.get(SPEED_HEADER)).toBeNull()
-    // Nothing billed for requests the provider never answered.
-    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(0)
+    // The fast model failing while the normal one answers: the normal model's text, billed once.
+    const masked = stubFetch((_url, init) =>
+      (init.body as FormData).get('model') === FAST_MODEL ? new Response('slow down', { status: 429 }) : jsonResponse({ text: 'from the normal model' })
+    )
+    const saved = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { speed: 'fast' }))
+    expect(saved.status).toBe(200)
+    expect(await saved.json()).toEqual({ text: 'from the normal model' })
+    expect(saved.headers.get(SPEED_HEADER)).toBe('normal')
+    expect(JSON.parse(saved.headers.get('x-murmur-trace')!)).toMatchObject({ role: 'normal', ok: true, failover: true })
+    expect(sent(masked).map((c) => c.model)).toEqual([FAST_MODEL, NORMAL])
+    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(1)
+    vi.restoreAllMocks()
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    stubEnv({ ...STT_ENV, ...FAST_ENV })
+    // Billed once: the one answer; nothing for the requests the provider never answered.
+    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(1)
 
     // When the normal model fails too, its error is the answer.
     const second = stubFetch((_url, init) =>
@@ -787,7 +811,7 @@ describe('speed modes on /v1/audio/transcriptions', () => {
     expect(both.status).toBe(502)
     expect((await both.json()).error.code).toBe('upstream_error')
     expect(sent(second).map((c) => c.model)).toEqual([FAST_MODEL, NORMAL])
-    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(0)
+    expect((await asAda.query(api.inference.status, {})).usage.sttRequests).toBe(1)
     vi.restoreAllMocks()
   })
 

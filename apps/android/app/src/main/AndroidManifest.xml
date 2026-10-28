@@ -121,6 +121,10 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <receiver
+            android:name=".learn.WordSuggestionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".service.RecordingService"
             android:exported="false"

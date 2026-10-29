@@ -11,10 +11,6 @@ import app.murmur.android.llm.ChatMessage
 import app.murmur.android.llm.ChatResult
 import app.murmur.android.llm.LlmClient
 import app.murmur.android.llm.LlmConfig
-import app.murmur.android.text.Engine
-import app.murmur.android.text.FormatInput
-import app.murmur.android.text.FormatResult
-import app.murmur.android.text.ModelAnswer
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
@@ -25,6 +21,11 @@ import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.SttException
 import app.murmur.android.stt.TranscribeOutput
+import app.murmur.android.text.Engine
+import app.murmur.android.text.FormatInput
+import app.murmur.android.text.FormatResult
+import app.murmur.android.text.ModelAnswer
+import app.murmur.android.text.PromptEcho
 
 private const val TAG = "MurmurInference"
 
@@ -249,6 +250,15 @@ class InferenceRouter(
      * resume round uses it too), and a user's own model that errors falls back to their fallback model.
      */
     suspend fun transcribe(resolved: ResolvedStt, wav: ByteArray, prompt: String?, tier: String? = null): TranscribeOutput {
+        val out = transcribeRaw(resolved, wav, prompt, tier)
+        // A clip without speech can come back as the prompt itself ("Dictation with punctuation.").
+        val text = PromptEcho.strip(out.text, prompt)
+        if (text == out.text) return out
+        Log.i(TAG, "dropped the speech prompt read back by the model")
+        return out.copy(text = text)
+    }
+
+    private suspend fun transcribeRaw(resolved: ResolvedStt, wav: ByteArray, prompt: String?, tier: String?): TranscribeOutput {
         // The tier rides on this call only; resolved.cfg is shared with the release.
         val cfg = if (tier != null) resolved.cfg.copy(tier = tier) else resolved.cfg
         return try {

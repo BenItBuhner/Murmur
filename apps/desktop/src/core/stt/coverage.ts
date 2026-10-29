@@ -1,6 +1,12 @@
 import { rmsDb } from '@core/audio/vad'
 import { encodeWavPcm16 } from '@core/audio/wav'
-import { countWords } from '@engine'
+import {
+  countWords,
+  editDistance,
+  isSilenceHallucination,
+  normalizePhrase,
+  stripPromptEcho
+} from '@engine'
 import type { TimedSpan, TranscribeOutput } from './types'
 
 /**
@@ -190,6 +196,27 @@ export interface CompleteResult extends TranscribeOutput {
 export type Transcribe = (wav: Uint8Array, prompt: string | undefined) => Promise<TranscribeOutput>
 
 /**
+ * A resumed tail needs at least this many words, and this many per second of the audio it was
+ * sent for, to be taken for speech the transcript missed (Oct 29 2026: 1.5 s of handling noise
+ * after a dictation was "resumed" and came back as "Dictation with punctuation." and "Sigh.").
+ * People speak at 2-3 words per second; the bar is far below that, pauses included.
+ */
+export const MIN_TAIL_WORDS = 2
+export const MIN_TAIL_WORDS_PER_SEC = 0.5
+
+/** Two readings of one clip agree closely enough to be the same speech. */
+export function sameReading(a: string, b: string): boolean {
+  const x = normalizePhrase(a)
+  const y = normalizePhrase(b)
+  if (!x || !y) return false
+  const longest = Math.max(x.length, y.length)
+  return 1 - editDistance(x, y, longest) / longest >= SAME_READING
+}
+
+/** Share of characters two readings of the same speech have in common, at least. */
+export const SAME_READING = 0.6
+
+/**
  * Transcribe the clip and keep going until the transcript reaches the end of the speech. With
  * timings, only the audio after the point where the transcript stopped is sent again (starting in
  * a pause, without the vocabulary prompt) and appended. Without timings there is nowhere to
@@ -237,17 +264,42 @@ export async function transcribeComplete(
       `transcript stops at ${fmt(stoppedAt)}s of ${fmt(speechEndSec)}s of speech; resuming from ${fmt(cut)}s`
     )
     let tail: TranscribeOutput
+    // With a prompt, the same audio is also read without one, at the same time: speech reads the
+    // same both ways, while noise comes back as unrelated words each time.
+    let check: TranscribeOutput | null = null
     try {
-      tail = await transcribe(
-        encodeWavPcm16(pcm.subarray(Math.floor(cut * sampleRate)), sampleRate),
-        opts.tailPrompt
-      )
+      const wav = encodeWavPcm16(pcm.subarray(Math.floor(cut * sampleRate)), sampleRate)
+      const second =
+        opts.tailPrompt !== undefined
+          ? transcribe(wav, undefined).catch(() => null)
+          : Promise.resolve(null)
+      tail = await transcribe(wav, opts.tailPrompt)
+      check = await second
     } catch (err) {
       log(`resume failed: ${err instanceof Error ? err.message : String(err)}`)
       break
     }
-    const tailText = tail.text.trim()
+    const tailText = stripPromptEcho(tail.text, opts.tailPrompt).trim()
     if (!tailText) break
+    if (check && !sameReading(tailText, check.text)) {
+      log(
+        `resumed tail "${tailText.slice(0, 40)}" reads as "${check.text.trim().slice(0, 40)}" without the prompt; taken for noise`
+      )
+      break
+    }
+    // Noise after the speech (a phone handled, a rustle) passes the level check as "speech", and a
+    // clip of it comes back as a word or two nobody said ("Sigh.", "Thank you."). Speech the
+    // transcript really missed comes back at a speaking rate.
+    const tailWords = countWords(tailText)
+    if (
+      isSilenceHallucination(tailText) ||
+      tailWords < Math.max(MIN_TAIL_WORDS, MIN_TAIL_WORDS_PER_SEC * (speechEndSec - cut))
+    ) {
+      log(
+        `resumed tail "${tailText.slice(0, 40)}" is too thin for ${fmt(speechEndSec - cut)}s of audio; taken for noise`
+      )
+      break
+    }
     const shifted: TimedSpan[] = (tail.spans ?? []).map((s) => ({
       start: s.start + cut,
       end: s.end + cut

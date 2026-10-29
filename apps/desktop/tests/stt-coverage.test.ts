@@ -5,6 +5,7 @@ import {
   assessCoverage,
   findCutPoint,
   mergeTranscripts,
+  sameReading,
   transcribeComplete,
   type Transcribe
 } from '@core/stt/coverage'
@@ -160,10 +161,15 @@ describe('transcribeComplete', () => {
     expect(r.resumed).toBe(1)
     expect(r.recoveredSec).toBeGreaterThan(10)
     expect(r.coverage.truncated).toBe(false)
-    expect(calls).toHaveLength(2)
-    expect(calls[1].prompt).toBe('Dictation with punctuation.')
+    // The tail is read with the style prompt, and without any prompt as a check.
+    expect(calls.map((c) => c.prompt)).toEqual([
+      'Vocabulary: Wispr Flow. Dictation with punctuation.',
+      undefined,
+      'Dictation with punctuation.'
+    ])
+    expect(calls[1].seconds).toBe(calls[2].seconds)
     // The tail starts inside the 8.0-8.6 s pause, so no word is cut in half.
-    const cut = 20 - calls[1].seconds
+    const cut = 20 - calls[2].seconds
     expect(cut).toBeGreaterThan(8.0)
     expect(cut).toBeLessThan(8.6)
     expect(r.spans?.[r.spans.length - 1].end).toBeGreaterThan(19)
@@ -252,7 +258,12 @@ describe('transcribeComplete', () => {
   })
 
   it('chains several resumes when the recognizer keeps stopping early', async () => {
-    const pieces = ['first part.', 'second part.', 'third part.']
+    // Each piece is said at a speaking rate: a tail of a word or two for many seconds is noise.
+    const pieces = [
+      'first part of what I said before the model stopped short.',
+      'second part of what I said before it stopped again.',
+      'third part of it, which finally reaches the end.'
+    ]
     let calls = 0
     const r = await transcribeComplete(
       async (wav) => {
@@ -265,7 +276,116 @@ describe('transcribeComplete', () => {
     )
     expect(calls).toBeGreaterThanOrEqual(3)
     expect(calls).toBeLessThanOrEqual(4)
-    expect(r.text.startsWith('first part. second part. third part.')).toBe(true)
+    expect(r.text.startsWith(pieces.join(' '))).toBe(true)
     expect(r.resumed).toBeGreaterThanOrEqual(2)
+  })
+
+  it('takes a thin tail for noise and keeps the transcript as it was (Oct 29 2026)', async () => {
+    // Speech to 8 s, then 2.5 s of handling noise that the level check counts as speech.
+    const noisy = clip(11, [
+      [0.3, 8.0],
+      [8.8, 10.8]
+    ])
+    const end = analyze(noisy, { sampleRate: RATE, thresholdDb: THRESHOLD }).lastVoicedMs / 1000
+    for (const junk of ['Sigh.', 'Thank you.', 'The End', 'Dictation with punctuation.']) {
+      const calls: Array<string | undefined> = []
+      const r = await transcribeComplete(
+        async (wav, prompt) => {
+          calls.push(prompt)
+          return calls.length === 1 ? out(HEAD, 7.9) : out(junk, wavSeconds(wav))
+        },
+        {
+          pcm: noisy,
+          sampleRate: RATE,
+          speechEndSec: end,
+          thresholdDb: THRESHOLD,
+          prompt: 'Vocabulary: Wispr Flow. Dictation with punctuation.',
+          tailPrompt: 'Dictation with punctuation.'
+        }
+      )
+      expect(calls).toHaveLength(3)
+      expect(r.text).toBe(HEAD)
+      expect(r.resumed).toBe(0)
+    }
+  })
+
+  it('still takes a short tail said at a speaking rate', async () => {
+    const short = clip(11, [
+      [0.3, 8.0],
+      [8.6, 10.6]
+    ])
+    const end = analyze(short, { sampleRate: RATE, thresholdDb: THRESHOLD }).lastVoicedMs / 1000
+    let calls = 0
+    const r = await transcribeComplete(
+      async (wav) =>
+        calls++ === 0 ? out(HEAD, 7.9) : out('and the pill stays up.', wavSeconds(wav) - 0.2),
+      { pcm: short, sampleRate: RATE, speechEndSec: end, thresholdDb: THRESHOLD, prompt: 'p' }
+    )
+    expect(r.text).toBe(`${HEAD} and the pill stays up.`)
+    expect(r.resumed).toBe(1)
+  })
+
+  it('takes a tail that reads differently without the prompt for noise', async () => {
+    const noisy = clip(14, [
+      [0.3, 8.0],
+      [8.8, 13.8]
+    ])
+    const end = analyze(noisy, { sampleRate: RATE, thresholdDb: THRESHOLD }).lastVoicedMs / 1000
+    const calls: Array<string | undefined> = []
+    const r = await transcribeComplete(
+      async (_wav, prompt) => {
+        calls.push(prompt)
+        if (calls.length === 1) return out(HEAD, 7.9)
+        // Five seconds of loud handling noise: a made-up sentence with the prompt, a dot without.
+        return prompt ? out('The end of the day is a very good one.', 5) : out('.')
+      },
+      {
+        pcm: noisy,
+        sampleRate: RATE,
+        speechEndSec: end,
+        thresholdDb: THRESHOLD,
+        prompt: 'Vocabulary: Wispr Flow. Dictation with punctuation.',
+        tailPrompt: 'Dictation with punctuation.'
+      }
+    )
+    expect(calls).toEqual([
+      'Vocabulary: Wispr Flow. Dictation with punctuation.',
+      undefined,
+      'Dictation with punctuation.'
+    ])
+    expect(r.text).toBe(HEAD)
+    expect(r.resumed).toBe(0)
+  })
+
+  it('keeps a tail that reads the same both ways', async () => {
+    const r = await transcribeComplete(
+      async (wav, prompt) => {
+        if (prompt?.includes('Vocabulary')) return out(HEAD, 7.9)
+        return prompt ? out(TAIL, wavSeconds(wav) - 0.2) : out(TAIL.toLowerCase().replace('.', ''))
+      },
+      {
+        pcm,
+        sampleRate: RATE,
+        speechEndSec: speechEnd,
+        thresholdDb: THRESHOLD,
+        prompt: 'Vocabulary: Wispr Flow. Dictation with punctuation.',
+        tailPrompt: 'Dictation with punctuation.'
+      }
+    )
+    expect(r.text).toBe(`${HEAD} ${TAIL}`)
+    expect(r.resumed).toBe(1)
+  })
+
+  it('sameReading tells one speech read twice from noise read twice', () => {
+    expect(sameReading('Winds.', 'wins.')).toBe(true)
+    expect(
+      sameReading(
+        'Wins out of this whole thing, honestly.',
+        'wins out of this whole thing honestly'
+      )
+    ).toBe(true)
+    expect(sameReading('The end of the day is a very good one.', '.')).toBe(false)
+    expect(sameReading('Dictation with punctuation.', 'So')).toBe(false)
+    expect(sameReading('Sigh.', 'Oh, my God.')).toBe(false)
   })
 })

@@ -27,6 +27,7 @@ import {
   type FormatInput,
   type ResolvedStyle,
   isSilentStockPhrase,
+  stripPromptEcho,
   joinPieces,
   joinSeam,
   lastSentenceStart,
@@ -1288,6 +1289,21 @@ export class DictationController extends EventEmitter {
   }
 
   private async transcribeWithFallback(
+    wav: Uint8Array,
+    prompt: string | undefined,
+    keyterms: string[],
+    resolved: ResolvedStt,
+    tier?: InferenceTier
+  ): Promise<TranscribeOutput> {
+    const out = await this.transcribeOnce(wav, prompt, keyterms, resolved, tier)
+    // A clip without speech can come back as the prompt itself ("Dictation with punctuation.").
+    const text = stripPromptEcho(out.text, prompt)
+    if (text === out.text) return out
+    log.info('dropped the speech prompt read back by the model')
+    return { ...out, text }
+  }
+
+  private async transcribeOnce(
     wav: Uint8Array,
     prompt: string | undefined,
     keyterms: string[],

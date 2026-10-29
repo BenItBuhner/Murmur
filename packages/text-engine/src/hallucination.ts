@@ -28,7 +28,9 @@ const PHRASES = [
   'so',
   'uh',
   'um',
-  'hmm'
+  'hmm',
+  // Oct 29 2026: the production models' answer to a second of silence with a vocabulary prompt.
+  'the end'
 ]
 const KNOWN = new Set(PHRASES)
 

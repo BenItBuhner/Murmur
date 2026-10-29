@@ -78,3 +78,44 @@ describe('/v1/audio/transcriptions and silence', () => {
     expect(formats(calls)).toEqual(['verbose_json', 'json'])
   })
 })
+
+describe('the prompt read back to a clip without speech (Oct 29 2026)', () => {
+  const PROMPT = 'Vocabulary: Murmur, Wispr Flow. Dictation with punctuation.'
+
+  it('drops it from the end of a transcript, segments included', async () => {
+    stubEnv(STT_ENV)
+    stubFetch(() =>
+      jsonResponse({
+        text: ' we could get some major, major, major. Dictation with punctuation.',
+        duration: 6,
+        segments: [
+          { text: ' we could get some major, major, major.', no_speech_prob: 0.01 },
+          { text: ' Dictation with punctuation.', no_speech_prob: 0 }
+        ]
+      })
+    )
+    const t = setup()
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(6), { prompt: PROMPT }))
+    expect(await res.json()).toEqual({ text: 'we could get some major, major, major.', duration: 6 })
+  })
+
+  it('answers nothing for a clip that came back as the prompt alone', async () => {
+    stubEnv(STT_ENV)
+    stubFetch(() => jsonResponse({ text: ' Dictation with punctuation.', duration: 1, segments: [{ text: ' Dictation with punctuation.', no_speech_prob: 0 }] }))
+    const t = setup()
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(1), { prompt: PROMPT }))
+    expect(await res.json()).toEqual({ text: '', duration: 1 })
+  })
+
+  it('keeps the words when no prompt was sent, and keeps what the speaker says', async () => {
+    stubEnv(STT_ENV)
+    stubFetch(() => jsonResponse({ text: ' Dictation with punctuation.', duration: 2 }))
+    const t = setup()
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(2)))
+    expect((await res.json()).text).toBe(' Dictation with punctuation.')
+
+    stubFetch(() => jsonResponse({ text: ' We should ship Wispr Flow parity next.', duration: 3 }))
+    const res2 = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(3), { prompt: PROMPT }))
+    expect((await res2.json()).text).toBe(' We should ship Wispr Flow parity next.')
+  })
+})

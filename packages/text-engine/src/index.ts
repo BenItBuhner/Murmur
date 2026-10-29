@@ -119,8 +119,10 @@ export {
   dropSilentSegments,
   isSilenceHallucination,
   isSilentStockPhrase,
+  normalizePhrase,
   TAIL_PHRASE_MIN_SPEECH_MS
 } from './hallucination'
+export { isPromptEcho, stripPromptEcho } from './prompt-echo'
 export {
   joinSeam,
   joinPieces,

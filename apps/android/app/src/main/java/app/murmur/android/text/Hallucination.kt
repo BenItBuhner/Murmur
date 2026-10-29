@@ -11,7 +11,9 @@ object Hallucination {
         "thank you for watching", "thanks for listening", "thank you for listening",
         "thank you for watching and see you next time", "please subscribe", "like and subscribe",
         "subscribe to my channel", "subtitles by the amara org community", "transcribed by",
-        "you", "bye", "bye bye", "okay", "so", "uh", "um", "hmm"
+        "you", "bye", "bye bye", "okay", "so", "uh", "um", "hmm",
+        // Oct 29 2026: the production models' answer to a second of silence with a vocabulary prompt.
+        "the end"
     )
     private val KNOWN = PHRASES.toHashSet()
     private val STRIP = Regex("[^\\p{L}\\p{N}' ]+")

@@ -1,7 +1,12 @@
 package app.murmur.android.stt
 
 import app.murmur.android.audio.Wav
+import app.murmur.android.text.Hallucination
+import app.murmur.android.text.PromptEcho
 import app.murmur.android.text.countWords
+import app.murmur.android.text.editDistance
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -163,6 +168,28 @@ fun mergeTranscripts(head: String, tail: String): String {
     return "$h $rest"
 }
 
+/**
+ * A resumed tail needs at least this many words, and this many per second of the audio it was
+ * sent for, to be taken for speech the transcript missed (Oct 29 2026: 1.5 s of handling noise
+ * after a dictation was "resumed" and came back as "Dictation with punctuation." and "Sigh.").
+ * People speak at 2-3 words per second; the bar is far below that, pauses included. Mirrors
+ * MIN_TAIL_WORDS in apps/desktop/src/core/stt/coverage.ts.
+ */
+const val MIN_TAIL_WORDS = 2
+const val MIN_TAIL_WORDS_PER_SEC = 0.5
+
+/** Share of characters two readings of the same speech have in common, at least. */
+const val SAME_READING = 0.6
+
+/** Two readings of one clip agree closely enough to be the same speech (desktop: sameReading). */
+fun sameReading(a: String, b: String): Boolean {
+    val x = Hallucination.normalize(a)
+    val y = Hallucination.normalize(b)
+    if (x.isEmpty() || y.isEmpty()) return false
+    val longest = maxOf(x.length, y.length)
+    return 1 - editDistance(x, y, longest).toDouble() / longest >= SAME_READING
+}
+
 data class CompleteResult(
     val output: TranscribeOutput,
     /** Extra requests made to recover text the first transcript stopped short of. */
@@ -223,14 +250,39 @@ suspend fun transcribeComplete(
         val cut = findCutPoint(pcm, sampleRate, stoppedAt, thresholdDb)
         if (speechEndSec - cut < 0.6 || pcm.size / sampleRate.toDouble() - cut < 0.5) break
         log("transcript stops at ${fmt(stoppedAt)}s of ${fmt(speechEndSec)}s of speech; resuming from ${fmt(cut)}s")
+        // With a prompt, the same audio is also read without one, at the same time: speech reads the
+        // same both ways, while noise comes back as unrelated words each time.
+        var check: TranscribeOutput? = null
         val tail = try {
-            transcribe(Wav.encodePcm16(pcm.copyOfRange((cut * sampleRate).toInt(), pcm.size), sampleRate), tailPrompt)
+            val wav = Wav.encodePcm16(pcm.copyOfRange((cut * sampleRate).toInt(), pcm.size), sampleRate)
+            coroutineScope {
+                val second = if (tailPrompt != null) async { runCatching { transcribe(wav, null) }.getOrNull() } else null
+                val first = transcribe(wav, tailPrompt)
+                check = second?.await()
+                first
+            }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             log("resume failed: ${e.message}")
             break
         }
-        val tailText = tail.text.trim()
+        val tailText = PromptEcho.strip(tail.text, tailPrompt).trim()
         if (tailText.isEmpty()) break
+        check?.let { c ->
+            if (!sameReading(tailText, c.text)) {
+                log("resumed tail \"${tailText.take(40)}\" reads as \"${c.text.trim().take(40)}\" without the prompt; taken for noise")
+                return CompleteResult(out, resumed, recoveredSec, cov)
+            }
+        }
+        // Noise after the speech (a phone handled, a rustle) passes the level check as "speech", and a
+        // clip of it comes back as a word or two nobody said ("Sigh.", "Thank you."). Speech the
+        // transcript really missed comes back at a speaking rate.
+        if (Hallucination.isSilencePhrase(tailText) ||
+            countWords(tailText) < maxOf(MIN_TAIL_WORDS.toDouble(), MIN_TAIL_WORDS_PER_SEC * (speechEndSec - cut))
+        ) {
+            log("resumed tail \"${tailText.take(40)}\" is too thin for ${fmt(speechEndSec - cut)}s of audio; taken for noise")
+            break
+        }
         val shifted = (tail.spans ?: emptyList()).map { TimedSpan(it.start + cut, it.end + cut) }
         out = out.copy(
             text = mergeTranscripts(out.text, tailText),

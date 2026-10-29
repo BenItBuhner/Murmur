@@ -87,7 +87,10 @@ export function applyDictionary(text: string, entries: readonly DictionaryTerm[]
   return text.replace(c.exact, (m) => c.canonical.get(m.toLowerCase().replace(/\s+/g, ' ')) ?? m)
 }
 
-/** Style hint that goes to the speech model on its own; nothing in it can be mistaken for speech. */
+/**
+ * Style hint that goes to the speech model on its own. Over noise with no speech the model can
+ * read it back as the transcript; prompt-echo.ts drops that.
+ */
 export const STT_BASE_PROMPT = 'Dictation with punctuation.'
 
 /**

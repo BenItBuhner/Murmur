@@ -8,6 +8,7 @@ import app.murmur.android.stt.assessCoverage
 import app.murmur.android.stt.findCutPoint
 import app.murmur.android.stt.lastVoicedSec
 import app.murmur.android.stt.mergeTranscripts
+import app.murmur.android.stt.sameReading
 import app.murmur.android.stt.spansFromVerbose
 import app.murmur.android.stt.transcribeComplete
 import kotlinx.coroutines.runBlocking
@@ -125,8 +126,10 @@ class SttCoverageTest {
         assertEquals(1, r.resumed)
         assertTrue(r.recoveredSec > 10)
         assertFalse(r.coverage.truncated)
-        assertEquals(2, calls.size)
-        assertEquals("Dictation with punctuation.", calls[1].second)
+        // The tail is read with the style prompt, and without any prompt as a check.
+        assertEquals(3, calls.size)
+        assertEquals(setOf("Dictation with punctuation.", null), calls.drop(1).map { it.second }.toSet())
+        assertEquals(calls[1].first, calls[2].first, 0.0)
         // The tail starts inside the 8.0-8.6 s pause, so no word is cut in half.
         val cut = 20 - calls[1].first
         assertTrue("cut $cut", cut > 8.0 && cut < 8.6)
@@ -176,7 +179,12 @@ class SttCoverageTest {
 
     @Test
     fun `chains several resumes when the recognizer keeps stopping early`() = runBlocking {
-        val pieces = listOf("first part.", "second part.", "third part.")
+        // Each piece is said at a speaking rate: a tail of a word or two for many seconds is noise.
+        val pieces = listOf(
+            "first part of what I said before the model stopped short.",
+            "second part of what I said before it stopped again.",
+            "third part of it, which finally reaches the end."
+        )
         var calls = 0
         val r = transcribeComplete(pcm, rate, speechEnd, threshold, prompt = null, tailPrompt = null, maxRounds = 3) { wav, _ ->
             val seconds = wavSeconds(wav)
@@ -185,7 +193,84 @@ class SttCoverageTest {
             out(pieces.getOrElse(i) { "more." }, if (i == 0) 6.5 else minOf(seconds - 0.2, seconds / 2))
         }
         assertTrue("calls $calls", calls in 3..4)
-        assertTrue(r.output.text.startsWith("first part. second part. third part."))
+        assertTrue(r.output.text.startsWith(pieces.joinToString(" ")))
         assertTrue(r.resumed >= 2)
+    }
+
+    @Test
+    fun `takes a thin tail for noise and keeps the transcript as it was (Oct 29 2026)`() = runBlocking {
+        // Speech to 8 s, then 2 s of handling noise that the level check counts as speech.
+        val noisy = clip(11.0, listOf(0.3 to 8.0, 8.8 to 10.8))
+        val end = lastVoicedSec(noisy, rate, threshold)
+        for (junk in listOf("Sigh.", "Thank you.", "The End", "Dictation with punctuation.")) {
+            val calls = ArrayList<String?>()
+            val r = transcribeComplete(
+                noisy, rate, end, threshold,
+                prompt = "Vocabulary: Wispr Flow. Dictation with punctuation.",
+                tailPrompt = "Dictation with punctuation."
+            ) { wav, prompt ->
+                calls.add(prompt)
+                if (calls.size == 1) out(head, 7.9) else out(junk, wavSeconds(wav))
+            }
+            assertEquals(3, calls.size)
+            assertEquals(junk, head, r.output.text)
+            assertEquals(0, r.resumed)
+        }
+    }
+
+    @Test
+    fun `still takes a short tail said at a speaking rate`() = runBlocking {
+        val short = clip(11.0, listOf(0.3 to 8.0, 8.6 to 10.6))
+        val end = lastVoicedSec(short, rate, threshold)
+        var calls = 0
+        val r = transcribeComplete(short, rate, end, threshold, prompt = "p", tailPrompt = null) { wav, _ ->
+            if (calls++ == 0) out(head, 7.9) else out("and the pill stays up.", wavSeconds(wav) - 0.2)
+        }
+        assertEquals("$head and the pill stays up.", r.output.text)
+        assertEquals(1, r.resumed)
+    }
+
+    @Test
+    fun `takes a tail that reads differently without the prompt for noise`() = runBlocking {
+        val noisy = clip(14.0, listOf(0.3 to 8.0, 8.8 to 13.8))
+        val end = lastVoicedSec(noisy, rate, threshold)
+        var calls = 0
+        val r = transcribeComplete(
+            noisy, rate, end, threshold,
+            prompt = "Vocabulary: Wispr Flow. Dictation with punctuation.",
+            tailPrompt = "Dictation with punctuation."
+        ) { _, prompt ->
+            // Five seconds of loud handling noise: a made-up sentence with the prompt, a dot without.
+            if (calls++ == 0) out(head, 7.9) else if (prompt != null) out("The end of the day is a very good one.", 5.0) else out(".")
+        }
+        assertEquals(3, calls)
+        assertEquals(head, r.output.text)
+        assertEquals(0, r.resumed)
+    }
+
+    @Test
+    fun `keeps a tail that reads the same both ways`() = runBlocking {
+        val r = transcribeComplete(
+            pcm, rate, speechEnd, threshold,
+            prompt = "Vocabulary: Wispr Flow. Dictation with punctuation.",
+            tailPrompt = "Dictation with punctuation."
+        ) { wav, prompt ->
+            when {
+                prompt?.contains("Vocabulary") == true -> out(head, 7.9)
+                prompt != null -> out(tail, wavSeconds(wav) - 0.2)
+                else -> out(tail.lowercase().replace(".", ""))
+            }
+        }
+        assertEquals("$head $tail", r.output.text)
+        assertEquals(1, r.resumed)
+    }
+
+    @Test
+    fun `sameReading tells one speech read twice from noise read twice`() {
+        assertTrue(sameReading("Winds.", "wins."))
+        assertTrue(sameReading("Wins out of this whole thing, honestly.", "wins out of this whole thing honestly"))
+        assertFalse(sameReading("The end of the day is a very good one.", "."))
+        assertFalse(sameReading("Dictation with punctuation.", "So"))
+        assertFalse(sameReading("Sigh.", "Oh, my God."))
     }
 }

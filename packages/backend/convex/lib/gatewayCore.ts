@@ -1,5 +1,6 @@
 import { formatTranscript } from '../../../text-engine/src/format'
 import { dropSilentSegments } from '../../../text-engine/src/hallucination'
+import { stripPromptEcho } from '../../../text-engine/src/prompt-echo'
 import { sttLanguageField } from '../../../text-engine/src/languages'
 import { joinSeam } from '../../../text-engine/src/seam'
 import { countWords } from '../../../text-engine/src/text'
@@ -222,6 +223,29 @@ export async function handleModels(hooks: GatewayHooks, identity: GatewayIdentit
   })
 }
 
+/**
+ * The answer without the prompt read back (see text-engine/src/prompt-echo.ts), segments included;
+ * null when there is none.
+ */
+export function dropPromptEcho(
+  answer: { text?: unknown; segments?: unknown },
+  prompt: string | undefined
+): { text: string; segments?: unknown[] } | null {
+  const text = typeof answer.text === 'string' ? answer.text : ''
+  const stripped = stripPromptEcho(text, prompt)
+  if (stripped === text) return null
+  if (!Array.isArray(answer.segments)) return { text: stripped }
+  const segments = (answer.segments as { text?: unknown }[])
+    .map((seg) => {
+      const t = typeof seg.text === 'string' ? seg.text : ''
+      const kept = stripPromptEcho(t, prompt)
+      if (kept === t) return seg
+      return kept ? { ...seg, text: (/^\s/.test(t) ? ' ' : '') + kept } : null
+    })
+    .filter((seg) => seg !== null)
+  return { text: stripped, segments }
+}
+
 export async function handleTranscriptions(
   hooks: GatewayHooks,
   identity: GatewayIdentity | null,
@@ -412,12 +436,20 @@ export async function handleTranscriptions(
   }
   const measured = measuredSeconds(file.data)
   let silenced = 0
+  let echoed = false
   if (json && (upstreamFormat === 'verbose_json' || upstreamFormat === 'json')) {
     const clipSec = measured ?? (typeof json.duration === 'number' ? json.duration : seconds)
-    const dropped = dropSilentSegments(json, clipSec)
+    let dropped = dropSilentSegments(json, clipSec)
     if (dropped) {
       silenced = (Array.isArray(json.segments) ? json.segments.length : 1) - (dropped.segments?.length ?? 0)
       json = { ...json, text: dropped.text, ...(dropped.segments ? { segments: dropped.segments } : {}) }
+    }
+    // A clip without speech can come back as the prompt itself ("Dictation with punctuation.").
+    const echo = dropPromptEcho(json, fields.prompt?.[0])
+    if (echo) {
+      echoed = true
+      json = { ...json, ...echo }
+      dropped ??= { text: echo.text, segments: undefined }
     }
     // The client asked for JSON: the plain answer, as before.
     const verbose = Array.isArray(json.segments)
@@ -446,7 +478,7 @@ export async function handleTranscriptions(
     ...(attempt.attempts > 1 ? { attempts: attempt.attempts } : {})
   }
   console.log(
-    `[gateway] stt plan=${gate.plan} tier=${tier} speed=${speedNote} model=${trace.role} seconds=${billed.toFixed(1)} words=${words}${silenced ? ` silenced=${silenced}` : ''} upstreamMs=${trace.ms}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}${first.hedged ? ` hedged=${first.failover ? 'failover' : 'slow'}` : ''}`
+    `[gateway] stt plan=${gate.plan} tier=${tier} speed=${speedNote} model=${trace.role} seconds=${billed.toFixed(1)} words=${words}${silenced ? ` silenced=${silenced}` : ''}${echoed ? ' prompt_echo=dropped' : ''} upstreamMs=${trace.ms}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}${first.hedged ? ` hedged=${first.failover ? 'failover' : 'slow'}` : ''}`
   )
   const responseHeaders: Record<string, string> = {
     'content-type': upstreamType,

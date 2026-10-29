@@ -60,7 +60,10 @@ describe('stripPromptEcho', () => {
   })
 
   it('works with the prompt the app builds', () => {
-    const prompt = buildSttPrompt([{ word: 'Convex' }, { word: 'Bennett' }])
+    const prompt = buildSttPrompt([
+      { word: 'Convex', aliases: [] },
+      { word: 'Bennett', aliases: [] }
+    ])
     expect(stripPromptEcho('Ship it. Dictation with punctuation.', prompt)).toBe('Ship it.')
     expect(stripPromptEcho('Vocabulary: Convex, Bennett.', prompt)).toBe('')
     expect(stripPromptEcho('Convex, Bennett.', prompt)).toBe('Convex, Bennett.')

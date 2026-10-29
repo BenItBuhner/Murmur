@@ -122,6 +122,17 @@ async function sendType(text: string, opts: InjectOptions): Promise<void> {
   throw new Error('Typing not supported on this platform')
 }
 
+export async function selectAll(): Promise<void> {
+  if (process.platform === 'win32') {
+    win.releaseModifiers()
+    if (!win.keyTap(win.VK.A, [win.VK.CONTROL])) throw new Error('SendInput Ctrl+A failed')
+    return
+  }
+  if (process.platform === 'linux') return linux.selectAllShortcut(linux.pickTool())
+  if (process.platform === 'darwin') return darwin.selectAllShortcut()
+  throw new Error('Select all not supported on this platform')
+}
+
 export async function sendEnter(): Promise<void> {
   if (process.platform === 'win32') {
     win.keyTap(win.VK.RETURN)

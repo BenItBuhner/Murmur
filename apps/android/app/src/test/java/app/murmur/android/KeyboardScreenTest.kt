@@ -91,11 +91,13 @@ class KeyboardScreenTest {
     fun `the defaults are shown as key caps and the device's state is described`() {
         compose.onNodeWithText("No physical keyboard").assertIsDisplayed()
         compose.onNodeWithContentDescription("Push to talk: Ctrl + Meta").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithContentDescription("Hands-free shortcut: Ctrl + Meta + Space").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithContentDescription("Edit selection: Shift + Meta").performScrollTo().assertIsDisplayed()
-        // Key caps carry the key names one by one.
-        assertTrue(compose.onAllNodesWithText("Ctrl").fetchSemanticsNodes().size >= 2)
-        compose.onAllNodesWithText("Meta").fetchSemanticsNodes().let { assertTrue(it.size >= 3) }
+        compose.onNodeWithContentDescription("Hands-free shortcut: Not set").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Edit selection: Not set").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Correct selection: Not set").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Select all, then correct: Not set").performScrollTo().assertIsDisplayed()
+        // Push-to-talk is the only factory bind; its caps still name the keys.
+        assertTrue(compose.onAllNodesWithText("Ctrl").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(compose.onAllNodesWithText("Meta").fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test
@@ -123,7 +125,7 @@ class KeyboardScreenTest {
 
     @Test
     fun `a reserved chord is refused with the reason and the old one is kept`() {
-        compose.onNodeWithContentDescription("Edit selection: Shift + Meta").performScrollTo()
+        compose.onNodeWithContentDescription("Edit selection: Not set").performScrollTo()
         compose.onAllNodesWithText("Change")[2].performClick()
         compose.waitForIdle()
         ShortcutRecorder.publish(
@@ -131,7 +133,7 @@ class KeyboardScreenTest {
         )
         compose.waitForIdle()
         compose.onNodeWithText("Alt + Meta is reserved by Android: it toggles Caps Lock.").assertIsDisplayed()
-        assertEquals(KeyboardSettings.DEFAULT_COMMAND_MODE, keyboard().commandMode)
+        assertEquals(emptyList<Int>(), keyboard().commandMode)
     }
 
     @Test
@@ -146,6 +148,12 @@ class KeyboardScreenTest {
 
     @Test
     fun `the optional shortcuts can be removed and the switches write the section`() {
+        compose.onNodeWithContentDescription("Hands-free shortcut: Not set").performScrollTo()
+        compose.onAllNodesWithText("Change")[1].performClick()
+        compose.waitForIdle()
+        ShortcutRecorder.publish(ShortcutCapture(listOf(Key.F9), "F9", valid = true, final = true))
+        compose.waitForIdle()
+        assertEquals(listOf(Key.F9), keyboard().handsFree)
         compose.onNodeWithContentDescription("Remove Hands-free shortcut").performScrollTo().performClick()
         compose.waitForIdle()
         assertEquals(emptyList<Int>(), keyboard().handsFree)

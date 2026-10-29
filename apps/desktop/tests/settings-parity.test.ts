@@ -72,10 +72,13 @@ describe('settings parity contract', () => {
       soundVolume: s.general.soundVolume,
       overlayPosition: s.general.overlayPosition,
       showOverlayWhenIdle: s.general.showOverlayWhenIdle,
-      // The command chord is left out on purpose: the desktop's Alt + Meta toggles Caps Lock on
-      // Android, so the phone ships Shift + Meta there.
+      // Only push-to-talk is bound by default. Command, correction and the dedicated hands-free
+      // chord stay empty on both apps until the user sets them.
       pushToTalk: s.hotkeys.pushToTalk,
       handsFree: s.hotkeys.handsFree,
+      commandMode: s.hotkeys.commandMode,
+      correctSelection: s.hotkeys.correctSelection,
+      selectAllThenCorrect: s.hotkeys.selectAllThenCorrect,
       handsFreeTrigger: s.hotkeys.handsFreeTrigger,
       tapThresholdMs: s.hotkeys.tapThresholdMs,
       doubleTapWindowMs: s.hotkeys.doubleTapWindowMs,

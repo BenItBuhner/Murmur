@@ -165,6 +165,28 @@ export function HomePage({
                 />
               </div>
             )}
+            {settings.hotkeys.correctSelection.length > 0 && (
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium">Correct selection</div>
+                <KeyCaps
+                  keys={settings.hotkeys.correctSelection}
+                  platform={platform}
+                  sideSensitive={settings.hotkeys.sideSensitive}
+                  size="lg"
+                />
+              </div>
+            )}
+            {settings.hotkeys.selectAllThenCorrect.length > 0 && (
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium">Select all, then correct</div>
+                <KeyCaps
+                  keys={settings.hotkeys.selectAllThenCorrect}
+                  platform={platform}
+                  sideSensitive={settings.hotkeys.sideSensitive}
+                  size="lg"
+                />
+              </div>
+            )}
             <div className="pt-1">
               <div className="mb-2 text-note text-muted-foreground">
                 Practice here — click the box, hold the shortcut and say something.

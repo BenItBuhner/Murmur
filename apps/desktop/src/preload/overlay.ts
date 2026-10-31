@@ -24,7 +24,8 @@ const api = {
   onTheme: (cb: (theme: ThemeMessage) => void): Unsub => on(IPC.overlayTheme, cb),
   onAudioConfigure: (cb: (cfg: AudioConfigureMessage) => void): Unsub => on(IPC.audioConfigure, cb),
   onAudioStart: (cb: (m: AudioStartMessage) => void): Unsub => on(IPC.audioStart, cb),
-  onAudioStop: (cb: (m: { sessionId: string }) => void): Unsub => on(IPC.audioStop, cb),
+  onAudioStop: (cb: (m: { sessionId: string; postRoll?: boolean }) => void): Unsub =>
+    on(IPC.audioStop, cb),
   sendChunk: (m: AudioChunkMessage): void => ipcRenderer.send(IPC.audioChunk, m),
   sendStopped: (m: AudioStoppedMessage): void => ipcRenderer.send(IPC.audioStopped, m),
   sendStatus: (m: AudioStatusMessage): void => ipcRenderer.send(IPC.audioStatus, m),

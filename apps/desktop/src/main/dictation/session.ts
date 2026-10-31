@@ -641,6 +641,10 @@ export class DictationController extends EventEmitter {
       // MURMUR_TAIL_SPECULATION=0 turns it off (diagnostics, and tests of the plain pipeline).
       process.env.MURMUR_TAIL_SPECULATION === '0' ? undefined : speculateTail
     )
+    // Open the connection to the gateway (and warm its grant) as soon as the user starts talking,
+    // as Android does, not only once a long dictation cuts its first piece: a short dictation
+    // otherwise paid the handshake on its release.
+    void resolveTarget()?.catch(() => undefined)
     session.streamListener = (id, samples) => {
       if (id === session.id) session.stream?.onSamples(samples)
     }
@@ -1344,7 +1348,14 @@ export class DictationController extends EventEmitter {
     forceMethod?: 'clipboard'
   ): Promise<InjectResult> {
     const run = async (): Promise<InjectResult> => {
-      await this.deps.hook.waitForKeysUp(1500)
+      // One wait for the hotkey to come up, before our own keystrokes. (It was waited for again
+      // inside injectText, after beginSynthetic, where no release could be seen: a key the hook
+      // thought held cost 1.5 s twice on every insertion.)
+      const released = await this.deps.hook.waitForKeysUp(1500)
+      if (!released)
+        log.warn(
+          `keys still held after 1.5 s (${(this.deps.hook as Partial<HookService>).heldKeys?.join(', ') ?? '?'}); inserting anyway`
+        )
       this.deps.hook.beginSynthetic()
       try {
         // Replacing a selection through the clipboard is unreliable when we own the X CLIPBOARD
@@ -1358,8 +1369,7 @@ export class DictationController extends EventEmitter {
           restoreClipboardDelayMs: s.injection.restoreClipboardDelayMs,
           typeChunkSize: s.injection.typeChunkSize,
           typeChunkDelayMs: s.injection.typeChunkDelayMs,
-          pressEnter,
-          waitForKeysUp: () => this.deps.hook.waitForKeysUp(1500)
+          pressEnter
         })
       } finally {
         // Keep suppressing briefly so the trailing synthesized key-ups are ignored too.

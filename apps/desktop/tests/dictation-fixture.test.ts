@@ -364,7 +364,10 @@ describe('a dictation fed by MURMUR_TEST_AUDIO_FILE', () => {
     const rule = await dictateOnce()
     expect(routed.formatterCalls).toBe(3)
     expect(rule.speed).toBe('normal')
-    expect(routed.speeds).toEqual(['normal', 'normal', 'normal'])
+    // Every speech request asked for Normal (the session start also resolves the target, to
+    // prewarm the gateway, so there are more requests than dictations).
+    expect(routed.speeds.length).toBeGreaterThanOrEqual(3)
+    expect([...new Set(routed.speeds)]).toEqual(['normal'])
 
     // Turning AI formatting off for an app is how to skip the model now.
     s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'auto', formatting: 'light' }]

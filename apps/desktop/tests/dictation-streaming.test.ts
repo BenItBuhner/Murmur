@@ -28,14 +28,19 @@ const provider = vi.hoisted(() => ({
   text: 'um so hello from murmur this is a test',
   sizes: [] as number[],
   failFirst: false,
+  /** Per request (1-based): how long it takes to answer, and whether it fails. */
+  delays: {} as Record<number, number>,
+  fail: new Set<number>(),
   transcribe: async (input: { wav: Uint8Array }): Promise<TranscribeOutput> => {
-    provider.requests++
+    const n = ++provider.requests
     provider.sizes.push(input.wav.length)
-    if (provider.failFirst && provider.requests === 1) throw new SttError('upstream 503', 'server')
+    if (provider.delays[n]) await new Promise((r) => setTimeout(r, provider.delays[n]))
+    if (provider.fail.has(n)) throw new SttError('upstream 503', 'server')
+    if (provider.failFirst && n === 1) throw new SttError('upstream 503', 'server')
     if (provider.outcome === 'timeout')
       throw new SttError('The request timed out after 45000 ms', 'timeout')
     return {
-      text: `${provider.text} ${provider.requests}`,
+      text: `${provider.text} ${n}`,
       language: 'en',
       durationSec: 1.5,
       latencyMs: 12
@@ -115,6 +120,14 @@ class FakeRecorder extends EventEmitter {
   sampleCount(): number {
     return this.fed
   }
+  /** Feeds the clip at `speed` times real time (100 ms chunks), as a slow-motion recording. */
+  async feedPaced(speed = 50): Promise<void> {
+    while (this.fed < this.pcm.length) {
+      this.fed = Math.min(this.pcm.length, this.fed + 1600)
+      this.emit('chunk', this.id, this.fed, 0.5)
+      await new Promise((r) => setTimeout(r, 100 / speed))
+    }
+  }
   feedAll(): void {
     while (this.fed < this.pcm.length) {
       this.fed = Math.min(this.pcm.length, this.fed + 1600)
@@ -187,6 +200,8 @@ describe('streaming a long dictation while it is spoken', () => {
     provider.requests = 0
     provider.sizes = []
     provider.failFirst = false
+    provider.delays = {}
+    provider.fail = new Set()
     provider.outcome = 'ok'
     provider.text = 'piece'
     recorder = new FakeRecorder()
@@ -258,6 +273,8 @@ describe('a short dictation stopped in a pause (Android #134/#135)', () => {
     provider.requests = 0
     provider.sizes = []
     provider.failFirst = false
+    provider.delays = {}
+    provider.fail = new Set()
     provider.outcome = 'ok'
     provider.text = 'short'
     recorder = new FakeRecorder()
@@ -321,6 +338,171 @@ describe('a short dictation stopped in a pause (Android #134/#135)', () => {
   })
 })
 
+describe('a short dictation stopped in a pause: edge cases', () => {
+  let dir: string
+  let history: HistoryStore
+  let controller: DictationController
+  let recorder: FakeRecorder
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 600 && controller.isBusy; i++) await new Promise((r) => setTimeout(r, 5))
+  }
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+  const text = (): string => history.list().entries[0]?.finalText.toLowerCase() ?? ''
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'murmur-edge-'))
+    const recordings = new RecordingStore(join(dir, 'recordings'))
+    history = new HistoryStore(dir, recordings)
+    inject.calls.length = 0
+    provider.requests = 0
+    provider.sizes = []
+    provider.failFirst = false
+    provider.delays = {}
+    provider.fail = new Set()
+    provider.outcome = 'ok'
+    provider.text = 'short'
+    recorder = new FakeRecorder()
+    controller = new DictationController({
+      settings: new FakeSettings() as never,
+      history,
+      recorder: recorder as never,
+      recordings,
+      hook: hook as never,
+      inference: inference as never,
+      overlay: { setState: () => undefined, playSound: () => undefined },
+      getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
+    })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  /** `parts` laid out in order: a number is that many seconds of silence, an array is speech. */
+  const clip = (...parts: Array<number | [number]>): Int16Array => {
+    const total = parts.reduce<number>((t, p) => t + (typeof p === 'number' ? p : p[0]), 0)
+    const pcm = new Int16Array(Math.round(total * SAMPLE_RATE))
+    let at = 0
+    for (const p of parts) {
+      const sec = typeof p === 'number' ? p : p[0]
+      if (typeof p !== 'number') pcm.set(speech(sec), Math.round(at * SAMPLE_RATE))
+      at += sec
+    }
+    return pcm
+  }
+  const dictate = async (pcm: Int16Array, holdMs = 30): Promise<void> => {
+    recorder.pcm = pcm
+    controller.handle({ type: 'start', mode: 'hold' })
+    recorder.feedAll()
+    await sleep(holdMs)
+    controller.handle({ type: 'stop' })
+    await settle()
+  }
+
+  it('speculation still running at the stop: the whole recording wins when it is faster', async () => {
+    provider.delays = { 1: 400 } // the background speculation is slow
+    await dictate(clip([3], 1.5))
+    expect(provider.requests).toBe(2)
+    expect(text()).toContain('short 2')
+  })
+
+  it('speculation still running at the stop: it is used when it answers first', async () => {
+    provider.delays = { 1: 60, 2: 600 }
+    const t0 = Date.now()
+    await dictate(clip([3], 1.5), 5)
+    expect(text()).toContain('short 1')
+    // Did not wait for the slow whole-recording request.
+    expect(Date.now() - t0).toBeLessThan(550)
+  })
+
+  it('a failed speculation: the whole recording is sent at release', async () => {
+    provider.fail = new Set([1])
+    await dictate(clip([3], 1.5))
+    expect(provider.requests).toBe(2)
+    expect(text()).toContain('short 2')
+  })
+
+  it('a speculation that fails while the whole recording is in flight: the whole one decides', async () => {
+    provider.delays = { 1: 80, 2: 200 }
+    provider.fail = new Set([1])
+    await dictate(clip([3], 1.5), 5)
+    expect(text()).toContain('short 2')
+  })
+
+  it('both fail: the dictation ends with an error, not a hang', async () => {
+    provider.delays = { 1: 50 }
+    provider.fail = new Set([1, 2, 3, 4, 5, 6])
+    await dictate(clip([3], 1.5), 5)
+    expect(controller.isBusy).toBe(false)
+    expect(inject.calls).toHaveLength(0)
+  })
+
+  it('under 2 s of audio: no speculation, one request at release', async () => {
+    await dictate(clip([1.2], 0.7))
+    expect(provider.requests).toBe(1)
+    expect(text()).toContain('short 1')
+  })
+
+  it('a stop 0.4 s into a pause: too short to speculate, still skips the post-roll', async () => {
+    await dictate(clip([3], 0.4))
+    expect(provider.requests).toBe(1)
+    expect(recorder.stop).toHaveBeenCalledWith(expect.any(String), expect.any(Number), {
+      postRoll: false
+    })
+  })
+
+  it('a stop mid-word keeps the post-roll', async () => {
+    await dictate(clip([3.17]))
+    expect(recorder.stop).toHaveBeenCalledWith(expect.any(String), expect.any(Number), {
+      postRoll: true
+    })
+  })
+
+  it('a short word after the pause is never lost', async () => {
+    await dictate(clip([3], 1, [0.3], 0.8))
+    // The speculation covered the first 3 s; the word after it sends the whole recording again.
+    expect(provider.requests).toBe(2)
+    expect(text()).toContain('short 2')
+    expect(Math.max(...provider.sizes)).toBeGreaterThan(4.5 * SAMPLE_RATE * 2)
+  })
+
+  it('a 60 ms click after the pause does not count as speech', async () => {
+    const pcm = clip([3], 1.6)
+    const at = Math.round(3.8 * SAMPLE_RATE)
+    for (let i = 0; i < 0.06 * SAMPLE_RATE; i++) pcm[at + i] = Math.round(Math.sin(i / 3) * 12000)
+    await dictate(pcm)
+    expect(provider.requests).toBe(1)
+    expect(text()).toContain('short 1')
+  })
+
+  it('spoke on for 3 s after the first pause, then paused again: the newer speculation is used', async () => {
+    await dictate(clip([3], 1, [3], 1.5), 60)
+    // One speculation per pause, nothing more at release.
+    expect(provider.requests).toBe(2)
+    expect(text()).toContain('short 2')
+    expect(Math.max(...provider.sizes)).toBeGreaterThan(7 * SAMPLE_RATE * 2)
+  })
+
+  it('paced like a real recording: the second pause speculates again and the stop sends nothing', async () => {
+    recorder.pcm = clip([3], 1, [3], 1.5)
+    controller.handle({ type: 'start', mode: 'hold' })
+    await recorder.feedPaced(20)
+    await sleep(20)
+    const before = provider.requests
+    controller.handle({ type: 'stop' })
+    await settle()
+    expect(before).toBe(2)
+    expect(provider.requests).toBe(2)
+    expect(text()).toContain('short 2')
+  })
+
+  it('only one speculation at a time while the provider is behind', async () => {
+    provider.delays = { 1: 300 }
+    await dictate(clip([3], 1, [3], 1.5), 5)
+    // The second pause found the first still running and did not pile on more of the same audio.
+    expect(provider.sizes.filter((s) => s < 5 * SAMPLE_RATE * 2)).toHaveLength(1)
+    expect(text()).toMatch(/short \d/)
+    // The text covers the whole recording, never just the first stretch.
+    expect(text()).not.toContain('short 1')
+  })
+})
+
 describe('precision mode formats pieces while the user speaks', () => {
   beforeEach(() => vi.stubEnv('MURMUR_TAIL_SPECULATION', '0'))
   afterEach(() => vi.unstubAllEnvs())
@@ -338,6 +520,8 @@ describe('precision mode formats pieces while the user speaks', () => {
     provider.requests = 0
     provider.sizes = []
     provider.failFirst = false
+    provider.delays = {}
+    provider.fail = new Set()
     provider.outcome = 'ok'
     provider.text = 'piece'
     inference.formatCalls.length = 0
@@ -389,6 +573,8 @@ describe('speculating on the tail while the user speaks', () => {
     provider.requests = 0
     provider.sizes = []
     provider.failFirst = false
+    provider.delays = {}
+    provider.fail = new Set()
     provider.outcome = 'ok'
     provider.text = 'part'
     inference.formatCalls.length = 0

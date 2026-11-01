@@ -47,6 +47,7 @@ interface Win32Api {
   ) => number
   CloseHandle: (h: unknown) => number
   GetAsyncKeyState: (vk: number) => number
+  MapVirtualKeyW: (code: number, mapType: number) => number
   inputSize: number
 }
 
@@ -107,6 +108,9 @@ function load(): Win32Api | null {
       ),
       CloseHandle: kernel32.func('int __stdcall CloseHandle(MURMUR_HANDLE hObject)'),
       GetAsyncKeyState: user32.func('short __stdcall GetAsyncKeyState(int vKey)'),
+      MapVirtualKeyW: user32.func(
+        'unsigned int __stdcall MapVirtualKeyW(unsigned int uCode, unsigned int uMapType)'
+      ),
       inputSize: koffi.sizeof(INPUT)
     }
     void HWND
@@ -184,6 +188,35 @@ export function releaseModifiers(): void {
       )
   }
   if (ev.length) send(ev)
+}
+
+/** uiohook mouse buttons (1 left, 2 right, 3 middle, 4/5 side) as virtual-key codes. */
+const MOUSE_VK: Record<number, number> = { 1: 0x01, 2: 0x02, 3: 0x04, 4: 0x05, 5: 0x06 }
+const MAPVK_VSC_TO_VK_EX = 3
+
+/**
+ * Whether Windows says the key behind a hook code is down right now (GetAsyncKeyState), or null
+ * when it cannot tell (not Windows, no user32, a code with no virtual key). uiohook keyboard codes
+ * are set-1 scan codes, 0x0E00 marking the E0-extended ones (3675 = Left Win); mouse buttons are
+ * `mouseBase + button`. Lets the hook drop a key whose release it never saw.
+ */
+export function hookKeyHeld(code: number, mouseBase: number): boolean | null {
+  const a = load()
+  if (!a) return null
+  let vk = 0
+  if (code >= mouseBase && code < mouseBase + 64) vk = MOUSE_VK[code - mouseBase] ?? 0
+  else {
+    const high = code & 0xff00
+    if (high !== 0 && high !== 0x0e00) return null
+    const scan = (high === 0x0e00 ? 0xe000 : 0) | (code & 0xff)
+    try {
+      vk = a.MapVirtualKeyW(scan, MAPVK_VSC_TO_VK_EX)
+    } catch {
+      return null
+    }
+  }
+  if (!vk) return null
+  return (a.GetAsyncKeyState(vk) & 0x8000) !== 0
 }
 
 export function modifiersDown(): boolean {

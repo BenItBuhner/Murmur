@@ -11,17 +11,29 @@ export type ChunkTranscriber = (pcm: Int16Array, index: number) => Promise<strin
  */
 export type TailSpeculator<T> = (pcm: Int16Array) => Promise<T>
 
-/** How often the unfinished stretch is checked for a new pause to speculate up to. */
-export const SPEC_CHECK_SEC = 0.5
+/**
+ * How often the unfinished stretch is checked for a pause to speculate up to: often enough that a
+ * trailing pause is caught within ~0.1 s of reaching SPEC_TRAILING_PAUSE_MS (Android: SPEC_CHECK_SEC).
+ */
+export const SPEC_CHECK_SEC = 0.1
 /** A new speculation needs at least this much more audio than the last one covered. */
 export const SPEC_MIN_GAIN_SEC = 2
 /** Pauses at least this long are speculation points (mid-sentence ones too; the join repairs). */
 export const SPEC_PAUSE_MS = 600
+/**
+ * A pause still going on at the end of the audio is a speculation point once it is this long: the
+ * speaker may be about to stop, and a stop in that pause then finds everything said already
+ * transcribed (Android #135: dictations under ~18 s otherwise did nothing while spoken, so every
+ * stop waited for the whole speech + formatting round trip).
+ */
+export const SPEC_TRAILING_PAUSE_MS = 600
 
 /** A speculation that was running or done at release, and where the audio after it starts. */
 export interface TailSpeculation<T> {
   samples: number
   result: Promise<T>
+  /** Pieces sent before it (0: a short dictation, speculated on whole at a trailing pause). */
+  pieces: number
 }
 
 /**
@@ -70,7 +82,9 @@ export const PAUSE_LEAD_IN_SEC = 0.3
  */
 export class ChunkStreamer<T = never> {
   private committed = 0
-  private spec: { at: number; restFrom: number; result: Promise<T> } | null = null
+  private spec: { at: number; restFrom: number; result: Promise<T>; pieces: number } | null = null
+  /** The newest speculation has not come back yet (one at a time, as on Android). */
+  private specRunning = false
   private nextSpecCheck = 0
   /** Samples before `committed` the next piece repeats. */
   private overlap = 0
@@ -135,6 +149,7 @@ export class ChunkStreamer<T = never> {
     this.pieces.push(p)
     this.committed += cut
     this.spec = null // the piece covers it
+    this.specRunning = false
     this.nextSpecCheck = 0
     const leadIn = found.forced
       ? FORCED_OVERLAP_SEC
@@ -144,26 +159,41 @@ export class ChunkStreamer<T = never> {
   }
 
   private maybeSpeculate(total: number): void {
-    // Short dictations never reach a piece cut (~18 s). Speculating on them makes release wait
-    // for an in-flight STT+format of almost the whole clip (desktop log 004edb08: 17 words, 2.7 s).
-    // Only speculate on the stretch after at least one piece, where the remainder is the real tail.
-    if (!this.speculate || this.committed === 0) return
+    if (!this.speculate) return
     if (total - this.committed < this.nextSpecCheck) return
     this.nextSpecCheck = total - this.committed + Math.floor(SPEC_CHECK_SEC * this.sampleRate)
     const pending = this.read(this.committed)
     const threshold = adaptiveThreshold(pending, this.sampleRate, this.floorDb)
-    const cut = findSpecCut(pending, this.sampleRate, threshold, SPEC_PAUSE_MS)
+    const cut = findSpecCut(
+      pending,
+      this.sampleRate,
+      threshold,
+      SPEC_PAUSE_MS,
+      2,
+      SPEC_TRAILING_PAUSE_MS
+    )
     if (!cut) return
+    // Short dictations (no piece yet) speculate only at a pause still going on, where the speaker
+    // may be done (Android #135): a speculation at a pause they spoke on after saves little there
+    // and each one re-sends the whole stretch.
+    if (this.committed === 0 && !cut.trailing) return
     if (this.spec && cut.at < this.spec.at + SPEC_MIN_GAIN_SEC * this.sampleRate) return
+    // One speculation at a time: a newer one waits for the last to come back, so a slow pool is
+    // not handed more of the same audio while it is behind.
+    if (this.specRunning) return
     const pcm = this.overlap
       ? this.read(this.committed - this.overlap).slice(0, this.overlap + cut.at)
       : pending.slice(0, cut.at)
+    this.specRunning = true
     const result = this.speculate(pcm)
-    result.catch(() => undefined) // a failed speculation only means the tail is sent whole
+    const settled = (): void => {
+      if (this.spec?.result === result) this.specRunning = false
+    }
+    result.then(settled, settled) // a failed speculation only means the tail is sent whole
     const lead = Math.floor(
       Math.min(PAUSE_LEAD_IN_SEC, Math.max(0, cut.pauseMs / 2000 - 0.05)) * this.sampleRate
     )
-    this.spec = { at: cut.at, restFrom: cut.at - lead, result }
+    this.spec = { at: cut.at, restFrom: cut.at - lead, result, pieces: this.pieces.length }
   }
 
   /**
@@ -172,7 +202,11 @@ export class ChunkStreamer<T = never> {
    */
   speculation(): TailSpeculation<T> | null {
     if (!this.spec) return null
-    return { samples: this.committed + this.spec.restFrom, result: this.spec.result }
+    return {
+      samples: this.committed + this.spec.restFrom,
+      result: this.spec.result,
+      pieces: this.spec.pieces
+    }
   }
 
   /**
@@ -258,4 +292,3 @@ export function formatGroups(text: string, size = FORMAT_GROUP_WORDS): string[] 
   if (cur.length) groups.push(cur.join(' '))
   return groups
 }
-

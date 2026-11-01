@@ -141,7 +141,8 @@ export class MicCapture {
     this.preBuffer = []
   }
 
-  stop(id: string): void {
+  /** `postRoll: false`: the last moments were already quiet, so there is no last word to wait for. */
+  stop(id: string, postRoll = true): void {
     if (!this.session || this.session.id !== id) {
       this.events.onStopped(id, 0)
       return
@@ -150,14 +151,17 @@ export class MicCapture {
     this.pendingStart = null
     // Post-roll: the key comes up while the last word is still sounding and audio still in the
     // graph; keep the session open briefly, then flush the worklet's partial buffer.
-    setTimeout(() => {
-      this.node?.port.postMessage('flush')
-      // The flushed buffer arrives as one more message; give it a tick before closing.
-      setTimeout(() => {
-        if (this.session === s) this.session = null
-        this.events.onStopped(s.id, s.samples)
-      }, 20)
-    }, STOP_POST_ROLL_MS)
+    setTimeout(
+      () => {
+        this.node?.port.postMessage('flush')
+        // The flushed buffer arrives as one more message; give it a tick before closing.
+        setTimeout(() => {
+          if (this.session === s) this.session = null
+          this.events.onStopped(s.id, s.samples)
+        }, 20)
+      },
+      postRoll ? STOP_POST_ROLL_MS : 0
+    )
     if (this.cfg && !this.cfg.keepWarm) {
       this.releaseTimer = setTimeout(() => void this.release(), 4000)
     }

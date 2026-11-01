@@ -112,6 +112,9 @@ class FakeRecorder extends EventEmitter {
   read(_id: string, from: number): Int16Array {
     return this.pcm.slice(from, this.fed)
   }
+  sampleCount(): number {
+    return this.fed
+  }
   feedAll(): void {
     while (this.fed < this.pcm.length) {
       this.fed = Math.min(this.pcm.length, this.fed + 1600)
@@ -236,6 +239,85 @@ describe('streaming a long dictation while it is spoken', () => {
     controller.handle({ type: 'stop' })
     await settle()
     expect(provider.requests).toBe(1)
+  })
+})
+
+describe('a short dictation stopped in a pause (Android #134/#135)', () => {
+  let dir: string
+  let history: HistoryStore
+  let controller: DictationController
+  let recorder: FakeRecorder
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 400 && controller.isBusy; i++) await new Promise((r) => setTimeout(r, 5))
+  }
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'murmur-short-'))
+    const recordings = new RecordingStore(join(dir, 'recordings'))
+    history = new HistoryStore(dir, recordings)
+    inject.calls.length = 0
+    provider.requests = 0
+    provider.sizes = []
+    provider.failFirst = false
+    provider.outcome = 'ok'
+    provider.text = 'short'
+    recorder = new FakeRecorder()
+    controller = new DictationController({
+      settings: new FakeSettings() as never,
+      history,
+      recorder: recorder as never,
+      recordings,
+      hook: hook as never,
+      inference: inference as never,
+      overlay: { setState: () => undefined, playSound: () => undefined },
+      getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
+    })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  /** 3 s of speech, then 1.5 s of quiet: the speaker stopped talking before letting go. */
+  const spokeThenPaused = (): Int16Array => {
+    const pcm = new Int16Array(Math.round(4.5 * SAMPLE_RATE))
+    pcm.set(speech(3), 0)
+    return pcm
+  }
+
+  it('uses the text transcribed in the pause; nothing more goes up at release', async () => {
+    recorder.pcm = spokeThenPaused()
+    controller.handle({ type: 'start', mode: 'hold' })
+    recorder.feedAll()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(provider.requests).toBe(1) // the speculation, while the user was still holding the key
+    controller.handle({ type: 'stop' })
+    await settle()
+    expect(provider.requests).toBe(1)
+    expect(history.list().entries[0].finalText.toLowerCase()).toContain('short 1')
+  })
+
+  it('skips the post-roll when the last moments were quiet', async () => {
+    recorder.pcm = spokeThenPaused()
+    controller.handle({ type: 'start', mode: 'hold' })
+    recorder.feedAll()
+    controller.handle({ type: 'stop' })
+    await settle()
+    expect(recorder.stop).toHaveBeenCalledWith(expect.any(String), expect.any(Number), {
+      postRoll: false
+    })
+  })
+
+  it('a dictation that went on after the pause is sent whole', async () => {
+    const pcm = new Int16Array(Math.round(6 * SAMPLE_RATE))
+    pcm.set(speech(3), 0)
+    pcm.set(speech(2), Math.round(4 * SAMPLE_RATE))
+    recorder.pcm = pcm
+    controller.handle({ type: 'start', mode: 'hold' })
+    recorder.feedAll()
+    await new Promise((r) => setTimeout(r, 30))
+    controller.handle({ type: 'stop' })
+    await settle()
+    // The speculation at 3 s, then the whole recording at release.
+    expect(provider.requests).toBe(2)
+    expect(Math.max(...provider.sizes)).toBeGreaterThan(5 * SAMPLE_RATE * 2)
+    expect(history.list().entries[0].finalText.toLowerCase()).toContain('short 2')
   })
 })
 

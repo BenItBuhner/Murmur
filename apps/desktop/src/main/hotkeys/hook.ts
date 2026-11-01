@@ -3,6 +3,7 @@ import { globalShortcut } from 'electron'
 import { HotkeyEngine, type HotkeyAction, type HotkeyEngineConfig } from '@core/hotkey/engine'
 import {
   Key,
+  MOUSE_BUTTON_BASE,
   canonicalChord,
   chordLabel,
   electronAccelerator,
@@ -13,6 +14,7 @@ import {
 import type { Settings } from '@shared/settings'
 import type { HotkeyCapture } from '@shared/types'
 import { createLogger } from '../logger'
+import { hookKeyHeld } from '../inject/win32'
 
 const log = createLogger('hook')
 
@@ -44,9 +46,18 @@ export class HookService extends EventEmitter {
   private started = false
   private synthetic = false
   private syntheticTimer: NodeJS.Timeout | null = null
+  /**
+   * What the OS says about a key right now (true down, false up, null unknown). Windows asks
+   * GetAsyncKeyState; elsewhere the hook's own events are all there is.
+   */
+  private keyHeld: (code: number) => boolean | null
 
-  constructor(private settings: Settings) {
+  constructor(
+    private settings: Settings,
+    keyHeld?: (code: number) => boolean | null
+  ) {
     super()
+    this.keyHeld = keyHeld ?? ((code) => hookKeyHeld(code, MOUSE_BUTTON_BASE))
     this.engine = new HotkeyEngine(HookService.engineConfig(settings))
     this.sideSensitive = settings.hotkeys.sideSensitive
   }
@@ -155,9 +166,26 @@ export class HookService extends EventEmitter {
     return this.engine.isListening
   }
 
-  /** True while any physical key we have seen pressed is still down. */
+  /**
+   * True while any physical key we have seen pressed is still down. A key whose release the hook
+   * missed (released over an elevated window, at the lock screen, or while we were injecting)
+   * would otherwise count as held forever and make every insertion wait out its timeout
+   * (Oct 31 2026: three dictations in a row spent 3 s in "inject", "Hotkey still held"), so a key
+   * the OS says is up is dropped here.
+   */
   get anyKeyDown(): boolean {
+    for (const code of this.physicallyDown) {
+      if (this.keyHeld(code) === false) {
+        this.physicallyDown.delete(code)
+        log.info(`key ${code} was up although its release was never seen; no longer waiting for it`)
+      }
+    }
     return this.physicallyDown.size > 0
+  }
+
+  /** The keys still counted as held, for the log when an insertion waits them out. */
+  get heldKeys(): number[] {
+    return [...this.physicallyDown]
   }
 
   /** Resolve once the user has released every key, or after `timeoutMs`. Injection waits on this. */
@@ -204,10 +232,12 @@ export class HookService extends EventEmitter {
   // ---- event plumbing -----------------------------------------------------------------------
 
   private onKey(code: number, down: boolean): void {
+    // A release always counts, even while we inject: dropping a physical key-up that lands
+    // during a paste left that key "held" for good, and every later insertion waited for it.
+    if (!down) this.physicallyDown.delete(code)
     // Drop events we synthesized ourselves so injection never triggers dictation.
     if (this.synthetic) return
     if (down) this.physicallyDown.add(code)
-    else this.physicallyDown.delete(code)
 
     if (this.capture) {
       if (down) {

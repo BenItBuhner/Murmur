@@ -231,7 +231,9 @@ export async function formatTranscript(
         : verdict.reason === 'verbatim-lost'
           ? `verbatim-lost (${verdict.expected})`
           : (verdict.reason ?? 'rejected')
-    if (attempt === 0) firstReason = detail
+    // A dropped ending is not asked again: a second round trip would add to the stop, and the
+    // rule-based text has every word the speaker said.
+    if (attempt === 0 && verdict.reason !== 'ending-lost') firstReason = detail
     else {
       return fallback(
         'rejected',

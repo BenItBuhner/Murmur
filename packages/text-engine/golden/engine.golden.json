@@ -776,8 +776,8 @@
       "options": {
         "language": "de"
       },
-      "ok": true,
-      "reason": null
+      "ok": false,
+      "reason": "ending-lost"
     },
     {
       "transcript": "sign it with my sig",
@@ -838,6 +838,27 @@
       "options": null,
       "ok": false,
       "reason": "empty"
+    },
+    {
+      "transcript": "the beta is out and feedback is good we also fixed the login crash and the export bug",
+      "output": "The beta is out and feedback is good.",
+      "options": null,
+      "ok": false,
+      "reason": "ending-lost"
+    },
+    {
+      "transcript": "we need to finalize the color of the logo by march third twenty twenty four",
+      "output": "We need to finalise the colour of the logo by March 3rd, 2024.",
+      "options": null,
+      "ok": true,
+      "reason": null
+    },
+    {
+      "transcript": "send it tuesday no wait wednesday",
+      "output": "Send it Wednesday.",
+      "options": null,
+      "ok": true,
+      "reason": null
     }
   ],
   "alreadyClean": [

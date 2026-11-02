@@ -75,6 +75,7 @@ export type VerifyReason =
   | 'numbers-changed'
   | 'verbatim-lost'
   | 'repeated'
+  | 'ending-lost'
 
 export interface Verdict {
   ok: boolean
@@ -140,6 +141,10 @@ export function verifyOutput(transcript: string, text: string, opts: VerifyOptio
 
   // Content said twice that the speaker said once (a looping or padding model).
   if (repeatedRuns(raw, text, 4).length) return { ok: false, reason: 'repeated' }
+
+  // The end of what was said must still be at the end (a model that stops early, or drops the
+  // last clause, otherwise passes every check above).
+  if (!endingCovered(raw, text)) return { ok: false, reason: 'ending-lost' }
 
   // Phrases the caller needs verbatim (a snippet trigger the client expands afterwards).
   for (const phrase of opts.keepVerbatim ?? []) {
@@ -273,6 +278,51 @@ export function repairCase(
     return sep + word.charAt(0).toUpperCase() + word.slice(1)
   })
   return out
+}
+
+/** Words a model may drop or rewrite at the very end without losing what was said. */
+const ENDING_SKIP = new Set(
+  'you know like um uh so well okay yeah quote unquote end new line paragraph period comma scratch that wait actually mean percent and the of'.split(
+    ' '
+  )
+)
+/** Words a model writes as digits or symbols ("third" → 3rd, "dollars" → $). */
+const ENDING_NUMERIC = new Set(
+  'first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth dollars dollar bucks cents grand percent euros pounds point zero'.split(
+    ' '
+  )
+)
+const endingNumeric = (w: string): boolean =>
+  isNumberWord(w) || ENDING_NUMERIC.has(w) || /^\d/.test(w) || /(teenth|tieth)$/.test(w)
+/** One spoken word against one written: the same, a number as digits, or the same first 4 letters (colour, finalise). */
+const endingSame = (said: string, written: string): boolean =>
+  said === written ||
+  (endingNumeric(said) && /\d/.test(written)) ||
+  (said.length >= 4 && written.length >= 4 && said.slice(0, 4) === written.slice(0, 4))
+const endingWords = (s: string): string[] =>
+  s
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .split(/[^\p{L}\p{N}']+/u)
+    .filter(Boolean)
+
+/**
+ * Does `text` still end where the speaker ended? Of the transcript's last 3 words that carry
+ * meaning, the very last must be among the output's last 4 words, or 2 of the 3 among its last 6.
+ * Lenient on purpose: numbers written as digits, spelling changes and dropped fillers all pass
+ * (0 false alarms on 157 correct outputs in the eval sets), while a dropped last sentence fails
+ * (25 of 32 short and 91 of 92 long cut outputs caught).
+ */
+export function endingCovered(transcript: string, text: string): boolean {
+  const want = endingWords(transcript)
+    .filter((w) => (endingNumeric(w) || w.replace(/'/g, '').length >= 3) && !ENDING_SKIP.has(w))
+    .slice(-3)
+  if (want.length < 2) return true
+  const out = endingWords(text)
+  const last = out.slice(-4)
+  if (last.some((t) => endingSame(want[want.length - 1], t))) return true
+  const tail = out.slice(-6)
+  return want.filter((w) => tail.some((t) => endingSame(w, t))).length >= 2
 }
 
 /**

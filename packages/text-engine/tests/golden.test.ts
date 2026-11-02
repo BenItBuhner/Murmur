@@ -218,7 +218,16 @@ const VERIFY_CASES: Array<[string, string, { language?: string; keepVerbatim?: s
     'we discussed the quarterly numbers the hiring plan and the office move in some detail',
     'We talked.'
   ],
-  ['hello world', '']
+  ['hello world', ''],
+  [
+    'the beta is out and feedback is good we also fixed the login crash and the export bug',
+    'The beta is out and feedback is good.'
+  ],
+  [
+    'we need to finalize the color of the logo by march third twenty twenty four',
+    'We need to finalise the colour of the logo by March 3rd, 2024.'
+  ],
+  ['send it tuesday no wait wednesday', 'Send it Wednesday.']
 ]
 
 interface SkipCase {

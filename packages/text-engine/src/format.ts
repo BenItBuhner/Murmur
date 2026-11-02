@@ -1,5 +1,6 @@
 import { CLEAN_MAX_WORDS, alreadyClean } from './clean'
 import { basicCleanup, prepareTranscript } from './cleanup'
+import { addsParagraphs, resolveLayout } from './profiles'
 import { buildFormatMessages, maxTokensFor } from './prompt'
 import { countWords, isMeaningful } from './text'
 import type { ChatResult, Complete, FormatContext, FormatResult, FormattingMode } from './types'
@@ -175,6 +176,7 @@ export async function formatTranscript(
       return formatInPieces(input, split, prepared.pressEnter, prepared.stages, complete)
   }
 
+  const paragraphs = addsParagraphs(resolveLayout(input.context.layout, input.context.category))
   const started = now()
   let attempts = 0
   let firstReason: string | undefined
@@ -201,7 +203,9 @@ export async function formatTranscript(
         firstReason
       )
     }
-    const text = repairOutput(prepared.text, cleanModelOutput(res.text, prepared.text))
+    const text = repairOutput(prepared.text, cleanModelOutput(res.text, prepared.text), {
+      paragraphs
+    })
     lastModelText = text
     const verdict =
       res.finishReason === 'length'

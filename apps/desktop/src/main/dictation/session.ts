@@ -23,7 +23,9 @@ import {
   formatTranscript,
   resolveStyle,
   type AppContext,
+  layoutPossible,
   type FormatContext,
+  type Layout,
   type FormatInput,
   type ResolvedStyle,
   isSilentStockPhrase,
@@ -126,9 +128,6 @@ interface StreamedPrefix {
   /** The pieces' layout while recording (smart formatting into a document, email or notes). */
   layout?: RollingLayout
 }
-
-/** Categories that never get paragraphs or lists (wantsLayout says the same). */
-const NO_LAYOUT = new Set<AppContext['category']>(['chat', 'code', 'terminal'])
 
 /** A formatting outcome whose layout is settled (laid out while recording); none runs after. */
 type LaidOut = { laidOut?: true }
@@ -661,11 +660,13 @@ export class DictationController extends EventEmitter {
         const speed = effectiveSpeed(s.stt.speed, style.rule)
         const smart = formattingModeAt(style.mode, speed) === 'smart'
         const context = this.formatContext(s, style, app)
-        if (smart && session.mode !== 'command' && !NO_LAYOUT.has(app.category))
+        if (smart && session.mode !== 'command' && layoutPossible(app.category, style.layout))
           session.streamLayout = new RollingLayout(
             app.category,
-            (text) => this.layout(text, app.category, tag),
-            (parts, continues) => joinFormatted(parts, continues).text
+            (text) => this.layout(text, app.category, tag, style.layout),
+            (parts, continues) => joinFormatted(parts, continues).text,
+            undefined,
+            style.layout
           )
         const prompt = s.stt.useDictionaryPrompt
           ? buildSttPrompt(
@@ -1168,9 +1169,14 @@ export class DictationController extends EventEmitter {
         // A formatter that just failed is not asked again for the layout.
         formatted.status.outcome !== 'failed' &&
         !(formatted as LaidOut).laidOut &&
-        wantsLayout(formatted.text, app.category)
+        wantsLayout(formatted.text, app.category, style.layout)
       ) {
-        const laid = await this.layout(formatted.text, app.category, job.id.slice(0, 8))
+        const laid = await this.layout(
+          formatted.text,
+          app.category,
+          job.id.slice(0, 8),
+          style.layout
+        )
         formatted = {
           ...formatted,
           llmMs: formatted.llmMs + laid.llmMs,
@@ -1184,7 +1190,8 @@ export class DictationController extends EventEmitter {
         dictionary: s.dictionary,
         trailingSpace: style.trailingSpace,
         snippets: s.snippets,
-        snippetContext: { now: new Date() }
+        snippetContext: { now: new Date() },
+        casing: style.casing
       })
       timings.llmMs = formatted.llmMs
       timings.formatMs = Math.max(0, Math.round(performance.now() - t) - formatted.llmMs)
@@ -1717,12 +1724,13 @@ export class DictationController extends EventEmitter {
   private async layout(
     text: string,
     category: AppContext['category'],
-    tag: string
+    tag: string,
+    layout?: Layout
   ): Promise<LayoutResult> {
     try {
       const formatter = await this.deps.inference.formatter()
       if (!formatter.layout) return { text, outcome: 'skipped', detail: 'no model', llmMs: 0 }
-      const laid = await within(formatter.layout(text, category), LAYOUT_TIMEOUT_MS)
+      const laid = await within(formatter.layout(text, category, layout), LAYOUT_TIMEOUT_MS)
       log.info(
         `session ${tag}: layout ${laid.outcome}${laid.detail ? ` (${laid.detail})` : ''} in ${laid.llmMs} ms`
       )
@@ -1838,7 +1846,11 @@ export class DictationController extends EventEmitter {
       instructions: style.instructions,
       dictionary: s.dictionary,
       // Snippet triggers are expanded after the model; it must leave them alone.
-      keepVerbatim: s.snippets.map((x) => x.trigger)
+      keepVerbatim: s.snippets.map((x) => x.trigger),
+      // The profile: how much layout the model may add, and whether it polishes grammar. Sent
+      // only when not the default, so the request is the same as before for everyone else.
+      ...(style.layout !== 'auto' ? { layout: style.layout } : {}),
+      ...(style.grammar !== 'polish' ? { grammar: style.grammar } : {})
     }
   }
 

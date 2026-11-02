@@ -1,5 +1,5 @@
 import { countWords } from './text'
-import type { AppCategory, ChatMessage, Complete } from './types'
+import type { AppCategory, ChatMessage, Complete, Layout } from './types'
 
 /**
  * Layout for long dictations: paragraphs and lists.
@@ -20,10 +20,22 @@ export const LAYOUT_MIN_WORDS = 150
 /** Sentences shown to the model at most; past that the text is left as it is. */
 export const LAYOUT_MAX_SENTENCES = 600
 
-/** Destinations where paragraphs and lists help: not chat, code or a terminal. */
-export function wantsLayout(text: string, category: AppCategory): boolean {
-  if (category === 'chat' || category === 'code' || category === 'terminal') return false
-  return countWords(text) >= LAYOUT_MIN_WORDS
+/**
+ * Destinations where paragraphs and lists help: not chat, code or a terminal, unless the profile
+ * asks for structure; never when it asks for running text.
+ */
+export function wantsLayout(text: string, category: AppCategory, layout?: Layout): boolean {
+  return layoutPossible(category, layout) && countWords(text) >= LAYOUT_MIN_WORDS
+}
+
+/**
+ * Would a long enough dictation into `category` get the layout pass at all? Never in chat, even
+ * with a structured profile: the pass can run at the key-up, and chat is where a wait shows most.
+ * There the "Layout" line of the formatting request (no extra round trip) is all a profile adds.
+ */
+export function layoutPossible(category: AppCategory, layout?: Layout): boolean {
+  if (layout === 'minimal') return false
+  return category !== 'chat' && category !== 'code' && category !== 'terminal'
 }
 
 export interface LayoutUnit {
@@ -191,10 +203,11 @@ export interface LayoutResult {
 export async function layoutText(
   text: string,
   category: AppCategory,
-  complete: Complete | null
+  complete: Complete | null,
+  layout?: Layout
 ): Promise<LayoutResult> {
   if (!complete) return { text, outcome: 'skipped', detail: 'no model', llmMs: 0 }
-  if (!wantsLayout(text, category))
+  if (!wantsLayout(text, category, layout))
     return { text, outcome: 'skipped', detail: 'short or chat/code/terminal', llmMs: 0 }
   const units = splitUnits(text)
   if (units.length < 4 || units.length > LAYOUT_MAX_SENTENCES)

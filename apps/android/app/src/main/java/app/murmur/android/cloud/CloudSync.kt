@@ -1251,7 +1251,10 @@ class CloudSync internal constructor(
             is SyncOp.AppRuleRemove ->
                 convex.mutation<Boolean>("appRules:remove", mapOf("id" to op.remoteId))
             is SyncOp.PreferencesUpdate ->
-                convex.mutation<PreferencesDto>("preferences:update", op.prefs.patchArgs(null))
+                convex.mutation<PreferencesDto>(
+                    "preferences:update",
+                    op.prefs.patchArgs(null, serverPreferences?.formatting?.profile)
+                )
             is SyncOp.StatsRecord -> {
                 // The run of stats ops at the head of the queue goes in one call: an offline backlog
                 // of hundreds of dictations drains in a handful of mutations, not one per dictation.
@@ -1367,6 +1370,7 @@ class CloudSync internal constructor(
             r.trailingSpace?.let { put("trailingSpace", it) }
             r.instructions?.takeIf { it.isNotBlank() }?.let { put("instructions", it) }
             r.speed?.let { put("speed", it.id) }
+            r.profile?.takeIf { it.isNotBlank() }?.let { put("profile", it) }
             if (r.createdAt > 0) put("createdAt", r.createdAt.toDouble())
         }
 
@@ -1445,7 +1449,8 @@ private fun StylePreferences.toDto() = PreferencesDto(
         mode = mode,
         tone = tone,
         trailingSpace = trailingSpace,
-        llmInstructions = llmInstructions
+        llmInstructions = llmInstructions,
+        profile = profile
     ),
     language = language,
     sync = SyncPreferencesDto(history = historySync)

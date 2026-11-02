@@ -29,11 +29,19 @@ export interface AppRuleInput {
   instructions?: string
   /** The app's speed override; older clients and instances neither send nor keep it. */
   speed?: AppRule['speed']
+  /** The app's profile; absent inherits the global one. */
+  profile?: AppRule['profile']
   createdAt: number
 }
 
 /** The optional per-app overrides, copied only when set so `undefined` never reaches the wire. */
-const APP_RULE_OPTIONALS = ['formatting', 'trailingSpace', 'instructions', 'speed'] as const
+const APP_RULE_OPTIONALS = [
+  'formatting',
+  'trailingSpace',
+  'instructions',
+  'speed',
+  'profile'
+] as const
 
 /**
  * The style preferences that follow the user across devices. The wire keeps the model
@@ -46,6 +54,8 @@ export interface SyncedFormatting {
   tone: Settings['formatting']['tone']
   trailingSpace: boolean
   llmInstructions: string
+  /** Absent while Default (see extractPreferences). */
+  profile?: Settings['formatting']['profile']
 }
 
 export interface SyncedPreferences {
@@ -381,7 +391,10 @@ export function extractPreferences(s: Settings): SyncedPreferences {
       mode: f.mode,
       tone: f.tone,
       trailingSpace: f.trailingSpace,
-      llmInstructions: f.instructions
+      llmInstructions: f.instructions,
+      // Left out while Default: a server from before profiles rejects the field, and with it the
+      // whole update. preferencesPatch sends 'default' when going back from another profile.
+      ...(f.profile && f.profile !== 'default' ? { profile: f.profile } : {})
     },
     language: s.stt.language,
     sync: { history: s.cloud.historySync }
@@ -399,7 +412,10 @@ export function preferencesPatch(
 ): RemotePreferences {
   const patch: RemotePreferences = {}
   if (JSON.stringify(prev.formatting) !== JSON.stringify(next.formatting))
-    patch.formatting = next.formatting
+    patch.formatting =
+      prev.formatting.profile !== undefined && next.formatting.profile === undefined
+        ? { ...next.formatting, profile: 'default' }
+        : next.formatting
   if (prev.language !== next.language) patch.language = next.language
   if (prev.sync.history !== next.sync.history) patch.sync = { history: next.sync.history }
   return patch
@@ -424,7 +440,7 @@ export function mergePreferencePatches(
 
 /** A settings patch for the `formatting` section. */
 export type FormattingPatch = Partial<
-  Pick<Settings['formatting'], 'mode' | 'tone' | 'trailingSpace' | 'instructions'>
+  Pick<Settings['formatting'], 'mode' | 'tone' | 'trailingSpace' | 'instructions' | 'profile'>
 >
 
 /** Wire shape -> settings shape. */
@@ -434,6 +450,8 @@ export function toFormattingPatch(flat: Partial<SyncedFormatting>): FormattingPa
   if (flat.tone !== undefined) out.tone = flat.tone
   if (flat.trailingSpace !== undefined) out.trailingSpace = flat.trailingSpace
   if (flat.llmInstructions !== undefined) out.instructions = flat.llmInstructions
+  // Kept as sent: a profile a newer build added reads as Default here (`profileOf`) but survives.
+  if (flat.profile !== undefined) out.profile = flat.profile
   return out
 }
 

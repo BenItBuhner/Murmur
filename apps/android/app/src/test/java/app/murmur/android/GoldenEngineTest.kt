@@ -7,6 +7,10 @@ import app.murmur.android.text.Clean
 import app.murmur.android.text.CommandPromptInput
 import app.murmur.android.text.DictionaryTerm
 import app.murmur.android.text.FormatContext
+import app.murmur.android.text.Casing
+import app.murmur.android.text.Grammar
+import app.murmur.android.text.Layout
+import app.murmur.android.text.applyCasing
 import app.murmur.android.text.NumberSignature
 import app.murmur.android.text.Prompt
 import app.murmur.android.text.Verify
@@ -58,7 +62,9 @@ class GoldenEngineTest {
             precedingText = json.optString("precedingText").takeIf { json.has("precedingText") && !json.isNull("precedingText") },
             instructions = json.optString("instructions").takeIf { json.has("instructions") && !json.isNull("instructions") },
             dictionary = dictionary,
-            keepVerbatim = json.optJSONArray("keepVerbatim")?.strings() ?: emptyList()
+            keepVerbatim = json.optJSONArray("keepVerbatim")?.strings() ?: emptyList(),
+            layout = json.optString("layout").takeIf { json.has("layout") }?.let { Layout.from(it) },
+            grammar = json.optString("grammar").takeIf { json.has("grammar") }?.let { Grammar.from(it) }
         )
     }
 
@@ -231,5 +237,30 @@ class GoldenEngineTest {
         assertEquals(lexicon.getJSONArray("enumerationPhrases").strings(), Clean.ENUMERATION_PHRASES)
         assertEquals(lexicon.getJSONArray("foreignWords").strings(), Clean.FOREIGN_WORDS)
         assertEquals(lexicon.getJSONArray("splitWords").strings(), Clean.SPLIT_WORDS)
+    }
+
+    @Test
+    fun casingMatchesTheEngine() {
+        val cases = golden.getJSONArray("casing")
+        assertTrue(cases.length() > 0)
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val category = c.optString("category").takeIf { !c.isNull("category") }?.let { id -> AppCategory.entries.first { it.id == id } }
+            assertEquals(c.getString("text"), c.getString("result"), applyCasing(c.getString("text"), Casing.LOWERCASE, category))
+        }
+    }
+
+    @Test
+    fun paragraphRepairMatchesTheEngine() {
+        val cases = golden.getJSONArray("repair")
+        assertTrue(cases.length() > 0)
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            assertEquals(
+                c.getString("output"),
+                c.getString("result"),
+                Verify.repairOutput(c.getString("transcript"), c.getString("output"), paragraphs = c.getBoolean("paragraphs"))
+            )
+        }
     }
 }

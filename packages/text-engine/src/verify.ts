@@ -1,4 +1,5 @@
 import { countUnits, digitSignature, isNumberWord } from './numbers'
+import { keepParagraphs } from './profiles'
 import { ABBREVIATION, QUESTION_START, countWords, isQuestion } from './text'
 import type { FormatContext } from './types'
 
@@ -209,9 +210,14 @@ const LIST_LINE = /^\s*(?:[-*•]|\d{1,2}[.)])\s+/m
 /**
  * Repairs that cost no round trip, applied before the invariants:
  *   - a word or short run the model said twice in a row, where the transcript did not, is said once;
- *   - line breaks in a dictation that asked for no layout become spaces (lists are kept).
+ *   - line breaks in a dictation that asked for no layout become spaces (lists are kept), except
+ *     paragraph breaks between sentences when the layout allows the model to add them.
  */
-export function repairOutput(transcript: string, text: string): string {
+export function repairOutput(
+  transcript: string,
+  text: string,
+  opts: { paragraphs?: boolean } = {}
+): string {
   let out = text
   {
     // Immediate repeats of 1–6 words ("a b c a b c" -> "a b c"), only where the transcript has none.
@@ -226,8 +232,10 @@ export function repairOutput(transcript: string, text: string): string {
       }
     )
   }
+  // A layout that lets the model start paragraphs keeps its blank lines between sentences; any
+  // other break it added is joined back.
   if (out.includes('\n') && !LAYOUT_CUE.test(transcript) && !LIST_LINE.test(out))
-    out = out.replace(/[ \t]*\n+[ \t]*/g, ' ')
+    out = opts.paragraphs ? keepParagraphs(out) : out.replace(/[ \t]*\n+[ \t]*/g, ' ')
   return out.trim()
 }
 

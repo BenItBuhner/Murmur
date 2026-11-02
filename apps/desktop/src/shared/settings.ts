@@ -113,7 +113,12 @@ export const appRuleSchema = z.object({
    * The Speed of Murmur's speech model in this app: Fast also means no AI formatting there.
    * Absent inherits the device's `stt.speed`. Synced with the rule.
    */
-  speed: speedModeSchema.optional()
+  speed: speedModeSchema.optional(),
+  /**
+   * The profile in this app (text-engine `PROFILES`); absent inherits `formatting.profile`. Any
+   * string, so a profile a newer build adds survives a round trip here (it reads as Default).
+   */
+  profile: z.string().max(64).optional()
 })
 export type AppRule = z.infer<typeof appRuleSchema>
 
@@ -229,6 +234,11 @@ export const settingsSchema = z.object({
       instructions: z.string().max(LLM_INSTRUCTIONS_MAX).default(''),
       /** Add a space after each dictation so the next one flows on naturally. */
       trailingSpace: z.boolean().default(true),
+      /**
+       * The profile for every app without one of its own: tone, layout (lists, paragraphs),
+       * casing and grammar in one choice (text-engine `PROFILES`). Synced.
+       */
+      profile: z.string().max(64).default('default'),
       appRules: z.array(appRuleSchema).default([]),
       /** The formatting model connection. Device-local; never synced. */
       llm: z

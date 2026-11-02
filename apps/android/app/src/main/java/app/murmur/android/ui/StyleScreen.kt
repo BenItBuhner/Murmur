@@ -28,6 +28,7 @@ import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsRanges
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.settings.Tone
+import app.murmur.android.text.Profiles
 import app.murmur.android.ui.components.ChipRow
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Field
@@ -95,6 +96,21 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
 
         SectionGap()
 
+        Group("Profile") {
+            // One choice for how dictations read: tone, lists and paragraphs, casing, grammar.
+            val current = Profiles.of(settings.profile)
+            ChipRow(
+                items = Profiles.ALL.map { it.name },
+                selected = current.name,
+                modifier = Modifier.testTag("profile"),
+                onSelect = { name -> Profiles.ALL.first { it.name == name }.let { p -> store.update { s -> s.copy(profile = p.id) } } }
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(current.description, style = Murmur.type.bodySmall, color = c.inkSoft)
+        }
+
+        SectionGap()
+
         Group("Tone") {
             ChipRow(
                 items = Tone.entries.map { it.displayName },
@@ -104,7 +120,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
             Spacer(Modifier.height(12.dp))
             Text(
                 when (settings.tone) {
-                    Tone.AUTO -> "Reads the app you are typing in: relaxed in chat, polished in email, neutral elsewhere."
+                    Tone.AUTO -> "The profile's tone. With Default it reads the app you are typing in: relaxed in chat, polished in email, neutral elsewhere."
                     Tone.CASUAL -> "Relaxed and conversational, everywhere."
                     Tone.NEUTRAL -> "Plain and even; nothing added, nothing dressed up."
                     Tone.PROFESSIONAL -> "Composed and precise, everywhere."
@@ -266,11 +282,11 @@ private fun AppRulesGroup(store: SettingsStore, settings: MurmurSettings) {
     val c = Murmur.colors
     Group(
         "Per-app rules",
-        description = "Match on the app's name or package; the first matching rule wins. Anything left on Default follows the settings above."
+        description = "Match on the app's name or package; the first matching rule wins. Pick a profile per app (Casual for WhatsApp, Polished for Gmail); anything left on Default follows the settings above."
     ) {
         if (settings.appRules.isEmpty()) {
             Text(
-                "No rules. Examples: “whatsapp” → casual; “termux” → formatting off; “gmail” → professional with extra instructions.",
+                "No rules. Examples: “whatsapp” → Casual profile; “gmail” → Polished; “termux” → formatting off.",
                 style = Murmur.type.bodySmall,
                 color = c.inkSoft
             )
@@ -298,6 +314,8 @@ private fun AppRulesGroup(store: SettingsStore, settings: MurmurSettings) {
 }
 
 private const val DEFAULT_CHOICE = "Default"
+/** A rule's profile choice that sets nothing (it follows the global profile). */
+private const val SAME_AS_ABOVE = "Same as above"
 
 @Composable
 private fun RuleEditor(rule: AppRule, onChange: (AppRule) -> Unit, onRemove: () -> Unit) {
@@ -314,6 +332,14 @@ private fun RuleEditor(rule: AppRule, onChange: (AppRule) -> Unit, onRemove: () 
         TextLink("Remove", onClick = onRemove, modifier = Modifier.padding(top = 26.dp))
     }
     Spacer(Modifier.height(16.dp))
+    Overline("Profile")
+    Spacer(Modifier.height(8.dp))
+    val profiles = listOf(SAME_AS_ABOVE) + Profiles.ALL.map { it.name }
+    val ruleProfile = rule.profile?.let { Profiles.of(it).name } ?: SAME_AS_ABOVE
+    ChipRow(profiles, ruleProfile, Modifier.testTag("rule-profile")) { label ->
+        onChange(rule.copy(profile = Profiles.ALL.firstOrNull { it.name == label }?.id))
+    }
+    Spacer(Modifier.height(14.dp))
     Overline("Tone")
     Spacer(Modifier.height(8.dp))
     val tones = listOf(DEFAULT_CHOICE) + Tone.entries.filter { it != Tone.AUTO }.map { it.displayName }

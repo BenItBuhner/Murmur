@@ -909,6 +909,20 @@ describe('POST /v1/format', () => {
     expect(parseFormatRequest({ transcript: 'x'.repeat(MAX_TRANSCRIPT_CHARS + 1) })).toMatchObject({ ok: false })
   })
 
+  it("passes a profile's layout and grammar through, and drops values it does not know", () => {
+    const ctxOf = (context: Record<string, unknown>) => {
+      const parsed = parseFormatRequest({ transcript: 'hi', context })
+      return parsed.ok ? parsed.request.context : null
+    }
+    expect(ctxOf({ layout: 'structured', grammar: 'as-spoken' })).toMatchObject({
+      layout: 'structured',
+      grammar: 'as-spoken'
+    })
+    const bogus = ctxOf({ layout: 'huge', grammar: 'shakespeare' })
+    expect(bogus?.layout).toBeUndefined()
+    expect(bogus?.grammar).toBeUndefined()
+  })
+
   it('runs the engine against the instance model and bills the tokens', async () => {
     stubEnv(LLM_ENV)
     const calls = stubFetch(() => chat('The budget is $1,200,000.'))

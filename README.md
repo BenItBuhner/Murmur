@@ -131,6 +131,13 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   trailing space and per-app rules for those same things (plus, per app, the speed of Murmur's
   speech model: **Fast** there means the quicker model and no AI formatting). **Light** mode and every fallback are a
   small rule set: filler sounds, spoken commands, casing, punctuation spacing and your dictionary.
+- **Profiles.** One choice for how dictations read, for every app or per app on its rule:
+  **Default** (adapts to the app), **Casual** (lower-case, no final period, names keep their
+  capitals), **Polished** (professional, a paragraph at each new topic, a list for any series of
+  items) and **As spoken** (your own wording and grammar, no layout you did not dictate). Lists
+  and paragraph breaks come from the same formatting request that already runs (email, documents
+  and notes get paragraphs by default), and casing is applied on the device, so a profile adds no
+  round trip and no wait at the key-up.
 - **A dictionary that hears, not just spells.** Terms are matched by sound as well as by spelling:
   “Wispr Flow” is recovered from “whisper flow”, “Wisper Flo” or “whisperflow” without an alias
   for each, and names are corrected when the recognizer got a letter wrong. Aliases you add are

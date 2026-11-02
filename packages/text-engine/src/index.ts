@@ -140,6 +140,7 @@ export {
   LAYOUT_MIN_WORDS,
   applyLayout,
   buildLayoutMessages,
+  layoutPossible,
   layoutText,
   parseLayout,
   splitUnits,
@@ -147,3 +148,17 @@ export {
   type LayoutPlan,
   type LayoutResult
 } from './layout'
+export {
+  PROFILES,
+  PROFILE_IDS,
+  addsParagraphs,
+  applyCasing,
+  grammarLine,
+  isProfileId,
+  keepParagraphs,
+  layoutLine,
+  profileOf,
+  resolveLayout,
+  type Profile,
+  type ProfileId
+} from './profiles'

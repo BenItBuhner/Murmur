@@ -18,8 +18,9 @@ import { editedSpan, findCorrections, parseLexicon } from '../src/corrections'
 import { applyDictionary } from '../src/dictionary'
 import { digitSignature } from '../src/numbers'
 import { buildCommandMessages, buildFormatMessages, type CommandPromptInput } from '../src/prompt'
-import type { DictionaryTerm, FormatContext } from '../src/types'
-import { cleanModelOutput, verifyOutput } from '../src/verify'
+import { applyCasing } from '../src/profiles'
+import type { AppCategory, DictionaryTerm, FormatContext } from '../src/types'
+import { cleanModelOutput, repairOutput, verifyOutput } from '../src/verify'
 import { contextOf, loadFixtures } from '../eval/score'
 
 /**
@@ -85,7 +86,57 @@ const PROMPT_CASES: PromptCase[] = [
       dictionary: [],
       precedingText: 'x'.repeat(450) + ' tail'
     }
+  },
+  {
+    name: 'structured notes, as spoken',
+    transcript: 'groceries eggs milk bread and coffee',
+    context: {
+      category: 'notes',
+      tone: 'neutral',
+      dictionary: [],
+      layout: 'structured',
+      grammar: 'as-spoken'
+    }
+  },
+  {
+    name: 'running text in an email',
+    transcript: 'thanks for the notes i will read them tonight',
+    context: { category: 'email', tone: 'professional', dictionary: [], layout: 'minimal' }
   }
+]
+
+/** Profiles' casing, applied on the device after formatting (`applyCasing`). */
+const CASING_CASES: Array<[string, string?]> = [
+  ['Sounds good. See you at 5.'],
+  ['Hey, can you send it? Thanks!'],
+  ["Don't worry about it."],
+  ['Sarah said yes. I think so.'],
+  ["I'm in. NASA called."],
+  ['Meet at 5 p.m.'],
+  ['Wait...'],
+  ['First line.\nSecond line.'],
+  ['Will you be there. My bad.'],
+  ['- Eggs\n- Milk'],
+  ['Will is coming. Ask Will about it.'],
+  ['So we left. Then, So what?'],
+  ['Sounds good.', 'code']
+]
+
+/** Line breaks the model added, with and without a layout that allows paragraphs (`repairOutput`). */
+const REPAIR_CASES: Array<[string, string, boolean]> = [
+  [
+    'hi team quick update. the beta is out. we fixed the crash. more soon',
+    'Hi team, quick update.\n\nThe beta is out. We fixed the crash.\n\nMore soon.',
+    true
+  ],
+  [
+    'hi team quick update. the beta is out. we fixed the crash. more soon',
+    'Hi team, quick update.\n\nThe beta is out. We fixed the crash.\n\nMore soon.',
+    false
+  ],
+  ['we will ship on friday then rest', 'We will ship\n\non Friday. Then rest.', true],
+  ['one thing another thing', 'One thing.\nAnother thing.', true],
+  ['a b', 'A.\n\n\n\nB.', true]
 ]
 
 /** Command mode (edit the selection by voice): the same prompt on the desktop and on Android. */
@@ -334,6 +385,17 @@ function build(): unknown {
       name: c.name,
       input: c.input,
       messages: buildCommandMessages(c.input)
+    })),
+    casing: CASING_CASES.map(([text, category]) => ({
+      text,
+      category: category ?? null,
+      result: applyCasing(text, 'lowercase', category as AppCategory | undefined)
+    })),
+    repair: REPAIR_CASES.map(([transcript, output, paragraphs]) => ({
+      transcript,
+      output,
+      paragraphs,
+      result: repairOutput(transcript, output, { paragraphs })
     })),
     signatures: SIGNATURE_CASES.map((text) => ({ text, signature: digitSignature(text) })),
     clean: CLEAN_CASES.map(([output, transcript]) => ({

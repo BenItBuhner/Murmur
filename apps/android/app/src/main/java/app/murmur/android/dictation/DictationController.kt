@@ -65,6 +65,8 @@ import app.murmur.android.text.lastSentenceStart
 import app.murmur.android.text.seamContext
 import app.murmur.android.text.stripEcho
 import app.murmur.android.text.resolveStyle
+import app.murmur.android.text.Layout
+import app.murmur.android.text.layoutPossible
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -713,7 +715,10 @@ object DictationController {
             instructions = style.instructions.takeIf { it.isNotEmpty() },
             dictionary = s.dictionaryEntries.map { DictionaryTerm(it.word, it.aliases, it.fuzzy) },
             // Snippet triggers are expanded after the model; it must leave them alone.
-            keepVerbatim = s.snippetTriggers
+            keepVerbatim = s.snippetTriggers,
+            // The profile: how much layout the model may add, and whether it polishes grammar.
+            layout = style.layout,
+            grammar = style.grammar
         ),
         dictionary = s.dictionaryEntries
     )
@@ -1266,7 +1271,7 @@ object DictationController {
             }
             // A long dictation into a document, email or notes gets paragraphs and lists, laid out
             // on the gateway from the model's plan without a word changed (desktop: layout).
-            if (mode == FormattingMode.SMART && wantsLayout(formatted.text, app.category)) {
+            if (mode == FormattingMode.SMART && wantsLayout(formatted.text, app.category, style.layout)) {
                 val layoutStarted = System.currentTimeMillis()
                 val laid = runCatching {
                     withTimeoutOrNull(LAYOUT_TIMEOUT_MS) { router.formatter().layout?.invoke(formatted.text, app.category) }
@@ -1274,7 +1279,7 @@ object DictationController {
                 trace.step("layout", System.currentTimeMillis() - layoutStarted)
                 if (laid != null) formatted = formatted.copy(text = laid, stages = formatted.stages + "layout")
             }
-            val finished = finish(formatted.text, app.category, s.dictionaryEntries, style.trailingSpace, snippets = s.snippets)
+            val finished = finish(formatted.text, app.category, s.dictionaryEntries, style.trailingSpace, snippets = s.snippets, casing = style.casing)
             final = finished.text
             pressEnter = formatted.pressEnter
             stages = formatted.stages + finished.stages
@@ -1520,10 +1525,13 @@ const val LAYOUT_TIMEOUT_MS = 4_000L
 /** Below this many words a dictation is short enough to read without paragraphs (layout.ts). */
 const val LAYOUT_MIN_WORDS = 150
 
-/** Destinations where paragraphs and lists help (desktop: wantsLayout). */
-fun wantsLayout(text: String, category: AppCategory): Boolean =
-    category != AppCategory.CHAT && category != AppCategory.CODE && category != AppCategory.TERMINAL &&
-        countWords(text) >= LAYOUT_MIN_WORDS
+/**
+ * Destinations where paragraphs and lists help (desktop: wantsLayout). A profile asking for running
+ * text turns it off. Unlike the desktop, Structured does not turn it on in chat: the phone lays out
+ * at the release, so a chat dictation would wait for it.
+ */
+fun wantsLayout(text: String, category: AppCategory, layout: Layout? = null): Boolean =
+    layoutPossible(category, layout) && countWords(text) >= LAYOUT_MIN_WORDS
 
 /** How long release waits for a piece's speech still out before sending it again. */
 const val PIECE_RESEND_AFTER_MS = 3_000L

@@ -11,6 +11,7 @@ import {
   formatTranscript,
   layoutText,
   type AppCategory,
+  type Layout,
   type FormatInput,
   type FormatResult,
   type LayoutResult
@@ -97,7 +98,7 @@ export interface Formatter {
    * Paragraphs and lists for a long, formatted dictation (Murmur's `POST /v1/layout`, or the same
    * engine against the user's own model). Absent when there is no model to ask.
    */
-  layout?: (text: string, category: AppCategory) => Promise<LayoutResult>
+  layout?: (text: string, category: AppCategory, layout?: Layout) => Promise<LayoutResult>
 }
 
 export class InferenceRouter {
@@ -240,7 +241,7 @@ export class InferenceRouter {
       return {
         source: 'murmur',
         format: (input, opts) => this.remoteFormat(cfg, input, opts?.tier),
-        layout: (text, category) => this.remoteLayout(cfg, text, category)
+        layout: (text, category, layout) => this.remoteLayout(cfg, text, category, layout)
       }
     }
     if (!cfg.baseUrl || !cfg.model)
@@ -249,8 +250,8 @@ export class InferenceRouter {
       source: 'custom',
       format: (input) =>
         formatTranscript(input, (messages, opts) => this.complete(cfg, messages, opts)),
-      layout: (text, category) =>
-        layoutText(text, category, (messages, opts) => this.complete(cfg, messages, opts))
+      layout: (text, category, layout) =>
+        layoutText(text, category, (messages, opts) => this.complete(cfg, messages, opts), layout)
     }
   }
 
@@ -291,14 +292,19 @@ export class InferenceRouter {
   }
 
   /** `POST /v1/layout` on Murmur's gateway; the text as it was on anything but an answer. */
-  private async remoteLayout(cfg: LlmConfig, text: string, category: AppCategory): Promise<LayoutResult> {
+  private async remoteLayout(
+    cfg: LlmConfig,
+    text: string,
+    category: AppCategory,
+    layout?: Layout
+  ): Promise<LayoutResult> {
     const call = async (apiKey: string): Promise<LayoutResult> => {
       let res: Response
       try {
         res = await fetch(`${cfg.baseUrl}/layout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ text, category }),
+          body: JSON.stringify({ text, category, ...(layout ? { layout } : {}) }),
           signal: combineSignals(cfg.timeoutMs + 2000)
         })
       } catch (err) {

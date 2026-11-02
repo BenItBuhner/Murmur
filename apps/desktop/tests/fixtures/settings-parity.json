@@ -12,6 +12,7 @@
     "historySync": false,
     "formattingMode": "smart",
     "tone": "auto",
+    "profile": "default",
     "trailingSpace": true,
     "instructions": "",
     "language": "auto",
@@ -136,7 +137,8 @@
   "appRule": {
     "tones": ["auto", "casual", "neutral", "professional"],
     "modes": ["off", "light", "smart"],
-    "speeds": ["normal", "fast"]
+    "speeds": ["normal", "fast"],
+    "profiles": ["default", "casual", "polished", "as-spoken"]
   },
   "sttSpeeds": ["normal", "fast"]
 }

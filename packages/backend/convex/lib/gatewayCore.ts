@@ -5,7 +5,7 @@ import { sttLanguageField } from '../../../text-engine/src/languages'
 import { joinSeam } from '../../../text-engine/src/seam'
 import { layoutText, wantsLayout, type LayoutResult } from '../../../text-engine/src/layout'
 import { countWords } from '../../../text-engine/src/text'
-import type { AppCategory, ChatMessage, ChatOptions, ChatResult } from '../../../text-engine/src/types'
+import type { AppCategory, ChatMessage, ChatOptions, ChatResult, Layout } from '../../../text-engine/src/types'
 import {
   MAX_COMPLETION_TOKENS,
   MURMUR_MODELS,
@@ -661,7 +661,7 @@ export async function handleLayout(
   const upstream = readUpstreams(hooks.env).llm
   if (!upstream)
     return gatewayError(503, 'not_configured', 'This Murmur instance does not offer a managed formatting model')
-  let input: { text?: unknown; category?: unknown }
+  let input: { text?: unknown; category?: unknown; layout?: unknown }
   try {
     input = (await request.json()) as typeof input
   } catch {
@@ -675,9 +675,14 @@ export async function handleLayout(
     ? (input.category as AppCategory)
     : 'unknown'
   const text = input.text
+  // The profile's layout (clients from v0.6.37 on): `minimal` never lays out, `structured` also in chat.
+  const layout: Layout | undefined =
+    input.layout === 'minimal' || input.layout === 'balanced' || input.layout === 'structured'
+      ? input.layout
+      : undefined
   const answer = (body: LayoutResult): Response =>
     new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
-  if (!wantsLayout(text, category))
+  if (!wantsLayout(text, category, layout))
     return answer({ text, outcome: 'skipped', detail: 'short or chat/code/terminal', llmMs: 0 })
 
   const gate = await hooks.authorize({ identity, kind: 'llm', degradable: true })
@@ -693,15 +698,20 @@ export async function handleLayout(
   let failure: UpstreamFailure | null = null
   let laid: LayoutResult
   try {
-    laid = await layoutText(text, category, async (messages, opts) => {
-      const res = await upstreamChat(upstream, model, messages, opts, budgetMs)
-      if (!res.ok) {
-        failure = res.failure
-        throw new UpstreamError(res.failure.message, res.failure.status, res.failure.code)
-      }
-      tokens += res.tokens
-      return res.result
-    })
+    laid = await layoutText(
+      text,
+      category,
+      async (messages, opts) => {
+        const res = await upstreamChat(upstream, model, messages, opts, budgetMs)
+        if (!res.ok) {
+          failure = res.failure
+          throw new UpstreamError(res.failure.message, res.failure.status, res.failure.code)
+        }
+        tokens += res.tokens
+        return res.result
+      },
+      layout
+    )
   } finally {
     releaseFormat(gate.userId)
   }

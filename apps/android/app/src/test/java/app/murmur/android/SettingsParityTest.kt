@@ -58,6 +58,7 @@ class SettingsParityTest {
         assertEquals(d.getBoolean("historySync"), s.historySync)
         assertEquals(d.getString("formattingMode"), s.formattingMode.id)
         assertEquals(d.getString("tone"), s.tone.id)
+        assertEquals(d.getString("profile"), s.profile)
         assertEquals(d.getBoolean("trailingSpace"), s.trailingSpace)
         assertEquals(d.getString("instructions"), s.llmInstructions)
         assertEquals(d.getString("language"), s.language)
@@ -135,6 +136,8 @@ class SettingsParityTest {
         val rule = contract.getJSONObject("appRule")
         assertEquals(rule.getJSONArray("tones").strings(), Tone.entries.map { it.id })
         assertEquals(rule.getJSONArray("modes").strings(), FormattingMode.entries.map { it.id })
+        // Profiles: the same ids, in the same order, as the desktop's PROFILE_IDS.
+        assertEquals(rule.getJSONArray("profiles").strings(), app.murmur.android.text.Profiles.ALL.map { it.id })
     }
 
     @Test

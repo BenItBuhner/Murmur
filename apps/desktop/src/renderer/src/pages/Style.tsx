@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Loader2, Play, Plus, Sparkles, Trash2, WandSparkles } from 'lucide-react'
 import type { AppRule, FormattingMode, Tone } from '@shared/settings'
 import { LLM_INSTRUCTIONS_MAX, SETTINGS_RANGES, clampToRange } from '@shared/settings'
+import { PROFILES, PROFILE_IDS, profileOf, type ProfileId } from '@engine'
 import { MURMUR_LLM_MODEL } from '@shared/inference'
 import type { LlmStatus, PreviewResult, ProviderTestResult } from '@shared/types'
 import { LLM_PRESETS } from '@core/stt/presets'
@@ -34,11 +35,18 @@ interface Level<T extends string> {
   hint: string
 }
 
+/** One choice for how dictations read: tone, lists and paragraphs, casing, grammar. */
+const PROFILE_LEVELS: Level<ProfileId>[] = PROFILE_IDS.map((id) => ({
+  value: id,
+  label: PROFILES[id].name,
+  hint: PROFILES[id].description
+}))
+
 const TONES: Level<Tone>[] = [
   {
     value: 'auto',
     label: 'Auto',
-    hint: 'Casual in chat apps, professional in email and documents, neutral elsewhere.'
+    hint: 'The profile’s tone. With Default: casual in chat apps, professional in email and documents, neutral elsewhere.'
   },
   { value: 'casual', label: 'Casual', hint: 'Relaxed, contractions, fragments are fine.' },
   { value: 'neutral', label: 'Neutral', hint: 'Clean sentences, faithful to how you talk.' },
@@ -183,10 +191,16 @@ export function StylePage(): React.JSX.Element {
     <div className="space-y-section">
       <PageHeader
         title="Style"
-        description="How raw speech becomes finished text. The formatting model reads the destination on its own: chat stays casual, email gets full sentences, code editors keep identifiers exact, terminals get one line. What is left to choose is how it should sound and anything you want to tell it."
+        description="How raw speech becomes finished text. The formatting model reads the destination on its own: chat stays casual, email gets full sentences and paragraphs, code editors keep identifiers exact, terminals get one line. What is left to choose is how it should sound and anything you want to tell it."
       />
 
       <Section title="Formatting">
+        <LevelRow
+          title="Profile"
+          levels={PROFILE_LEVELS}
+          value={profileOf(f.profile).id}
+          onChange={(v) => void patch({ formatting: { profile: v } })}
+        />
         <LevelRow
           title="Mode"
           levels={MODES}
@@ -365,7 +379,7 @@ export function StylePage(): React.JSX.Element {
 
       <Section
         title="Per-app rules"
-        description="Match on the window title or process name; the first matching rule wins. Anything left on “Default” follows the settings above."
+        description="Match on the window title or process name; the first matching rule wins. Pick a profile per app (Casual for Slack, Polished for Outlook); anything left on “Default” follows the settings above."
         actions={
           <Button variant="outline" size="sm" onClick={addRule}>
             <Plus /> Add rule
@@ -374,8 +388,8 @@ export function StylePage(): React.JSX.Element {
       >
         {f.appRules.length === 0 ? (
           <div className="py-2 text-note text-muted-foreground">
-            No rules. Examples: “slack” → casual; “Code.exe” → formatting off; “outlook” →
-            professional with extra instructions.
+            No rules. Examples: “slack” → Casual profile; “outlook” → Polished; “Code.exe” →
+            formatting off.
           </div>
         ) : (
           f.appRules.map((r) => (
@@ -396,13 +410,16 @@ function RuleSelect<T extends string>({
   value,
   options,
   onChange,
-  width = 'w-40'
+  width = 'w-40',
+  inheritLabel = 'Default'
 }: {
   label: string
   value: T | undefined
   options: Array<{ value: T; label: string }>
   onChange: (v: T | undefined) => void
   width?: string
+  /** The choice that sets nothing on the rule (it follows the global setting). */
+  inheritLabel?: string
 }): React.JSX.Element {
   return (
     <label className="flex flex-col gap-1.5 eyebrow">
@@ -415,7 +432,7 @@ function RuleSelect<T extends string>({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="inherit">Default</SelectItem>
+          <SelectItem value="inherit">{inheritLabel}</SelectItem>
           {options.map((o) => (
             <SelectItem key={o.value} value={o.value}>
               {o.label}
@@ -451,6 +468,14 @@ function RuleEditor({
         </Button>
       </div>
       <div className="flex flex-wrap gap-3">
+        <RuleSelect
+          label="Profile"
+          value={r.profile ? profileOf(r.profile).id : undefined}
+          options={PROFILE_LEVELS.map(({ value, label }) => ({ value, label }))}
+          onChange={(v) => onChange(r.id, { profile: v })}
+          inheritLabel="Same as above"
+          width="w-40"
+        />
         <RuleSelect
           label="Tone"
           value={r.tone === 'auto' ? undefined : r.tone}
@@ -609,6 +634,9 @@ function Playground({ modelReady }: { modelReady: boolean }): React.JSX.Element 
               </Badge>
               {out.style.ruleMatch && (
                 <Badge variant="secondary">rule “{out.style.ruleMatch}”</Badge>
+              )}
+              {out.style.profile && out.style.profile !== 'default' && (
+                <Badge variant="secondary">profile {profileOf(out.style.profile).name}</Badge>
               )}
               <Badge variant="secondary">tone {out.style.tone}</Badge>
               <Badge variant="secondary">mode {out.style.mode}</Badge>

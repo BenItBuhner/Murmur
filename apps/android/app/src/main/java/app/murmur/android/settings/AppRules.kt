@@ -29,7 +29,9 @@ data class AppRule(
      * formatting there. Null inherits the device's [MurmurSettings.sttSpeed]. Last so stored and
      * synced rules from before the field, and code that builds one positionally, read as before.
      */
-    val speed: SttSpeed? = null
+    val speed: SttSpeed? = null,
+    /** The profile in this app (text/Profiles.kt); null inherits [MurmurSettings.profile]. */
+    val profile: String? = null
 )
 
 object AppRuleCodec {

@@ -988,7 +988,8 @@ object DictationController {
         // the bias off (then no prompt goes at all, as on the desktop).
         val prompt = if (s.useDictionaryPrompt) buildSttPrompt(s.dictionaryTerms + s.snippetTriggers) else null
         val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
-        suspend fun runStt(clip: ShortArray) = transcribeComplete(
+        suspend fun runStt(clip: ShortArray, first: TranscribeOutput? = null) = transcribeComplete(
+            first = first,
             pcm = clip,
             sampleRate = SAMPLE_RATE,
             speechEndSec = lastVoicedSec(clip, SAMPLE_RATE, threshold),
@@ -1077,14 +1078,20 @@ object DictationController {
                     }
                     if (answer == null) trace.timed("speech (tail)") { runStt(rest) }
                     else {
-                        answer.format?.let { preformatted = answer.transcript to FormatResult.fromJson(it) }
+                        // The same check as every other speech request: a transcript that stopped
+                        // before the speech did is resumed from where it stopped, and the text is
+                        // formatted here instead of the gateway's answer for the cut-off text.
+                        val done = runStt(rest, answer.stt)
+                        if (done.resumed == 0 && done.output.text == answer.stt.text)
+                            answer.format?.let { preformatted = answer.transcript to FormatResult.fromJson(it) }
+                        else trace.note("the tail's transcript stopped early and was resumed")
                         Log.i(TAG, "tail in one call: ${answer.stt.latencyMs} ms${if (answer.rules) " (short tail, rules)" else ""}")
                         trace.path = "one-call"
                         trace.step("speech + formatting of the tail (one call)", answer.stt.latencyMs)
                         trace.call(answer.stt.trace)
                         preformatted?.second?.calls?.let { trace.calls(it) }
                         if (answer.rules) trace.note("short tail formatted by rules")
-                        CompleteResult(answer.stt, 0, 0.0, Coverage(null, 0.0, false))
+                        done
                     }
                 }
             }

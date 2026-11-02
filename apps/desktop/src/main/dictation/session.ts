@@ -866,8 +866,13 @@ export class DictationController extends EventEmitter {
       formattingModeAt(style.mode, speed) === 'smart' &&
       this.deps.inference.routing?.().llm === 'murmur' &&
       resolved.source === 'murmur'
-    const run = (clip: Int16Array, endSec: number): Promise<CompleteResult> =>
+    const run = (
+      clip: Int16Array,
+      endSec: number,
+      first?: TranscribeOutput
+    ): Promise<CompleteResult> =>
       transcribeComplete((wav, p) => this.transcribeWithFallback(wav, p, keyterms, resolved), {
+        first,
         pcm: clip,
         sampleRate: SAMPLE_RATE,
         speechEndSec: endSec,
@@ -919,16 +924,17 @@ export class DictationController extends EventEmitter {
               }
             )
             if (answer) {
-              if (answer.format) preformatted = [answer.transcript, answer.format as FormatOutcome]
               log.info(
                 `session ${tag}: tail in one call, ${answer.stt.latencyMs} ms${answer.rules ? ' (short tail, rules)' : ''}`
               )
-              return {
-                ...answer.stt,
-                resumed: 0,
-                recoveredSec: 0,
-                coverage: { transcribedSec: null, missingSec: 0, truncated: false }
-              } as CompleteResult
+              // The same check as every other speech request: a transcript that stopped before
+              // the speech did (the vocabulary prompt's early stop) is resumed from where it
+              // stopped, and its text is formatted here instead of the gateway's answer.
+              const stt = stripPromptEcho(answer.stt.text, prompt)
+              const done = await run(clip, endSec, { ...answer.stt, text: stt })
+              if (!done.resumed && done.text === stt && answer.format)
+                preformatted = [answer.transcript, answer.format as FormatOutcome]
+              return done
             }
           } catch (err) {
             log.warn(`session ${tag}: one-call release failed; using two calls`, err)
@@ -1757,19 +1763,29 @@ async function releasePlan(
   streamed: StreamedPrefix
 ): Promise<{ prefix: string; before: string; format: Record<string, unknown> } | null> {
   if (!streamed.spec) return null
-  const PENDING = Symbol('pending')
-  const spec = await Promise.race([
-    streamed.spec.result.catch(() => null),
-    Promise.resolve(PENDING)
-  ])
+  const spec = await settledNow(streamed.spec.result)
   if (spec === PENDING || spec === null) return null
-  const f = await Promise.race([spec.format.catch(() => null), Promise.resolve(PENDING)])
+  const f = await settledNow(spec.format)
   if (f === PENDING || f === null || f === 'empty') return null
   const at = lastSentenceStart(f.text)
   const head = f.text.slice(0, at).trim()
   if (!head) return null
   return { prefix: f.text.slice(at), before: head, format: {} }
 }
+const PENDING = Symbol('pending')
+
+/**
+ * The value of `p` if it has already settled (null if it failed), PENDING if not; never waits.
+ * Racing `p.catch()` against `Promise.resolve(PENDING)` always answered PENDING: the `.catch()`
+ * promise settles a tick after `p`, so the one-call release never ran (Oct 15 to Nov 2 2026).
+ */
+async function settledNow<T>(p: Promise<T>): Promise<T | null | typeof PENDING> {
+  return Promise.race([
+    p.catch(() => null),
+    new Promise<typeof PENDING>((r) => setImmediate(() => r(PENDING)))
+  ])
+}
+
 /** The longest the paragraph and list layout of a long dictation may add to its release. */
 export const LAYOUT_TIMEOUT_MS = 4_000
 /** How long release waits for a piece still out before sending it again (racing the original). */

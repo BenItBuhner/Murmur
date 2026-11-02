@@ -182,6 +182,8 @@ export interface CompleteOptions {
   tailPrompt?: string
   maxRounds?: number
   coverage?: CoverageOptions
+  /** The first answer, when it is already in hand (the one-call release); not asked again. */
+  first?: TranscribeOutput
   log?: (message: string) => void
 }
 
@@ -230,7 +232,7 @@ export async function transcribeComplete(
   const { pcm, sampleRate, speechEndSec } = opts
   const log = opts.log ?? ((): void => undefined)
   const fmt = (n: number): string => n.toFixed(1)
-  let out = await transcribe(encodeWavPcm16(pcm, sampleRate), opts.prompt)
+  let out = opts.first ?? (await transcribe(encodeWavPcm16(pcm, sampleRate), opts.prompt))
   let resumed = 0
   let recoveredSec = 0
   let cov = assessCoverage(out, speechEndSec, opts.coverage)

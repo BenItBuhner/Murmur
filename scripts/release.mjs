@@ -140,6 +140,12 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.37': [
+    'Profiles. Pick how your dictations read in Style: Default adapts to each app, Casual writes relaxed lower-case messages, Polished is professional with paragraphs and lists, and As spoken keeps your own words and grammar. Set one for everything, or a different one per app.',
+    'Paragraphs and lists. Longer emails, documents and notes now get a paragraph break where you move to a new topic, and a list when you name several items, with no extra wait when you stop.',
+    'Long dictations finish faster and more reliably. If one part of a long dictation fails, only that part is redone, not the whole thing. Sentences are no longer split in two where a part ended, and the last words are no longer cut short.',
+    'Fewer made-up endings. A "Thank you." the speech model adds to a rustle or breath at the end is removed, while one you actually said is kept.'
+  ],
   '0.6.36': [
     'Desktop catches up with Android on speed. Short dictations now start transcribing during your pauses, so when you let go of the hotkey in a pause the words are already there. The stop also skips the extra 0.2 s wait when you had already stopped talking, and the connection to Murmur is opened as soon as you start speaking.',
     'No more 3-second stall before text appears on Windows. A key whose release Murmur missed (for example one let go over an admin window) no longer makes every insertion wait for it. If keys really are still held, the pill now says "Release the keys to insert…".',

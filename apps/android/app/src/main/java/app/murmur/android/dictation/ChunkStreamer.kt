@@ -174,6 +174,8 @@ class ChunkStreamer(
     /** Samples before [committed] the next piece (or the tail) repeats. */
     private var overlap = 0
     private val pieces = ArrayList<Deferred<String>>()
+    /** Where each piece sits in the recording: first sample to end, overlap included. */
+    private val ranges = ArrayList<Pair<Int, Int>>()
     private var nextCheck = (plan.minSec * sampleRate).toInt()
     @Volatile private var closed = false
     private var specAt = -1
@@ -197,6 +199,7 @@ class ChunkStreamer(
         val index = pieces.size
         val text = scope.async { send(piece, index) }
         pieces.add(text)
+        ranges.add((committed - (if (overlap > 0) overlap else 0)) to (committed + cut))
         onPiece(index, text)
         committed += cut
         specText = null // the piece covers it
@@ -242,7 +245,7 @@ class ChunkStreamer(
         closed = true
         val all = ArrayList(pieces)
         val spec = specText
-        return Streamed(committed - overlap, spec?.let { committed + specRestFrom }, spec) { all.awaitAll() }
+        return Streamed(committed - overlap, spec?.let { committed + specRestFrom }, spec, all, ArrayList(ranges)) { all.awaitAll() }
     }
 }
 
@@ -252,6 +255,9 @@ class Streamed(
     /** Where the audio after the tail speculation starts, when there is one. */
     val specSamples: Int? = null,
     val specText: Deferred<String>? = null,
+    /** Each piece's own text, and where its audio sits in the recording, to resend it alone. */
+    val pieces: List<Deferred<String>> = emptyList(),
+    val ranges: List<Pair<Int, Int>> = emptyList(),
     val texts: suspend () -> List<String>
 )
 

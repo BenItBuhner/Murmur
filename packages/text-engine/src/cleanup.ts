@@ -15,6 +15,7 @@ import {
   isMeaningful,
   normalizeWhitespace
 } from './text'
+import { joinPauseStops } from './pause-stops'
 import type { AppCategory, DictionaryTerm } from './types'
 
 /**
@@ -54,6 +55,8 @@ export function prepareTranscript(raw: string): PreparedTranscript {
   }
   step('line-commands', applyLineCommands)
   step('literal-punctuation', applyLiteralPunctuation)
+  // Before the model sees it too: a period at a pause where no sentence can end.
+  step('pause-stops', joinPauseStops)
   return { text: normalizeWhitespace(text), pressEnter: enter.pressEnter, stages }
 }
 

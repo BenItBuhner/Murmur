@@ -61,6 +61,8 @@ fun capitalizeSentences(text: String): String {
         val ch = m.groupValues[2]
         val before = out.substring(0, m.range.first + 1)
         if (sep.startsWith(".") && ABBREVIATION.containsMatchIn(before)) m.value
+        // "sent to a... channel": trailing-off dots before a lower-case word are a pause, not an end.
+        else if (sep.startsWith(".") && before.endsWith("..")) m.value
         else sep + ch.uppercase()
     }
     // Standalone pronoun "i".
@@ -339,6 +341,8 @@ fun prepareTranscript(raw: String): PreparedTranscript {
     }
     step("line-commands", ::applyLineCommands)
     step("literal-punctuation", ::applyLiteralPunctuation)
+    // Before the model sees it too: a period at a pause where no sentence can end.
+    step("pause-stops", ::joinPauseStops)
     return PreparedTranscript(normalizeWhitespace(text), enter.pressEnter, stages)
 }
 

@@ -3,6 +3,7 @@ import { httpAction, type ActionCtx } from './_generated/server'
 import {
   handleChatCompletions,
   handleFormat,
+  handleLayout,
   handleModels,
   handleTranscriptions,
   type Gate,
@@ -71,4 +72,9 @@ export const chatCompletions = httpAction(async (ctx, request) => {
 export const format = httpAction(async (ctx, request) => {
   if (!convexGatewayEnabled(process.env)) return gatewayOff()
   return handleFormat(convexHooks(ctx), await identityOf(ctx.auth), request)
+})
+
+export const layout = httpAction(async (ctx, request) => {
+  if (!convexGatewayEnabled(process.env)) return gatewayOff()
+  return handleLayout(convexHooks(ctx), await identityOf(ctx.auth), request)
 })

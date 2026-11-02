@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import type { HotkeyAction } from '@core/hotkey/engine'
-import { adaptiveThreshold, analyze, trimSilence } from '@core/audio/vad'
+import { adaptiveThreshold, analyze, frameLevelsDb, trimSilence } from '@core/audio/vad'
 import {
   getSttProvider,
   SttError,
@@ -30,9 +30,12 @@ import {
   stripPromptEcho,
   joinPieces,
   joinSeam,
+  rawSeamContinues,
   lastSentenceStart,
   seamContext,
-  stripEcho
+  stripEcho,
+  wantsLayout,
+  type LayoutResult
 } from '@engine'
 import {
   FAST_SKIP_DETAIL,
@@ -58,6 +61,8 @@ import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
 import { DEFAULT_CHUNK_PLAN } from '@core/audio/chunker'
 import type { PartialStore } from '../store/partials'
+import { RollingLayout } from './rolling-layout'
+import { dropUnspokenEnding } from './unspoken'
 import {
   ChunkStreamer,
   LONG_CLIP_SEC,
@@ -93,6 +98,8 @@ interface ActiveSession {
   /** Long dictations to Murmur's gateway go up in pieces while they are spoken. */
   stream?: ChunkStreamer<TailSpec>
   streamFormats?: Promise<FormatOutcome | 'empty' | null>[]
+  /** Paragraphs and lists for the pieces, worked out while the user keeps talking. */
+  streamLayout?: RollingLayout
   streamListener?: (id: string, samples: number) => void
 }
 
@@ -106,6 +113,9 @@ interface TailSpec {
 interface StreamedPrefix {
   samples: number
   texts: Promise<string[]>
+  /** Each piece's own text, and where its audio sits in the recording, to resend it alone. */
+  pieces?: Promise<string>[]
+  ranges?: Array<[number, number]>
   /** A speculation on the stretch after the pieces; the rest of the audio starts at its samples. */
   spec?: TailSpeculation<TailSpec>
   /**
@@ -113,7 +123,15 @@ interface StreamedPrefix {
    * order: 'empty' for a piece with no speech, null where speculation was not possible.
    */
   formats: Promise<FormatOutcome | 'empty' | null>[]
+  /** The pieces' layout while recording (smart formatting into a document, email or notes). */
+  layout?: RollingLayout
 }
+
+/** Categories that never get paragraphs or lists (wantsLayout says the same). */
+const NO_LAYOUT = new Set<AppContext['category']>(['chat', 'code', 'terminal'])
+
+/** A formatting outcome whose layout is settled (laid out while recording); none runs after. */
+type LaidOut = { laidOut?: true }
 
 /** Streamed pieces and the tail, for formatting the tail alone at release. */
 type StreamedStt = CompleteResult & {
@@ -154,17 +172,21 @@ async function formatLong(formatter: Formatter, input: FormatInput): Promise<For
       run(() =>
         formatter.format({
           ...input,
-          transcript: g,
+          transcript: g.trim(),
           context: pieceContext(input.context, i ? groups[i - 1] : '', i === groups.length - 1)
         })
-      )
+      ).then((out) => {
+        // A paragraph or list break at the cut between groups is put back after the model.
+        const brk = /\s+$/.exec(g)?.[0] ?? ''
+        return brk.includes('\n') ? { ...out, text: out.text.trimEnd() + brk } : out
+      })
     )
   )
   return joinFormatted(parts)
 }
 
 /** Pieces formatted separately, joined in order with their seams repaired; the last decides Enter. */
-function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
+function joinFormatted(parts: FormatOutcome[], continues: readonly boolean[] = []): FormatOutcome {
   const rank: Record<string, number> = {
     used: 0,
     'skipped-clean': 1,
@@ -179,10 +201,16 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const stages: string[] = []
   for (const p of parts) for (const st of p.stages) if (!stages.includes(st)) stages.push(st)
   return {
-    text: joinPieces(parts.map((p) => p.text)).text,
+    text: joinPieces(
+      parts.map((p) => p.text),
+      continues
+    ).text,
     pressEnter: parts[parts.length - 1].pressEnter,
     modelText: parts.every((p) => p.modelText !== undefined)
-      ? joinPieces(parts.map((p) => p.modelText!)).text
+      ? joinPieces(
+          parts.map((p) => p.modelText!),
+          continues
+        ).text
       : undefined,
     llmMs: parts[parts.length - 1].llmMs,
     // A piece the model left as it was, or a short tail formatted by rules, does not make the
@@ -210,6 +238,11 @@ interface ProcessJob {
   windowInfo: Promise<ActiveWindowInfo>
   /** File name of the stored audio, when it was kept. */
   recording?: string
+  /**
+   * The audio being written to disk, alongside the release (a 25-minute WAV is 48 MB, and
+   * waiting for it held every long release by half a second). `recording` is set once it settles.
+   */
+  stored?: Promise<void>
   /** Sent again: the failed entry this run replaces. */
   previous?: HistoryEntry
   /** How many times this audio has now been sent for transcription. */
@@ -474,8 +507,11 @@ export class DictationController extends EventEmitter {
       )
       const streamed = this.stopStreaming(session)
       // Store the audio before anything can go wrong with it: a failed request is retried from
-      // this file, and a kept recording is what History plays back.
-      job.recording = await this.storeRecording(session.id, pcm)
+      // this file, and a kept recording is what History plays back. The write runs alongside
+      // the release; whatever records the entry waits for it.
+      job.stored = this.storeRecording(session.id, pcm).then((name) => {
+        job.recording = name
+      })
       // A hard deadline: whatever stalls, the pill never sits on "processing" forever.
       const audioSec = pcm.length / SAMPLE_RATE
       const work = this.process(job, pcm, stopAt, s, streamed)
@@ -501,6 +537,7 @@ export class DictationController extends EventEmitter {
           injectMs: 0,
           totalMs: Math.round(performance.now() - stopAt)
         }
+        await job.stored
         this.recordFailure(job, '', classifyApp('', ''), timings, null, RELEASE_TIMEOUT_MESSAGE)
         this.showError(RELEASE_TIMEOUT_MESSAGE, job.recording ? job.id : undefined)
       }
@@ -509,6 +546,7 @@ export class DictationController extends EventEmitter {
       this.showError(friendlyError(err))
     } finally {
       this.deps.partials?.clear(session.id)
+      await job.stored
       this.releaseRecording(job)
       this.processing--
       if (!this.active && this.processing === 0) this.emit('state', 'idle')
@@ -623,6 +661,12 @@ export class DictationController extends EventEmitter {
         const speed = effectiveSpeed(s.stt.speed, style.rule)
         const smart = formattingModeAt(style.mode, speed) === 'smart'
         const context = this.formatContext(s, style, app)
+        if (smart && session.mode !== 'command' && !NO_LAYOUT.has(app.category))
+          session.streamLayout = new RollingLayout(
+            app.category,
+            (text) => this.layout(text, app.category, tag),
+            (parts, continues) => joinFormatted(parts, continues).text
+          )
         const prompt = s.stt.useDictionaryPrompt
           ? buildSttPrompt(
               s.dictionary,
@@ -638,6 +682,10 @@ export class DictationController extends EventEmitter {
       let settle: (v: Promise<FormatOutcome | 'empty' | null> | 'empty' | null) => void = () =>
         undefined
       formats[index] = new Promise((r) => (settle = r))
+      formats[index].then(
+        (v) => session.streamLayout?.settle(index, v, partialTexts[index] ?? ''),
+        () => session.streamLayout?.settle(index, null, '')
+      )
       const own = transcribeOnly(pcm, index)
       own.catch(() => undefined)
       pieceTexts[index] = own
@@ -668,6 +716,11 @@ export class DictationController extends EventEmitter {
       const a = analyze(pcm, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
       if (!a.hasSpeech) return ''
       const started = performance.now()
+      // The end of the piece before, when it has arrived, closes the prompt: Whisper reads the
+      // prompt as the text just before this audio, so a sentence the cut split carries on instead
+      // of being opened again with a capital (real speech: false sentence breaks 9 -> 7, the same
+      // words). Never waited for: a piece whose neighbour is still out goes with the plain prompt.
+      const carry = index > 0 ? seamContext(partialTexts[index - 1] ?? '') : ''
       const out = await transcribeComplete(
         (wav, p) => this.transcribeWithFallback(wav, p, t.keyterms, t.resolved, 'background'),
         {
@@ -675,7 +728,7 @@ export class DictationController extends EventEmitter {
           sampleRate: SAMPLE_RATE,
           speechEndSec: a.lastVoicedMs / 1000,
           thresholdDb: threshold,
-          prompt: t.prompt,
+          prompt: t.prompt && carry ? `${t.prompt} ${carry}` : t.prompt,
           tailPrompt: t.prompt ? STT_BASE_PROMPT : undefined,
           log: (m) => log.warn(`session ${tag} piece ${index}: ${m}`)
         }
@@ -763,10 +816,14 @@ export class DictationController extends EventEmitter {
     session.stream = undefined
     const formats = session.streamFormats ?? []
     session.streamFormats = undefined
+    const layout = session.streamLayout
+    session.streamLayout = undefined
     const spec = stream?.speculation() ?? undefined
     if (!stream || (stream.piecesSent === 0 && !spec)) return undefined
     for (const f of formats) f.catch(() => undefined)
-    return { ...stream.finish(), formats, spec }
+    // The last pieces are laid out too if their answer can still beat the tail's; never waited for.
+    layout?.flush()
+    return { ...stream.finish(), formats, spec, layout }
   }
 
   private clearTimers(session: ActiveSession): void {
@@ -804,7 +861,12 @@ export class DictationController extends EventEmitter {
     // carry the limit so the user learns what ran out, when it comes back, and what else they can
     // do, with Retry right there for when it has. A Murmur provider that is down is explained the
     // same calm way, with Retry for when it is back.
-    const failure = (raw: string, resolved: ResolvedStt | null, err: unknown): ProcessOutcome => {
+    const failure = async (
+      raw: string,
+      resolved: ResolvedStt | null,
+      err: unknown
+    ): Promise<ProcessOutcome> => {
+      await job.stored
       const error = friendlyError(err)
       const limit = planLimitOf(err)
       const service = serviceNoticeOf(err)
@@ -820,10 +882,13 @@ export class DictationController extends EventEmitter {
     let t = performance.now()
     let audio = pcm
     if (pcm.length < SAMPLE_RATE * 0.15) return notice('Too short')
-    const threshold = adaptiveThreshold(pcm, SAMPLE_RATE, s.audio.silenceThresholdDb)
-    const analysis = analyze(pcm, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
+    // One pass over the audio for its frame levels; the threshold, speech and trim share it.
+    const levels = frameLevelsDb(pcm, SAMPLE_RATE)
+    const threshold = adaptiveThreshold(pcm, SAMPLE_RATE, s.audio.silenceThresholdDb, levels)
+    const analysis = analyze(pcm, { sampleRate: SAMPLE_RATE, thresholdDb: threshold, levels })
     if (s.audio.skipIfSilent && !analysis.hasSpeech) {
       timings.vadMs = Math.round(performance.now() - t)
+
       log.info(
         `session ${job.id.slice(0, 8)}: no speech (peak ${analysis.peakDb.toFixed(1)} dB, threshold ${threshold.toFixed(1)} dB)`
       )
@@ -835,6 +900,7 @@ export class DictationController extends EventEmitter {
       const trimmed = trimSilence(pcm, {
         sampleRate: SAMPLE_RATE,
         thresholdDb: threshold,
+        levels,
         paddingMs: 300
       })
       audio = trimmed.pcm
@@ -873,8 +939,13 @@ export class DictationController extends EventEmitter {
       formattingModeAt(style.mode, speed) === 'smart' &&
       this.deps.inference.routing?.().llm === 'murmur' &&
       resolved.source === 'murmur'
-    const run = (clip: Int16Array, endSec: number): Promise<CompleteResult> =>
+    const run = (
+      clip: Int16Array,
+      endSec: number,
+      first?: TranscribeOutput
+    ): Promise<CompleteResult> =>
       transcribeComplete((wav, p) => this.transcribeWithFallback(wav, p, keyterms, resolved), {
+        first,
         pcm: clip,
         sampleRate: SAMPLE_RATE,
         speechEndSec: endSec,
@@ -926,16 +997,17 @@ export class DictationController extends EventEmitter {
               }
             )
             if (answer) {
-              if (answer.format) preformatted = [answer.transcript, answer.format as FormatOutcome]
               log.info(
                 `session ${tag}: tail in one call, ${answer.stt.latencyMs} ms${answer.rules ? ' (short tail, rules)' : ''}`
               )
-              return {
-                ...answer.stt,
-                resumed: 0,
-                recoveredSec: 0,
-                coverage: { transcribedSec: null, missingSec: 0, truncated: false }
-              } as CompleteResult
+              // The same check as every other speech request: a transcript that stopped before
+              // the speech did (the vocabulary prompt's early stop) is resumed from where it
+              // stopped, and its text is formatted here instead of the gateway's answer.
+              const stt = stripPromptEcho(answer.stt.text, prompt)
+              const done = await run(clip, endSec, { ...answer.stt, text: stt })
+              if (!done.resumed && done.text === stt && answer.format)
+                preformatted = [answer.transcript, answer.format as FormatOutcome]
+              return done
             }
           } catch (err) {
             log.warn(`session ${tag}: one-call release failed; using two calls`, err)
@@ -951,9 +1023,14 @@ export class DictationController extends EventEmitter {
             runTail,
             tag,
             runWhole,
-            s.audio.silenceThresholdDb
+            s.audio.silenceThresholdDb,
+            // A piece sent again is plain speech: never the tail's one-call release.
+            (clip, endSec) => run(clip, endSec)
           )
         : await runWhole()
+      // One answer for the whole (trimmed) clip: its timings line up with `audio`.
+      if (!streamed && audio.length / SAMPLE_RATE <= LONG_CLIP_SEC)
+        stt = dropUnspokenEnding(stt, audio, tag)
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
       return failure('', resolved, err)
@@ -1082,6 +1159,26 @@ export class DictationController extends EventEmitter {
           softLimit = planLimitOf(err)
         }
       }
+      // A long dictation into a document, email or notes gets paragraphs and lists, laid out from
+      // the model's plan without changing a word (the formatting prompt never adds paragraphs).
+      // A streamed dictation was laid out while it was spoken; it never waits for one here.
+      if (
+        mode === 'smart' &&
+        !streamed &&
+        // A formatter that just failed is not asked again for the layout.
+        formatted.status.outcome !== 'failed' &&
+        !(formatted as LaidOut).laidOut &&
+        wantsLayout(formatted.text, app.category)
+      ) {
+        const laid = await this.layout(formatted.text, app.category, job.id.slice(0, 8))
+        formatted = {
+          ...formatted,
+          llmMs: formatted.llmMs + laid.llmMs,
+          ...(laid.outcome === 'used'
+            ? { text: laid.text, stages: [...formatted.stages, 'layout'] }
+            : {})
+        }
+      }
       const finished = finish(formatted.text, {
         category: app.category,
         dictionary: s.dictionary,
@@ -1129,6 +1226,7 @@ export class DictationController extends EventEmitter {
       setTimeout(selectionRestore, Math.max(300, s.injection.restoreClipboardDelayMs))
 
     // The audio stays with a successful dictation only if the user wants recordings kept.
+    await job.stored
     const recording = s.audio.keepRecordings ? job.recording : undefined
     if (job.recording && !recording) this.deps.recordings.delete(job.recording)
     const entry: HistoryEntry = {
@@ -1193,7 +1291,8 @@ export class DictationController extends EventEmitter {
     run: (clip: Int16Array, endSec: number) => Promise<CompleteResult>,
     tag: string,
     whole: () => Promise<CompleteResult>,
-    configuredDb = -48
+    configuredDb = -48,
+    runPiece: (clip: Int16Array, endSec: number) => Promise<CompleteResult> = run
   ): Promise<StreamedStt> {
     const sendFrom = (
       from: number
@@ -1201,6 +1300,7 @@ export class DictationController extends EventEmitter {
       rest: Int16Array
       a: ReturnType<typeof analyze>
       tail: Promise<CompleteResult | null>
+      clip: Int16Array
     } => {
       const rest = pcm.subarray(Math.min(from, pcm.length))
       // The tail's own noise floor, never stricter than the session's: a soft last phrase after a
@@ -1208,16 +1308,18 @@ export class DictationController extends EventEmitter {
       const tailDb = Math.min(threshold, adaptiveThreshold(rest, SAMPLE_RATE, configuredDb))
       const a = analyze(rest, { sampleRate: SAMPLE_RATE, thresholdDb: tailDb })
       let tail: Promise<CompleteResult | null> = Promise.resolve(null)
+      let clip = rest
       if (a.hasSpeech) {
         const trimmed = trimSilence(rest, {
           sampleRate: SAMPLE_RATE,
           thresholdDb: tailDb,
           paddingMs: 300
         })
-        tail = run(trimmed.pcm, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
+        clip = trimmed.pcm
+        tail = run(clip, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
       }
       tail.catch(() => undefined)
-      return { rest, a, tail }
+      return { rest, a, tail, clip }
     }
     // With a speculation, only the audio after its pause is sent now; if it failed, the whole
     // stretch after the pieces is sent as before (Android DictationController.process).
@@ -1320,19 +1422,23 @@ export class DictationController extends EventEmitter {
         ? {
             rest: new Int16Array(0),
             a: analyze(new Int16Array(0), { sampleRate: SAMPLE_RATE, thresholdDb: threshold }),
-            tail: Promise.resolve(null)
+            tail: Promise.resolve(null),
+            clip: new Int16Array(0)
           }
         : sendFrom(specUsable && streamed.spec ? streamed.spec.samples : streamed.samples)
     // Everything streamed shares one wait; past it the whole dictation goes up instead.
     const streamDeadline = Date.now() + STREAM_WAIT_MS
     const left = (): number => Math.max(1, streamDeadline - Date.now())
     const tSpec = Date.now()
-    const { rest, a, tail } = sent
+    const { rest, a, tail, clip } = sent
     let texts: string[]
     try {
-      texts = await within(streamed.texts, left())
+      texts = await this.settlePieces(streamed, pcm, threshold, runPiece, left, tag)
     } catch (err) {
-      log.warn(`session ${tag}: a streamed piece failed; transcribing the whole dictation`, err)
+      log.warn(
+        `session ${tag}: a streamed piece failed twice; transcribing the whole dictation`,
+        err
+      )
       return whole()
     }
     let last: CompleteResult | null
@@ -1355,6 +1461,7 @@ export class DictationController extends EventEmitter {
       log.info(`session ${tag}: dropped a stock phrase from a quiet tail (${a.speechMs} ms voiced)`)
       last = { ...last, text: '' }
     }
+    if (last) last = dropUnspokenEnding(last, clip, tag)
     const seams = joinPieces([...texts, spec?.text ?? '', last?.text ?? ''])
     const text = seams.text
     log.info(
@@ -1436,18 +1543,25 @@ export class DictationController extends EventEmitter {
           ? formatTranscript(tailRequest, null)
           : formatter.format(tailRequest)
     tailFormat?.catch(() => undefined)
-    type PieceOutcome = Awaited<(typeof streamed.formats)[number]>
-    const pieces: PieceOutcome[] = await within(Promise.all(streamed.formats), formatLeft()).catch(
-      (): PieceOutcome[] => [null as PieceOutcome]
+    const pieces = await this.settleFormats(
+      formatter,
+      input,
+      streamed.formats,
+      stt.streamed.texts,
+      tag
     )
-    if (pieces.some((p) => p === null)) {
-      log.info(
-        `session ${tag}: a piece was not formatted while speaking; formatting the whole text`
-      )
-      return null
+    const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty')
+    // What the recognizer heard at each seam, so formatting each piece alone (which gives the next
+    // piece a capital) does not close a sentence the speaker never closed.
+    const raws = stt.streamed.texts.filter((_, i) => pieces[i] !== 'empty')
+    const piecesDone = parts.length
+    if (specHead) {
+      parts.push(specHead)
+      raws.push(stt.streamed.spec?.text ?? '')
     }
-    const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty' && p !== null)
-    if (specHead) parts.push(specHead)
+    const continues = raws.slice(0, -1).map((raw, k) => rawSeamContinues(raw, raws[k + 1]))
+    // The tail after a speculation starts at a sentence start; after the pieces, at the cut.
+    if (tailFormat && !specHead) continues.push(rawSeamContinues(raws[raws.length - 1] ?? '', tail))
     if (tailFormat) {
       try {
         let t = await tailFormat
@@ -1466,7 +1580,157 @@ export class DictationController extends EventEmitter {
     log.info(
       `session ${tag}: ${parts.length - (tailFormat ? 1 : 0)} piece(s) formatted while speaking; tail formatted at release`
     )
-    return joinFormatted(parts)
+    const joined = joinFormatted(parts, continues)
+    // The pieces were laid out while the user spoke: the newest answer that has arrived is used,
+    // and what was said after it (the last pieces and the tail) joins it as it is. Nothing waits
+    // for a layout at release.
+    if (!streamed.layout) return joined
+    const done: FormatOutcome & LaidOut = { ...joined, laidOut: true }
+    const early = streamed.layout.current()
+    if (
+      early &&
+      early.parts <= piecesDone &&
+      early.laid.outcome === 'used' &&
+      joinFormatted(parts.slice(0, early.parts), continues).text === early.prefix
+    ) {
+      done.text = joinPieces(
+        [early.laid.text, ...parts.slice(early.parts).map((p) => p.text)],
+        continues.slice(early.parts - 1)
+      ).text
+      done.stages = [...joined.stages, 'layout']
+      done.llmMs += early.laid.llmMs
+    }
+    return done
+  }
+
+  /**
+   * The streamed pieces' texts. A piece that failed, or is still out when its grace runs out, is
+   * sent again on its own at release priority (raced against the original if that is still out),
+   * instead of transcribing the whole dictation again. Throws only when a resend fails too.
+   */
+  private async settlePieces(
+    streamed: StreamedPrefix,
+    pcm: Int16Array,
+    threshold: number,
+    run: (clip: Int16Array, endSec: number) => Promise<CompleteResult>,
+    left: () => number,
+    tag: string
+  ): Promise<string[]> {
+    const { pieces, ranges } = streamed
+    if (!pieces || !ranges || pieces.length !== ranges.length) return within(streamed.texts, left())
+    const PENDING = Symbol('pending')
+    const grace = Math.min(left(), PIECE_RESEND_AFTER_MS)
+    const deadline = new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), grace))
+    const resend = limiter(MAX_RESENDS_IN_FLIGHT)
+    let resent = 0
+    const texts = await Promise.all(
+      pieces.map(async (piece, i) => {
+        const first = await Promise.race([piece.catch(() => null), deadline])
+        if (typeof first === 'string') return first
+        resent++
+        const [from, to] = ranges[i]
+        const clip = pcm.subarray(Math.max(0, from), Math.min(pcm.length, to))
+        const a = analyze(clip, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
+        if (!a.hasSpeech) return ''
+        const again = resend(() => run(clip, a.lastVoicedMs / 1000)).then((r) => r.text.trim())
+        // The original may still answer first; a failure of one is fine while the other can win.
+        if (first === PENDING) return within(firstOf([piece, again]), left() + 10_000)
+        return within(again, left() + 10_000)
+      })
+    )
+    if (resent)
+      log.info(
+        `session ${tag}: ${resent} piece(s) sent again at release instead of the whole dictation`
+      )
+    return texts
+  }
+
+  /**
+   * Each piece's formatting from while it was spoken. One that failed, came back unformatted, or
+   * is still out when its grace runs out, is formatted again on its own at release priority, with
+   * the piece before it as context; the rest stand. A piece the model cannot format gets the
+   * rule-based cleanup, never a re-format of the whole dictation.
+   */
+  private async settleFormats(
+    formatter: Formatter,
+    input: FormatInput,
+    formats: Promise<FormatOutcome | 'empty' | null>[],
+    texts: string[],
+    tag: string
+  ): Promise<Array<FormatOutcome | 'empty'>> {
+    const PENDING = Symbol('pending')
+    const deadline = new Promise<typeof PENDING>((r) =>
+      setTimeout(() => r(PENDING), FORMAT_RESEND_AFTER_MS)
+    )
+    const run = limiter(MAX_RESENDS_IN_FLIGHT)
+    let redone = 0
+    const out = await Promise.all(
+      formats.map(async (f, i): Promise<FormatOutcome | 'empty'> => {
+        const text = texts[i] ?? ''
+        if (!text.trim()) return 'empty'
+        const first = await Promise.race([f.catch(() => null), deadline])
+        // The gateway answers rule-based text when this user's formats were over its cap.
+        if (
+          first !== null &&
+          first !== PENDING &&
+          (first === 'empty' || first.status.detail !== 'rate_limited')
+        )
+          return first
+        redone++
+        const before = i > 0 ? (texts[i - 1] ?? '') : ''
+        const request: FormatInput = {
+          ...input,
+          transcript: text,
+          context: pieceContext(input.context, before)
+        }
+        const again = run(() => formatter.format(request)).then((r) => {
+          if (r.status.outcome === 'failed') throw new Error(r.status.detail ?? 'failed')
+          return { ...r, text: stripEcho(r.text, seamContext(before)) }
+        })
+        const late =
+          first === PENDING
+            ? f.then((x) => (x === null ? Promise.reject(new Error('unformatted')) : x))
+            : null
+        try {
+          return await within(
+            late ? firstOf<FormatOutcome | 'empty'>([late, again]) : again,
+            // A stalled formatter gets the shared format wait (as main's release had), then rules.
+            FORMAT_WAIT_MS
+          )
+        } catch {
+          const rules = await formatTranscript(request, null)
+          return {
+            ...rules,
+            status: { outcome: 'failed', detail: 'piece not formatted', attempts: 0 }
+          }
+        }
+      })
+    )
+    if (redone)
+      log.info(
+        `session ${tag}: ${redone} piece(s) formatted again at release instead of the whole text`
+      )
+    return out
+  }
+
+  /** Paragraphs and lists for a long dictation, within LAYOUT_TIMEOUT_MS; the text as it was otherwise. */
+  private async layout(
+    text: string,
+    category: AppContext['category'],
+    tag: string
+  ): Promise<LayoutResult> {
+    try {
+      const formatter = await this.deps.inference.formatter()
+      if (!formatter.layout) return { text, outcome: 'skipped', detail: 'no model', llmMs: 0 }
+      const laid = await within(formatter.layout(text, category), LAYOUT_TIMEOUT_MS)
+      log.info(
+        `session ${tag}: layout ${laid.outcome}${laid.detail ? ` (${laid.detail})` : ''} in ${laid.llmMs} ms`
+      )
+      return laid
+    } catch (err) {
+      log.warn(`session ${tag}: layout skipped: ${friendlyError(err)}`)
+      return { text, outcome: 'failed', detail: friendlyError(err), llmMs: 0 }
+    }
   }
 
   private async transcribeWithFallback(
@@ -1686,19 +1950,49 @@ async function releasePlan(
   streamed: StreamedPrefix
 ): Promise<{ prefix: string; before: string; format: Record<string, unknown> } | null> {
   if (!streamed.spec) return null
-  const PENDING = Symbol('pending')
-  const spec = await Promise.race([
-    streamed.spec.result.catch(() => null),
-    Promise.resolve(PENDING)
-  ])
+  const spec = await settledNow(streamed.spec.result)
   if (spec === PENDING || spec === null) return null
-  const f = await Promise.race([spec.format.catch(() => null), Promise.resolve(PENDING)])
+  const f = await settledNow(spec.format)
   if (f === PENDING || f === null || f === 'empty') return null
   const at = lastSentenceStart(f.text)
   const head = f.text.slice(0, at).trim()
   if (!head) return null
   return { prefix: f.text.slice(at), before: head, format: {} }
 }
+const PENDING = Symbol('pending')
+
+/**
+ * The value of `p` if it has already settled (null if it failed), PENDING if not; never waits.
+ * Racing `p.catch()` against `Promise.resolve(PENDING)` always answered PENDING: the `.catch()`
+ * promise settles a tick after `p`, so the one-call release never ran (Oct 15 to Nov 2 2026).
+ */
+async function settledNow<T>(p: Promise<T>): Promise<T | null | typeof PENDING> {
+  return Promise.race([
+    p.catch(() => null),
+    new Promise<typeof PENDING>((r) => setImmediate(() => r(PENDING)))
+  ])
+}
+
+/** The longest the paragraph and list layout of a long dictation may add to its release. */
+export const LAYOUT_TIMEOUT_MS = 4_000
+/** How long release waits for a piece still out before sending it again (racing the original). */
+export const PIECE_RESEND_AFTER_MS = 3_000
+/** How long release waits for a piece's formatting still out before formatting it again. */
+export const FORMAT_RESEND_AFTER_MS = 1_500
+/** Pieces sent again (speech or formatting) at once at release; the gateway allows 3 formats. */
+export const MAX_RESENDS_IN_FLIGHT = 2
+
+/** The first of `ps` to resolve; rejects only when all of them reject. */
+export function firstOf<T>(ps: Promise<T>[]): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let failed = 0
+    for (const p of ps)
+      p.then(resolve, (err: unknown) => {
+        if (++failed === ps.length) reject(err)
+      })
+  })
+}
+
 export const RELEASE_TIMEOUT_MESSAGE = 'Murmur took too long to transcribe this — tap Retry'
 
 /**

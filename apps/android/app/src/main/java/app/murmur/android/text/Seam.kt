@@ -24,6 +24,16 @@ private val ALWAYS_CAPITAL = Regex("""^(I|I['’](m|ll|ve|d))$""")
 
 private data class SeamWord(val key: String, val start: Int, val end: Int, val text: String)
 
+/** A line that is a list item: "- ", "* ", "• ", "1. " or "1) ". Mirrors LIST_ITEM in seam.ts. */
+private val LIST_ITEM = Regex("""^\s*(?:[-*•]|\d{1,3}[.)])\s+\S""")
+
+/** A capitalized word that does not start a sentence ("May" the month), so not a continuation. */
+private fun capitalizedMidSentence(text: String, w: SeamWord): Boolean {
+    if (!w.text[0].isUpperCase() || ALWAYS_CAPITAL.matches(w.text)) return false
+    val before = text.substring(0, w.start).replace(Regex("""["'(\[\s]+$"""), "")
+    return before.isNotEmpty() && !Regex("""[.!?…:\n]$""").containsMatchIn(before)
+}
+
 private fun seamWords(s: String): List<SeamWord> = SEAM_WORD.findAll(s).map {
     SeamWord(it.value.lowercase().replace('’', '\''), it.range.first, it.range.last + 1, it.value)
 }.toList()
@@ -77,11 +87,18 @@ private fun looksLikeName(word: String, vararg texts: String): Boolean {
     return texts.any { re.containsMatchIn(it) }
 }
 
-fun joinSeam(prev: String, next: String): SeamJoin {
+fun joinSeam(prev: String, next: String, continues: Boolean = false): SeamJoin {
     var h = prev.trimEnd()
     var t = next.trimStart()
     if (t.isEmpty()) return SeamJoin(h, 0, false)
     if (h.isEmpty()) return SeamJoin(t, 0, false)
+    // A line break either side already had at the cut (a paragraph, a list) survives the join.
+    val edge = (Regex("""\s+$""").find(prev)?.value ?: "") + (Regex("""^\s+""").find(next)?.value ?: "")
+    val keptBreak = when {
+        '\n' !in edge -> ""
+        Regex("""\n[^\S\n]*\n""").containsMatchIn(edge) -> "\n\n"
+        else -> "\n"
+    }
 
     val hw = seamWords(h).takeLast(SEAM_WINDOW)
     var tw = seamWords(t).take(SEAM_WINDOW)
@@ -112,6 +129,15 @@ fun joinSeam(prev: String, next: String): SeamJoin {
         tw = seamWords(t).take(SEAM_WINDOW)
     }
 
+    // A list on either side of the cut: the seam is a line boundary, never a sentence to repair.
+    // (A lower-case start after a list item is the rest of that item, cut mid-line.)
+    val hLastLine = h.substring(h.lastIndexOf('\n') + 1)
+    if (LIST_ITEM.containsMatchIn(t) || (LIST_ITEM.containsMatchIn(hLastLine) && !t[0].isLowerCase())) {
+        val sep = keptBreak.ifEmpty { if (LIST_ITEM.containsMatchIn(t)) "\n" else "\n\n" }
+        return SeamJoin("$h$sep$t", deduped, false)
+    }
+    if (keptBreak.isNotEmpty()) return SeamJoin("$h$keptBreak$t", deduped, false)
+
     // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
     // never owed, and next opens with the one or two lower-case words that finish prev's sentence,
     // then its own mark. Those words go back before prev's mark ("in this chat?"). Mirrors seam.ts.
@@ -131,8 +157,8 @@ fun joinSeam(prev: String, next: String): SeamJoin {
     val endsBare = !Regex("""[.!?…:;,"')\]]$""").containsMatchIn(h)
     val firstAtStart = first != null && first.start == 0
     val nextLower = firstAtStart && first!!.text[0].isLowerCase()
-    val midSentence = deduped > 0 || Regex("""(\.{2,}|…)["')\]]*$""").containsMatchIn(h) ||
-        (last != null && last.key in CONTINUATION) || nextLower
+    val midSentence = continues || deduped > 0 || Regex("""(\.{2,}|…)["')\]]*$""").containsMatchIn(h) ||
+        (last != null && last.key in CONTINUATION && !capitalizedMidSentence(h, last)) || nextLower
     var joined = false
     if (firstAtStart && midSentence && (endsSoft || endsBare)) {
         if (endsSoft) h = h.replace(Regex("""(\.{2,}|…|\.)(["')\]]*)$"""), "$2")
@@ -151,18 +177,34 @@ fun joinSeam(prev: String, next: String): SeamJoin {
 
 data class PiecesJoin(val text: String, val deduped: Int, val joined: Int)
 
-fun joinPieces(pieces: List<String>): PiecesJoin {
+/** [continues] k: the seam after pieces k ran a sentence on in the raw speech (see rawSeamContinues). */
+fun joinPieces(pieces: List<String>, continues: List<Boolean> = emptyList()): PiecesJoin {
     var text = ""
     var deduped = 0
     var joined = 0
-    for (p in pieces) {
+    for ((i, p) in pieces.withIndex()) {
         if (p.isBlank()) continue
-        val j = joinSeam(text, p)
+        // The seam before this piece: the one after the last non-empty piece before it.
+        var k = i - 1
+        while (k >= 0 && pieces[k].isBlank()) k--
+        val j = joinSeam(text, p, k >= 0 && continues.getOrElse(k) { false })
         text = j.text
         deduped += j.deduped
         if (j.joined) joined++
     }
     return PiecesJoin(text.trim(), deduped, joined)
+}
+
+/**
+ * Whether the recognizer's own pieces say a sentence runs on across this cut: the next piece starts
+ * in lower case, or joining the two raw pieces repaired a sentence the cut had closed. Formatting
+ * each piece alone loses this (it gives the next piece a capital). Desktop: rawSeamContinues.
+ */
+fun rawSeamContinues(prev: String, next: String): Boolean {
+    val n = next.trim()
+    if (prev.isBlank() || n.isEmpty()) return false
+    if (Regex("""[!?]["')\]]*$""").containsMatchIn(prev.trim())) return false
+    return n[0].isLowerCase() || joinSeam(prev, next).joined
 }
 
 /** The end of the piece before, from its last sentence start, at most [maxWords] words. */

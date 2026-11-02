@@ -112,6 +112,9 @@ export function capitalizeSentences(text: string): string {
     (m: string, sep: string, ch: string, offset: number, whole: string) => {
       const before = whole.slice(0, offset + 1)
       if (sep.startsWith('.') && ABBREVIATION.test(before)) return m
+      // "sent to a... channel": the recognizer's trailing-off dots before a lower-case word mark a
+      // pause in the sentence, not its end.
+      if (sep.startsWith('.') && before.endsWith('..')) return m
       return sep + ch.toUpperCase()
     }
   )

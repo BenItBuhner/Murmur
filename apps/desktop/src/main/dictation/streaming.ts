@@ -89,6 +89,8 @@ export class ChunkStreamer<T = never> {
   /** Samples before `committed` the next piece repeats. */
   private overlap = 0
   private pieces: Promise<string>[] = []
+  /** Where each piece sits in the recording: [first sample, end), overlap included. */
+  private ranges: Array<[number, number]> = []
   private nextCheck: number
   private closed = false
   private readonly limit: <R>(task: () => Promise<R>) => Promise<R>
@@ -147,6 +149,7 @@ export class ChunkStreamer<T = never> {
     const p = this.send(piece, index)
     p.catch(() => undefined) // awaited in finish(); never an unhandled rejection
     this.pieces.push(p)
+    this.ranges.push([this.committed - (head ? head.length : 0), this.committed + cut])
     this.committed += cut
     this.spec = null // the piece covers it
     this.specRunning = false
@@ -213,11 +216,21 @@ export class ChunkStreamer<T = never> {
    * Where the rest of the audio starts (the overlap the next piece would have repeated is
    * included), and the pieces' texts (rejects if any piece failed).
    */
-  finish(): { samples: number; texts: Promise<string[]> } {
+  finish(): {
+    samples: number
+    texts: Promise<string[]>
+    pieces: Promise<string>[]
+    ranges: Array<[number, number]>
+  } {
     this.closed = true
     const texts = Promise.all(this.pieces)
     texts.catch(() => undefined) // the session awaits it later, after resolving its provider
-    return { samples: this.committed - this.overlap, texts }
+    return {
+      samples: this.committed - this.overlap,
+      texts,
+      pieces: [...this.pieces],
+      ranges: [...this.ranges]
+    }
   }
 
   get piecesSent(): number {
@@ -273,22 +286,28 @@ export const LONG_FORMAT_WORDS = 600
 /** Words per group when a long transcript is formatted in groups, cut at sentence ends. */
 export const FORMAT_GROUP_WORDS = 250
 
-/** Splits a transcript at sentence ends into groups of about `size` words. */
+/**
+ * Splits a transcript at sentence ends into groups of about `size` words. Whitespace inside a group
+ * is kept as it was; a line break at a cut between groups stays at the end of the group before it,
+ * so paragraphs and lists survive formatting in groups.
+ */
 export function formatGroups(text: string, size = FORMAT_GROUP_WORDS): string[] {
-  const sentences = text.trim().split(/(?<=[.!?])\s+/)
+  const parts = text.trim().split(/(?<=[.!?])(\s+)/)
   const groups: string[] = []
-  let cur: string[] = []
+  let cur = ''
   let words = 0
-  for (const sentence of sentences) {
+  for (let i = 0; i < parts.length; i += 2) {
+    const sentence = parts[i]
     const n = countWords(sentence)
     if (words && words + n > size) {
-      groups.push(cur.join(' '))
-      cur = []
+      const sep = parts[i - 1] ?? ''
+      groups.push(sep.includes('\n') ? cur + sep : cur)
+      cur = ''
       words = 0
-    }
-    cur.push(sentence)
+    } else if (i > 0) cur += parts[i - 1]
+    cur += sentence
     words += n
   }
-  if (cur.length) groups.push(cur.join(' '))
+  if (cur) groups.push(cur)
   return groups
 }

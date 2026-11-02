@@ -303,7 +303,16 @@ against an in-memory Convex via `convex-test`). Engine checks: the same three co
 the **golden contract** (`golden/engine.golden.json`) the Android port is pinned to — after changing
 the prompt, the verifier, the number reader or the clean-skip rules, run `npm run golden`, review
 the diff, and port the change to `apps/android/.../text`. `MURMUR_LIVE=1 MURMUR_BASE_URL=… MURMUR_API_KEY=…
-MURMUR_LLM_MODEL=… npm run test:live` runs the corpus against a real model and reports per fixture. The desktop app typechecks against the committed
+MURMUR_LLM_MODEL=… npm run test:live` runs the corpus against a real model and reports per fixture.
+Long dictations have their own samples in `eval/long/` (one sentence per line, with the paragraphs
+and lists the speaker meant marked): `npm test` cuts each one into streamed pieces 200 ways and
+scores the joins (broken sentences, stray capitals, lost words) and a perfect layout, and the same
+variables with `npx vitest run eval/long-live.test.ts` format, join and lay them out with a real
+model and report fidelity, seam errors, paragraph and list recall and latency
+(`MURMUR_SEAM_WORDS` compares how much of the piece before each piece is shown). In `apps/desktop`,
+`MURMUR_BENCH=1 npx vitest run tests/bench` times the release of a 25-minute dictation through the
+real session code with a simulated network (no failures, a piece that failed, one still out at the
+key-up, 2% of formats failing) and writes `bench-results/release-latency.json`. The desktop app typechecks against the committed
 `packages/backend/convex/_generated`, so run `npx convex dev` (or `npx convex codegen`) after
 changing backend functions and commit the result. `MURMUR_LIVE=1 npm run test:live -- tests/live/cloud-sync.test.ts`
 in `apps/desktop` drives the real sync engine against a Convex deployment that trusts a test JWT

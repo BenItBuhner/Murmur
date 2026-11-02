@@ -218,10 +218,12 @@ suspend fun transcribeComplete(
     tailPrompt: String?,
     maxRounds: Int = 3,
     log: (String) -> Unit = {},
+    /** The first answer, when it is already in hand (the one-call release); not asked again. */
+    first: TranscribeOutput? = null,
     transcribe: suspend (wav: ByteArray, prompt: String?) -> TranscribeOutput
 ): CompleteResult {
     fun fmt(n: Double): String = String.format(java.util.Locale.ROOT, "%.1f", n)
-    var out = transcribe(Wav.encodePcm16(pcm, sampleRate), prompt)
+    var out = first ?: transcribe(Wav.encodePcm16(pcm, sampleRate), prompt)
     var resumed = 0
     var recoveredSec = 0.0
     var cov = assessCoverage(out, speechEndSec)

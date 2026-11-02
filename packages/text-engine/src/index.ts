@@ -116,18 +116,34 @@ export {
 } from './clean'
 export { formatTranscript, type FormatInput } from './format'
 export {
+  dropLastWords,
   dropSilentSegments,
   isSilenceHallucination,
   isSilentStockPhrase,
   normalizePhrase,
-  TAIL_PHRASE_MIN_SPEECH_MS
+  STOCK_PHRASE_MIN_PITCHED_MS,
+  TAIL_PHRASE_MIN_SPEECH_MS,
+  trailingStockPhrase,
+  type TimedWord
 } from './hallucination'
 export { isPromptEcho, stripPromptEcho } from './prompt-echo'
 export {
   joinSeam,
   joinPieces,
+  rawSeamContinues,
   lastSentenceStart,
   seamContext,
   stripEcho,
   type SeamJoin
 } from './seam'
+export {
+  LAYOUT_MIN_WORDS,
+  applyLayout,
+  buildLayoutMessages,
+  layoutText,
+  parseLayout,
+  splitUnits,
+  wantsLayout,
+  type LayoutPlan,
+  type LayoutResult
+} from './layout'

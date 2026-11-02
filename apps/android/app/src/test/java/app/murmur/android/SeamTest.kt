@@ -2,6 +2,7 @@ package app.murmur.android
 
 import app.murmur.android.text.joinPieces
 import app.murmur.android.text.joinSeam
+import app.murmur.android.text.rawSeamContinues
 import app.murmur.android.text.seamContext
 import app.murmur.android.text.stripEcho
 import org.junit.Assert.assertEquals
@@ -76,5 +77,43 @@ class SeamTest {
             j("Can you preview that video for me in this?", "chat. Can I just watch it here, please, or is that not possible?")
         )
         assertEquals("Is it done? Yes. We shipped it.", j("Is it done?", "Yes. We shipped it."))
+    }
+
+    @Test
+    fun `keeps lists and paragraph breaks at a seam`() {
+        assertEquals(
+            "That covers the budget.\n\nNow the timeline. We have three phases:\n1. Design in March\n2. Build in April\n3. Launch in May\n\nNext, the hiring plan.\n\nWe need two engineers.",
+            joinPieces(
+                listOf(
+                    "That covers the budget.\n\nNow the timeline. We have three phases:",
+                    "1. Design in March\n2. Build in April\n3. Launch in May",
+                    "Next, the hiring plan.\n\nWe need two engineers."
+                )
+            ).text
+        )
+        assertEquals("- Design in march and april", j("- Design in", "march and april"))
+        assertEquals("First part.\n\nSecond part.", j("First part.\n\n", "Second part."))
+        assertEquals("First part.\nSecond part.", j("First part.", "\nSecond part."))
+    }
+
+    @Test
+    fun `a capitalized month is not a word that carries the sentence on`() {
+        assertEquals("We ship in May. Next we hire.", j("We ship in May", "Next we hire."))
+        assertEquals("we should go with the second option.", j("we should go with the", "Second option."))
+    }
+
+    @Test
+    fun `formatted pieces join as the recognizer heard the seam`() {
+        // Raw: "…before it" | "starts the timer" (one sentence); formatted alone: "…before it." | "Starts…"
+        assertEquals(true, rawSeamContinues("Check the queue before it", "starts the timer."))
+        assertEquals(false, rawSeamContinues("Is it done?", "starts the timer."))
+        assertEquals(
+            "Check the queue before it starts the timer.",
+            joinPieces(listOf("Check the queue before it.", "Starts the timer."), listOf(true)).text
+        )
+        assertEquals(
+            "Check the queue. Starts the timer.",
+            joinPieces(listOf("Check the queue.", "Starts the timer."), listOf(false)).text
+        )
     }
 }

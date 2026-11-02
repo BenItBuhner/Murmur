@@ -57,6 +57,13 @@ export function spansFromVerbose(json: VerboseJson | undefined): TimedSpan[] | u
   return segments.length ? segments : undefined
 }
 
+/** The segments' mean `no_speech_prob`, when the answer has segments. */
+function noSpeechOf(json: VerboseJson | undefined): number | undefined {
+  return json?.segments?.length
+    ? json.segments.reduce((acc, s) => acc + (s.no_speech_prob ?? 0), 0) / json.segments.length
+    : undefined
+}
+
 /** Turns a 16 kHz WAV into a smaller upload (Ogg Opus); null means send the WAV as it is. */
 export type CompactUploadEncoder = (wav: Uint8Array) => Uint8Array | null
 let compactEncoder: CompactUploadEncoder | null = null
@@ -163,14 +170,11 @@ export class OpenAiCompatibleStt implements SttProvider {
       } else {
         text = await res.text()
       }
-      const noSpeech = json?.segments?.length
-        ? json.segments.reduce((acc, s) => acc + (s.no_speech_prob ?? 0), 0) / json.segments.length
-        : undefined
       return {
         text: text.trim(),
         language: languageFromResponse(json),
         durationSec: json?.duration,
-        noSpeechProb: noSpeech,
+        noSpeechProb: noSpeechOf(json),
         latencyMs: Math.round(performance.now() - started),
         spans: spansFromVerbose(json),
         speed: readSpeedOutcome(res.headers, cfg.speed),
@@ -243,12 +247,18 @@ export async function dictateRelease(
     }
   }
   const form = new FormData()
-  if (compact) form.append('file', new Blob([compact as BlobPart], { type: 'audio/ogg' }), 'audio.ogg')
+  if (compact)
+    form.append('file', new Blob([compact as BlobPart], { type: 'audio/ogg' }), 'audio.ogg')
   else form.append('file', new Blob([input.wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
   form.append('model', cfg.model)
-  form.append('response_format', 'json')
+  // Timings, so the client can tell a transcript that stopped before the speech did (and resume
+  // it) exactly as it does for its other requests.
+  form.append('response_format', 'verbose_json')
+  form.append('timestamp_granularities[]', 'word')
+  form.append('timestamp_granularities[]', 'segment')
   form.append('temperature', '0')
-  if (cfg.language && cfg.language !== 'auto') form.append(sttLanguageField(cfg.model), cfg.language)
+  if (cfg.language && cfg.language !== 'auto')
+    form.append(sttLanguageField(cfg.model), cfg.language)
   if (input.prompt) form.append('prompt', input.prompt)
   if (cfg.speed) form.append(MURMUR_SPEED_FIELD, cfg.speed)
   if (prefix?.trim()) form.append('prefix', prefix)
@@ -279,7 +289,9 @@ export async function dictateRelease(
         text: (json.text ?? '').trim(),
         language: languageFromResponse(json),
         durationSec: json.duration,
+        noSpeechProb: noSpeechOf(json),
         latencyMs: Math.round(performance.now() - started),
+        spans: spansFromVerbose(json),
         speed: readSpeedOutcome(res.headers, cfg.speed),
         raw: json
       },

@@ -49,6 +49,28 @@ function words(s: string): Word[] {
   return out
 }
 
+/**
+ * The last `n` words of `s` (or all of them), with offsets into `s`. Only the end of the text is
+ * read: joining 80 pieces one after another must not read the whole dictation again at each seam.
+ */
+function lastWords(s: string, n: number): Word[] {
+  for (let span = 512; ; span *= 4) {
+    const from = Math.max(0, s.length - span)
+    const ws = words(s.slice(from))
+    // The first word of a window that does not reach the start may be cut; it never counts.
+    if (from > 0) ws.shift()
+    if (from === 0 || ws.length >= n) {
+      const out = ws.slice(-n)
+      if (from > 0)
+        for (const w of out) {
+          w.start += from
+          w.end += from
+        }
+      return out
+    }
+  }
+}
+
 /** How many words each side of a seam are searched for a repeat (a piece can echo a whole clause). */
 export const SEAM_WINDOW = 20
 /** Words at the end of the text before that an echo may stop short of (the model dropped or changed them). */
@@ -106,6 +128,19 @@ export interface SeamJoin {
   joined: boolean
 }
 
+/** A line that is a list item: "- ", "* ", "• ", "1. " or "1) ". */
+const LIST_ITEM = /^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/u
+
+/**
+ * A capitalized word that does not start a sentence: "May" the month or "Will" the name, not the
+ * auxiliary that would mean the sentence goes on.
+ */
+function capitalizedMidSentence(text: string, w: Word): boolean {
+  if (!/^\p{Lu}/u.test(w.text) || ALWAYS_CAPITAL.test(w.text)) return false
+  const before = text.slice(0, w.start).replace(/["'(\[\s]+$/u, '')
+  return before.length > 0 && !/[.!?…:\n]$/u.test(before)
+}
+
 /** Is this word capitalized somewhere other than a sentence start, so likely a name? */
 function looksLikeName(word: string, ...texts: string[]): boolean {
   if (word.length > 1 && word === word.toUpperCase()) return true // acronym
@@ -120,15 +155,26 @@ function looksLikeName(word: string, ...texts: string[]): boolean {
  * Join two consecutive pieces of one dictation. `prev` and `next` may each be raw speech
  * recognition or formatted text.
  */
-export function joinSeam(prev: string, next: string): SeamJoin {
-  let h = prev.replace(/\s+$/u, '')
+export function joinSeam(
+  prev: string,
+  next: string,
+  /**
+   * The same seam in the raw speech continued a sentence (see rawSeamContinues): a period and a
+   * capital that formatting the two sides separately put back at the cut are taken out again.
+   */
+  continues = false
+): SeamJoin {
+  let h = prev.trimEnd()
   let t = next.replace(/^\s+/u, '')
   if (!t) return { text: h, deduped: 0, joined: false }
   if (!h) return { text: t, deduped: 0, joined: false }
+  // A line break either side already had at the cut (a paragraph, a list) survives the join.
+  const edge = prev.slice(prev.trimEnd().length) + (/^\s+/u.exec(next)?.[0] ?? '')
+  const keptBreak = edge.includes('\n') ? (/\n[^\S\n]*\n/u.test(edge) ? '\n\n' : '\n') : ''
 
   // 1. The words at the cut heard (or echoed by the formatter) by both pieces: up to
   // SEAM_WINDOW words, near-exact for long runs, possibly stopping a few words short of prev's end.
-  const hw = words(h).slice(-SEAM_WINDOW)
+  const hw = lastWords(h, SEAM_WINDOW)
   let tw = words(t).slice(0, SEAM_WINDOW)
   let deduped = 0
   const rep = findRepeat(hw, tw)
@@ -137,7 +183,8 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     // next goes on with those same words, its version is kept and prev's is dropped.
     const slackWords = hw.slice(hw.length - rep.slack)
     const after = tw.slice(rep.k, rep.k + rep.slack)
-    const redone = after.length === rep.slack && slackWords.every((w, i) => sameKey(w.key, after[i].key))
+    const redone =
+      after.length === rep.slack && slackWords.every((w, i) => sameKey(w.key, after[i].key))
     if (redone) {
       h = h.slice(0, slackWords[0].start).replace(/[\s,;:]+$/u, '')
       // Drop the run itself; next carries the rest.
@@ -163,11 +210,21 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     tw = words(t).slice(0, SEAM_WINDOW)
   }
 
+  // A list on either side of the cut: the seam is a line boundary, never a sentence to repair.
+  const hLastLine = h.slice(h.lastIndexOf('\n') + 1)
+  // (A lower-case start after a list item is the rest of that item, cut mid-line.)
+  if (LIST_ITEM.test(t) || (LIST_ITEM.test(hLastLine) && !/^\p{Ll}/u.test(t))) {
+    const sep = keptBreak || (LIST_ITEM.test(t) ? '\n' : '\n\n')
+    return { text: `${h}${sep}${t}`, deduped, joined: false }
+  }
+  if (keptBreak) return { text: `${h}${keptBreak}${t}`, deduped, joined: false }
+
   // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
   // never owed, and next opens with the one or two words that finish prev's sentence, in lower
   // case, then its own mark. Those words go back before prev's mark ("in this chat?"), so neither
   // the reader nor the formatter sees a stray fragment it might move elsewhere.
-  const frag = /^(\p{Ll}[\p{L}\p{N}'’-]*(?:\s+[\p{L}\p{N}'’-]+)?)([.?!…]+)["')\]]*\s+(?=\p{Lu})/u.exec(t)
+  const frag =
+    /^(\p{Ll}[\p{L}\p{N}'’-]*(?:\s+[\p{L}\p{N}'’-]+)?)([.?!…]+)["')\]]*\s+(?=\p{Lu})/u.exec(t)
   const hMark = /([.?!…]+)(["')\]]*)$/u.exec(h)
   if (frag && hMark) {
     const mark = hMark[1].includes('?') || frag[2].includes('?') ? '?' : frag[2]
@@ -177,17 +234,17 @@ export function joinSeam(prev: string, next: string): SeamJoin {
   }
 
   // 2. A period or ellipsis the cut put in the middle of a sentence.
-  const hWords = words(h)
-  const last = hWords[hWords.length - 1]
+  const last = lastWords(h, 1)[0]
   const first = tw[0]
   const endsSoft = /(\.{2,}|…|(?<!\.)\.)["')\]]*$/u.test(h) && !/[!?]["')\]]*$/u.test(h)
   const endsBare = !/[.!?…:;,"')\]]$/u.test(h)
   const firstAtStart = first && first.start === 0
   const nextLower = firstAtStart && /^\p{Ll}/u.test(first.text)
   const midSentence =
+    continues ||
     deduped > 0 ||
     /(\.{2,}|…)["')\]]*$/u.test(h) ||
-    (last && CONTINUATION.has(last.key)) ||
+    (last && CONTINUATION.has(last.key) && !capitalizedMidSentence(h, last)) ||
     nextLower
   let joined = false
   if (firstAtStart && midSentence && (endsSoft || endsBare)) {
@@ -212,7 +269,11 @@ export function joinSeam(prev: string, next: string): SeamJoin {
 }
 
 /** joinSeam over a whole list of pieces, in order. */
-export function joinPieces(pieces: readonly string[]): {
+export function joinPieces(
+  pieces: readonly string[],
+  /** continues[i]: the seam after pieces[i] continued a sentence in the raw speech. */
+  continues: readonly boolean[] = []
+): {
   text: string
   deduped: number
   joined: number
@@ -220,14 +281,31 @@ export function joinPieces(pieces: readonly string[]): {
   let text = ''
   let deduped = 0
   let joined = 0
-  for (const p of pieces) {
+  for (let i = 0; i < pieces.length; i++) {
+    const p = pieces[i]
     if (!p.trim()) continue
-    const j = joinSeam(text, p)
+    // The seam before this piece: the one after the last non-empty piece before it.
+    let k = i - 1
+    while (k >= 0 && !pieces[k].trim()) k--
+    const j = joinSeam(text, p, k >= 0 && continues[k] === true)
     text = j.text
     deduped += j.deduped
     if (j.joined) joined++
   }
   return { text: text.trim(), deduped, joined }
+}
+
+/**
+ * Whether the speech recognizer's own pieces say a sentence runs on across this cut: the next
+ * piece starts in lower case (the recognizer heard it as a continuation), or joining the two raw
+ * pieces repaired a sentence the cut had closed. Formatting each piece alone loses this (it gives
+ * the next piece a capital), so the formatted pieces are joined with it.
+ */
+export function rawSeamContinues(prev: string, next: string): boolean {
+  const n = next.trim()
+  if (!prev.trim() || !n) return false
+  if (/[!?]["')\]]*$/u.test(prev.trim())) return false
+  return /^\p{Ll}/u.test(n) || joinSeam(prev, next).joined
 }
 
 /**

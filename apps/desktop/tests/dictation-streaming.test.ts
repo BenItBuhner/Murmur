@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SttError, type TranscribeOutput } from '@core/stt'
 import { defaultSettings, type Settings } from '@shared/settings'
+import { layoutText, type AppCategory } from '@engine'
 
 // The session talks to the desktop through the injector (Electron's clipboard and native key
 // synthesis) and the speech provider (HTTP). Both are replaced; everything else is the real code.
@@ -166,11 +167,14 @@ const inference = {
   },
   refreshedStt: async () => null,
   formatCalls: [] as string[],
+  /** Transcripts whose first formatting attempt fails. */
+  failFormatOnce: new Set<string>(),
   formatter: async () => ({
     source: 'murmur',
     format: async (input: { transcript: string }) => {
       inference.formatCalls.push(input.transcript)
       await new Promise((r) => setTimeout(r, 2))
+      if (inference.failFormatOnce.delete(input.transcript)) throw new Error('upstream 503')
       return {
         text: `[${input.transcript}]`,
         pressEnter: false,
@@ -245,6 +249,20 @@ describe('streaming a long dictation while it is spoken', () => {
     expect(entry.error).toBeUndefined()
     // Only the failed piece went up again: no request carries the whole 50 s clip.
     expect(Math.max(...provider.sizes)).toBeLessThan(recorder.pcm.length * 2 * 0.8)
+  })
+
+  it('a piece that fails twice is sent once more at release on its own, not the whole dictation', async () => {
+    // Requests 1 and 2: the first piece and its retry while recording.
+    provider.fail = new Set([1, 2])
+    controller.handle({ type: 'start', mode: 'hold' })
+    recorder.feedAll()
+    await new Promise((r) => setTimeout(r, 20))
+    controller.handle({ type: 'stop' })
+    await settle()
+    const entry = history.list().entries[0]
+    expect(entry.error).toBeUndefined()
+    expect(Math.max(...provider.sizes)).toBeLessThan(recorder.pcm.length * 2 * 0.8)
+    expect(entry.finalText.length).toBeGreaterThan(0)
   })
 
   it('a short dictation is one request, as before', async () => {
@@ -541,6 +559,7 @@ describe('precision mode formats pieces while the user speaks', () => {
     provider.outcome = 'ok'
     provider.text = 'piece'
     inference.formatCalls.length = 0
+    inference.failFormatOnce.clear()
     recorder = new FakeRecorder()
     const settings = new FakeSettings()
     settings.value.formatting.mode = 'smart'
@@ -572,6 +591,51 @@ describe('precision mode formats pieces while the user speaks', () => {
     for (let i = 1; i < provider.requests; i++) expect(text).toContain(`[piece ${i}]`)
     expect(text).toMatch(new RegExp(`Piece ${provider.requests}\\.?$`))
   })
+  it('a piece whose formatting failed is formatted again alone, never the whole text', async () => {
+    controller.handle({ type: 'start', mode: 'hold' })
+    inference.failFormatOnce.add('piece 1')
+    recorder.feedAll()
+    await new Promise((r) => setTimeout(r, 30))
+    controller.handle({ type: 'stop' })
+    await settle()
+    const text = history.list().entries[0].finalText
+    // "piece 1" was formatted twice (the failure, then alone at release); no call had it all.
+    expect(inference.formatCalls.filter((t) => t === 'piece 1')).toHaveLength(2)
+    expect(inference.formatCalls.every((t) => t.split('piece').length <= 3)).toBe(true)
+    expect(text).toContain('[piece 1]')
+    expect(text).toContain('[piece 2]')
+  })
+  it('a long dictation gets paragraphs from a layout plan without a word changed', async () => {
+    const sentence = 'We talked about the roadmap for the next quarter and what ships first.'
+    provider.text = `${sentence} ${sentence} ${sentence} ${sentence} ${sentence} ${sentence} ${sentence} Part`
+    const asked: string[] = []
+    const orig = inference.formatter
+    inference.formatter = (async () => ({
+      ...(await orig()),
+      layout: (text: string, category: AppCategory) =>
+        layoutText(text, category, async (messages) => {
+          asked.push(messages[1].content)
+          return { text: '{"paragraphs":[6,12],"lists":[]}' }
+        })
+    })) as never
+    try {
+      controller.handle({ type: 'start', mode: 'hold' })
+      recorder.feedAll()
+      await new Promise((r) => setTimeout(r, 30))
+      controller.handle({ type: 'stop' })
+      await settle()
+    } finally {
+      inference.formatter = orig
+    }
+    const entry = history.list().entries[0]
+    expect(asked).toHaveLength(1)
+    expect(entry.stages).toContain('layout')
+    expect(entry.finalText).toContain('\n\n')
+    expect(entry.finalText.replace(/\s+/g, ' ')).toBe(entry.finalText.replace(/\n\n/g, ' '))
+    // The pieces were laid out while recording; the tail joined that answer, never waited on.
+    expect(asked[0]).not.toContain(`Part ${provider.requests}`)
+    expect(entry.finalText).toMatch(new RegExp(`Part ${provider.requests}\\.?\\]?\\.?$`))
+  })
 })
 
 describe('speculating on the tail while the user speaks', () => {
@@ -594,6 +658,7 @@ describe('speculating on the tail while the user speaks', () => {
     provider.outcome = 'ok'
     provider.text = 'part'
     inference.formatCalls.length = 0
+    inference.failFormatOnce.clear()
     recorder = new FakeRecorder()
     const settings = new FakeSettings()
     settings.value.formatting.mode = 'smart'

@@ -2,7 +2,7 @@ import { httpRouter } from 'convex/server'
 import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
 import { stripeWebhook } from './billing'
-import { chatCompletions, format, models, transcriptions } from './gateway'
+import { chatCompletions, format, layout, models, transcriptions } from './gateway'
 import { parseUsageRecords, workerAuthorized } from './lib/worker'
 import { verifyClerkWebhook, WebhookVerificationError } from './lib/clerkWebhook'
 
@@ -17,6 +17,8 @@ http.route({ path: '/v1/audio/transcriptions', method: 'POST', handler: transcri
 http.route({ path: '/v1/chat/completions', method: 'POST', handler: chatCompletions })
 /** Murmur-native: the transcript in, the text to insert out (see gateway.ts `format`). */
 http.route({ path: '/v1/format', method: 'POST', handler: format })
+/** Paragraphs and lists for a long, already formatted dictation (see gatewayCore `handleLayout`). */
+http.route({ path: '/v1/layout', method: 'POST', handler: layout })
 
 /**
  * The inference Worker (apps/inference-worker) -> Convex. The Worker serves /v1/* itself and only

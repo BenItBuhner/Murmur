@@ -318,7 +318,11 @@ object SttClient {
                 else addFormDataPart("file", "audio.wav", wav.toRequestBody("audio/wav".toMediaType()))
             }
             .addFormDataPart("model", cfg.model)
-            .addFormDataPart("response_format", "json")
+            // Timings, so a transcript that stopped before the speech did is caught and resumed,
+            // as for every other speech request.
+            .addFormDataPart("response_format", "verbose_json")
+            .addFormDataPart("timestamp_granularities[]", "word")
+            .addFormDataPart("timestamp_granularities[]", "segment")
             .addFormDataPart("temperature", "0")
         if (cfg.language.isNotEmpty() && cfg.language != "auto") form.addFormDataPart(sttLanguageField(cfg.model), cfg.language)
         if (!prompt.isNullOrEmpty()) form.addFormDataPart("prompt", prompt)
@@ -335,10 +339,15 @@ object SttClient {
             if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
             val json = JSONObject(r.body?.string() ?: "{}")
             val stt = json.optJSONObject("stt") ?: JSONObject()
+            val segments = stt.optJSONArray("segments")
             val out = TranscribeOutput(
                 text = stt.optString("text", "").trim(),
                 language = languageFromResponse(stt),
                 durationSec = if (stt.has("duration")) stt.optDouble("duration") else null,
+                noSpeechProb = if (segments != null && segments.length() > 0)
+                    (0 until segments.length()).sumOf { segments.getJSONObject(it).optDouble("no_speech_prob", 0.0) } / segments.length()
+                else null,
+                spans = spansFromVerbose(stt),
                 latencyMs = (System.nanoTime() - started) / 1_000_000,
                 speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed),
                 trace = GatewayCall.parse("speech", json.optJSONObject("timing")?.optJSONObject("stt"))

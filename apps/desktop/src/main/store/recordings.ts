@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { decodeWavPcm16, encodeWavPcm16 } from '@core/audio/wav'
+import { decodeWavPcm16, wavHeader } from '@core/audio/wav'
 import type { RecordingsInfo } from '@shared/ipc'
 import { createLogger } from '../logger'
 
@@ -41,11 +41,17 @@ export class RecordingStore {
     return !!name && FILE_NAME.test(name) && existsSync(join(this.dir, name))
   }
 
-  /** Write the dictation's audio as WAV and return the file name to store on the entry. */
+  /**
+   * Write the dictation's audio as WAV and return the file name to store on the entry. The samples
+   * go to disk as they are (WAV is little-endian, like every platform Murmur runs on), so a long
+   * dictation is not copied into a second 50 MB buffer while it is being finished.
+   */
   async save(id: string, pcm: Int16Array, sampleRate: number): Promise<string> {
     const name = RecordingStore.fileFor(id)
     mkdirSync(this.dir, { recursive: true })
-    await writeFile(join(this.dir, name), encodeWavPcm16(pcm, sampleRate))
+    const path = join(this.dir, name)
+    await writeFile(path, wavHeader(pcm.length, sampleRate))
+    await appendFile(path, new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength))
     this.prune()
     return name
   }

@@ -1,0 +1,16 @@
+# status-email | email
+Hey team, here is the update for this week on the mobile launch.
+The short version is that we are on track for the November twentieth release, but there are two risks I want everyone to know about.
+
+On the engineering side, the new sync engine landed on Tuesday and it has been stable on the beta channel since then.
+We saw one crash on older Android phones when the app was restored from the background, and Priya has a fix in review.
+Offline mode now works for notes and tasks, but attachments still need a connection, and we decided that is fine for the first release.
+
+Now the two risks.
+1) First, the App Store review has been slow this month, so we are submitting the build on Friday instead of next Wednesday to leave a buffer.
+2) Second, the payments provider is changing their API on the fifteenth.
+  Marcus is updating our integration, but if their sandbox is not ready we may have to launch with the old checkout flow and switch later.
+
+For next week, design is finishing the onboarding screens and marketing is drafting the launch post.
+If you have anything that should be in the release notes, send it to me by Thursday.
+Thanks everyone, this has been a really solid week.

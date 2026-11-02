@@ -3,8 +3,9 @@ import { dropSilentSegments } from '../../../text-engine/src/hallucination'
 import { stripPromptEcho } from '../../../text-engine/src/prompt-echo'
 import { sttLanguageField } from '../../../text-engine/src/languages'
 import { joinSeam } from '../../../text-engine/src/seam'
+import { layoutText, wantsLayout, type LayoutResult } from '../../../text-engine/src/layout'
 import { countWords } from '../../../text-engine/src/text'
-import type { ChatMessage, ChatOptions, ChatResult } from '../../../text-engine/src/types'
+import type { AppCategory, ChatMessage, ChatOptions, ChatResult } from '../../../text-engine/src/types'
 import {
   MAX_COMPLETION_TOKENS,
   MURMUR_MODELS,
@@ -637,6 +638,83 @@ export async function handleFormat(
   )
   if (shared) console.log('[gateway] format deduped (identical request in flight)')
   return new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
+}
+
+const LAYOUT_CATEGORIES: readonly AppCategory[] = ['chat', 'email', 'document', 'code', 'terminal', 'browser', 'notes', 'unknown']
+/** The longest text `/v1/layout` takes (about an hour of speech). */
+export const LAYOUT_MAX_CHARS = 60_000
+
+/**
+ * `POST /v1/layout` — `{ "text": "...", "category": "document" }` → `{ text, outcome, detail?,
+ * llmMs }`. Paragraphs and lists for a long dictation that is already formatted: the engine's
+ * layoutText runs here against the instance's release model, so the desktop and Android apps
+ * share one implementation. The model only marks where paragraphs and list items start, so the
+ * words never change; anything that goes wrong answers the text as it was (`outcome` says why),
+ * never an error, except for a request that is not one.
+ */
+export async function handleLayout(
+  hooks: GatewayHooks,
+  identity: GatewayIdentity | null,
+  request: Request
+): Promise<Response> {
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  const upstream = readUpstreams(hooks.env).llm
+  if (!upstream)
+    return gatewayError(503, 'not_configured', 'This Murmur instance does not offer a managed formatting model')
+  let input: { text?: unknown; category?: unknown }
+  try {
+    input = (await request.json()) as typeof input
+  } catch {
+    return gatewayError(400, 'bad_request', 'Body must be JSON')
+  }
+  if (!input || typeof input.text !== 'string')
+    return gatewayError(400, 'bad_request', '"text" must be a string')
+  if (input.text.length > LAYOUT_MAX_CHARS)
+    return gatewayError(400, 'bad_request', `"text" is longer than ${LAYOUT_MAX_CHARS} characters`)
+  const category: AppCategory = LAYOUT_CATEGORIES.includes(input.category as AppCategory)
+    ? (input.category as AppCategory)
+    : 'unknown'
+  const text = input.text
+  const answer = (body: LayoutResult): Response =>
+    new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
+  if (!wantsLayout(text, category))
+    return answer({ text, outcome: 'skipped', detail: 'short or chat/code/terminal', llmMs: 0 })
+
+  const gate = await hooks.authorize({ identity, kind: 'llm', degradable: true })
+  if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
+  if (gate.paused) return answer({ text, outcome: 'skipped', detail: 'fair use', llmMs: 0 })
+  if (gate.provider.openForSec !== null)
+    return answer({ text, outcome: 'skipped', detail: 'provider unavailable', llmMs: 0 })
+  const admitted = admitFormat(gate.userId)
+  if (!admitted.ok) return answer({ text, outcome: 'skipped', detail: 'rate_limited', llmMs: 0 })
+  const { model } = chooseLlmModel(upstream, gate.plan, 'release', 'normal')
+  const budgetMs = readUpstreamBudgets(hooks.env).formatMs
+  let tokens = 0
+  let failure: UpstreamFailure | null = null
+  let laid: LayoutResult
+  try {
+    laid = await layoutText(text, category, async (messages, opts) => {
+      const res = await upstreamChat(upstream, model, messages, opts, budgetMs)
+      if (!res.ok) {
+        failure = res.failure
+        throw new UpstreamError(res.failure.message, res.failure.status, res.failure.code)
+      }
+      tokens += res.tokens
+      return res.result
+    })
+  } finally {
+    releaseFormat(gate.userId)
+  }
+  if (tokens > 0) {
+    await hooks.record({ userId: gate.userId, identity, kind: 'llm', tokens })
+    await providerAnswered(hooks, 'llm', gate)
+  }
+  const failed = failure as UpstreamFailure | null
+  if (failed?.unavailable) await hooks.providerFailed('llm', failed.unavailable.reason)
+  console.log(
+    `[gateway] layout plan=${gate.plan} outcome=${laid.outcome}${laid.detail ? ` detail=${laid.detail.slice(0, 80)}` : ''} tokens=${tokens} ms=${laid.llmMs}`
+  )
+  return answer(laid)
 }
 
 async function formatOnce(

@@ -7,7 +7,14 @@ import {
   type InferenceTier,
   type SttConfig
 } from '@core/stt'
-import { formatTranscript, type FormatInput, type FormatResult } from '@engine'
+import {
+  formatTranscript,
+  layoutText,
+  type AppCategory,
+  type FormatInput,
+  type FormatResult,
+  type LayoutResult
+} from '@engine'
 import {
   chatComplete,
   type ChatMessage,
@@ -86,6 +93,11 @@ export interface Formatter {
   source: InferenceSource
   /** `tier`: Murmur's gateway only; `background` for a piece formatted while recording. */
   format: (input: FormatInput, opts?: { tier?: InferenceTier }) => Promise<FormatOutcome>
+  /**
+   * Paragraphs and lists for a long, formatted dictation (Murmur's `POST /v1/layout`, or the same
+   * engine against the user's own model). Absent when there is no model to ask.
+   */
+  layout?: (text: string, category: AppCategory) => Promise<LayoutResult>
 }
 
 export class InferenceRouter {
@@ -227,7 +239,8 @@ export class InferenceRouter {
     if (resolved.source === 'murmur') {
       return {
         source: 'murmur',
-        format: (input, opts) => this.remoteFormat(cfg, input, opts?.tier)
+        format: (input, opts) => this.remoteFormat(cfg, input, opts?.tier),
+        layout: (text, category) => this.remoteLayout(cfg, text, category)
       }
     }
     if (!cfg.baseUrl || !cfg.model)
@@ -235,7 +248,9 @@ export class InferenceRouter {
     return {
       source: 'custom',
       format: (input) =>
-        formatTranscript(input, (messages, opts) => this.complete(cfg, messages, opts))
+        formatTranscript(input, (messages, opts) => this.complete(cfg, messages, opts)),
+      layout: (text, category) =>
+        layoutText(text, category, (messages, opts) => this.complete(cfg, messages, opts))
     }
   }
 
@@ -271,6 +286,34 @@ export class InferenceRouter {
     } catch (err) {
       if (!(err instanceof SttError) || err.kind !== 'auth') throw err
       log.info('session token rejected by the gateway; refreshing and retrying')
+      return await call(await this.sessionToken(true))
+    }
+  }
+
+  /** `POST /v1/layout` on Murmur's gateway; the text as it was on anything but an answer. */
+  private async remoteLayout(cfg: LlmConfig, text: string, category: AppCategory): Promise<LayoutResult> {
+    const call = async (apiKey: string): Promise<LayoutResult> => {
+      let res: Response
+      try {
+        res = await fetch(`${cfg.baseUrl}/layout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ text, category }),
+          signal: combineSignals(cfg.timeoutMs + 2000)
+        })
+      } catch (err) {
+        throw toSttError(err, 'Layout request failed')
+      }
+      if (!res.ok) throw errorFromResponse(res.status, await res.text())
+      const json = (await res.json()) as Partial<LayoutResult>
+      if (typeof json.text !== 'string' || !json.outcome)
+        return { text, outcome: 'failed', detail: 'unexpected answer', llmMs: 0 }
+      return { text: json.text, outcome: json.outcome, detail: json.detail, llmMs: json.llmMs ?? 0 }
+    }
+    try {
+      return await call(cfg.apiKey)
+    } catch (err) {
+      if (!(err instanceof SttError) || err.kind !== 'auth') throw err
       return await call(await this.sessionToken(true))
     }
   }

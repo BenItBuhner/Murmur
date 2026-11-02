@@ -17,7 +17,7 @@ function setup(
     outcome: 'used',
     llmMs: 1
   })
-) {
+): { roll: RollingLayout; asked: string[] } {
   const asked: string[] = []
   const roll = new RollingLayout(
     'document',

@@ -54,7 +54,8 @@ export function isSilenceHallucination(text: string): boolean {
     const pw = p.split(' ').length
     if (parts.length % pw !== 0) continue
     let all = true
-    for (let i = 0; i < parts.length; i += pw) if (parts.slice(i, i + pw).join(' ') !== p) all = false
+    for (let i = 0; i < parts.length; i += pw)
+      if (parts.slice(i, i + pw).join(' ') !== p) all = false
     if (all) return true
   }
   return false
@@ -106,8 +107,45 @@ export const TAIL_PHRASE_MIN_SPEECH_MS = 120
  * A stock phrase is dropped only on audio evidence: the model rated it as silence, or (without a
  * rating) the audio held almost no voiced frames. Never on the text alone.
  */
-export function isSilentStockPhrase(text: string, speechMs: number, noSpeechProb?: number): boolean {
+export function isSilentStockPhrase(
+  text: string,
+  speechMs: number,
+  noSpeechProb?: number
+): boolean {
   if (!isSilenceHallucination(text)) return false
   if (noSpeechProb !== undefined) return noSpeechProb >= NO_SPEECH_PROB
   return speechMs < TAIL_PHRASE_MIN_SPEECH_MS
+}
+
+export interface TimedWord {
+  word: string
+  start: number
+  end: number
+}
+
+/**
+ * The stock phrase a transcript ends with ("…right to me. Thank you."), as its last `count` timed
+ * words and where they start, or null. Only phrases of PHRASES, up to six words.
+ */
+export function trailingStockPhrase(
+  words: readonly TimedWord[]
+): { count: number; start: number; end: number } | null {
+  for (let count = Math.min(6, words.length); count >= 1; count--) {
+    const tail = words.slice(words.length - count)
+    if (isSilenceHallucination(tail.map((w) => w.word).join(' ')))
+      return { count, start: tail[0].start, end: tail[count - 1].end }
+  }
+  return null
+}
+
+/** Pitched (voiced) audio under a stock phrase below which nobody said it: "thank you" has ~250 ms. */
+export const STOCK_PHRASE_MIN_PITCHED_MS = 80
+
+/** `text` without its last `count` words (and the punctuation that followed them). */
+export function dropLastWords(text: string, count: number): string {
+  const re = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu
+  const starts: number[] = []
+  for (const m of text.matchAll(re)) starts.push(m.index)
+  if (count <= 0 || starts.length < count) return text
+  return text.slice(0, starts[starts.length - count]).trimEnd()
 }

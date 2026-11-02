@@ -61,6 +61,7 @@ import type { Recorder } from '../audio/recorder'
 import { DEFAULT_CHUNK_PLAN } from '@core/audio/chunker'
 import type { PartialStore } from '../store/partials'
 import { RollingLayout } from './rolling-layout'
+import { dropUnspokenEnding } from './unspoken'
 import {
   ChunkStreamer,
   LONG_CLIP_SEC,
@@ -953,6 +954,9 @@ export class DictationController extends EventEmitter {
             s.audio.silenceThresholdDb
           )
         : await runWhole()
+      // One answer for the whole (trimmed) clip: its timings line up with `audio`.
+      if (!streamed && audio.length / SAMPLE_RATE <= LONG_CLIP_SEC)
+        stt = dropUnspokenEnding(stt, audio, tag)
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
       return failure('', resolved, err)
@@ -1219,6 +1223,7 @@ export class DictationController extends EventEmitter {
       rest: Int16Array
       a: ReturnType<typeof analyze>
       tail: Promise<CompleteResult | null>
+      clip: Int16Array
     } => {
       const rest = pcm.subarray(Math.min(from, pcm.length))
       // The tail's own noise floor, never stricter than the session's: a soft last phrase after a
@@ -1226,16 +1231,18 @@ export class DictationController extends EventEmitter {
       const tailDb = Math.min(threshold, adaptiveThreshold(rest, SAMPLE_RATE, configuredDb))
       const a = analyze(rest, { sampleRate: SAMPLE_RATE, thresholdDb: tailDb })
       let tail: Promise<CompleteResult | null> = Promise.resolve(null)
+      let clip = rest
       if (a.hasSpeech) {
         const trimmed = trimSilence(rest, {
           sampleRate: SAMPLE_RATE,
           thresholdDb: tailDb,
           paddingMs: 300
         })
-        tail = run(trimmed.pcm, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
+        clip = trimmed.pcm
+        tail = run(clip, (a.lastVoicedMs - trimmed.trimmedStartMs) / 1000)
       }
       tail.catch(() => undefined)
-      return { rest, a, tail }
+      return { rest, a, tail, clip }
     }
     // With a speculation, only the audio after its pause is sent now; if it failed, the whole
     // stretch after the pieces is sent as before.
@@ -1280,7 +1287,7 @@ export class DictationController extends EventEmitter {
       }
     }
     const tSpec = Date.now()
-    const { rest, a, tail } = sent
+    const { rest, a, tail, clip } = sent
     let texts: string[]
     try {
       texts = await this.settlePieces(streamed, pcm, threshold, run, left, tag)
@@ -1311,6 +1318,7 @@ export class DictationController extends EventEmitter {
       log.info(`session ${tag}: dropped a stock phrase from a quiet tail (${a.speechMs} ms voiced)`)
       last = { ...last, text: '' }
     }
+    if (last) last = dropUnspokenEnding(last, clip, tag)
     const seams = joinPieces([...texts, spec?.text ?? '', last?.text ?? ''])
     const text = seams.text
     log.info(

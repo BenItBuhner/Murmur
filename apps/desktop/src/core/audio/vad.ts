@@ -120,3 +120,45 @@ export function adaptiveThreshold(
   // Speech is normally >12 dB above the floor; never go below what the user configured.
   return Math.max(configuredDb, noiseFloor + 12)
 }
+
+/**
+ * Milliseconds of pitched sound (voiced speech: a vowel, a hum) between `startSec` and `endSec`.
+ * A 20 ms frame counts when it is above the floor and repeats itself at a pitch period between
+ * 2.5 and 12.5 ms (80-400 Hz) with normalized autocorrelation of at least 0.5. Breath, a rustle, a
+ * click or a key press have energy but no pitch, so they count for nothing; "thank you" said
+ * aloud has a few hundred ms of it.
+ */
+export function pitchedMs(
+  pcm: Int16Array,
+  sampleRate: number,
+  startSec = 0,
+  endSec = pcm.length / sampleRate,
+  floorDb = -50
+): number {
+  const frame = Math.floor(sampleRate * 0.02)
+  const minLag = Math.floor(sampleRate / 400)
+  const maxLag = Math.floor(sampleRate / 80)
+  const from = Math.max(0, Math.floor(startSec * sampleRate))
+  const to = Math.min(pcm.length, Math.floor(endSec * sampleRate))
+  let ms = 0
+  for (let s = from; s + frame + maxLag <= to; s += frame) {
+    if (rmsDb(pcm, s, s + frame + maxLag) < floorDb) continue
+    let best = 0
+    for (let lag = minLag; lag <= maxLag; lag++) {
+      let xy = 0
+      let xx = 0
+      let yy = 0
+      for (let i = s; i < s + frame; i++) {
+        const x = pcm[i]
+        const y = pcm[i + lag]
+        xy += x * y
+        xx += x * x
+        yy += y * y
+      }
+      const r = xx && yy ? xy / Math.sqrt(xx * yy) : 0
+      if (r > best) best = r
+    }
+    if (best >= 0.5) ms += 20
+  }
+  return ms
+}

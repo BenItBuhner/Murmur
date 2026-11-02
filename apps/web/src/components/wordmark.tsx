@@ -25,14 +25,13 @@ export function Mark({
       </defs>
       <rect width="48" height="48" rx="12" fill={`url(#${id})`} />
       <path
-        d="M11 33V22.5a5.25 5.25 0 0 1 10.5 0V30M21.5 22.5a5.25 5.25 0 0 1 10.5 0V33"
-        fill="none"
+        d="M9 22v4M15 18v12M21 14v20M27 19v10"
         stroke="#fff"
-        strokeWidth="4.4"
+        strokeWidth="3.6"
         strokeLinecap="round"
-        strokeLinejoin="round"
+        opacity=".78"
       />
-      <path d="M37.5 19v9" stroke="#fff" strokeWidth="4.4" strokeLinecap="round" opacity=".55" />
+      <path d="M36 12v24M33 12h6M33 36h6" stroke="#fff" strokeWidth="3.6" strokeLinecap="round" />
     </svg>
   )
 }

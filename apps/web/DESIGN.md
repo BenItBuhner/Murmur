@@ -6,12 +6,13 @@ Status: proposal only, open for Bennett's review. Nothing here is merged or depl
 
 **Idea.** Speech turning into text: a soft voice that lands exactly where you meant it.
 
-**Mark.** A lowercase m drawn as two soft arches, with a quieter third bar for the voice trailing off, in white on
-the voice gradient (coral `#FF8A6B` into violet `#8B5CFF` into indigo `#5B3DF5`). The geometry is in
+**Mark (redrawn Nov 2, 2026).** Four rising voice bars that end in a text caret: what you say becomes the text at
+your cursor. White on the voice gradient (coral `#FF8A6B` into violet `#8B5CFF` into indigo `#5B3DF5`); the bars sit
+a little quieter than the caret. It replaces the earlier soft lowercase m. The geometry is in
 `src/components/wordmark.tsx` (`Mark`) and `src/app/icon.svg`; keep them identical.
 
 - Minimum size 16 px. Clear space: a quarter of the tile on every side.
-- The tile always carries the gradient; don't flatten it to one colour or put the m on a photo.
+- The tile always carries the gradient; don't flatten it to one colour or put the mark on a photo.
 
 **Wordmark.** The mark, then "Murmur" in Inter Tight SemiBold at 21 px, tracking -0.035em.
 

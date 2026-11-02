@@ -7,7 +7,10 @@ vi.mock('electron', () => ({
 import { HookService } from '../src/main/hotkeys/hook'
 import { defaultSettings } from '../src/shared/settings'
 
-type Internals = { onKey: (code: number, down: boolean) => void }
+type Internals = {
+  onKey: (code: number, down: boolean) => void
+  engine: { snapshot: () => { down: number[] } }
+}
 
 const make = (held: (code: number) => boolean | null = () => null): HookService & Internals =>
   new HookService(defaultSettings(), held) as unknown as HookService & Internals
@@ -49,5 +52,18 @@ describe('hook: keys counted as held', () => {
     expect(hook.anyKeyDown).toBe(true)
     hook.onKey(57, false)
     expect(hook.anyKeyDown).toBe(false)
+  })
+
+  it('a release the hotkey engine missed does not make the next press read as key-repeat', () => {
+    const down = new Set<number>([42, 3675])
+    const hook = make((code) => down.has(code))
+    hook.onKey(42, true)
+    hook.onKey(3675, true)
+    hook.beginSynthetic()
+    hook.onKey(42, false) // released while we were pasting
+    hook.endSynthetic(0)
+    down.clear() // 3675 released over an elevated window: no key-up at all
+    expect(hook.anyKeyDown).toBe(false)
+    expect(hook.engine.snapshot().down).toEqual([])
   })
 })

@@ -122,7 +122,11 @@ export class Recorder extends EventEmitter {
    * (Android #134). `graceMs` is how long to wait for the renderer's confirmation before using the
    * samples received so far; it used to be 1.2 s, all of it on the release when the renderer was slow.
    */
-  stop(sessionId: string, graceMs = 1200, opts: { postRoll?: boolean } = {}): Promise<Int16Array> {
+  stop(
+    sessionId: string,
+    graceMs = 1200,
+    opts: { postRoll?: boolean; quietDb?: number } = {}
+  ): Promise<Int16Array> {
     const cap = this.captures.get(sessionId)
     if (cap?.fixture) {
       // The clip lives in this process: what is due up to now lands at once, no renderer to wait for.
@@ -130,7 +134,11 @@ export class Recorder extends EventEmitter {
       this.captures.delete(sessionId)
       return Promise.resolve(concatInt16(cap.chunks))
     }
-    this.overlay.send(IPC.audioStop, { sessionId, postRoll: opts.postRoll !== false })
+    this.overlay.send(IPC.audioStop, {
+      sessionId,
+      postRoll: opts.postRoll !== false,
+      ...(opts.postRoll === false && opts.quietDb !== undefined ? { quietDb: opts.quietDb } : {})
+    })
     if (!cap) return Promise.resolve(new Int16Array(0))
     return new Promise((resolve) => {
       const finish = (): void => {

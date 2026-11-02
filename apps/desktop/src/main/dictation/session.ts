@@ -233,8 +233,11 @@ export const SPEC_RELEASE_GRACE_MS = 150
 export const QUIET_STOP_MS = 300
 /** The renderer's post-roll before it flushes (renderer/overlay/capture.ts STOP_POST_ROLL_MS). */
 export const STOP_POST_ROLL_MS = 200
-/** How long past the post-roll the stop waits for the renderer to confirm (was 1.2 s in all). */
-export const STOP_CONFIRM_GRACE_MS = 300
+/**
+ * How long past the post-roll the stop waits for the renderer to confirm (was 1.2 s in all). Only a
+ * slow renderer waits it out; past it the flushed last chunk is lost, so it is not cut too fine.
+ */
+export const STOP_CONFIRM_GRACE_MS = 600
 /** Less voiced audio than this after the speculation's pause: nothing was said after it (Android: Hallucination.MIN_SPEECH_MS). */
 export const QUIET_AFTER_SPEC_MS = 120
 /**
@@ -417,20 +420,25 @@ export class DictationController extends EventEmitter {
     log.info(`session ${session.id.slice(0, 8)} cancelled`)
   }
 
-  /** Whether the last QUIET_STOP_MS of the recording so far held no speech (Android silentAtStop). */
-  private silentAtStop(id: string, floorDb: number): boolean {
+  /**
+   * The speech threshold (dB) when the last QUIET_STOP_MS of the recording so far held no speech
+   * (Android silentAtStop), else null.
+   */
+  private silentAtStop(id: string, floorDb: number): number | null {
     const recorder = this.deps.recorder as Partial<Recorder>
     if (typeof recorder.read !== 'function' || typeof recorder.sampleCount !== 'function')
-      return false
+      return null
     try {
       const n = recorder.sampleCount(id)
       const recent = recorder.read(id, Math.max(0, n - 5 * SAMPLE_RATE))
-      if (recent.length < SAMPLE_RATE) return false
+      if (recent.length < SAMPLE_RATE) return null
       const end = recent.subarray(recent.length - Math.floor((QUIET_STOP_MS * SAMPLE_RATE) / 1000))
       const threshold = adaptiveThreshold(recent, SAMPLE_RATE, floorDb)
       return analyze(end, { sampleRate: SAMPLE_RATE, thresholdDb: threshold }).speechMs === 0
+        ? threshold
+        : null
     } catch {
-      return false
+      return null
     }
   }
 
@@ -455,11 +463,14 @@ export class DictationController extends EventEmitter {
     try {
       // The last 300 ms before the stop held no speech: the post-roll that catches a last word
       // still sounding has nothing to catch, and the stop skips its 200 ms (Android #134).
-      const postRoll = !this.silentAtStop(session.id, s.audio.silenceThresholdDb)
+      // The renderer may still run the post-roll (a word starting as the key came up), so the
+      // grace always covers it; a renderer that answers at once is not held by it.
+      const quietDb = this.silentAtStop(session.id, s.audio.silenceThresholdDb)
+      const postRoll = quietDb === null
       const pcm = await this.deps.recorder.stop(
         session.id,
-        (postRoll ? STOP_POST_ROLL_MS : 0) + STOP_CONFIRM_GRACE_MS,
-        { postRoll }
+        STOP_POST_ROLL_MS + STOP_CONFIRM_GRACE_MS,
+        postRoll ? { postRoll } : { postRoll, quietDb }
       )
       const streamed = this.stopStreaming(session)
       // Store the audio before anything can go wrong with it: a failed request is retried from
@@ -1217,11 +1228,15 @@ export class DictationController extends EventEmitter {
     const t0 = Date.now()
     let specUsable = false
     let spec: TailSpec | undefined
+    // Judged like the tail itself (sendFrom): a soft last word after a loud dictation still counts.
+    const afterSpec = streamed.spec
+      ? pcm.subarray(Math.min(Math.max(0, streamed.spec.samples), pcm.length))
+      : null
     const quietAfterSpec =
-      !!streamed.spec &&
-      analyze(pcm.subarray(Math.min(Math.max(0, streamed.spec.samples), pcm.length)), {
+      !!afterSpec &&
+      analyze(afterSpec, {
         sampleRate: SAMPLE_RATE,
-        thresholdDb: threshold
+        thresholdDb: Math.min(threshold, adaptiveThreshold(afterSpec, SAMPLE_RATE, configuredDb))
       }).speechMs < QUIET_AFTER_SPEC_MS
     if (streamed.spec) {
       const specResult = streamed.spec.result
@@ -1381,10 +1396,18 @@ export class DictationController extends EventEmitter {
     let specHead: FormatOutcome | null = null
     let tailInput = tail
     let tailBefore = lastPiece
+    let specUnformatted = false
     if (stt.streamed.spec) {
       const f = await within(stt.streamed.spec.format, formatLeft()).catch(() => null)
-      if (f === null) return null
-      if (f !== 'empty') {
+      if (f === null) {
+        // Its background format is not back: it is formatted now with the tail, which is far
+        // less than formatting the whole dictation again.
+        log.info(
+          `session ${tag}: the speculation was not formatted in time; formatting it with the tail`
+        )
+        tailInput = joinSeam(stt.streamed.spec.text, tail).text
+        specUnformatted = true
+      } else if (f !== 'empty') {
         const at = lastSentenceStart(f.text)
         const head = f.text.slice(0, at).trim()
         const lastSentence = f.text.slice(at)
@@ -1406,7 +1429,8 @@ export class DictationController extends EventEmitter {
       : preformatted && preformatted[0] === tailInput
         ? Promise.resolve(preformatted[1])
         : // A few words after formatted text: rule-based formatting, no model round trip.
-          countWords(tail) > 0 &&
+          !specUnformatted &&
+            countWords(tail) > 0 &&
             countWords(tail) <= SHORT_TAIL_WORDS &&
             (specHead || stt.streamed.texts.length)
           ? formatTranscript(tailRequest, null)

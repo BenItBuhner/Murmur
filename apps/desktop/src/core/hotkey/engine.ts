@@ -148,6 +148,14 @@ export class HotkeyEngine {
     return [{ type: 'start', mode: 'hold' }]
   }
 
+  /**
+   * Drop a key whose release was not handled (it landed while we injected, or the hook never saw
+   * it), without acting on it: otherwise its next press reads as OS key-repeat and is ignored.
+   */
+  forget(rawCode: number): void {
+    this.down.delete(canonicalKey(rawCode, this.config.sideSensitive))
+  }
+
   keyUp(rawCode: number, now: number): HotkeyAction[] {
     const code = canonicalKey(rawCode, this.config.sideSensitive)
     if (!this.down.delete(code)) return []

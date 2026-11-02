@@ -317,7 +317,8 @@ describe('a short dictation stopped in a pause (Android #134/#135)', () => {
     controller.handle({ type: 'stop' })
     await settle()
     expect(recorder.stop).toHaveBeenCalledWith(expect.any(String), expect.any(Number), {
-      postRoll: false
+      postRoll: false,
+      quietDb: expect.any(Number)
     })
   })
 
@@ -433,6 +434,20 @@ describe('a short dictation stopped in a pause: edge cases', () => {
     expect(inject.calls).toHaveLength(0)
   })
 
+  it('a soft word after the speculation pause is still sent, not judged silent', async () => {
+    // Speech over loud background noise (a high session noise floor), the noise stops for a
+    // pause (the speculation is cut there), then a soft short word right before the stop.
+    const pcm = clip([8], 1.0, 0.3)
+    for (let i = 0; i < 8 * SAMPLE_RATE; i++)
+      pcm[i] = Math.max(-32768, Math.min(32767, pcm[i] + Math.round((Math.random() - 0.5) * 3000)))
+    const soft = Math.round(9.0 * SAMPLE_RATE)
+    for (let i = 0; i < 0.3 * SAMPLE_RATE; i++)
+      pcm[soft + i] = Math.round(Math.sin(i / 17) * 700 + (Math.random() - 0.5) * 40)
+    await dictate(pcm)
+    // The speculation, then the soft tail (or the whole recording): never the speculation alone.
+    expect(provider.requests).toBeGreaterThan(1)
+  })
+
   it('under 2 s of audio: no speculation, one request at release', async () => {
     await dictate(clip([1.2], 0.7))
     expect(provider.requests).toBe(1)
@@ -443,7 +458,8 @@ describe('a short dictation stopped in a pause: edge cases', () => {
     await dictate(clip([3], 0.4))
     expect(provider.requests).toBe(1)
     expect(recorder.stop).toHaveBeenCalledWith(expect.any(String), expect.any(Number), {
-      postRoll: false
+      postRoll: false,
+      quietDb: expect.any(Number)
     })
   })
 

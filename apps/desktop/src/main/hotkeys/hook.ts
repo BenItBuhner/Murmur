@@ -177,6 +177,7 @@ export class HookService extends EventEmitter {
     for (const code of this.physicallyDown) {
       if (this.keyHeld(code) === false) {
         this.physicallyDown.delete(code)
+        this.engine.forget(code)
         log.info(`key ${code} was up although its release was never seen; no longer waiting for it`)
       }
     }
@@ -235,8 +236,12 @@ export class HookService extends EventEmitter {
     // A release always counts, even while we inject: dropping a physical key-up that lands
     // during a paste left that key "held" for good, and every later insertion waited for it.
     if (!down) this.physicallyDown.delete(code)
-    // Drop events we synthesized ourselves so injection never triggers dictation.
-    if (this.synthetic) return
+    // Drop events we synthesized ourselves so injection never triggers dictation. A release
+    // still clears the engine's record of the key, or its next press would read as key-repeat.
+    if (this.synthetic) {
+      if (!down) this.engine.forget(code)
+      return
+    }
     if (down) this.physicallyDown.add(code)
 
     if (this.capture) {

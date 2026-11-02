@@ -117,7 +117,16 @@ export class Recorder extends EventEmitter {
   }
 
   /** Ask the renderer to flush; resolves with all PCM (even if the renderer never answers). */
-  stop(sessionId: string, graceMs = 1200): Promise<Int16Array> {
+  /**
+   * `postRoll: false` (the last moments were already quiet) skips the renderer's 200 ms post-roll
+   * (Android #134). `graceMs` is how long to wait for the renderer's confirmation before using the
+   * samples received so far; it used to be 1.2 s, all of it on the release when the renderer was slow.
+   */
+  stop(
+    sessionId: string,
+    graceMs = 1200,
+    opts: { postRoll?: boolean; quietDb?: number } = {}
+  ): Promise<Int16Array> {
     const cap = this.captures.get(sessionId)
     if (cap?.fixture) {
       // The clip lives in this process: what is due up to now lands at once, no renderer to wait for.
@@ -125,7 +134,11 @@ export class Recorder extends EventEmitter {
       this.captures.delete(sessionId)
       return Promise.resolve(concatInt16(cap.chunks))
     }
-    this.overlay.send(IPC.audioStop, { sessionId })
+    this.overlay.send(IPC.audioStop, {
+      sessionId,
+      postRoll: opts.postRoll !== false,
+      ...(opts.postRoll === false && opts.quietDb !== undefined ? { quietDb: opts.quietDb } : {})
+    })
     if (!cap) return Promise.resolve(new Int16Array(0))
     return new Promise((resolve) => {
       const finish = (): void => {
@@ -149,6 +162,11 @@ export class Recorder extends EventEmitter {
     else this.overlay.send(IPC.audioStop, { sessionId })
     if (cap?.timer) clearTimeout(cap.timer)
     this.captures.delete(sessionId)
+  }
+
+  /** Samples captured so far in a session (0 when there is none). */
+  sampleCount(sessionId: string): number {
+    return this.captures.get(sessionId)?.samples ?? 0
   }
 
   /** The samples captured so far from `from` on (a copy), for streaming a long dictation. */

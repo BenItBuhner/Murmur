@@ -98,6 +98,7 @@ function labelFor(s: OverlayState): string {
       if (s.mode === 'command') return 'Command'
       return s.locked ? 'Hands-free' : ''
     case 'processing':
+      if (s.message) return s.message
       return s.mode === 'command' ? 'Editing…' : 'Transcribing…'
     case 'success':
       if (s.message) return s.message

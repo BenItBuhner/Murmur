@@ -17,3 +17,4 @@ apps/android/local.properties
 apps/android/.kotlin
 *.apk
 *.keystore
+*.tsbuildinfo

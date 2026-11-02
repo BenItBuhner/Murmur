@@ -135,6 +135,9 @@ class Recorder {
         }
     }
 
+    /** How the post-roll waits; tests replace it to see whether a stop waited, without timing it. */
+    internal var postRollSleep: (Long) -> Unit = { Thread.sleep(it) }
+
     /** [postRoll] false: the speaker was already silent at the stop, so nothing is left to catch. */
     fun stop(postRoll: Boolean = true): ShortArray {
         // Post-roll: the button comes up while the last word is still sounding.
@@ -143,7 +146,7 @@ class Recorder {
         // invents minutes of samples and the concat runs out of heap.
         if (running && postRoll) {
             captureUntil = peekSampleCount() + STOP_POST_ROLL_MS * SAMPLE_RATE / 1000
-            Thread.sleep(STOP_POST_ROLL_MS)
+            postRollSleep(STOP_POST_ROLL_MS)
         }
         stopInternal()
         val list = synchronized(chunks) { ArrayList(chunks).also { chunks.clear(); buffered = 0 } }

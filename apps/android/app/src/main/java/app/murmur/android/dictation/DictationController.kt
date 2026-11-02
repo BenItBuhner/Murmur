@@ -18,6 +18,7 @@ import app.murmur.android.history.LlmOutcome
 import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
 import app.murmur.android.history.TraceRecorder
+import app.murmur.android.inference.Formatter
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
 import app.murmur.android.inference.LimitNotice
@@ -780,17 +781,9 @@ object DictationController {
                 scope.async { runCatching { Engine.formatTranscript(tailInput, null) } }
             else -> scope.async { runCatching { formatter.format(tailInput) } }
         }
-        val done = withTimeoutOrNull(formatLeft()) { specs.awaitAll() }
+        val done = settleFormats(formatter, input, specs, texts, trace)
         trace?.step("waiting for formatting done while speaking", System.currentTimeMillis() - waitStarted)
-        if (done == null) {
-            trace?.note("a piece's formatting was still running after ${FORMAT_WAIT_MS} ms; the whole text was formatted at release")
-            return null
-        }
-        if (done.any { it is PieceFormat.Unavailable }) {
-            trace?.note("a piece could not be formatted while speaking; the whole text was formatted at release")
-            return null
-        }
-        val parts = done.filterIsInstance<PieceFormat.Done>().map { it.result }.toMutableList()
+        val parts = done.toMutableList()
         specHead?.let { parts.add(it) }
         if (tailJob != null) parts.add(tailJob.await().getOrElse { return null }.let { it.copy(text = stripEcho(it.text, lastPiece)) })
         if (parts.isEmpty()) return null
@@ -812,6 +805,59 @@ object DictationController {
             // The release's own model calls (the tail); the pieces' ran while the user spoke.
             calls = if (tailJob != null) parts.last().calls else emptyList()
         )
+    }
+
+    /**
+     * Each piece's formatting from while it was spoken. One that failed, came back rule-based on
+     * the gateway's per-user cap, or is still out after FORMAT_RESEND_AFTER_MS is formatted again on
+     * its own at release priority (racing the original), with the piece before as context; one the
+     * model still cannot format gets the rule-based cleanup. Never the whole text again: with ~80
+     * pieces in a 25-minute dictation, one failure used to cost a re-format of all of it
+     * (desktop: settleFormats).
+     */
+    private suspend fun settleFormats(
+        formatter: Formatter,
+        input: FormatInput,
+        specs: List<Deferred<PieceFormat>>,
+        texts: List<String>,
+        trace: TraceRecorder?
+    ): List<FormatResult> = kotlinx.coroutines.coroutineScope {
+        val gate = kotlinx.coroutines.sync.Semaphore(MAX_RESENDS_IN_FLIGHT)
+        val deadline = System.currentTimeMillis() + FORMAT_RESEND_AFTER_MS
+        val redone = java.util.concurrent.atomic.AtomicInteger(0)
+        val results = specs.mapIndexed { i, job ->
+            async {
+                val text = texts.getOrElse(i) { "" }
+                if (text.isBlank()) return@async null
+                val first = withTimeoutOrNull((deadline - System.currentTimeMillis()).coerceAtLeast(1)) { job.await() }
+                if (first is PieceFormat.Empty) return@async null
+                if (first is PieceFormat.Done && first.result.status.detail != "rate_limited") return@async first.result
+                redone.incrementAndGet()
+                val prior = if (i > 0) seamContext(texts[i - 1]) else ""
+                val request = input.copy(
+                    transcript = text,
+                    context = input.context.copy(
+                        precedingText = listOfNotNull(input.context.precedingText, prior.ifEmpty { null }).joinToString(" ").ifEmpty { null },
+                        instructions = listOfNotNull(input.context.instructions, PIECE_NOTE).joinToString(" ")
+                    )
+                )
+                val again = async {
+                    gate.withPermit { runCatching { formatter.format(request) }.getOrNull() }
+                        ?.takeIf { it.status.outcome != FormatOutcome.FAILED }
+                }
+                // Still running at the grace: the original may yet answer first.
+                val late = if (first == null) async { (job.await() as? PieceFormat.Done)?.result } else null
+                val won = withTimeoutOrNull(STREAM_WAIT_MS) { firstNonNull(listOfNotNull(late, again)) }
+                late?.cancel()
+                again.cancel()
+                won?.let { it.copy(text = stripEcho(it.text, prior)) }
+                    ?: Engine.formatTranscript(request, null).let {
+                        it.copy(status = it.status.copy(outcome = FormatOutcome.FAILED, detail = "piece not formatted"))
+                    }
+            }
+        }.awaitAll().filterNotNull()
+        if (redone.get() > 0) trace?.note("${redone.get()} piece(s) formatted again at release instead of the whole text")
+        results
     }
 
     /**
@@ -1396,6 +1442,24 @@ object DictationController {
 
 /** A release tail of at most this many words is formatted by rules (mirrors SHORT_TAIL_WORDS in the gateway). */
 const val SHORT_TAIL_WORDS = 6
+
+/** How long release waits for a piece's formatting still out before formatting it again. */
+const val FORMAT_RESEND_AFTER_MS = 1_500L
+/** Pieces formatted again at once at release; the gateway allows 3 formats per user. */
+const val MAX_RESENDS_IN_FLIGHT = 2
+
+/** The first non-null answer of `jobs`, or null when all of them answer null. */
+suspend fun <T : Any> firstNonNull(jobs: List<Deferred<T?>>): T? {
+    val pending = jobs.toMutableList()
+    while (pending.isNotEmpty()) {
+        val (job, value) = kotlinx.coroutines.selects.select<Pair<Deferred<T?>, T?>> {
+            pending.forEach { j -> j.onAwait { j to it } }
+        }
+        if (value != null) return value
+        pending.remove(job)
+    }
+    return null
+}
 
 /** What the formatter is told about a piece of a longer dictation that is not the last. */
 private const val PIECE_NOTE =

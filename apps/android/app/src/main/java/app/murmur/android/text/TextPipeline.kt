@@ -383,7 +383,9 @@ fun finish(
     dictionary: List<DictionaryEntry>,
     trailingSpace: Boolean,
     snippets: List<Snippet> = emptyList(),
-    snippetContext: SnippetContext = SnippetContext()
+    snippetContext: SnippetContext = SnippetContext(),
+    /** The profile's casing; LOWERCASE lowers sentence starts before snippets expand. */
+    casing: Casing = Casing.STANDARD
 ): Finished {
     val stages = ArrayList<String>()
     var out = normalizeWhitespace(text)
@@ -395,6 +397,9 @@ fun finish(
         if (one != out) stages.add("terminal")
         out = one
     }
+    val cased = applyCasing(out, casing, category)
+    if (cased != out) stages.add("casing")
+    out = cased
     val expanded = expandSnippets(out, snippets, snippetContext)
     if (expanded.expanded.isNotEmpty()) stages.add("snippets")
     out = normalizeWhitespace(expanded.text)

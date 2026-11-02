@@ -63,7 +63,8 @@ describe('buildFormatMessages', () => {
 
   it('stays small', () => {
     const chars = buildFormatMessages('hello there', ctx).reduce((n, m) => n + m.content.length, 0)
-    expect(chars).toBeLessThan(6500)
+    // Profiles added ~960 characters: the paragraph example and its Layout lines (cached prefix).
+    expect(chars).toBeLessThan(7500)
   })
 
   it('examples use the same layout as the real message', () => {

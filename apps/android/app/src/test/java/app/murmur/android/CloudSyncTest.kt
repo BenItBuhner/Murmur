@@ -122,6 +122,8 @@ class CloudSyncTest {
         assertEquals(setOf("formatting", "language", "sync"), base.patchArgs(null).keys)
         assertEquals(setOf("language"), base.copy(language = "en").patchArgs(base).keys)
         assertEquals(setOf("formatting"), base.copy(tone = "casual").patchArgs(base).keys)
+        // The global profile is a style preference like the tone.
+        assertEquals("casual", (base.copy(profile = "casual").patchArgs(base)["formatting"] as Map<*, *>)["profile"])
         assertTrue(base.patchArgs(base).isEmpty())
 
         val applied = applyRemotePreferences(
@@ -351,6 +353,22 @@ class CloudSyncTest {
         // A record from the server: legacy knobs older clients wrote are read past and dropped.
         val fromServer = SyncReducers.fromRemote(AppRuleDto("r2", "slack", "casual", formatting = "light", lists = "auto", numbers = "all", freedom = "strict", createdAt = 4.0, updatedAt = 4.0))
         assertEquals(AppRule("r2", "slack", Tone.CASUAL, FormattingMode.LIGHT, createdAt = 4L), fromServer)
+    }
+
+    @Test
+    fun `a rule's profile goes to the server and comes back, and only when set`() {
+        val json = Json { ignoreUnknownKeys = true }
+        assertEquals(
+            mapOf("match" to "slack", "tone" to "auto", "profile" to "casual"),
+            CloudSync.appRuleArgs(AppRule("r", "slack", profile = "casual"))
+        )
+        assertFalse(CloudSync.appRuleArgs(AppRule("r", "slack")).containsKey("profile"))
+        assertEquals(
+            "casual",
+            SyncReducers.fromRemote(json.decodeFromString<AppRuleDto>("""{"id":"r1","match":"slack","profile":"casual","createdAt":1,"updatedAt":1}""")).profile
+        )
+        assertEquals(null, SyncReducers.fromRemote(json.decodeFromString<AppRuleDto>("""{"id":"r1","match":"slack","createdAt":1,"updatedAt":1}""")).profile)
+        assertFalse(SyncReducers.sameAppRule(AppRule("r", "slack"), AppRule("r", "slack", profile = "casual")))
     }
 
     @Test

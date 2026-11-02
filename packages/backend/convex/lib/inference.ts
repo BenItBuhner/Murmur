@@ -4,6 +4,7 @@ import type {
   AppCategory,
   DictionaryTerm,
   FormatContext,
+  Layout,
   ResolvedTone
 } from '../../../text-engine/src/types'
 import { PRIVATE_TESTING_CODE, PRIVATE_TESTING_MESSAGE } from './access'
@@ -884,6 +885,7 @@ const CATEGORIES = new Set<AppCategory>([
   'unknown'
 ])
 const TONES = new Set<ResolvedTone>(['casual', 'neutral', 'professional'])
+const LAYOUTS = new Set<Layout>(['auto', 'minimal', 'balanced', 'structured'])
 
 export const MAX_TRANSCRIPT_CHARS = 40_000
 const MAX_DICTIONARY = 500
@@ -943,7 +945,10 @@ export function parseFormatRequest(
         precedingText: str(ctx.precedingText, MAX_PRECEDING),
         instructions: str(ctx.instructions, MAX_INSTRUCTIONS),
         dictionary,
-        keepVerbatim
+        keepVerbatim,
+        // Profiles (clients from v0.6.37 on). Absent means `auto` / `polish`, as before.
+        layout: LAYOUTS.has(ctx.layout as Layout) ? (ctx.layout as Layout) : undefined,
+        grammar: ctx.grammar === 'as-spoken' ? 'as-spoken' : undefined
       }
     }
   }

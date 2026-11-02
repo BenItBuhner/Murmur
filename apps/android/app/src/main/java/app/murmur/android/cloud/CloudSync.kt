@@ -1367,6 +1367,7 @@ class CloudSync internal constructor(
             r.trailingSpace?.let { put("trailingSpace", it) }
             r.instructions?.takeIf { it.isNotBlank() }?.let { put("instructions", it) }
             r.speed?.let { put("speed", it.id) }
+            r.profile?.takeIf { it.isNotBlank() }?.let { put("profile", it) }
             if (r.createdAt > 0) put("createdAt", r.createdAt.toDouble())
         }
 
@@ -1445,7 +1446,8 @@ private fun StylePreferences.toDto() = PreferencesDto(
         mode = mode,
         tone = tone,
         trailingSpace = trailingSpace,
-        llmInstructions = llmInstructions
+        llmInstructions = llmInstructions,
+        profile = profile
     ),
     language = language,
     sync = SyncPreferencesDto(history = historySync)

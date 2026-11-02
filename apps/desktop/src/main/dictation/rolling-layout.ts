@@ -3,6 +3,7 @@ import {
   rawSeamContinues,
   wantsLayout,
   type AppCategory,
+  type Layout,
   type LayoutResult
 } from '@engine'
 import type { FormatOutcome } from '../inference/router'
@@ -38,7 +39,9 @@ export class RollingLayout {
     private readonly category: AppCategory,
     private readonly layout: (text: string) => Promise<LayoutResult>,
     private readonly join: (parts: FormatOutcome[], continues: boolean[]) => string,
-    private minNewWords = RELAYOUT_WORDS
+    private minNewWords = RELAYOUT_WORDS,
+    /** The profile's layout: `minimal` never lays out, `structured` also in chat. */
+    private readonly profileLayout?: Layout
   ) {}
 
   /** Piece `index` was formatted ('empty': no speech; null: not formatted, which stops the layout there). */
@@ -75,7 +78,11 @@ export class RollingLayout {
     const continues = raws.slice(0, -1).map((raw, k) => rawSeamContinues(raw, raws[k + 1]))
     const prefix = this.join(parts, continues)
     const words = countWords(prefix)
-    if (words - this.laidWords < this.minNewWords || !wantsLayout(prefix, this.category)) return
+    if (
+      words - this.laidWords < this.minNewWords ||
+      !wantsLayout(prefix, this.category, this.profileLayout)
+    )
+      return
     this.running = true
     this.tried = parts.length
     void this.layout(prefix)

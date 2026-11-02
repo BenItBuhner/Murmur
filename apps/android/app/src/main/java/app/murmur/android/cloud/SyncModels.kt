@@ -60,6 +60,8 @@ data class AppRuleDto(
     val instructions: String? = null,
     /** The app's speed override (`normal` / `fast`); absent from rules saved before speed modes. */
     val speed: String? = null,
+    /** The app's profile (text/Profiles.kt); absent from rules saved before profiles. */
+    val profile: String? = null,
     val lists: String? = null,
     val numbers: String? = null,
     val freedom: String? = null,
@@ -268,7 +270,9 @@ data class FormattingPreferencesDto(
     val mode: String? = null,
     val tone: String? = null,
     val trailingSpace: Boolean? = null,
-    val llmInstructions: String? = null
+    val llmInstructions: String? = null,
+    /** The global profile (text/Profiles.kt); servers from before profiles never send it. */
+    val profile: String? = null
 )
 
 @Serializable
@@ -325,7 +329,8 @@ data class StylePreferences(
     val trailingSpace: Boolean,
     val language: String,
     val llmInstructions: String = "",
-    val historySync: Boolean = false
+    val historySync: Boolean = false,
+    val profile: String = "default"
 ) {
     companion object {
         fun of(s: MurmurSettings) = StylePreferences(
@@ -334,7 +339,8 @@ data class StylePreferences(
             trailingSpace = s.trailingSpace,
             language = s.language,
             llmInstructions = s.llmInstructions,
-            historySync = s.historySync
+            historySync = s.historySync,
+            profile = s.profile
         )
     }
 
@@ -344,7 +350,8 @@ data class StylePreferences(
             "mode" to mode,
             "tone" to tone,
             "trailingSpace" to trailingSpace,
-            "llmInstructions" to llmInstructions
+            "llmInstructions" to llmInstructions,
+            "profile" to profile
         )
         val args = LinkedHashMap<String, Any?>()
         if (previous == null || previous.copy(language = language, historySync = historySync) != this) args["formatting"] = formatting
@@ -362,6 +369,7 @@ fun applyRemotePreferences(s: MurmurSettings, remote: PreferencesDto): MurmurSet
         tone = f?.tone?.let { Tone.from(it) } ?: s.tone,
         trailingSpace = f?.trailingSpace ?: s.trailingSpace,
         llmInstructions = f?.llmInstructions ?: s.llmInstructions,
+        profile = f?.profile ?: s.profile,
         language = remote.language ?: s.language,
         historySync = remote.sync?.history ?: s.historySync
     )
@@ -569,7 +577,8 @@ object SyncReducers {
         instructions = dto.instructions,
         createdAt = dto.createdAt.toLong(),
         // A speed this build does not know reads as inherit rather than as Normal.
-        speed = SttSpeed.fromOrNull(dto.speed)
+        speed = SttSpeed.fromOrNull(dto.speed),
+        profile = dto.profile?.takeIf { it.isNotBlank() }
     )
 
     val dictionarySpec = CollectionSpec<DictionaryEntry, DictionaryEntryDto>(
@@ -659,7 +668,8 @@ object SyncReducers {
 
     fun sameAppRule(a: AppRule, b: AppRule): Boolean =
         a.match == b.match && a.tone == b.tone && a.formatting == b.formatting &&
-            a.trailingSpace == b.trailingSpace && a.instructions == b.instructions && a.speed == b.speed
+            a.trailingSpace == b.trailingSpace && a.instructions == b.instructions && a.speed == b.speed &&
+            a.profile == b.profile
 
     fun diffDictionary(previous: List<DictionaryEntry>, next: List<DictionaryEntry>): Diff<DictionaryEntry> =
         diffCollection(previous, next, { it.id }, ::sameDictionaryEntry)

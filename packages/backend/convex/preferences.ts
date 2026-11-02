@@ -28,6 +28,7 @@ function cleanFormatting(input: FormattingPreferences | undefined): FormattingPr
     ].slice(0, LIMITS.hesitationPhrases)
   }
   if (out.llmInstructions !== undefined) out.llmInstructions = out.llmInstructions.trim().slice(0, LIMITS.instructionsLength)
+  if (out.profile !== undefined) out.profile = out.profile.trim().slice(0, 64) || undefined
   return out
 }
 

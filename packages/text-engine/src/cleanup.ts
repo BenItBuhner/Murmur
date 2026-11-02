@@ -7,6 +7,7 @@ import {
 } from './commands'
 import { applyDictionary } from './dictionary'
 import { removeFillers } from './fillers'
+import { applyCasing } from './profiles'
 import { expandSnippets, type Snippet, type SnippetContext } from './snippets'
 import {
   applyTrailing,
@@ -16,7 +17,7 @@ import {
   normalizeWhitespace
 } from './text'
 import { joinPauseStops } from './pause-stops'
-import type { AppCategory, DictionaryTerm } from './types'
+import type { AppCategory, Casing, DictionaryTerm } from './types'
 
 /**
  * The deterministic stages. There are three moments for rules around the model:
@@ -91,6 +92,8 @@ export interface FinishOptions {
   trailingSpace: boolean
   snippets?: readonly Snippet[]
   snippetContext?: SnippetContext
+  /** The profile's casing; `lowercase` lowers sentence starts before snippets expand. */
+  casing?: Casing
 }
 
 export interface Finished {
@@ -116,6 +119,9 @@ export function finish(text: string, opts: FinishOptions): Finished {
     if (one !== out) stages.push('terminal')
     out = one
   }
+  const cased = applyCasing(out, opts.casing, opts.category)
+  if (cased !== out) stages.push('casing')
+  out = cased
   const snippets = expandSnippets(out, opts.snippets ?? [], opts.snippetContext)
   if (snippets.expanded.length) stages.push('snippets')
   out = normalizeWhitespace(snippets.text)

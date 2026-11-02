@@ -178,6 +178,12 @@ data class MurmurSettings(
      */
     val formattingMode: FormattingMode = FormattingMode.SMART,
     val tone: Tone = Tone.AUTO,
+    /**
+     * The profile for every app without one of its own (text/Profiles.kt; desktop:
+     * `formatting.profile`). Any string, so a profile a newer build adds survives here (it reads
+     * as Default). Synced.
+     */
+    val profile: String = "default",
     val trailingSpace: Boolean = true,
     /** Free-form guidance for the model ("British spelling", "dates as ISO"). Synced. */
     val llmInstructions: String = "",
@@ -482,6 +488,7 @@ class SettingsStore(context: Context) {
             sttTimeoutMs = prefs.getInt("sttTimeoutMs", d.sttTimeoutMs).coerceIn(SettingsRanges.STT_TIMEOUT_MS),
             formattingMode = FormattingMode.from(prefs.getString("formattingMode", d.formattingMode.id)),
             tone = Tone.from(prefs.getString("tone", d.tone.id)),
+            profile = prefs.getString("profile", d.profile) ?: d.profile,
             trailingSpace = prefs.getBoolean("trailingSpace", d.trailingSpace),
             llmInstructions = prefs.getString("llmInstructions", d.llmInstructions) ?: "",
             llmSameAsStt = prefs.getBoolean("llmSameAsStt", d.llmSameAsStt),
@@ -547,6 +554,7 @@ class SettingsStore(context: Context) {
             .putInt("sttTimeoutMs", s.sttTimeoutMs.coerceIn(SettingsRanges.STT_TIMEOUT_MS))
             .putString("formattingMode", s.formattingMode.id)
             .putString("tone", s.tone.id)
+            .putString("profile", s.profile)
             .putBoolean("trailingSpace", s.trailingSpace)
             .putString("llmInstructions", s.llmInstructions)
             .putBoolean("llmSameAsStt", s.llmSameAsStt)

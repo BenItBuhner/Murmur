@@ -24,7 +24,11 @@ data class FormatContext(
     val precedingText: String? = null,
     val instructions: String? = null,
     val dictionary: List<DictionaryTerm> = emptyList(),
-    val keepVerbatim: List<String> = emptyList()
+    val keepVerbatim: List<String> = emptyList(),
+    /** The profile's layout; null is `auto` (decided by the category). */
+    val layout: Layout? = null,
+    /** The profile's grammar; null is `polish`. */
+    val grammar: Grammar? = null
 ) {
     /** The `context` object of a `POST /v1/format` request. */
     fun toJson(): JSONObject = JSONObject().apply {
@@ -38,6 +42,9 @@ data class FormatContext(
             for (d in dictionary) put(JSONObject().put("word", d.word).put("aliases", JSONArray(d.aliases)).put("fuzzy", d.fuzzy))
         })
         put("keepVerbatim", JSONArray(keepVerbatim))
+        // Sent only when not the default, so the request is the same as before for everyone else.
+        layout?.takeIf { it != Layout.AUTO }?.let { put("layout", it.id) }
+        grammar?.takeIf { it != Grammar.POLISH }?.let { put("grammar", it.id) }
     }
 }
 
@@ -52,7 +59,7 @@ object Prompt {
         "- Spoken punctuation and layout: \"new line\", \"new paragraph\", \"question mark\", \"exclamation point\", and \"quote ... end quote\" (or \"unquote\") become the line break, the blank line, the \"?\" or \"!\" and the quotation marks.",
         "- Obvious mis-hearings where the intended word is clear (homophones, split or merged words), and grammar slips where the intended wording is obvious (\"we was\" -> \"we were\", \"a apple\" -> \"an apple\").",
         "- Numbers the way a person types them: quantities, money, times, dates, percentages, versions and phone numbers as digits (\"five thirty pm\" -> \"5:30 pm\", \"twenty three percent\" -> \"23%\", \"one million two hundred thousand dollars\" -> \"\$1,200,000\", \"version two point oh point one\" -> \"version 2.0.1\"). Digits read out one by one keep their order and every zero (\"zero zero seven\" -> \"007\", \"five five five one two one two\" -> \"555-1212\"). Small counts in prose may stay words (\"two options\").",
-        "- Lists: when the speaker clearly enumerates (\"first..., second...\", \"number one...\", \"three things: a, b and c\"), one item per line with \"- \" bullets, or \"1.\" numbering when the order matters. Otherwise keep the speaker's paragraphs, and keep every line break they dictated. Never add a line break or paragraph the speaker did not dictate.",
+        "- Lists: when the speaker clearly enumerates (\"first..., second...\", \"number one...\", \"three things: a, b and c\"), one item per line with \"- \" bullets, or \"1.\" numbering when the order matters. Otherwise keep the speaker's paragraphs, and keep every line break they dictated. Never add a line break or paragraph the speaker did not dictate, unless a \"Layout\" line asks for one.",
         "",
         "Never:",
         "- Change the meaning, the order of the points or the language. Do not summarize, expand, translate, rephrase, swap synonyms or make it more polite.",
@@ -93,6 +100,8 @@ object Prompt {
         val destination = categoryHint(ctx.category) + (ctx.app?.let { " ($it)" } ?: "")
         lines.add("Destination: $destination. Tone: ${ctx.tone.id}.")
         lines.add(languageLine(ctx.language))
+        layoutLine(resolveLayout(ctx.layout, ctx.category)).takeIf { it.isNotEmpty() }?.let { lines.add(it) }
+        grammarLine(ctx.grammar).takeIf { it.isNotEmpty() }?.let { lines.add(it) }
         dictionaryLine(ctx.dictionary).takeIf { it.isNotEmpty() }?.let { lines.add(it) }
         val keep = ctx.keepVerbatim.map { it.trim() }.filter { it.isNotEmpty() }
         if (keep.isNotEmpty()) lines.add("Keep verbatim: ${keep.joinToString(", ") { "\"$it\"" }}.")
@@ -133,7 +142,7 @@ object Prompt {
     private fun exampleCtx(category: AppCategory, tone: Tone, app: String? = null, dictionary: List<DictionaryTerm> = emptyList(), precedingText: String? = null) =
         FormatContext(category = category, tone = tone, app = app, language = "auto", dictionary = dictionary, precedingText = precedingText)
 
-    /** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context, sentences split at pauses. */
+    /** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context, paragraphs, sentences split at pauses. */
     val EXAMPLES: List<Triple<FormatContext, String, String>> = listOf(
         Triple(
             exampleCtx(AppCategory.CHAT, Tone.CASUAL, app = "Slack"),
@@ -159,6 +168,11 @@ object Prompt {
             exampleCtx(AppCategory.EMAIL, Tone.PROFESSIONAL),
             "We are aiming for the end of next month. Assuming the beta goes well. And we do not find any. Serious problems, I will send the update to. The whole team.",
             "We are aiming for the end of next month, assuming the beta goes well and we do not find any serious problems. I will send the update to the whole team."
+        ),
+        Triple(
+            exampleCtx(AppCategory.EMAIL, Tone.PROFESSIONAL),
+            "hi team quick update. the beta is out and feedback has been positive. we also fixed the login crash. on the budget side we're still waiting on finance. i'll follow up tomorrow",
+            "Hi team, quick update.\n\nThe beta is out and feedback has been positive. We also fixed the login crash.\n\nOn the budget side, we're still waiting on finance. I'll follow up tomorrow."
         ),
         Triple(
             exampleCtx(AppCategory.CHAT, Tone.CASUAL),

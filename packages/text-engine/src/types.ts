@@ -9,6 +9,21 @@ export type AppCategory =
 export type Tone = 'auto' | 'casual' | 'neutral' | 'professional'
 export type ResolvedTone = Exclude<Tone, 'auto'>
 
+/**
+ * How much layout the model may add on its own. `auto`: the destination decides (see
+ * `resolveLayout`). `minimal`: running text, nothing the speaker did not dictate. `lists` (only
+ * ever resolved, never chosen): a list when the speaker enumerates. `balanced`: also a paragraph
+ * at each new topic in longer text. `structured`: also a list for any run of parallel items.
+ */
+export type Layout = 'auto' | 'minimal' | 'balanced' | 'structured'
+export type ResolvedLayout = 'minimal' | 'lists' | 'balanced' | 'structured'
+
+/** `lowercase`: sentence starts in lower case and no final period on a one-line message. */
+export type Casing = 'standard' | 'lowercase'
+
+/** `as-spoken`: keep the speaker's wording and grammar; fix only punctuation and fillers. */
+export type Grammar = 'polish' | 'as-spoken'
+
 /** `off`: insert the transcript as heard. `light`: rule-based tidying only. `smart`: the model. */
 export type FormattingMode = 'off' | 'light' | 'smart'
 
@@ -65,6 +80,10 @@ export interface FormatContext {
   dictionary: readonly DictionaryTerm[]
   /** Phrases that must survive verbatim (snippet triggers, for example). */
   keepVerbatim?: readonly string[]
+  /** How much layout the model may add (absent: `auto`, decided by the category). */
+  layout?: Layout
+  /** Absent: `polish`. */
+  grammar?: Grammar
 }
 
 /**

@@ -1,4 +1,5 @@
-import type { AppCategory, FormattingMode, ResolvedTone, Tone } from './types'
+import { profileOf, type ProfileId } from './profiles'
+import type { AppCategory, Casing, FormattingMode, Grammar, Layout, ResolvedTone, Tone } from './types'
 
 export interface AppContext {
   app: string
@@ -67,6 +68,8 @@ export interface StylePrefs {
   /** Free-form guidance for the model ("British spelling", "dates as ISO"). */
   instructions: string
   trailingSpace: boolean
+  /** The profile for every app without one of its own (absent or unknown: `default`). */
+  profile?: string
 }
 
 /**
@@ -81,6 +84,8 @@ export interface StyleRule {
   formatting?: FormattingMode
   trailingSpace?: boolean
   instructions?: string
+  /** The profile in this app; absent inherits the global one. */
+  profile?: string
 }
 
 /**
@@ -93,6 +98,11 @@ export interface ResolvedStyle<R extends StyleRule = StyleRule> {
   mode: FormattingMode
   instructions: string
   trailingSpace: boolean
+  /** The profile in effect: the rule's, else the global one. */
+  profile: ProfileId
+  layout: Layout
+  casing: Casing
+  grammar: Grammar
 }
 
 export function findRule<R extends StyleRule>(rules: readonly R[], ctx: AppContext): R | undefined {
@@ -100,19 +110,24 @@ export function findRule<R extends StyleRule>(rules: readonly R[], ctx: AppConte
   return rules.find((r) => r.match.trim() && hay.includes(r.match.trim().toLowerCase()))
 }
 
-/** Precedence: the matching per-app rule, then the global settings, then the destination's defaults. */
+/**
+ * Precedence: the matching per-app rule, then the global settings, then the destination's
+ * defaults. Within each level an explicit tone wins over the one its profile carries, so a rule
+ * that picks a profile overrides a global tone, and a tone set on the rule overrides its profile.
+ */
 export function resolveStyle<R extends StyleRule>(
   prefs: StylePrefs,
   rules: readonly R[],
   ctx: AppContext
 ): ResolvedStyle<R> {
   const rule = findRule(rules, ctx)
+  const profile = profileOf(rule?.profile || prefs.profile)
+  const ruleProfile = rule?.profile ? profileOf(rule.profile) : undefined
+  const globalProfile = profileOf(prefs.profile)
   const tone =
-    rule?.tone && rule.tone !== 'auto'
-      ? rule.tone
-      : prefs.tone !== 'auto'
-        ? prefs.tone
-        : autoTone(ctx.category)
+    [rule?.tone, ruleProfile?.tone, prefs.tone, globalProfile.tone].find(
+      (t): t is ResolvedTone => !!t && t !== 'auto'
+    ) ?? autoTone(ctx.category)
   const instructions = [prefs.instructions.trim(), rule?.instructions?.trim() ?? '']
     .filter(Boolean)
     .join('\n\n')
@@ -121,7 +136,11 @@ export function resolveStyle<R extends StyleRule>(
     rule,
     mode: rule?.formatting ?? prefs.mode,
     instructions,
-    trailingSpace: rule?.trailingSpace ?? prefs.trailingSpace
+    trailingSpace: rule?.trailingSpace ?? prefs.trailingSpace,
+    profile: profile.id,
+    layout: profile.layout,
+    casing: profile.casing,
+    grammar: profile.grammar
   }
 }
 

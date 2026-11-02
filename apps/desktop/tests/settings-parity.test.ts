@@ -10,6 +10,7 @@ import {
   speedModeSchema,
   toneSchema
 } from '@shared/settings'
+import { PROFILE_IDS } from '@engine'
 import { SPEED_MODES } from '@shared/inference'
 import { STT_PRESETS } from '@core/stt/presets'
 
@@ -26,7 +27,7 @@ const contract = JSON.parse(
   ranges: Record<string, { min: number; max: number }>
   sttPresets: Array<Record<string, unknown>>
   snippetPlaceholders: string[]
-  appRule: { tones: string[]; modes: string[]; speeds: string[] }
+  appRule: { tones: string[]; modes: string[]; speeds: string[]; profiles: string[] }
   sttSpeeds: string[]
 }
 
@@ -57,6 +58,7 @@ describe('settings parity contract', () => {
       historySync: s.cloud.historySync,
       formattingMode: s.formatting.mode,
       tone: s.formatting.tone,
+      profile: s.formatting.profile,
       trailingSpace: s.formatting.trailingSpace,
       instructions: s.formatting.instructions,
       language: s.stt.language,
@@ -118,6 +120,9 @@ describe('settings parity contract', () => {
   it('the style vocabularies match', () => {
     expect(toneSchema.options).toEqual(contract.appRule.tones)
     expect(formattingModeSchema.options).toEqual(contract.appRule.modes)
+    // Profiles: the same ids on both apps, chosen globally and per app (absent inherits).
+    expect([...PROFILE_IDS]).toEqual(contract.appRule.profiles)
+    expect(appRuleSchema.shape.profile.safeParse(undefined).success).toBe(true)
   })
 
   it('the speed modes are the ones both apps send to the gateway', () => {

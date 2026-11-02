@@ -117,7 +117,9 @@ const routed = {
   /** How many times the formatting stage was asked for (each would be a model round trip). */
   formatterCalls: 0,
   /** What the formatting model "answers" when it is asked. */
-  answer: 'Hello from Murmur, this is a test.'
+  answer: 'Hello from Murmur, this is a test.',
+  /** The context of every formatting request, as the model would be told it. */
+  contexts: [] as Array<Record<string, unknown>>
 }
 
 const inference = {
@@ -145,8 +147,9 @@ const inference = {
   /** A formatting model that answers at once, standing in for /v1/format or the user's own model. */
   formatter: async () => ({
     source: 'custom' as const,
-    format: async () => {
+    format: async (input: { context: Record<string, unknown> }) => {
       routed.formatterCalls++
+      routed.contexts.push(input.context)
       return {
         text: routed.answer,
         pressEnter: false,
@@ -221,6 +224,7 @@ describe('a dictation fed by MURMUR_TEST_AUDIO_FILE', () => {
     provider.speed = undefined
     routed.speeds.length = 0
     routed.formatterCalls = 0
+    routed.contexts.length = 0
     hook = {
       waitForKeysUp: async () => true,
       beginSynthetic: () => undefined,
@@ -371,6 +375,34 @@ describe('a dictation fed by MURMUR_TEST_AUDIO_FILE', () => {
     const light = await dictateOnce()
     expect(routed.formatterCalls).toBe(3)
     expect(light.finalText).toBe('So hello from murmur this is a test')
+  })
+
+  it("profiles: a per-app profile sets the request's layout and grammar and the text's casing, with no extra request", async () => {
+    const s = (controller as unknown as { deps: { settings: FakeSettings } }).deps.settings.value
+    s.formatting.mode = 'smart'
+    const plain = await dictateOnce()
+    expect(plain.finalText).toBe('Hello from Murmur, this is a test.')
+    // Default profile: the request is the same as before profiles.
+    expect(routed.contexts[0]).not.toHaveProperty('layout')
+    expect(routed.contexts[0]).not.toHaveProperty('grammar')
+
+    s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'auto', profile: 'casual' }]
+    const casual = await dictateOnce()
+    expect(casual.finalText).toBe('hello from Murmur, this is a test')
+    expect(casual.stages).toContain('casing')
+    expect(routed.contexts[1]).toMatchObject({ tone: 'casual' })
+
+    s.formatting.appRules = [{ id: 'r1', match: 'notes', tone: 'auto', profile: 'as-spoken' }]
+    await dictateOnce()
+    expect(routed.contexts[2]).toMatchObject({ layout: 'minimal', grammar: 'as-spoken' })
+
+    // The global profile applies where no rule picks one.
+    s.formatting.appRules = []
+    s.formatting.profile = 'polished'
+    await dictateOnce()
+    expect(routed.contexts[3]).toMatchObject({ layout: 'structured', tone: 'professional' })
+    // One formatting request per dictation, whatever the profile.
+    expect(routed.formatterCalls).toBe(4)
   })
 
   it('press enter: a clip ending in "press enter" types the text and presses Enter', async () => {

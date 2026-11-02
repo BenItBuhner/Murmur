@@ -177,7 +177,7 @@ object Verify {
     )
 
     /** Repairs that cost no round trip, applied before the invariants (see verify.ts). */
-    fun repairOutput(transcript: String, text: String): String {
+    fun repairOutput(transcript: String, text: String, paragraphs: Boolean = false): String {
         val inInput = runWords(transcript).joinToString(" ")
         var out = DOUBLED_RUN.replace(text) { m ->
             val run = m.groupValues[1]
@@ -186,7 +186,8 @@ object Verify {
             if (inInput.contains("$key $key")) m.value else run
         }
         if (out.contains('\n') && !LAYOUT_CUE.containsMatchIn(transcript) && !LIST_LINE.containsMatchIn(out))
-            out = out.replace(Regex("[ \\t]*\\n+[ \\t]*"), " ")
+            // A layout that lets the model start paragraphs keeps its blank lines between sentences.
+            out = if (paragraphs) keepParagraphs(out) else out.replace(Regex("[ \\t]*\\n+[ \\t]*"), " ")
         return out.trim()
     }
 

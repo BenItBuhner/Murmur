@@ -413,7 +413,8 @@ export function registerIpc(deps: IpcDeps): void {
         dictionary: s.dictionary,
         trailingSpace: false,
         snippets: s.snippets,
-        snippetContext: { now: new Date() }
+        snippetContext: { now: new Date() },
+        casing: style.casing
       }
       const prepared = prepareTranscript(request.raw)
       const light = basicCleanup(prepared.text, { dictionary: s.dictionary })
@@ -429,7 +430,8 @@ export function registerIpc(deps: IpcDeps): void {
           category: app.category,
           ruleMatch: style.rule?.match,
           tone: style.tone,
-          mode: style.mode
+          mode: style.mode,
+          profile: style.profile
         }
       }
       if (request.smart) {

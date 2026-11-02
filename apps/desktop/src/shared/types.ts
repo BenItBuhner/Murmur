@@ -179,6 +179,8 @@ export interface PreviewResult {
     ruleMatch?: string
     tone: string
     mode: string
+    /** The profile in effect (text-engine `PROFILE_IDS`). */
+    profile?: string
   }
   smart?: {
     status: LlmStatus

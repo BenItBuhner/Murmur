@@ -92,6 +92,12 @@ export const formattingPreferencesValidator = v.object({
   trailingSpace: v.optional(v.boolean()),
   /** Free-form guidance for the formatting model. */
   llmInstructions: v.optional(v.string()),
+  /**
+   * The profile every app uses unless its rule picks another (text-engine `PROFILE_IDS`). A plain
+   * string, so a profile added later syncs through older servers; clients read an unknown id as
+   * `default`.
+   */
+  profile: v.optional(v.string()),
   ...legacyFormattingFields
 })
 export type FormattingPreferences = Infer<typeof formattingPreferencesValidator>
@@ -169,6 +175,8 @@ export const appRuleOverrides = {
    * ignore it on the way in.
    */
   speed: v.optional(speedModeValidator),
+  /** The profile in this app (text-engine `PROFILE_IDS`); absent inherits the global one. */
+  profile: v.optional(v.string()),
   ...legacyAppRuleFields
 }
 

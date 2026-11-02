@@ -464,7 +464,8 @@ export class CloudSync extends EventEmitter {
           formatting: r.formatting,
           trailingSpace: r.trailingSpace,
           instructions: r.instructions,
-          speed: r.speed
+          speed: r.speed,
+          profile: r.profile
         }))
       })
     }
@@ -1231,6 +1232,7 @@ export class CloudSync extends EventEmitter {
           trailingSpace: op.rule.trailingSpace,
           instructions: op.rule.instructions,
           speed: op.rule.speed,
+          profile: op.rule.profile,
           createdAt: op.rule.createdAt
         })
         this.outbox.update((ops) => ackUpsert(ops, op.id, id))

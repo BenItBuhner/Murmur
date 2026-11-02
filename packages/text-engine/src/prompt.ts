@@ -1,5 +1,6 @@
 import { categoryHint, isTechnical, toneDescription } from './context'
 import { languageName } from './languages'
+import { grammarLine, layoutLine, resolveLayout } from './profiles'
 import { countWords } from './text'
 import type { ChatMessage, DictionaryTerm, FormatContext } from './types'
 
@@ -20,7 +21,7 @@ export const SYSTEM_PROMPT = [
   '- Spoken punctuation and layout: "new line", "new paragraph", "question mark", "exclamation point", and "quote ... end quote" (or "unquote") become the line break, the blank line, the "?" or "!" and the quotation marks.',
   '- Obvious mis-hearings where the intended word is clear (homophones, split or merged words), and grammar slips where the intended wording is obvious ("we was" -> "we were", "a apple" -> "an apple").',
   '- Numbers the way a person types them: quantities, money, times, dates, percentages, versions and phone numbers as digits ("five thirty pm" -> "5:30 pm", "twenty three percent" -> "23%", "one million two hundred thousand dollars" -> "$1,200,000", "version two point oh point one" -> "version 2.0.1"). Digits read out one by one keep their order and every zero ("zero zero seven" -> "007", "five five five one two one two" -> "555-1212"). Small counts in prose may stay words ("two options").',
-  '- Lists: when the speaker clearly enumerates ("first..., second...", "number one...", "three things: a, b and c"), one item per line with "- " bullets, or "1." numbering when the order matters. Otherwise keep the speaker\'s paragraphs, and keep every line break they dictated. Never add a line break or paragraph the speaker did not dictate.',
+  '- Lists: when the speaker clearly enumerates ("first..., second...", "number one...", "three things: a, b and c"), one item per line with "- " bullets, or "1." numbering when the order matters. Otherwise keep the speaker\'s paragraphs, and keep every line break they dictated. Never add a line break or paragraph the speaker did not dictate, unless a "Layout" line asks for one.',
   '',
   'Never:',
   '- Change the meaning, the order of the points or the language. Do not summarize, expand, translate, rephrase, swap synonyms or make it more polite.',
@@ -74,6 +75,10 @@ export function userMessage(transcript: string, ctx: FormatContext, strict = fal
   const destination = `${categoryHint(ctx.category)}${ctx.app ? ` (${ctx.app})` : ''}`
   lines.push(`Destination: ${destination}. Tone: ${toneDescription(ctx.tone)}.`)
   lines.push(languageLine(ctx.language))
+  const layout = layoutLine(resolveLayout(ctx.layout, ctx.category))
+  if (layout) lines.push(layout)
+  const grammar = grammarLine(ctx.grammar)
+  if (grammar) lines.push(grammar)
   const dict = dictionaryLine(ctx.dictionary)
   if (dict) lines.push(dict)
   const keep = (ctx.keepVerbatim ?? []).map((k) => k.trim()).filter(Boolean)
@@ -102,7 +107,7 @@ const EXAMPLE_CTX = (
   extra: Partial<FormatContext> = {}
 ): FormatContext => ({ category, tone, dictionary: [], language: 'auto', ...extra })
 
-/** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context, sentences split at pauses. */
+/** Worked examples covering the failure modes that matter: fillers, numbers, lists, questions, context, paragraphs, sentences split at pauses. */
 export const EXAMPLES: ReadonlyArray<[FormatContext, string, string]> = [
   [
     EXAMPLE_CTX('chat', 'casual', { app: 'Slack' }),
@@ -130,6 +135,11 @@ export const EXAMPLES: ReadonlyArray<[FormatContext, string, string]> = [
     EXAMPLE_CTX('email', 'professional'),
     'We are aiming for the end of next month. Assuming the beta goes well. And we do not find any. Serious problems, I will send the update to. The whole team.',
     'We are aiming for the end of next month, assuming the beta goes well and we do not find any serious problems. I will send the update to the whole team.'
+  ],
+  [
+    EXAMPLE_CTX('email', 'professional'),
+    "hi team quick update. the beta is out and feedback has been positive. we also fixed the login crash. on the budget side we're still waiting on finance. i'll follow up tomorrow",
+    "Hi team, quick update.\n\nThe beta is out and feedback has been positive. We also fixed the login crash.\n\nOn the budget side, we're still waiting on finance. I'll follow up tomorrow."
   ],
   [
     EXAMPLE_CTX('chat', 'casual'),

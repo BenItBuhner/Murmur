@@ -84,8 +84,14 @@ data class FormatStyle(
      * (desktop: `effectiveSpeed`). Asked of Murmur's speech model and, with FAST, the formatting
      * model is not asked at all (see [effectiveMode]).
      */
-    val speed: SttSpeed = SttSpeed.NORMAL
+    val speed: SttSpeed = SttSpeed.NORMAL,
+    /** The profile in effect: the rule's, else the global one (desktop: `ResolvedStyle.profile`). */
+    val profile: Profile = Profiles.DEFAULT
 ) {
+    val layout: Layout get() = profile.layout
+    val casing: Casing get() = profile.casing
+    val grammar: Grammar get() = profile.grammar
+
     /**
      * The formatting mode the dictation actually runs with: Fast never asks the model, so SMART
      * becomes the rule-based LIGHT; OFF stays off and Normal keeps [mode] (desktop: `formattingModeAt`).
@@ -102,15 +108,15 @@ const val FAST_SKIP_DETAIL = "fast speed"
 
 /**
  * Precedence, as on the desktop: the matching per-app rule, then the global settings, then the
- * destination's defaults. A rule's instructions are appended to the global ones.
+ * destination's defaults. A rule's instructions are appended to the global ones. Within each level
+ * an explicit tone wins over its profile's: rule tone, rule profile, global tone, global profile.
  */
 fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
     val rule = findRule(s.appRules, ctx)
-    val tone = when {
-        rule != null && rule.tone != Tone.AUTO -> rule.tone
-        s.tone != Tone.AUTO -> s.tone
-        else -> autoTone(ctx.category)
-    }
+    val ruleProfile = rule?.profile?.takeIf { it.isNotEmpty() }?.let { Profiles.of(it) }
+    val globalProfile = Profiles.of(s.profile)
+    val tone = listOfNotNull(rule?.tone, ruleProfile?.tone, s.tone, globalProfile.tone)
+        .firstOrNull { it != Tone.AUTO } ?: autoTone(ctx.category)
     val instructions = listOf(s.llmInstructions.trim(), rule?.instructions?.trim() ?: "")
         .filter { it.isNotEmpty() }
         .joinToString("\n\n")
@@ -120,6 +126,7 @@ fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
         instructions = instructions,
         trailingSpace = rule?.trailingSpace ?: s.trailingSpace,
         rule = rule,
+        profile = ruleProfile ?: globalProfile,
         // One automatic mode since 0.6.23 (desktop: `effectiveSpeed`): a stored Fast, on the device
         // or a rule, runs as Normal and no longer turns AI formatting off.
         speed = SttSpeed.NORMAL

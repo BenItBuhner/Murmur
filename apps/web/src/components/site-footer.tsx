@@ -22,7 +22,7 @@ export function SiteFooter() {
       <Container>
         <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4">
           <div className="max-w-xs">
-            <Wordmark />
+            <Wordmark id="murmur-mark-foot" />
             <p className="mt-4 text-body text-muted-foreground">{SITE_TAGLINE}</p>
           </div>
           <FooterColumn title="Product">

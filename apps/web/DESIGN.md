@@ -1,10 +1,40 @@
-# Aurora: the website's brand layer (proposal)
+# Murmur: brand and website design system (proposal)
 
 Status: proposal only, open for Bennett's review. Nothing here is merged or deployed.
 
-The site shares its tokens with the desktop and Android apps (see the header of `src/app/globals.css`). Aurora leaves all of them alone and adds a thin brand layer for the website only. The idea is a voice glow from violet into the record coral, so the page feels like speech turning into text.
+## Identity
 
-## Tokens (site only)
+**Idea.** Speech turning into text: a soft voice that lands exactly where you meant it.
+
+**Mark.** A lowercase m drawn as two soft arches, with a quieter third bar for the voice trailing off, in white on
+the voice gradient (coral `#FF8A6B` into violet `#8B5CFF` into indigo `#5B3DF5`). The geometry is in
+`src/components/wordmark.tsx` (`Mark`) and `src/app/icon.svg`; keep them identical.
+
+- Minimum size 16 px. Clear space: a quarter of the tile on every side.
+- The tile always carries the gradient; don't flatten it to one colour or put the m on a photo.
+
+**Wordmark.** The mark, then "Murmur" in Instrument Serif at 27 px, tracking -0.02em, as the apps set the name.
+
+**Voice.** Quiet, exact and checkable. Say what happens to your words and where they go; point to the source when a
+claim can be checked. No "magic", no "10x".
+
+| Do | Don't |
+|---|---|
+| "Recordings never leave the device." | "Military-grade privacy" |
+| "Hold a key. Speak. The words land where your cursor is." | "The future of typing is here!" |
+
+## Type (site)
+
+The site now reads larger than the apps, because a page is read at arm's length and an app panel is glanced at:
+caption 12, meta 13, note 14.5, body 16, lead 18 px (sans, Inter); heading 27, numeral 34, title 44, display 60,
+hero 80 px (Instrument Serif). Muted text is darker (`oklch(0.45 0.012 60)` in light mode). Eyebrows are 600 weight
+in brand ink (brand violet in dark mode).
+
+## Brand layer
+
+The site shares its tokens with the desktop and Android apps (see the header of `src/app/globals.css`). The brand layer (Aurora) leaves the colours alone, raises the type scale for the site and adds a thin brand layer for the website only. The idea is a voice glow from violet into the record coral, so the page feels like speech turning into text.
+
+## Brand tokens (site only)
 
 | Token | Light | Dark | Use |
 |---|---|---|---|

@@ -1,13 +1,22 @@
 import { Key, canonicalChord, canonicalKey } from './keys'
 import type { DictationMode } from '@shared/types'
 
+/**
+ * `target: 'ephemeris'` marks a session started with the Ephemeris note chord: its text is sent
+ * to Ephemeris instead of being typed at the cursor.
+ */
 export type HotkeyAction =
-  { type: 'start'; mode: DictationMode } | { type: 'lock' } | { type: 'stop' } | { type: 'cancel' }
+  | { type: 'start'; mode: DictationMode; target?: 'ephemeris' }
+  | { type: 'lock' }
+  | { type: 'stop' }
+  | { type: 'cancel' }
 
 export interface HotkeyEngineConfig {
   pushToTalk: number[]
   handsFree: number[]
   commandMode: number[]
+  /** Ephemeris note chord; empty (the default) when the integration or its note mode is off. */
+  ephemerisNote?: number[]
   handsFreeTrigger: 'tap' | 'double-tap' | 'off'
   tapThresholdMs: number
   doubleTapWindowMs: number
@@ -15,7 +24,7 @@ export interface HotkeyEngineConfig {
   escapeCancels: boolean
 }
 
-type ChordId = 'ptt' | 'handsFree' | 'command'
+type ChordId = 'ptt' | 'handsFree' | 'command' | 'note'
 
 interface Session {
   mode: DictationMode
@@ -38,6 +47,8 @@ interface Session {
  *  - Dedicated hands-free chord toggles a locked session on press.
  *  - Hands-free chord pressed while holding push-to-talk upgrades the session to locked.
  *  - Esc while listening -> `cancel`.
+ *  - The optional Ephemeris note chord works like push-to-talk (a tap locks unless the trigger
+ *    is 'off'), and its `start` carries `target: 'ephemeris'`.
  *
  * The engine never owns timers; the host feeds monotonic timestamps.
  */
@@ -45,7 +56,7 @@ export class HotkeyEngine {
   private down = new Set<number>()
   private session: Session | null = null
   private lastTapAt: number | null = null
-  private chords: Record<ChordId, number[]> = { ptt: [], handsFree: [], command: [] }
+  private chords: Record<ChordId, number[]> = { ptt: [], handsFree: [], command: [], note: [] }
 
   constructor(private config: HotkeyEngineConfig) {
     this.applyConfig(config)
@@ -57,7 +68,8 @@ export class HotkeyEngine {
     this.chords = {
       ptt: c(config.pushToTalk),
       handsFree: c(config.handsFree),
-      command: c(config.commandMode)
+      command: c(config.commandMode),
+      note: c(config.ephemerisNote ?? [])
     }
   }
 
@@ -134,6 +146,12 @@ export class HotkeyEngine {
       return [{ type: 'start', mode: 'command' }]
     }
 
+    if (chord === 'note') {
+      // Behaves like push-to-talk (hold to talk, a quick tap locks unless the trigger is off).
+      this.session = { mode: 'hold', chord, startedAt: now, locked: false }
+      return [{ type: 'start', mode: 'hold', target: 'ephemeris' }]
+    }
+
     // push-to-talk
     const isDoubleTap =
       this.config.handsFreeTrigger === 'double-tap' &&
@@ -157,7 +175,12 @@ export class HotkeyEngine {
     if (!this.chords[session.chord].includes(code)) return []
 
     const held = now - session.startedAt
-    if (held < this.config.tapThresholdMs && session.mode !== 'command') {
+    if (held < this.config.tapThresholdMs && session.chord === 'note') {
+      if (this.config.handsFreeTrigger !== 'off') {
+        session.locked = true
+        return [{ type: 'lock' }]
+      }
+    } else if (held < this.config.tapThresholdMs && session.mode !== 'command') {
       switch (this.config.handsFreeTrigger) {
         case 'tap':
           session.locked = true
@@ -176,7 +199,7 @@ export class HotkeyEngine {
 
   /** Chords that are fully pressed and include the key that just went down, longest first. */
   private newlyActiveChords(code: number): ChordId[] {
-    const ids: ChordId[] = ['handsFree', 'command', 'ptt']
+    const ids: ChordId[] = ['handsFree', 'command', 'ptt', 'note']
     return ids
       .filter((id) => {
         const keys = this.chords[id]

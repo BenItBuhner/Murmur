@@ -68,8 +68,10 @@ import type { SettingsStore } from '../store/settings'
 import type { HistoryStore } from '../store/history'
 import type { RecordingStore } from '../store/recordings'
 import { injectText, readSelection, type InjectResult } from '../inject'
+import { sendToEphemeris, type EphemerisTranscript } from '@core/ephemeris'
 
 const log = createLogger('session')
+const ephemerisLog = createLogger('ephemeris')
 const SAMPLE_RATE = 16000
 
 interface ActiveSession {
@@ -82,6 +84,8 @@ interface ActiveSession {
   maxTimer: NodeJS.Timeout | null
   /** The stand-in clip (MURMUR_TEST_AUDIO_FILE) is spent; a microphone never says so. */
   inputEnded: boolean
+  /** Started with the Ephemeris note chord: the text goes to Ephemeris, not the cursor. */
+  ephemerisNote?: boolean
   /** Long dictations to Murmur's gateway go up in pieces while they are spoken. */
   stream?: ChunkStreamer<TailSpec>
   streamFormats?: Promise<FormatOutcome | 'empty' | null>[]
@@ -207,6 +211,32 @@ interface ProcessJob {
    * the focused field would be the settings window itself.
    */
   inject: boolean
+  /** An Ephemeris note: sent there instead of typed (core/ephemeris.ts). */
+  ephemerisNote?: boolean
+}
+
+/**
+ * What a finished dictation would send to Ephemeris, or null when it sends nothing: the
+ * integration is off, the session was a command (an edit of a selection, not something said),
+ * or in `notes-hotkey` mode the session was not started with the note chord.
+ */
+function ephemerisPayload(
+  cfg: Settings['ephemeris'],
+  job: ProcessJob,
+  text: string,
+  recordMs: number,
+  app: string
+): EphemerisTranscript | null {
+  if (!cfg.enabled || job.mode === 'command') return null
+  if (cfg.mode === 'notes-hotkey' && !job.ephemerisNote) return null
+  const endedAt = job.previous?.createdAt ?? Date.now()
+  return {
+    text: text.trim(),
+    kind: 'note',
+    app: app || undefined,
+    startedAt: new Date(endedAt - recordMs).toISOString(),
+    endedAt: new Date(endedAt).toISOString()
+  }
 }
 
 type ProcessOutcome =
@@ -262,7 +292,7 @@ export class DictationController extends EventEmitter {
     if (!this.enabled) return
     switch (action.type) {
       case 'start':
-        this.start(action.mode)
+        this.start(action.mode, action.target)
         break
       case 'lock':
         this.lock()
@@ -298,7 +328,7 @@ export class DictationController extends EventEmitter {
 
   // ---- lifecycle ----------------------------------------------------------------------------
 
-  private start(mode: DictationMode): void {
+  private start(mode: DictationMode, target?: 'ephemeris'): void {
     if (this.active) {
       log.debug('start ignored: session already active')
       return
@@ -313,7 +343,8 @@ export class DictationController extends EventEmitter {
       windowInfo: this.deps.getActiveWindow().catch(() => ({ title: '', app: '' })),
       elapsedTimer: null,
       maxTimer: null,
-      inputEnded: false
+      inputEnded: false,
+      ephemerisNote: target === 'ephemeris' && mode !== 'command'
     }
     this.active = session
     // Audio first: every millisecond before capture starts is a clipped first word.
@@ -342,7 +373,8 @@ export class DictationController extends EventEmitter {
       }, durationLimitMs)
     }
     this.emit('state', 'listening')
-    log.info(`session ${id.slice(0, 8)} start mode=${mode}`)
+    const note = session.ephemerisNote ? ' (ephemeris note)' : ''
+    log.info(`session ${id.slice(0, 8)} start mode=${mode}${note}`)
   }
 
   private lock(): void {
@@ -409,7 +441,8 @@ export class DictationController extends EventEmitter {
       mode: session.mode,
       windowInfo: session.windowInfo,
       attempts: 1,
-      inject: true
+      inject: true,
+      ephemerisNote: session.ephemerisNote
     }
     try {
       const pcm = await this.deps.recorder.stop(session.id)
@@ -1030,9 +1063,25 @@ export class DictationController extends EventEmitter {
       return { ok: false, error: RELEASE_TIMEOUT_MESSAGE, recorded: true }
     }
     t = performance.now()
-    const injectResult = job.inject
-      ? await this.enqueueInject(finalText, pressEnter, s, replaceSelection)
-      : await this.enqueueInject(finalText, false, s, false, 'clipboard')
+    const appName = windowInfo.app
+    const ephemeris = ephemerisPayload(s.ephemeris, job, finalText, timings.recordMs, appName)
+    let sentToEphemeris = false
+    let injectResult: InjectResult
+    if (job.ephemerisNote && ephemeris) {
+      // A note is sent instead of typed; if Ephemeris cannot take it, it is copied so it is not lost.
+      sentToEphemeris = await sendToEphemeris(s, ephemeris, fetch, ephemerisLog)
+      injectResult = sentToEphemeris
+        ? { ok: true, method: 'clipboard', ms: 0 }
+        : await this.enqueueInject(finalText, false, s, false, 'clipboard')
+    } else {
+      // Every dictation also goes to Ephemeris in `all` mode. Fire-and-forget: insertion never
+      // waits on it, and it never throws.
+      if (ephemeris && s.ephemeris.mode === 'all')
+        void sendToEphemeris(s, ephemeris, fetch, ephemerisLog)
+      injectResult = job.inject
+        ? await this.enqueueInject(finalText, pressEnter, s, replaceSelection)
+        : await this.enqueueInject(finalText, false, s, false, 'clipboard')
+    }
     timings.injectMs = Math.round(performance.now() - t)
     timings.totalMs = Math.round(performance.now() - stopAt)
     if (selectionRestore)
@@ -1054,8 +1103,8 @@ export class DictationController extends EventEmitter {
       model: resolved.cfg.model,
       speed,
       sttSpeed: stt.speed,
-      injected: injectResult.ok && injectResult.method !== 'clipboard',
-      injectionMethod: injectResult.method,
+      injected: injectResult.ok && injectResult.method !== 'clipboard' && !sentToEphemeris,
+      injectionMethod: sentToEphemeris ? 'ephemeris' : injectResult.method,
       llmUsed,
       llm: llmStatus,
       stages: stt.resumed ? ['stt-resumed', ...stages] : stages,
@@ -1073,11 +1122,15 @@ export class DictationController extends EventEmitter {
     if (injectResult.ok) {
       this.deps.overlay.setState({
         phase: 'success',
-        message: !job.inject
-          ? 'Transcribed — copied to clipboard'
-          : injectResult.method === 'clipboard'
-            ? 'Copied — press Ctrl+V'
-            : undefined,
+        message: sentToEphemeris
+          ? 'Sent to Ephemeris'
+          : job.ephemerisNote
+            ? 'Ephemeris unreachable — copied to clipboard'
+            : !job.inject
+              ? 'Transcribed — copied to clipboard'
+              : injectResult.method === 'clipboard'
+                ? 'Copied — press Ctrl+V'
+                : undefined,
         limit: softLimit
       })
     } else {

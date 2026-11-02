@@ -20,6 +20,14 @@ export type HookBackend = 'uiohook' | 'globalShortcut' | 'none'
 
 type UiohookModule = typeof import('uiohook-napi')
 
+type GlobalShortcutId = 'ptt' | 'handsFree' | 'command' | 'note'
+
+/** The Ephemeris note chord, live only while the integration is on in `notes-hotkey` mode. */
+export function ephemerisNoteChord(s: Settings): number[] {
+  const e = s.ephemeris
+  return e.enabled && e.mode === 'notes-hotkey' ? e.noteHotkey : []
+}
+
 interface CaptureState {
   down: Set<number>
   combo: number[]
@@ -56,6 +64,7 @@ export class HookService extends EventEmitter {
       pushToTalk: s.hotkeys.pushToTalk,
       handsFree: s.hotkeys.handsFree,
       commandMode: s.hotkeys.commandMode,
+      ephemerisNote: ephemerisNoteChord(s),
       handsFreeTrigger: s.hotkeys.handsFreeTrigger,
       tapThresholdMs: s.hotkeys.tapThresholdMs,
       doubleTapWindowMs: s.hotkeys.doubleTapWindowMs,
@@ -245,10 +254,11 @@ export class HookService extends EventEmitter {
 
   private registerGlobalShortcuts(): void {
     const s = this.settings
-    const entries: Array<[number[], 'ptt' | 'handsFree' | 'command']> = [
+    const entries: Array<[number[], GlobalShortcutId]> = [
       [s.hotkeys.pushToTalk, 'ptt'],
       [s.hotkeys.handsFree, 'handsFree'],
-      [s.hotkeys.commandMode, 'command']
+      [s.hotkeys.commandMode, 'command'],
+      [ephemerisNoteChord(s), 'note']
     ]
     for (const [keys, which] of entries) {
       const acc = electronAccelerator(keys)
@@ -283,7 +293,7 @@ export class HookService extends EventEmitter {
     this.registeredAccelerators = []
   }
 
-  private onGlobalShortcut(which: 'ptt' | 'handsFree' | 'command'): void {
+  private onGlobalShortcut(which: GlobalShortcutId): void {
     if (this.capture) return
     if (this.engine.isListening) {
       this.engine.externalStop()
@@ -292,6 +302,10 @@ export class HookService extends EventEmitter {
     }
     const mode = which === 'command' ? 'command' : 'hands-free'
     this.engine.externalStart(mode, performance.now())
-    this.emit('action', { type: 'start', mode } satisfies HotkeyAction)
+    this.emit('action', {
+      type: 'start',
+      mode,
+      ...(which === 'note' ? { target: 'ephemeris' as const } : {})
+    } satisfies HotkeyAction)
   }
 }

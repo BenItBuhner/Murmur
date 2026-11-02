@@ -17,3 +17,6 @@ apps/android/local.properties
 apps/android/.kotlin
 *.apk
 *.keystore
+
+# Benchmark output (apps/desktop/tests/bench)
+apps/desktop/bench-results/

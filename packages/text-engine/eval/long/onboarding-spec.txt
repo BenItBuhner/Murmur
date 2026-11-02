@@ -1,0 +1,20 @@
+# onboarding-spec | document
+This is the spec for the new onboarding flow, and the goal is to get someone from download to their first dictation in under two minutes.
+Right now it takes most people closer to six minutes, and about a third of them never finish.
+The biggest problem is that we ask for every permission up front before the person has seen anything work.
+
+So the new flow has five steps.
+1) Step one is a single welcome screen with one sentence about what the app does and a button that says get started.
+2) Step two asks for microphone access, and only microphone access, with a short line explaining that audio is never stored without permission.
+3) Step three is a practice dictation where the person reads a sentence out loud and sees it typed back to them.
+  This is the moment where people understand the product, so it has to be fast and it has to look great.
+4) Step four asks for accessibility access, because now the person knows why we need to type into other apps.
+5) And finally, step five shows the keyboard shortcut and lets them change it before they leave.
+
+We will measure two things.
+The first is the share of people who finish onboarding, and we want that above eighty percent.
+The second is how long it takes, and we want the median below two minutes.
+We are going to run the old flow and the new flow side by side for two weeks before we switch everyone over.
+
+Open questions are whether we need an account at all during onboarding, and whether the practice sentence should be in the person's own language.
+My recommendation is no account until they have used the app for a day, and yes on the language.

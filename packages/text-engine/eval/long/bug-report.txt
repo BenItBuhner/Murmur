@@ -1,0 +1,19 @@
+# bug-report | document
+The desktop app sometimes pastes the dictation into the wrong window when you switch apps while it is still finishing.
+It happens on Windows eleven and I could not reproduce it on the Mac.
+It is not every time, but I can get it to happen about one in five tries.
+
+Here is how to reproduce it.
+1) Open a long document in Word and click somewhere in the middle of it.
+2) Hold the dictation key and talk for at least a minute, so the release takes a few seconds.
+3) Let go of the key and immediately switch to Slack with alt tab.
+4) Wait for the dictation to finish.
+
+What I expect is that the text goes into Word, because that is where I started dictating, or at least that the app tells me it did not paste.
+What actually happens is that the text gets pasted into the Slack message box, and once it was sent to a channel before I noticed.
+That last part is the scary one, because people saw a half finished thought that was meant for a document.
+
+I looked at the logs, and the app reads the focused window at paste time instead of remembering the one from the start of the dictation.
+I think the fix is to remember the window when recording starts and to only paste if that window is still in front.
+If it is not, we should copy the text to the clipboard and show a notice instead.
+This should be a high priority fix, since it can leak private text into a shared channel.

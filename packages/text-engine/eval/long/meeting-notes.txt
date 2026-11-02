@@ -1,0 +1,18 @@
+# meeting-notes | notes
+Notes from the planning meeting on Monday with the platform team.
+We spent most of the hour on the database migration, and the rest on hiring.
+
+The migration is going ahead, but in stages instead of one big weekend.
+We agreed on a few things.
+- We move the read traffic first, because it is easy to roll back if the latency is worse.
+- The write traffic moves only after a full week with no incidents on reads.
+- Every stage gets a written rollback plan before it starts, and Dana owns those plans.
+- We will not migrate the billing tables this quarter at all, since the risk is too high right before the holidays.
+Nobody was fully happy with the timeline, but everyone agreed it is safer.
+
+On hiring, we have two open roles, a senior backend engineer and a site reliability engineer.
+The backend role has three candidates in the final round, and we expect an offer by the end of the month.
+The reliability role has been open for ten weeks with almost no good applicants.
+Sam suggested we widen the search to people who have done operations work at smaller companies, even without the exact title, and we all agreed to try that.
+
+Action items are that Dana writes the first rollback plan, Sam updates the job posting, and I schedule the follow up for two weeks from now.

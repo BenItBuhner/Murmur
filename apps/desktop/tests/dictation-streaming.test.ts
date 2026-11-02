@@ -330,7 +330,7 @@ describe('precision mode formats pieces while the user speaks', () => {
   })
   it('a long dictation gets paragraphs from a layout plan without a word changed', async () => {
     const sentence = 'We talked about the roadmap for the next quarter and what ships first.'
-    provider.text = `${sentence} ${sentence} ${sentence} ${sentence} ${sentence} Part`
+    provider.text = `${sentence} ${sentence} ${sentence} ${sentence} ${sentence} ${sentence} ${sentence} Part`
     const asked: string[] = []
     const orig = inference.formatter
     inference.formatter = (async () => ({
@@ -355,6 +355,9 @@ describe('precision mode formats pieces while the user speaks', () => {
     expect(entry.stages).toContain('layout')
     expect(entry.finalText).toContain('\n\n')
     expect(entry.finalText.replace(/\s+/g, ' ')).toBe(entry.finalText.replace(/\n\n/g, ' '))
+    // The layout ran on the pieces while the tail was on its way; the tail joined its answer.
+    expect(asked[0]).not.toContain(`Part ${provider.requests}`)
+    expect(entry.finalText).toMatch(new RegExp(`Part ${provider.requests}\\.?\\]?\\.?$`))
   })
 })
 

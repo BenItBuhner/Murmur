@@ -112,6 +112,15 @@ interface StreamedPrefix {
   formats: Promise<FormatOutcome | 'empty' | null>[]
 }
 
+/** The pieces' layout, started at the key-up: the text it laid out, and its answer. */
+interface EarlyLayout {
+  prefix: string
+  laid: LayoutResult
+}
+
+/** A formatting outcome whose layout already ran (with the pieces, while the tail was out). */
+type LaidOut = { laidOut?: true }
+
 /** Streamed pieces and the tail, for formatting the tail alone at release. */
 type StreamedStt = CompleteResult & {
   streamed?: { texts: string[]; tail: string; spec?: TailSpec }
@@ -785,6 +794,12 @@ export class DictationController extends EventEmitter {
     // 2. STT
     t = performance.now()
     const tag = job.id.slice(0, 8)
+    // The layout of what was formatted while the user spoke starts now, alongside the tail's
+    // speech and formatting, instead of after them.
+    const earlyLayout =
+      streamed && job.mode !== 'command' && formattingModeAt(style.mode, speed) === 'smart'
+        ? this.prefixLayout(streamed, app.category, tag)
+        : undefined
     let resolved: ResolvedStt
     try {
       resolved = await this.deps.inference.stt({ speed })
@@ -992,7 +1007,8 @@ export class DictationController extends EventEmitter {
               streamed,
               preformatted,
               stt,
-              job.id.slice(0, 8)
+              job.id.slice(0, 8),
+              earlyLayout
             )) ?? (await formatLong(formatter, input))
           softLimit = formatted.limit
         } catch (err) {
@@ -1003,7 +1019,11 @@ export class DictationController extends EventEmitter {
       }
       // A long dictation into a document, email or notes gets paragraphs and lists, laid out from
       // the model's plan without changing a word (the formatting prompt never adds paragraphs).
-      if (mode === 'smart' && wantsLayout(formatted.text, app.category)) {
+      if (
+        mode === 'smart' &&
+        !(formatted as LaidOut).laidOut &&
+        wantsLayout(formatted.text, app.category)
+      ) {
         const laid = await this.layout(formatted.text, app.category, job.id.slice(0, 8))
         formatted = {
           ...formatted,
@@ -1236,7 +1256,8 @@ export class DictationController extends EventEmitter {
     streamed: StreamedPrefix | undefined,
     preformatted: [string, FormatOutcome] | undefined,
     stt: StreamedStt,
-    tag: string
+    tag: string,
+    earlyLayout?: Promise<EarlyLayout | null>
   ): Promise<FormatOutcome | null> {
     if (!streamed || !stt.streamed || formatter.source !== 'murmur') return null
     if (streamed.formats.length !== stt.streamed.texts.length) return null
@@ -1278,6 +1299,7 @@ export class DictationController extends EventEmitter {
     tailFormat?.catch(() => undefined)
     const pieces = await this.settleFormats(formatter, input, streamed.formats, stt.streamed.texts, tag)
     const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty')
+    const piecesDone = parts.length
     if (specHead) parts.push(specHead)
     if (tailFormat) {
       try {
@@ -1297,7 +1319,60 @@ export class DictationController extends EventEmitter {
     log.info(
       `session ${tag}: ${parts.length - (tailFormat ? 1 : 0)} piece(s) formatted while speaking; tail formatted at release`
     )
-    return joinFormatted(parts)
+    const joined = joinFormatted(parts)
+    // The pieces were laid out while the tail was on its way: when they came out as the layout
+    // saw them, the tail joins the laid-out text and the layout is not asked again.
+    const early = earlyLayout ? await earlyLayout : null
+    if (early && piecesDone && joinFormatted(parts.slice(0, piecesDone)).text === early.prefix) {
+      const rest = parts.slice(piecesDone).map((p) => p.text)
+      const laid: FormatOutcome & LaidOut = {
+        ...joined,
+        llmMs: joined.llmMs + early.laid.llmMs,
+        laidOut: true
+      }
+      if (early.laid.outcome === 'used') {
+        laid.text = joinPieces([early.laid.text, ...rest]).text
+        laid.stages = [...joined.stages, 'layout']
+      }
+      return laid
+    }
+    return joined
+  }
+
+  /**
+   * Paragraphs and lists for the pieces formatted while the user spoke, started at the key-up.
+   * Only when every piece is formatted within the release grace (the usual case); null otherwise,
+   * and the layout runs after the release as before.
+   */
+  private prefixLayout(
+    streamed: StreamedPrefix,
+    category: AppContext['category'],
+    tag: string
+  ): Promise<EarlyLayout | null> {
+    const PENDING = Symbol('pending')
+    const run = async (): Promise<EarlyLayout | null> => {
+      if (category === 'chat' || category === 'code' || category === 'terminal') return null
+      // The last piece may still be formatting at the key-up; it gets the same grace as at release.
+      const grace = new Promise<typeof PENDING>((r) =>
+        setTimeout(() => r(PENDING), FORMAT_RESEND_AFTER_MS)
+      )
+      const done = await Promise.all(
+        streamed.formats.map((f) => Promise.race([f.catch(() => null), grace]))
+      )
+      const parts: FormatOutcome[] = []
+      for (const f of done) {
+        if (f === 'empty') continue
+        if (f === PENDING || f === null) return null
+        if (f.status.outcome !== 'used' && f.status.outcome !== 'skipped-clean') return null
+        parts.push(f)
+      }
+      if (!parts.length) return null
+      const prefix = joinFormatted(parts).text
+      if (!wantsLayout(prefix, category)) return null
+      return { prefix, laid: await this.layout(prefix, category, tag) }
+    }
+    const out = run().catch(() => null)
+    return out
   }
 
   /**

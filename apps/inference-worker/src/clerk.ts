@@ -62,9 +62,16 @@ async function loadKeys(issuer: string, fetcher: typeof fetch): Promise<Map<stri
   return keys
 }
 
+/**
+ * An unknown `kid` refetches the JWKS at most this often. The kid is read before the signature is
+ * checked, so without this a forged kid turned every request into a fetch to Clerk.
+ */
+export const JWKS_MIN_REFETCH_MS = 60_000
+
 async function keyFor(issuer: string, kid: string, fetcher: typeof fetch): Promise<CryptoKey | null> {
   const fresh = jwksCache && jwksCache.issuer === issuer && Date.now() - jwksCache.at < JWKS_TTL_MS
   if (fresh && jwksCache!.keys.has(kid)) return jwksCache!.keys.get(kid)!
+  if (fresh && Date.now() - jwksCache!.at < JWKS_MIN_REFETCH_MS) return null
   try {
     const keys = await loadKeys(issuer, fetcher)
     return keys.get(kid) ?? null

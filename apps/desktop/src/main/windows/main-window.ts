@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { BrowserWindow, shell, nativeImage } from 'electron'
+import { guardWebContents } from './external'
+import { BrowserWindow, nativeImage } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { IPC } from '@shared/ipc'
 import icon from '../../../resources/icon.png?asset'
@@ -95,10 +96,7 @@ export function createMainWindow(chrome: ChromeColors): BrowserWindow {
   win.on('closed', () => {
     win = null
   })
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  guardWebContents(win.webContents)
   win.webContents.on('console-message', (event) => {
     if (event.level === 'error' || event.level === 'warning')
       log.warn(`[renderer] ${event.message} (${event.sourceId}:${event.lineNumber})`)

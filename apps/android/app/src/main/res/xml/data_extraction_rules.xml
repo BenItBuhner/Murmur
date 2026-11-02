@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and higher. Cloud backup runs only when it is end-to-end encrypted (a screen lock is
+     set), since murmur_settings holds the provider API keys in plain text. A direct transfer to
+     the user's new phone carries everything. -->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true" />
+    <device-transfer />
+</data-extraction-rules>

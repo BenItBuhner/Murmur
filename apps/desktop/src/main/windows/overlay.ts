@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { guardWebContents } from './external'
+import { BrowserWindow, ipcMain, screen } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import type { OverlayPosition } from '@shared/settings'
 import type { OverlayState } from '@shared/types'
@@ -93,10 +94,7 @@ export class OverlayWindow {
     win.setAlwaysOnTop(true, 'screen-saver')
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     win.setMenuBarVisibility(false)
-    win.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url)
-      return { action: 'deny' }
-    })
+    guardWebContents(win.webContents)
     win.webContents.on('did-finish-load', () => {
       this.resolveReady()
       this.push()

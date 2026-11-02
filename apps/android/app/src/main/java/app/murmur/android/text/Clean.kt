@@ -182,6 +182,9 @@ object Clean {
         if (has(COMMAND_SET) || COMMAND_PHRASE_RE.containsMatchIn(lower)) return no("command")
         if (has(ENUMERATION_SET) || ENUMERATION_PHRASE_RE.containsMatchIn(lower)) return no("enumeration")
         if (DIGIT.containsMatchIn(lower) || words.any { NumberSignature.isNumberWord(it) }) return no("number")
+        // A split the rules joined ("to. Sarah" -> "to Sarah"): whether the next word keeps its
+        // capital is the model's call.
+        if ("pause-stops" in prepared.stages) return no("split")
         val sentences = text.split(SENTENCE_SPLIT)
         // A sentence that ends on "to" or "the" was cut at a pause; the next one finishes it.
         for (sentence in sentences.dropLast(1)) {

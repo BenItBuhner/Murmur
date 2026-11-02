@@ -341,6 +341,8 @@ fun prepareTranscript(raw: String): PreparedTranscript {
     }
     step("line-commands", ::applyLineCommands)
     step("literal-punctuation", ::applyLiteralPunctuation)
+    // Before the model sees it too: a period at a pause where no sentence can end.
+    step("pause-stops", ::joinPauseStops)
     return PreparedTranscript(normalizeWhitespace(text), enter.pressEnter, stages)
 }
 

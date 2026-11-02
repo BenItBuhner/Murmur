@@ -325,6 +325,9 @@ export function alreadyClean(
   if (has(COMMAND_SET) || COMMAND_PHRASE_RE.test(lower)) return no('command')
   if (has(ENUMERATION_SET) || ENUMERATION_PHRASE_RE.test(lower)) return no('enumeration')
   if (/[0-9]/.test(lower) || words.some(isNumberWord)) return no('number')
+  // A split the rules joined ("to. Sarah" -> "to Sarah"): whether the next word keeps its capital is
+  // the model's call.
+  if (prepared.stages.includes('pause-stops')) return no('split')
   const sentences = text.split(SENTENCE_SPLIT)
   // A sentence that ends on "to" or "the" was cut at a pause; the next one finishes it.
   for (const sentence of sentences.slice(0, -1)) {

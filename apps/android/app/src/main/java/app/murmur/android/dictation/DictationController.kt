@@ -646,12 +646,16 @@ object DictationController {
             if (Wav.peakDb(pcm) < -48.0) return@ChunkStreamer ""
             val threshold = adaptiveThreshold(pcm, SAMPLE_RATE, -48.0)
             val started = System.currentTimeMillis()
+            // The end of the piece before, when it has arrived, closes the prompt: Whisper reads it
+            // as the text just before this audio, so a sentence the cut split carries on (desktop:
+            // session.ts transcribeOnly). Never waited for.
+            val carry = if (index > 0) seamContext(partialTexts[index - 1].orEmpty()) else ""
             val out = transcribeComplete(
                 pcm = pcm,
                 sampleRate = SAMPLE_RATE,
                 speechEndSec = lastVoicedSec(pcm, SAMPLE_RATE, threshold),
                 thresholdDb = threshold,
-                prompt = prompt,
+                prompt = if (prompt != null && carry.isNotEmpty()) "$prompt $carry" else prompt,
                 tailPrompt = if (prompt != null) STT_BASE_PROMPT else null,
                 log = { Log.w(TAG, "piece $index: $it") }
             ) { wav, p -> router.transcribe(resolved, wav, p, Inference.TIER_BACKGROUND) }

@@ -665,6 +665,11 @@ export class DictationController extends EventEmitter {
       const a = analyze(pcm, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
       if (!a.hasSpeech) return ''
       const started = performance.now()
+      // The end of the piece before, when it has arrived, closes the prompt: Whisper reads the
+      // prompt as the text just before this audio, so a sentence the cut split carries on instead
+      // of being opened again with a capital (real speech: false sentence breaks 9 -> 7, the same
+      // words). Never waited for: a piece whose neighbour is still out goes with the plain prompt.
+      const carry = index > 0 ? seamContext(partialTexts[index - 1] ?? '') : ''
       const out = await transcribeComplete(
         (wav, p) => this.transcribeWithFallback(wav, p, t.keyterms, t.resolved, 'background'),
         {
@@ -672,7 +677,7 @@ export class DictationController extends EventEmitter {
           sampleRate: SAMPLE_RATE,
           speechEndSec: a.lastVoicedMs / 1000,
           thresholdDb: threshold,
-          prompt: t.prompt,
+          prompt: t.prompt && carry ? `${t.prompt} ${carry}` : t.prompt,
           tailPrompt: t.prompt ? STT_BASE_PROMPT : undefined,
           log: (m) => log.warn(`session ${tag} piece ${index}: ${m}`)
         }

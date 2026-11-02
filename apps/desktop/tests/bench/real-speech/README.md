@@ -11,6 +11,8 @@ pip install sherpa-onnx==1.12.40 soundfile numpy   # 2.x has no espeak front end
 #   tts-models/vits-piper-en_US-amy-medium, -en_GB-alan-medium, -en_US-ryan-medium, -en_US-libritts_r-medium
 MURMUR_MODELS=/path/to/models python3 tts.py /tmp/rs/audio     # 14 dictations + meta.json
 MURMUR_MODELS=/path/to/models python3 server.py &              # POST a WAV to :8765, get {text}
+# or, closer to production (the speech prompt honoured): pip install onnxruntime librosa tiktoken,
+# MURMUR_PROMPTED=1 python3 server.py &, and MURMUR_REAL_SPEECH_PROMPT=1 on the vitest run
 cd ../../.. && MURMUR_REAL_SPEECH=/tmp/rs/audio MURMUR_REAL_SPEECH_TAG=mine \
   npx vitest run tests/bench/real-speech.test.ts               # writes /tmp/rs/audio/result-mine.json
 ```

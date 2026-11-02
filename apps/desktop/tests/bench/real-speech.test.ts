@@ -28,6 +28,9 @@ const DIR = process.env.MURMUR_REAL_SPEECH ?? ''
 const URL_ = process.env.MURMUR_REAL_SPEECH_URL ?? 'http://127.0.0.1:8765'
 const TAG = process.env.MURMUR_REAL_SPEECH_TAG ?? 'run'
 const SAMPLE_RATE = 16000
+// MURMUR_REAL_SPEECH_PROMPT=1: the speech prompt each request carries goes to the server (header
+// x-prompt), for a server that honours it (tests/bench/real-speech/server.py with prompt support).
+const SEND_PROMPT = process.env.MURMUR_REAL_SPEECH_PROMPT === '1'
 
 // MURMUR_REAL_SPEECH_LOG=<file>: the session's log lines, to see which path each release took.
 if (process.env.MURMUR_REAL_SPEECH_LOG) {
@@ -51,11 +54,13 @@ vi.mock('../../src/main/inject', () => ({
 
 const calls = vi.hoisted(() => ({ n: 0, inFlight: 0 }))
 
-async function whisper(wav: Uint8Array): Promise<string> {
+async function whisper(wav: Uint8Array, prompt?: string): Promise<string> {
   calls.n++
   calls.inFlight++
   try {
-    const res = await fetch(URL_, { method: 'POST', body: wav as BodyInit })
+    const headers: Record<string, string> =
+      SEND_PROMPT && prompt ? { 'x-prompt': encodeURIComponent(prompt) } : {}
+    const res = await fetch(URL_, { method: 'POST', body: wav as BodyInit, headers })
     const json = (await res.json()) as { text: string }
     if (process.env.MURMUR_REAL_SPEECH_CLIPS)
       writeFileSync(`${process.env.MURMUR_REAL_SPEECH_CLIPS}/${calls.n}.wav`, wav)
@@ -72,8 +77,11 @@ vi.mock('@core/stt', async (importOriginal) => {
   return {
     ...actual,
     getSttProvider: () => ({
-      transcribe: async (input: { wav: Uint8Array }): Promise<TranscribeOutput> => ({
-        text: await whisper(input.wav),
+      transcribe: async (input: {
+        wav: Uint8Array
+        prompt?: string
+      }): Promise<TranscribeOutput> => ({
+        text: await whisper(input.wav, input.prompt),
         language: 'en',
         durationSec: (input.wav.length - 44) / 2 / SAMPLE_RATE,
         latencyMs: 1
@@ -91,12 +99,12 @@ vi.mock('@core/stt/openai-compatible', async (importOriginal) => {
     ...actual,
     prewarmGateway: async () => undefined,
     dictateRelease: async (
-      input: { wav: Uint8Array },
+      input: { wav: Uint8Array; prompt?: string },
       _cfg: unknown,
       prefix?: string,
       format?: { context?: unknown }
     ) => {
-      const raw = await whisper(input.wav)
+      const raw = await whisper(input.wav, input.prompt)
       const transcript = prefix?.trim() ? joinSeam(prefix.trim(), raw).text : raw
       const f =
         format && transcript

@@ -106,6 +106,19 @@ export interface SeamJoin {
   joined: boolean
 }
 
+/** A line that is a list item: "- ", "* ", "• ", "1. " or "1) ". */
+const LIST_ITEM = /^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/u
+
+/**
+ * A capitalized word that does not start a sentence: "May" the month or "Will" the name, not the
+ * auxiliary that would mean the sentence goes on.
+ */
+function capitalizedMidSentence(text: string, w: Word): boolean {
+  if (!/^\p{Lu}/u.test(w.text) || ALWAYS_CAPITAL.test(w.text)) return false
+  const before = text.slice(0, w.start).replace(/["'(\[\s]+$/u, '')
+  return before.length > 0 && !/[.!?…:\n]$/u.test(before)
+}
+
 /** Is this word capitalized somewhere other than a sentence start, so likely a name? */
 function looksLikeName(word: string, ...texts: string[]): boolean {
   if (word.length > 1 && word === word.toUpperCase()) return true // acronym
@@ -125,6 +138,9 @@ export function joinSeam(prev: string, next: string): SeamJoin {
   let t = next.replace(/^\s+/u, '')
   if (!t) return { text: h, deduped: 0, joined: false }
   if (!h) return { text: t, deduped: 0, joined: false }
+  // A line break either side already had at the cut (a paragraph, a list) survives the join.
+  const edge = (/\s+$/u.exec(prev)?.[0] ?? '') + (/^\s+/u.exec(next)?.[0] ?? '')
+  const keptBreak = edge.includes('\n') ? (/\n[^\S\n]*\n/u.test(edge) ? '\n\n' : '\n') : ''
 
   // 1. The words at the cut heard (or echoed by the formatter) by both pieces: up to
   // SEAM_WINDOW words, near-exact for long runs, possibly stopping a few words short of prev's end.
@@ -163,6 +179,15 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     tw = words(t).slice(0, SEAM_WINDOW)
   }
 
+  // A list on either side of the cut: the seam is a line boundary, never a sentence to repair.
+  const hLastLine = h.slice(h.lastIndexOf('\n') + 1)
+  // (A lower-case start after a list item is the rest of that item, cut mid-line.)
+  if (LIST_ITEM.test(t) || (LIST_ITEM.test(hLastLine) && !/^\p{Ll}/u.test(t))) {
+    const sep = keptBreak || (LIST_ITEM.test(t) ? '\n' : '\n\n')
+    return { text: `${h}${sep}${t}`, deduped, joined: false }
+  }
+  if (keptBreak) return { text: `${h}${keptBreak}${t}`, deduped, joined: false }
+
   // 1b. A cut mid-sentence ("…for me in this | chat? Can I…"): prev got a terminal mark it was
   // never owed, and next opens with the one or two words that finish prev's sentence, in lower
   // case, then its own mark. Those words go back before prev's mark ("in this chat?"), so neither
@@ -187,7 +212,7 @@ export function joinSeam(prev: string, next: string): SeamJoin {
   const midSentence =
     deduped > 0 ||
     /(\.{2,}|…)["')\]]*$/u.test(h) ||
-    (last && CONTINUATION.has(last.key)) ||
+    (last && CONTINUATION.has(last.key) && !capitalizedMidSentence(h, last)) ||
     nextLower
   let joined = false
   if (firstAtStart && midSentence && (endsSoft || endsBare)) {

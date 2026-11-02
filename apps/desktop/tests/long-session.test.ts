@@ -110,6 +110,12 @@ describe('a simulated 30-minute dictation', () => {
     expect(groups.length).toBeGreaterThanOrEqual(19)
   })
 
+  it('a paragraph break at a cut between groups stays with the group before it', () => {
+    const groups = formatGroups('One two three. Four five six.\n\nSeven eight nine. Ten.', 6)
+    expect(groups).toEqual(['One two three. Four five six.\n\n', 'Seven eight nine. Ten.'])
+    expect(formatGroups('A b c.\nD e f. G h.', 100)).toEqual(['A b c.\nD e f. G h.'])
+  })
+
   it('limiter runs tasks in order, at most N at a time', async () => {
     const run = limiter(2)
     let active = 0

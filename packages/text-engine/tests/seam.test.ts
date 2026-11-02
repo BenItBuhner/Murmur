@@ -91,3 +91,32 @@ describe('lastSentenceStart', () => {
     expect(lastSentenceStart('no marks at all')).toBe(0)
   })
 })
+
+describe('line breaks and lists at a seam', () => {
+  it('keeps a list that starts or ends at the cut on its own lines', () => {
+    const out = joinPieces([
+      'That covers the budget.\n\nNow the timeline. We have three phases:',
+      '1. Design in March\n2. Build in April\n3. Launch in May',
+      'Next, the hiring plan.\n\nWe need two engineers.'
+    ]).text
+    expect(out).toBe(
+      'That covers the budget.\n\nNow the timeline. We have three phases:\n1. Design in March\n2. Build in April\n3. Launch in May\n\nNext, the hiring plan.\n\nWe need two engineers.'
+    )
+  })
+
+  it('a list item cut mid-line continues on the same line', () => {
+    expect(joinSeam('- Design in', 'march and april').text).toBe('- Design in march and april')
+  })
+
+  it('keeps a paragraph break either piece carried at the cut', () => {
+    expect(joinSeam('First part.\n\n', 'Second part.').text).toBe('First part.\n\nSecond part.')
+    expect(joinSeam('First part.', '\nSecond part.').text).toBe('First part.\nSecond part.')
+  })
+
+  it('a capitalized month or name is not a word that carries the sentence on', () => {
+    expect(joinSeam('We ship in May', 'Next we hire.').text).toBe('We ship in May. Next we hire.')
+    expect(joinSeam('we should go with the', 'Second option.').text).toBe(
+      'we should go with the second option.'
+    )
+  })
+})

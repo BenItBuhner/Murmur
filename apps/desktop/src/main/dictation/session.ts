@@ -98,6 +98,9 @@ interface TailSpec {
 interface StreamedPrefix {
   samples: number
   texts: Promise<string[]>
+  /** Each piece's own text, and where its audio sits in the recording, to resend it alone. */
+  pieces?: Promise<string>[]
+  ranges?: Array<[number, number]>
   /** A speculation on the stretch after the pieces; the rest of the audio starts at its samples. */
   spec?: TailSpeculation<TailSpec>
   /**
@@ -146,10 +149,14 @@ async function formatLong(formatter: Formatter, input: FormatInput): Promise<For
       run(() =>
         formatter.format({
           ...input,
-          transcript: g,
+          transcript: g.trim(),
           context: pieceContext(input.context, i ? groups[i - 1] : '', i === groups.length - 1)
         })
-      )
+      ).then((out) => {
+        // A paragraph or list break at the cut between groups is put back after the model.
+        const brk = /\s+$/.exec(g)?.[0] ?? ''
+        return brk.includes('\n') ? { ...out, text: out.text.trimEnd() + brk } : out
+      })
     )
   )
   return joinFormatted(parts)
@@ -1168,9 +1175,9 @@ export class DictationController extends EventEmitter {
     const { rest, a, tail } = sent
     let texts: string[]
     try {
-      texts = await within(streamed.texts, left())
+      texts = await this.settlePieces(streamed, pcm, threshold, run, left, tag)
     } catch (err) {
-      log.warn(`session ${tag}: a streamed piece failed; transcribing the whole dictation`, err)
+      log.warn(`session ${tag}: a streamed piece failed twice; transcribing the whole dictation`, err)
       return whole()
     }
     let last: CompleteResult | null
@@ -1255,17 +1262,8 @@ export class DictationController extends EventEmitter {
           ? formatTranscript(tailRequest, null)
           : formatter.format(tailRequest)
     tailFormat?.catch(() => undefined)
-    type PieceOutcome = Awaited<(typeof streamed.formats)[number]>
-    const pieces: PieceOutcome[] = await within(Promise.all(streamed.formats), STREAM_WAIT_MS).catch(
-      (): PieceOutcome[] => [null as PieceOutcome]
-    )
-    if (pieces.some((p) => p === null)) {
-      log.info(
-        `session ${tag}: a piece was not formatted while speaking; formatting the whole text`
-      )
-      return null
-    }
-    const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty' && p !== null)
+    const pieces = await this.settleFormats(formatter, input, streamed.formats, stt.streamed.texts, tag)
+    const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty')
     if (specHead) parts.push(specHead)
     if (tailFormat) {
       try {
@@ -1286,6 +1284,99 @@ export class DictationController extends EventEmitter {
       `session ${tag}: ${parts.length - (tailFormat ? 1 : 0)} piece(s) formatted while speaking; tail formatted at release`
     )
     return joinFormatted(parts)
+  }
+
+  /**
+   * The streamed pieces' texts. A piece that failed, or is still out when its grace runs out, is
+   * sent again on its own at release priority (raced against the original if that is still out),
+   * instead of transcribing the whole dictation again. Throws only when a resend fails too.
+   */
+  private async settlePieces(
+    streamed: StreamedPrefix,
+    pcm: Int16Array,
+    threshold: number,
+    run: (clip: Int16Array, endSec: number) => Promise<CompleteResult>,
+    left: () => number,
+    tag: string
+  ): Promise<string[]> {
+    const { pieces, ranges } = streamed
+    if (!pieces || !ranges || pieces.length !== ranges.length) return within(streamed.texts, left())
+    const PENDING = Symbol('pending')
+    const grace = Math.min(left(), PIECE_RESEND_AFTER_MS)
+    const deadline = new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), grace))
+    const resend = limiter(MAX_RESENDS_IN_FLIGHT)
+    let resent = 0
+    const texts = await Promise.all(
+      pieces.map(async (piece, i) => {
+        const first = await Promise.race([piece.catch(() => null), deadline])
+        if (typeof first === 'string') return first
+        resent++
+        const [from, to] = ranges[i]
+        const clip = pcm.subarray(Math.max(0, from), Math.min(pcm.length, to))
+        const a = analyze(clip, { sampleRate: SAMPLE_RATE, thresholdDb: threshold })
+        if (!a.hasSpeech) return ''
+        const again = resend(() => run(clip, a.lastVoicedMs / 1000)).then((r) => r.text.trim())
+        // The original may still answer first; a failure of one is fine while the other can win.
+        if (first === PENDING) return within(firstOf([piece, again]), left() + 10_000)
+        return within(again, left() + 10_000)
+      })
+    )
+    if (resent) log.info(`session ${tag}: ${resent} piece(s) sent again at release instead of the whole dictation`)
+    return texts
+  }
+
+  /**
+   * Each piece's formatting from while it was spoken. One that failed, came back unformatted, or
+   * is still out when its grace runs out, is formatted again on its own at release priority, with
+   * the piece before it as context; the rest stand. A piece the model cannot format gets the
+   * rule-based cleanup, never a re-format of the whole dictation.
+   */
+  private async settleFormats(
+    formatter: Formatter,
+    input: FormatInput,
+    formats: Promise<FormatOutcome | 'empty' | null>[],
+    texts: string[],
+    tag: string
+  ): Promise<Array<FormatOutcome | 'empty'>> {
+    const PENDING = Symbol('pending')
+    const deadline = new Promise<typeof PENDING>((r) =>
+      setTimeout(() => r(PENDING), FORMAT_RESEND_AFTER_MS)
+    )
+    const run = limiter(MAX_RESENDS_IN_FLIGHT)
+    let redone = 0
+    const out = await Promise.all(
+      formats.map(async (f, i): Promise<FormatOutcome | 'empty'> => {
+        const text = texts[i] ?? ''
+        if (!text.trim()) return 'empty'
+        const first = await Promise.race([f.catch(() => null), deadline])
+        // The gateway answers rule-based text when this user's formats were over its cap.
+        if (first !== null && first !== PENDING && (first === 'empty' || first.status.detail !== 'rate_limited'))
+          return first
+        redone++
+        const before = i > 0 ? (texts[i - 1] ?? '') : ''
+        const request: FormatInput = {
+          ...input,
+          transcript: text,
+          context: pieceContext(input.context, before)
+        }
+        const again = run(() => formatter.format(request)).then((r) => {
+          if (r.status.outcome === 'failed') throw new Error(r.status.detail ?? 'failed')
+          return { ...r, text: stripEcho(r.text, seamContext(before)) }
+        })
+        const late =
+          first === PENDING
+            ? f.then((x) => (x === null ? Promise.reject(new Error('unformatted')) : x))
+            : null
+        try {
+          return await within(late ? firstOf<FormatOutcome | 'empty'>([late, again]) : again, STREAM_WAIT_MS)
+        } catch {
+          const rules = await formatTranscript(request, null)
+          return { ...rules, status: { outcome: 'failed', detail: 'piece not formatted', attempts: 0 } }
+        }
+      })
+    )
+    if (redone) log.info(`session ${tag}: ${redone} piece(s) formatted again at release instead of the whole text`)
+    return out
   }
 
   private async transcribeWithFallback(
@@ -1506,6 +1597,24 @@ async function releasePlan(
   if (!head) return null
   return { prefix: f.text.slice(at), before: head, format: {} }
 }
+/** How long release waits for a piece still out before sending it again (racing the original). */
+export const PIECE_RESEND_AFTER_MS = 3_000
+/** How long release waits for a piece's formatting still out before formatting it again. */
+export const FORMAT_RESEND_AFTER_MS = 1_500
+/** Pieces sent again (speech or formatting) at once at release; the gateway allows 3 formats. */
+export const MAX_RESENDS_IN_FLIGHT = 2
+
+/** The first of `ps` to resolve; rejects only when all of them reject. */
+export function firstOf<T>(ps: Promise<T>[]): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let failed = 0
+    for (const p of ps)
+      p.then(resolve, (err: unknown) => {
+        if (++failed === ps.length) reject(err)
+      })
+  })
+}
+
 export const RELEASE_TIMEOUT_MESSAGE = 'Murmur took too long to transcribe this — tap Retry'
 
 /**

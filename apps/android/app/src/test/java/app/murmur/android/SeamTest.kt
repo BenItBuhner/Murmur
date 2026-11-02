@@ -77,4 +77,27 @@ class SeamTest {
         )
         assertEquals("Is it done? Yes. We shipped it.", j("Is it done?", "Yes. We shipped it."))
     }
+
+    @Test
+    fun `keeps lists and paragraph breaks at a seam`() {
+        assertEquals(
+            "That covers the budget.\n\nNow the timeline. We have three phases:\n1. Design in March\n2. Build in April\n3. Launch in May\n\nNext, the hiring plan.\n\nWe need two engineers.",
+            joinPieces(
+                listOf(
+                    "That covers the budget.\n\nNow the timeline. We have three phases:",
+                    "1. Design in March\n2. Build in April\n3. Launch in May",
+                    "Next, the hiring plan.\n\nWe need two engineers."
+                )
+            ).text
+        )
+        assertEquals("- Design in march and april", j("- Design in", "march and april"))
+        assertEquals("First part.\n\nSecond part.", j("First part.\n\n", "Second part."))
+        assertEquals("First part.\nSecond part.", j("First part.", "\nSecond part."))
+    }
+
+    @Test
+    fun `a capitalized month is not a word that carries the sentence on`() {
+        assertEquals("We ship in May. Next we hire.", j("We ship in May", "Next we hire."))
+        assertEquals("we should go with the second option.", j("we should go with the", "Second option."))
+    }
 }

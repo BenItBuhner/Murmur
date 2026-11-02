@@ -809,6 +809,46 @@ object DictationController {
     }
 
     /**
+     * The streamed pieces' texts. A piece that failed, or is still out after PIECE_RESEND_AFTER_MS,
+     * is sent again on its own at release priority (racing the original), instead of transcribing
+     * the whole dictation again. Throws only when a resend fails too (desktop: settlePieces).
+     */
+    private suspend fun settlePieces(
+        streamed: Streamed,
+        pcm: ShortArray,
+        left: () -> Long,
+        resend: suspend (ShortArray) -> String,
+        trace: TraceRecorder
+    ): List<String> {
+        if (streamed.pieces.isEmpty() || streamed.pieces.size != streamed.ranges.size)
+            return withTimeout(left()) { streamed.texts() }
+        val gate = kotlinx.coroutines.sync.Semaphore(MAX_RESENDS_IN_FLIGHT)
+        val deadline = System.currentTimeMillis() + minOf(left(), PIECE_RESEND_AFTER_MS)
+        val resent = java.util.concurrent.atomic.AtomicInteger(0)
+        val texts = kotlinx.coroutines.coroutineScope {
+            streamed.pieces.mapIndexed { i, job ->
+                async {
+                    val first = withTimeoutOrNull((deadline - System.currentTimeMillis()).coerceAtLeast(1)) { runCatching { job.await() } }
+                    first?.getOrNull()?.let { return@async it }
+                    resent.incrementAndGet()
+                    val (from, to) = streamed.ranges[i]
+                    val clip = pcm.copyOfRange(from.coerceIn(0, pcm.size), to.coerceIn(0, pcm.size))
+                    if (clip.isEmpty() || Wav.peakDb(clip) < -48.0) return@async ""
+                    val again = async { runCatching { gate.withPermit { resend(clip) } }.getOrNull() }
+                    // Still running at the grace: the original may yet answer first.
+                    val late = if (first == null) async { runCatching { job.await() }.getOrNull() } else null
+                    val won = withTimeoutOrNull(left() + 10_000) { firstNonNull(listOfNotNull(late, again)) }
+                    late?.cancel()
+                    again.cancel()
+                    won ?: throw ReleaseTimeoutException()
+                }
+            }.awaitAll()
+        }
+        if (resent.get() > 0) trace.note("${resent.get()} piece(s) sent again at release instead of the whole recording")
+        return texts
+    }
+
+    /**
      * Each piece's formatting from while it was spoken. One that failed, came back rule-based on
      * the gateway's per-user cap, or is still out after FORMAT_RESEND_AFTER_MS is formatted again on
      * its own at release priority (racing the original), with the piece before as context; one the
@@ -1050,7 +1090,7 @@ object DictationController {
             }
             if (trace.path != "retry") trace.path = "streamed"
             val piecesStarted = System.currentTimeMillis()
-            val texts = runCatching { withTimeout(streamLeft()) { streamed.texts() } }
+            val texts = runCatching { settlePieces(streamed, pcm, { streamLeft() }, { clip -> runStt(clip).output.text.trim() }, trace) }
             trace.step("waiting for pieces sent while speaking", System.currentTimeMillis() - piecesStarted)
             trace.pieces = texts.getOrNull()?.size ?: 0
             // The tail is new audio, not a stalled piece: it gets the stream wait plus its own STT time.
@@ -1464,6 +1504,8 @@ fun wantsLayout(text: String, category: AppCategory): Boolean =
     category != AppCategory.CHAT && category != AppCategory.CODE && category != AppCategory.TERMINAL &&
         countWords(text) >= LAYOUT_MIN_WORDS
 
+/** How long release waits for a piece's speech still out before sending it again. */
+const val PIECE_RESEND_AFTER_MS = 3_000L
 /** How long release waits for a piece's formatting still out before formatting it again. */
 const val FORMAT_RESEND_AFTER_MS = 1_500L
 /** Pieces formatted again at once at release; the gateway allows 3 formats per user. */

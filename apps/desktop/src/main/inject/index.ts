@@ -1,4 +1,4 @@
-import { clipboard, nativeImage, type NativeImage } from 'electron'
+import { ClipboardItem, clipboard, nativeImage } from 'electron'
 import type { InjectionMethod } from '@shared/settings'
 import { createLogger } from '../logger'
 import * as darwin from './darwin'
@@ -25,50 +25,54 @@ export interface InjectResult {
   error?: string
 }
 
-interface ClipboardSnapshot {
-  text: string
-  html: string
-  rtf: string
-  image: NativeImage | null
-}
+/**
+ * The clipboard formats we put back after pasting: plain text, HTML, RTF and an image, keyed by
+ * MIME type. Electron 44's clipboard follows the W3C Clipboard API (async, MIME-typed
+ * ClipboardItems), so the payloads are read eagerly into Blobs; reading lazily later would see
+ * our own text instead of the user's.
+ */
+type ClipboardSnapshot = Record<string, Blob>
 
-function snapshotClipboard(): ClipboardSnapshot {
-  let image: NativeImage | null = null
+const SNAPSHOT_TYPES = ['text/plain', 'text/html', 'text/rtf']
+
+async function snapshotClipboard(): Promise<ClipboardSnapshot> {
+  const snap: ClipboardSnapshot = {}
+  let items: Electron.ClipboardItem[] = []
   try {
-    const img = clipboard.readImage()
-    image = img.isEmpty() ? null : img
+    items = await clipboard.read()
   } catch {
-    image = null
+    return snap
   }
-  return {
-    text: safe(() => clipboard.readText()),
-    html: safe(() => clipboard.readHTML()),
-    rtf: safe(() => clipboard.readRTF()),
-    image
+  for (const item of items) {
+    const image = item.types.includes('image/png')
+      ? 'image/png'
+      : item.types.find((t) => t.startsWith('image/'))
+    for (const type of [...SNAPSHOT_TYPES, ...(image ? [image] : [])]) {
+      if (snap[type] || !item.types.includes(type)) continue
+      try {
+        // Only the bookmark format resolves to a non-Blob, and we never ask for it.
+        const payload = await item.getType(type)
+        if ('arrayBuffer' in payload && payload.size) snap[type] = payload
+      } catch {
+        // format vanished or unreadable; skip it
+      }
+    }
   }
+  return snap
 }
 
-function restoreClipboard(snap: ClipboardSnapshot): void {
+async function restoreClipboard(snap: ClipboardSnapshot): Promise<void> {
   try {
-    if (snap.image && !snap.text && !snap.html) {
-      clipboard.writeImage(snap.image)
-      return
-    }
-    const data: Electron.Data = {}
-    if (snap.text) data.text = snap.text
-    if (snap.html) data.html = snap.html
-    if (snap.rtf) data.rtf = snap.rtf
-    if (snap.image) data.image = snap.image
-    if (Object.keys(data).length) clipboard.write(data)
+    if (Object.keys(snap).length) await clipboard.write([new ClipboardItem(snap)])
     else clipboard.clear()
   } catch (err) {
     log.warn('clipboard restore failed', err)
   }
 }
 
-function safe(fn: () => string): string {
+async function safeReadText(source: Electron.Clipboard = clipboard): Promise<string> {
   try {
-    return fn()
+    return (await source.readText()) ?? ''
   } catch {
     return ''
   }
@@ -151,8 +155,8 @@ export async function injectText(text: string, opts: InjectOptions): Promise<Inj
       return { ok: true, method, ms: Math.round(performance.now() - started) }
     }
 
-    const snap = opts.restoreClipboard ? snapshotClipboard() : null
-    clipboard.writeText(text)
+    const snap = opts.restoreClipboard ? await snapshotClipboard() : null
+    await clipboard.writeText(text)
     if (method === 'clipboard') {
       return { ok: true, method, ms: Math.round(performance.now() - started) }
     }
@@ -167,8 +171,10 @@ export async function injectText(text: string, opts: InjectOptions): Promise<Inj
       // Restore later so apps with delayed clipboard rendering still receive our text.
       setTimeout(
         () => {
-          const current = safe(() => clipboard.readText())
-          if (current === text) restoreClipboard(snap)
+          void safeReadText().then((current) => {
+            if (current === text) return restoreClipboard(snap)
+            return undefined
+          })
         },
         Math.max(50, opts.restoreClipboardDelayMs)
       )
@@ -179,7 +185,7 @@ export async function injectText(text: string, opts: InjectOptions): Promise<Inj
     log.error(`inject via ${method} failed: ${message}`)
     // Leave the text on the clipboard so the user can still paste manually.
     try {
-      clipboard.writeText(text)
+      await clipboard.writeText(text)
     } catch {
       // ignore
     }
@@ -195,16 +201,13 @@ export async function readSelection(): Promise<{ text: string; restore: () => vo
   // On X11 the PRIMARY selection already holds whatever is highlighted, no Ctrl+C and no clipboard
   // clobber required. This sidesteps the Electron-vs-app CLIPBOARD ownership race entirely.
   if (process.platform === 'linux') {
-    try {
-      const primary = clipboard.readText('selection')
-      if (primary && primary.trim()) return { text: primary, restore: () => undefined }
-    } catch {
-      // fall through to the Ctrl+C path
-    }
+    // Electron 44 moved the selection clipboard to `clipboard.selection` (Linux only).
+    const primary = clipboard.selection ? await safeReadText(clipboard.selection) : ''
+    if (primary && primary.trim()) return { text: primary, restore: () => undefined }
   }
-  const snap = snapshotClipboard()
+  const snap = await snapshotClipboard()
   const marker = `\u200b__murmur_marker_${Date.now()}__`
-  clipboard.writeText(marker)
+  await clipboard.writeText(marker)
   try {
     if (process.platform === 'win32') {
       win.releaseModifiers()
@@ -222,14 +225,14 @@ export async function readSelection(): Promise<{ text: string; restore: () => vo
   let text = ''
   for (let i = 0; i < 24; i++) {
     await sleep(25)
-    const cur = safe(() => clipboard.readText())
+    const cur = await safeReadText()
     if (cur && cur !== marker) {
       text = cur
       break
     }
   }
   log.debug(`readSelection: captured ${text.length} chars`)
-  return { text, restore: () => restoreClipboard(snap) }
+  return { text, restore: () => void restoreClipboard(snap) }
 }
 
 export { nativeImage }

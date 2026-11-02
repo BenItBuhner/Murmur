@@ -17,6 +17,7 @@ import { prepareTranscript } from '../src/cleanup'
 import { editedSpan, findCorrections, parseLexicon } from '../src/corrections'
 import { applyDictionary } from '../src/dictionary'
 import { digitSignature } from '../src/numbers'
+import { buildAutocorrectMessages } from '../src/autocorrect'
 import { buildCommandMessages, buildFormatMessages, type CommandPromptInput } from '../src/prompt'
 import type { DictionaryTerm, FormatContext } from '../src/types'
 import { cleanModelOutput, verifyOutput } from '../src/verify'
@@ -119,6 +120,18 @@ const COMMAND_CASES: Array<{ name: string; input: CommandPromptInput }> = [
       language: 'de'
     }
   }
+]
+
+/** Selection correction (AHK Insta-AI-Correct): the same prompt on the desktop and on Android. */
+const AUTOCORRECT_CASES: Array<{ name: string; text: string }> = [
+  { name: 'plain selection', text: 'hey can u send me the report tmrw' },
+  { name: 'embedded instructions', text: '{Make it formal}hey can u send me the report tmrw' },
+  {
+    name: 'multiline braces',
+    text: 'Keep this.\n{Fix only the second sentence.\nKeep names.}\nits broken.'
+  },
+  { name: 'empty braces', text: '{}unchanged words' },
+  { name: 'first block only', text: '{tone: terse}one {leave this} two' }
 ]
 
 const SIGNATURE_CASES = [
@@ -334,6 +347,11 @@ function build(): unknown {
       name: c.name,
       input: c.input,
       messages: buildCommandMessages(c.input)
+    })),
+    autocorrect: AUTOCORRECT_CASES.map((c) => ({
+      name: c.name,
+      text: c.text,
+      messages: buildAutocorrectMessages(c.text)
     })),
     signatures: SIGNATURE_CASES.map((text) => ({ text, signature: digitSignature(text) })),
     clean: CLEAN_CASES.map(([output, transcript]) => ({

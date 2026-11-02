@@ -26,6 +26,8 @@ class HotkeyEngineTest {
         pushToTalk = listOf(Key.CTRL, Key.META),
         handsFree = listOf(Key.CTRL, Key.META, Key.SPACE),
         commandMode = listOf(Key.SHIFT, Key.META),
+        correctSelection = emptyList(),
+        selectAllThenCorrect = emptyList(),
         handsFreeTrigger = HandsFreeTrigger.TAP,
         tapThresholdMs = 350,
         doubleTapWindowMs = 400,
@@ -159,6 +161,35 @@ class HotkeyEngineTest {
     }
 
     @Test
+    fun `correction chords fire on press and stay independent`() {
+        val e = make {
+            it.copy(
+                correctSelection = listOf(Key.CTRL, Key.ALT, Key.C),
+                selectAllThenCorrect = listOf(Key.CTRL, Key.ALT, Key.A)
+            )
+        }
+        e.keyDown(Key.CTRL, 0)
+        e.keyDown(Key.ALT, 1)
+        assertEquals(listOf(HotkeyAction.Correct), e.keyDown(Key.C, 2))
+        assertFalse(e.isListening)
+        e.keyUp(Key.C, 3)
+        e.keyUp(Key.ALT, 4)
+        e.keyUp(Key.CTRL, 5)
+        e.keyDown(Key.CTRL, 10)
+        e.keyDown(Key.ALT, 11)
+        assertEquals(listOf(HotkeyAction.CorrectAll), e.keyDown(Key.A, 12))
+        assertFalse(e.isListening)
+    }
+
+    @Test
+    fun `an empty correction bind never fires`() {
+        val e = make()
+        e.keyDown(Key.CTRL, 0)
+        e.keyDown(Key.ALT, 1)
+        assertEquals(none, e.keyDown(Key.A, 2))
+    }
+
+    @Test
     fun `escape cancels a listening session and does nothing when idle`() {
         val e = make()
         assertEquals(none, e.keyDown(Key.ESCAPE, 0))
@@ -209,8 +240,8 @@ class HotkeyEngineTest {
         assertTrue(altMeta.reason!!, altMeta.reason!!.contains("Caps Lock"))
         assertFalse(Keys.validateChord(listOf(Key.META, Key.L)).valid)
         assertTrue(Keys.validateChord(KeyboardSettings.DEFAULT_PUSH_TO_TALK).valid)
-        assertTrue(Keys.validateChord(KeyboardSettings.DEFAULT_HANDS_FREE).valid)
-        assertTrue(Keys.validateChord(KeyboardSettings.DEFAULT_COMMAND_MODE).valid)
+        assertTrue(Keys.validateChord(KeyboardSettings.FACTORY_HANDS_FREE).valid)
+        assertTrue(Keys.validateChord(KeyboardSettings.FACTORY_COMMAND_MODE).valid)
     }
 
     @Test
@@ -246,6 +277,8 @@ class HotkeyEngineTest {
             pushToTalk = listOf(Key.F9),
             handsFree = emptyList(),
             commandMode = listOf(Key.CTRL, Key.ALT, Key.META),
+            correctSelection = listOf(Key.F8),
+            selectAllThenCorrect = listOf(Key.F7),
             handsFreeTrigger = HandsFreeTrigger.DOUBLE_TAP,
             tapThresholdMs = 200,
             doubleTapWindowMs = 500,
@@ -263,17 +296,32 @@ class HotkeyEngineTest {
         assertEquals(listOf(Key.F9), partial.pushToTalk)
         assertEquals(80, partial.tapThresholdMs)
         assertEquals(OverlayPosition.BOTTOM_RIGHT, partial.overlayPosition)
-        assertEquals(KeyboardSettings.DEFAULT_HANDS_FREE, partial.handsFree)
+        assertEquals(emptyList<Int>(), partial.handsFree)
+        assertEquals(emptyList<Int>(), partial.correctSelection)
+        assertEquals(emptyList<Int>(), partial.selectAllThenCorrect)
     }
 
     @Test
-    fun `the defaults are the desktop's where Android allows them`() {
+    fun `a pre-v2 file loses the factory hands-free and command chords`() {
+        val raw = """{"version":1,"pushToTalk":[29,3675],"handsFree":[29,3675,57],"commandMode":[42,3675]}"""
+        val migrated = KeyboardSettingsCodec.decode(raw)
+        assertEquals(listOf(29, 3675), migrated.pushToTalk)
+        assertEquals(emptyList<Int>(), migrated.handsFree)
+        assertEquals(emptyList<Int>(), migrated.commandMode)
+        val chosen = KeyboardSettingsCodec.decode(
+            """{"version":1,"handsFree":[59],"commandMode":[60]}"""
+        )
+        assertEquals(listOf(59), chosen.handsFree)
+        assertEquals(listOf(60), chosen.commandMode)
+    }
+
+    @Test
+    fun `only push-to-talk is bound by default`() {
         val d = KeyboardSettings.DEFAULT
-        // Ctrl + Meta and Ctrl + Meta + Space: the desktop's [29, 3675] and [29, 3675, 57].
         assertEquals(listOf(29, 3675), d.pushToTalk)
-        assertEquals(listOf(29, 3675, 57), d.handsFree)
-        // Not the desktop's Alt + Meta ([56, 3675]): Android toggles Caps Lock on it.
-        assertEquals(listOf(42, 3675), d.commandMode)
-        assertNull(Keys.validateChord(d.commandMode).reason)
+        assertEquals(emptyList<Int>(), d.handsFree)
+        assertEquals(emptyList<Int>(), d.commandMode)
+        assertEquals(emptyList<Int>(), d.correctSelection)
+        assertEquals(emptyList<Int>(), d.selectAllThenCorrect)
     }
 }

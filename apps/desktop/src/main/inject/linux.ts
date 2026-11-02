@@ -93,6 +93,20 @@ export async function pressEnter(tool: LinuxTool): Promise<void> {
   }
 }
 
+export async function selectAllShortcut(tool: LinuxTool): Promise<void> {
+  switch (tool) {
+    case 'xdotool':
+      return run('xdotool', ['key', '--clearmodifiers', 'ctrl+a'])
+    case 'wtype':
+      return run('wtype', ['-M', 'ctrl', 'a', '-m', 'ctrl'])
+    case 'ydotool':
+      // 29 = LEFTCTRL, 30 = A
+      return run('ydotool', ['key', '29:1', '30:1', '30:0', '29:0'])
+    default:
+      throw new Error('No input tool available (install xdotool, wtype, or ydotool)')
+  }
+}
+
 export async function copyShortcut(tool: LinuxTool): Promise<void> {
   switch (tool) {
     case 'xdotool':

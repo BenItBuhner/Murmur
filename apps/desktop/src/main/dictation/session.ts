@@ -13,6 +13,9 @@ import {
 import type { LlmConfig } from '@core/llm/client'
 import {
   STT_BASE_PROMPT,
+  AUTOCORRECT_TEMPERATURE,
+  autocorrectMaxTokens,
+  buildAutocorrectMessages,
   buildCommandMessages,
   buildSttPrompt,
   classifyApp,
@@ -67,7 +70,7 @@ import type { FormatOutcome, Formatter, InferenceRouter, ResolvedStt } from '../
 import type { SettingsStore } from '../store/settings'
 import type { HistoryStore } from '../store/history'
 import type { RecordingStore } from '../store/recordings'
-import { injectText, readSelection, type InjectResult } from '../inject'
+import { injectText, readSelection, selectAll, type InjectResult } from '../inject'
 
 const log = createLogger('session')
 const SAMPLE_RATE = 16000
@@ -242,6 +245,7 @@ export class DictationController extends EventEmitter {
   enabled = true
   private active: ActiveSession | null = null
   private processing = 0
+  private correcting = false
   private injectQueue: Promise<void> = Promise.resolve()
 
   constructor(private deps: SessionDeps) {
@@ -255,7 +259,7 @@ export class DictationController extends EventEmitter {
   }
 
   get isBusy(): boolean {
-    return this.processing > 0
+    return this.processing > 0 || this.correcting
   }
 
   handle(action: HotkeyAction): void {
@@ -272,6 +276,12 @@ export class DictationController extends EventEmitter {
         break
       case 'cancel':
         this.cancel()
+        break
+      case 'correct':
+        void this.correct(false)
+        break
+      case 'correctAll':
+        void this.correct(true)
         break
     }
   }
@@ -296,10 +306,98 @@ export class DictationController extends EventEmitter {
     this.emit('enabled', enabled)
   }
 
+  /**
+   * Instant correction: copy the selection (or select-all first), send it through the formatting
+   * model with the AHK Insta-AI-Correct prompt, paste the model's text back. No dictation, no
+   * post-processing of the model's answer.
+   */
+  private async correct(selectAllFirst: boolean): Promise<void> {
+    if (this.active || this.processing > 0 || this.correcting) return
+    this.correcting = true
+    const s = this.deps.settings.get()
+    try {
+      await this.deps.hook.waitForKeysUp(1500)
+      this.deps.hook.beginSynthetic()
+      if (selectAllFirst) {
+        try {
+          await selectAll()
+          await new Promise((r) => setTimeout(r, 50))
+        } catch (err) {
+          log.warn('select-all failed', err)
+          this.deps.hook.endSynthetic()
+          this.showNotice(selectAllFirst ? 'Could not select the text' : 'Select some text first')
+          return
+        }
+      }
+      const sel = await readSelection().catch(() => ({ text: '', restore: () => undefined }))
+      if (!sel.text) {
+        sel.restore()
+        this.deps.hook.endSynthetic()
+        this.showNotice(selectAllFirst ? 'Nothing to correct' : 'Select some text first')
+        return
+      }
+      this.deps.overlay.setState({ phase: 'processing', message: 'Correcting…' })
+      let llm: LlmConfig
+      try {
+        llm = (await this.deps.inference.llm()).cfg
+      } catch (err) {
+        sel.restore()
+        this.deps.hook.endSynthetic()
+        this.showNotice(err instanceof Error ? err.message : 'Correction needs a formatting model')
+        return
+      }
+      if (!llm.baseUrl || !llm.model) {
+        sel.restore()
+        this.deps.hook.endSynthetic()
+        this.showNotice('Correction needs a formatting model (Style settings)')
+        return
+      }
+      try {
+        const res = await this.deps.inference.complete(llm, buildAutocorrectMessages(sel.text), {
+          maxTokens: autocorrectMaxTokens(sel.text),
+          temperature: AUTOCORRECT_TEMPERATURE
+        })
+        const edited = res.text
+        if (edited === '') {
+          sel.restore()
+          this.deps.hook.endSynthetic()
+          this.showNotice('The model returned nothing')
+          return
+        }
+        const injectResult = await injectText(edited, {
+          method: s.injection.method,
+          restoreClipboard: s.injection.restoreClipboard,
+          restoreClipboardDelayMs: s.injection.restoreClipboardDelayMs,
+          typeChunkSize: s.injection.typeChunkSize,
+          typeChunkDelayMs: s.injection.typeChunkDelayMs
+        })
+        this.deps.hook.endSynthetic()
+        if (s.injection.restoreClipboard)
+          setTimeout(sel.restore, Math.max(300, s.injection.restoreClipboardDelayMs))
+        else sel.restore()
+        if (injectResult.ok) {
+          this.deps.overlay.setState({
+            phase: 'success',
+            message:
+              injectResult.method === 'clipboard' ? 'Corrected — copied to clipboard' : 'Corrected'
+          })
+        } else {
+          this.showNotice(`Copied to clipboard. ${injectResult.error ?? 'Could not insert text'}`)
+        }
+      } catch (err) {
+        sel.restore()
+        this.deps.hook.endSynthetic()
+        this.showNotice(err instanceof Error ? err.message : 'Correction failed')
+      }
+    } finally {
+      this.correcting = false
+    }
+  }
+
   // ---- lifecycle ----------------------------------------------------------------------------
 
   private start(mode: DictationMode): void {
-    if (this.active) {
+    if (this.active || this.correcting) {
       log.debug('start ignored: session already active')
       return
     }

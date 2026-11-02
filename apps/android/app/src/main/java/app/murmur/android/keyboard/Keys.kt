@@ -60,8 +60,8 @@ object Key {
     const val Z = 44
 }
 
-/** The three ways a chord can be bound, in the desktop settings' field names. */
-enum class ChordId { PUSH_TO_TALK, HANDS_FREE, COMMAND }
+/** The ways a chord can be bound, in the desktop settings' field names. */
+enum class ChordId { PUSH_TO_TALK, HANDS_FREE, COMMAND, CORRECT, CORRECT_ALL }
 
 data class ChordValidation(val valid: Boolean, val reason: String? = null)
 
@@ -240,8 +240,8 @@ object Keys {
     /**
      * Combinations Android itself acts on (AOSP 13 to 16, Samsung DeX): taking them over would cost the
      * user a system function, so the recorder refuses them, as the desktop recorder refuses Alt + F4.
-     * Alt + Meta is on the list because Android toggles Caps Lock on it, which is why the desktop's
-     * default for command mode cannot be the default here.
+     * Alt + Meta is on the list because Android toggles Caps Lock on it. Command mode is unbound
+     * by default on both apps, so that factory chord is no longer shipped.
      */
     private val BLOCKED: List<Pair<List<Int>, String>> = listOf(
         listOf(Key.CTRL, Key.A) to "selects all",

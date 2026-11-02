@@ -9,12 +9,16 @@ sealed class HotkeyAction {
     data object Lock : HotkeyAction()
     data object Stop : HotkeyAction()
     data object Cancel : HotkeyAction()
+    data object Correct : HotkeyAction()
+    data object CorrectAll : HotkeyAction()
 }
 
 data class HotkeyEngineConfig(
     val pushToTalk: List<Int>,
     val handsFree: List<Int>,
     val commandMode: List<Int>,
+    val correctSelection: List<Int>,
+    val selectAllThenCorrect: List<Int>,
     val handsFreeTrigger: HandsFreeTrigger,
     val tapThresholdMs: Int,
     val doubleTapWindowMs: Int,
@@ -27,6 +31,8 @@ fun KeyboardSettings.toEngineConfig(): HotkeyEngineConfig = HotkeyEngineConfig(
     pushToTalk = pushToTalk,
     handsFree = handsFree,
     commandMode = commandMode,
+    correctSelection = correctSelection,
+    selectAllThenCorrect = selectAllThenCorrect,
     handsFreeTrigger = handsFreeTrigger,
     tapThresholdMs = tapThresholdMs,
     doubleTapWindowMs = doubleTapWindowMs,
@@ -49,6 +55,7 @@ fun KeyboardSettings.toEngineConfig(): HotkeyEngineConfig = HotkeyEngineConfig(
  *  - Dedicated hands-free chord toggles a locked session on press.
  *  - Hands-free chord pressed while holding push-to-talk upgrades the session to locked.
  *  - Esc while listening -> [HotkeyAction.Cancel].
+ *  - Correct / select-all-then-correct fire on press and never start a dictation session.
  *
  * The engine never owns timers; the host feeds monotonic timestamps. Codes are desktop codes
  * ([Keys]); the host translates Android keycodes before calling in.
@@ -76,7 +83,9 @@ class HotkeyEngine(config: HotkeyEngineConfig) {
         chords = mapOf(
             ChordId.PUSH_TO_TALK to Keys.canonicalChord(config.pushToTalk, config.sideSensitive),
             ChordId.HANDS_FREE to Keys.canonicalChord(config.handsFree, config.sideSensitive),
-            ChordId.COMMAND to Keys.canonicalChord(config.commandMode, config.sideSensitive)
+            ChordId.COMMAND to Keys.canonicalChord(config.commandMode, config.sideSensitive),
+            ChordId.CORRECT to Keys.canonicalChord(config.correctSelection, config.sideSensitive),
+            ChordId.CORRECT_ALL to Keys.canonicalChord(config.selectAllThenCorrect, config.sideSensitive)
         )
     }
 
@@ -122,6 +131,11 @@ class HotkeyEngine(config: HotkeyEngineConfig) {
         // Prefer the most specific (longest) chord when several complete at once.
         val chord = activated.first()
         lastMatchedChord = chords[chord] ?: emptyList()
+
+        if (chord == ChordId.CORRECT || chord == ChordId.CORRECT_ALL) {
+            if (session != null) return emptyList()
+            return listOf(if (chord == ChordId.CORRECT_ALL) HotkeyAction.CorrectAll else HotkeyAction.Correct)
+        }
 
         val current = session
         if (current != null) {
@@ -190,7 +204,7 @@ class HotkeyEngine(config: HotkeyEngineConfig) {
 
     /** Chords that are fully pressed and include the key that just went down, longest first. */
     private fun newlyActiveChords(code: Int): List<ChordId> =
-        listOf(ChordId.HANDS_FREE, ChordId.COMMAND, ChordId.PUSH_TO_TALK)
+        listOf(ChordId.CORRECT_ALL, ChordId.CORRECT, ChordId.HANDS_FREE, ChordId.COMMAND, ChordId.PUSH_TO_TALK)
             .filter { id ->
                 val keys = chords[id] ?: emptyList()
                 keys.isNotEmpty() && code in keys && keys.all { it in down }

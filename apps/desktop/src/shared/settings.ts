@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { replacementModel } from './models'
 import { ACCENT_PRESET_IDS } from './theme'
 
-export const SETTINGS_VERSION = 5
+export const SETTINGS_VERSION = 6
 
 /**
  * Where a model runs: the Murmur instance's managed models (cloud builds only) or a provider the
@@ -119,6 +119,10 @@ export type AppRule = z.infer<typeof appRuleSchema>
 
 export const hotkeySchema = z.array(z.number().int()).max(3)
 
+/** Factory chords shipped before v6. Migration clears them so they stop stealing keys. */
+export const FACTORY_HANDS_FREE = [29, 3675, 57] // Ctrl + Meta + Space
+export const FACTORY_COMMAND_MODE = [56, 3675] // Alt + Meta (desktop)
+
 export const settingsSchema = z.object({
   version: z.number().default(SETTINGS_VERSION),
   onboardingComplete: z.boolean().default(false),
@@ -147,9 +151,15 @@ export const settingsSchema = z.object({
   hotkeys: z
     .object({
       // uiohook keycodes (see core/hotkey/keys.ts). Empty array disables the binding.
+      // Only push-to-talk is bound out of the box. Every other shortcut stays inert until
+      // the user applies one — a factory Alt/Meta chord was eating the modifier for everything else.
       pushToTalk: hotkeySchema.default([29, 3675]), // Ctrl + Meta/Win
-      handsFree: hotkeySchema.default([29, 3675, 57]), // Ctrl + Meta + Space
-      commandMode: hotkeySchema.default([56, 3675]), // Alt + Meta
+      handsFree: hotkeySchema.default([]),
+      commandMode: hotkeySchema.default([]),
+      /** Send the current selection through the formatting model (AHK Insta-AI-Correct). */
+      correctSelection: hotkeySchema.default([]),
+      /** Select everything first, then the same correction. Its own bind, not Shift on the first. */
+      selectAllThenCorrect: hotkeySchema.default([]),
       handsFreeTrigger: handsFreeTriggerSchema.default('tap'),
       tapThresholdMs: z.number().int().min(80).max(1500).default(350),
       doubleTapWindowMs: z.number().int().min(100).max(1500).default(400),
@@ -321,6 +331,9 @@ export type SettingsInput = z.input<typeof settingsSchema>
  * any file below the current version, so the model is swapped for the provider's recommended
  * replacement once per bump; a file at the current version is the user's own choice and is left
  * alone even if it names a retired id.
+ *
+ * v6 unbinds the factory hands-free and command-mode chords (Ctrl+Meta+Space, Alt+Meta) so
+ * they stop stealing modifiers. A bind the user chose for themselves is left alone.
  */
 export function migrateSettings(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw
@@ -351,7 +364,27 @@ export function migrateSettings(raw: unknown): unknown {
     input = { ...input, formatting: { ...formatting, instructions, llm: rest } }
   }
   if (version < SETTINGS_VERSION) input = replaceRetiredModels(input)
+  if (version < 6) input = unbindFactoryHotkeys(input)
   return input === raw ? raw : { ...input, version: SETTINGS_VERSION }
+}
+
+/** True when `value` is exactly the factory chord, in that order. */
+function sameChord(value: unknown, expected: readonly number[]): boolean {
+  if (!Array.isArray(value) || value.length !== expected.length) return false
+  return value.every((n, i) => n === expected[i])
+}
+
+/**
+ * v6: the factory dedicated-hands-free and command-mode chords were bound for everyone, including
+ * people who never chose them. Clear those exact factory values; leave any other bind.
+ */
+function unbindFactoryHotkeys(input: Record<string, unknown>): Record<string, unknown> {
+  const hotkeys = isRecord(input.hotkeys) ? input.hotkeys : undefined
+  if (!hotkeys) return input
+  let next = hotkeys
+  if (sameChord(hotkeys.handsFree, FACTORY_HANDS_FREE)) next = { ...next, handsFree: [] }
+  if (sameChord(hotkeys.commandMode, FACTORY_COMMAND_MODE)) next = { ...next, commandMode: [] }
+  return next === hotkeys ? input : { ...input, hotkeys: next }
 }
 
 /**

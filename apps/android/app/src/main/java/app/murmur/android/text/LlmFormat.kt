@@ -214,6 +214,30 @@ object Prompt {
 
     /** Upper bound for an edit of [selection]: room for the whole text again, plus a margin (desktop: session.ts). */
     fun commandMaxTokens(selection: String): Int = minOf(4096, maxOf(1024, countWords(selection) * 4 + 512))
+
+    /**
+     * Grammar-correction prompt from Bennett's AutoHotkey script
+     * (BenItBuhner/Insta-AI-Correct, Auto-Correct Hotkey.ahk). Kept verbatim; pinned to the
+     * TypeScript engine by GoldenEngineTest.
+     */
+    const val AUTOCORRECT_SYSTEM_PROMPT =
+        "You are a grammar correction and alignment agent. Your sole and only goal here is to fix any and all grammatical errors with minimal augmentation to the original text or meaning, including spelling, styling, and punctuation. Correct the text while keeping it as original as feasibly possible, not altering correct words or phrases in any way. Return only the final corrected text in your response; do not add any preamble, explanation, or other text."
+
+    const val AUTOCORRECT_TEMPERATURE = 0.2
+
+    private val EMBEDDED_INSTRUCTIONS = Regex("\\{(.*?)\\}", RegexOption.DOT_MATCHES_ALL)
+
+    fun splitAutocorrectInput(text: String): Pair<String, String> {
+        val match = EMBEDDED_INSTRUCTIONS.find(text) ?: return AUTOCORRECT_SYSTEM_PROMPT to text
+        return (match.groupValues.getOrElse(1) { AUTOCORRECT_SYSTEM_PROMPT }) to text.replace(match.value, "")
+    }
+
+    fun buildAutocorrectMessages(text: String): List<ChatMessage> {
+        val (systemPrompt, userText) = splitAutocorrectInput(text)
+        return listOf(ChatMessage("system", systemPrompt), ChatMessage("user", userText))
+    }
+
+    fun autocorrectMaxTokens(text: String): Int = minOf(4096, maxOf(1024, countWords(text) * 4 + 512))
 }
 
 /** What the command prompt needs: the selected text, the spoken instruction and the destination (desktop: CommandPromptInput). */

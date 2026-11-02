@@ -12,6 +12,10 @@ describe('settings schema', () => {
   it('fills every nested default from an empty object', () => {
     const s = parseSettings({})
     expect(s.hotkeys.pushToTalk).toEqual([Key.Ctrl, Key.Meta])
+    expect(s.hotkeys.handsFree).toEqual([])
+    expect(s.hotkeys.commandMode).toEqual([])
+    expect(s.hotkeys.correctSelection).toEqual([])
+    expect(s.hotkeys.selectAllThenCorrect).toEqual([])
     expect(s.hotkeys.handsFreeTrigger).toBe('tap')
     expect(s.audio.keepMicWarm).toBe(true)
     expect(s.audio.limitDuration).toBe(false)
@@ -157,6 +161,34 @@ describe('settings schema', () => {
 
     const optedIn = parseSettings({ audio: { limitDuration: true, maxDurationSec: 120 } })
     expect(sessionDurationLimitMs(optedIn.audio)).toBe(120_000)
+  })
+
+  it('unbinds the factory hands-free and command chords on a pre-v6 file, and keeps a chosen bind', () => {
+    const factory = parseSettings({
+      version: 5,
+      hotkeys: {
+        pushToTalk: [29, 3675],
+        handsFree: [29, 3675, 57],
+        commandMode: [56, 3675]
+      }
+    })
+    expect(factory.hotkeys.pushToTalk).toEqual([Key.Ctrl, Key.Meta])
+    expect(factory.hotkeys.handsFree).toEqual([])
+    expect(factory.hotkeys.commandMode).toEqual([])
+    expect(factory.hotkeys.correctSelection).toEqual([])
+    expect(factory.hotkeys.selectAllThenCorrect).toEqual([])
+
+    const chosen = parseSettings({
+      version: 5,
+      hotkeys: {
+        pushToTalk: [67],
+        handsFree: [59],
+        commandMode: [60]
+      }
+    })
+    expect(chosen.hotkeys.pushToTalk).toEqual([Key.F9])
+    expect(chosen.hotkeys.handsFree).toEqual([Key.F1])
+    expect(chosen.hotkeys.commandMode).toEqual([Key.F2])
   })
 
   it('handles garbage input', () => {

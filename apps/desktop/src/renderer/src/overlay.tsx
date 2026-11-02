@@ -53,7 +53,7 @@ function App(): React.JSX.Element {
       bridge.onAudioStart((m) => {
         capture.start(m.sessionId, m.includePreBuffer).catch(() => undefined)
       }),
-      bridge.onAudioStop((m) => capture.stop(m.sessionId))
+      bridge.onAudioStop((m) => capture.stop(m.sessionId, m.postRoll !== false, m.quietDb))
     ]
     bridge.sendStatus({ ready: false, warm: false })
     return () => unsubs.forEach((u) => u())

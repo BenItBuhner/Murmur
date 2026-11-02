@@ -119,6 +119,16 @@ describe('Clerk token verification', () => {
   })
 })
 
+describe('JWKS refetch', () => {
+  it('does not refetch the JWKS for every forged key id', async () => {
+    expect(await verifyClerkToken(`Bearer ${await token({})}`, ISSUER, fetcher)).not.toBeNull()
+    for (let i = 0; i < 5; i++) {
+      expect(await verifyClerkToken(`Bearer ${await token({}, `forged-${i}`)}`, ISSUER, fetcher)).toBeNull()
+    }
+    expect(calls.filter((c) => c.url.endsWith('/.well-known/jwks.json'))).toHaveLength(1)
+  })
+})
+
 describe('gateway routes', () => {
   it('refuses without a session and when unconfigured', async () => {
     const res = await handle(new Request('https://w.test/v1/models'), env, ctx, fetcher)

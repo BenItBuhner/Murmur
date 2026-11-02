@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { app, ipcMain, shell, BrowserWindow } from 'electron'
+import { openExternalSafe } from './windows/external'
 import { getSttProvider, STT_PRESETS, type SttConfig } from '@core/stt'
 import { listChatModels, type LlmConfig } from '@core/llm/client'
 import {
@@ -104,7 +105,7 @@ export function registerIpc(deps: IpcDeps): void {
   })
   ipcMain.handle(IPC.updatesOpenReleases, () => {
     const release = updates.getStatus().release
-    void shell.openExternal(release?.url ?? releasesPageUrl(deps.updateSource))
+    openExternalSafe(release?.url ?? releasesPageUrl(deps.updateSource))
   })
 
   ipcMain.handle(IPC.cloudConfig, (): CloudConfig => cloudConfig)

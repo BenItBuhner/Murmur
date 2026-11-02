@@ -261,6 +261,22 @@ type ProcessOutcome =
 /** Voiced time below which a tail that reads as a stock phrase is taken for silence. */
 /** How long release waits for a speculation already running before sending the whole tail. */
 export const SPEC_RELEASE_GRACE_MS = 150
+/** The stop skips the post-roll when this much audio before it held no speech (Android QUIET_STOP_MS). */
+export const QUIET_STOP_MS = 300
+/** The renderer's post-roll before it flushes (renderer/overlay/capture.ts STOP_POST_ROLL_MS). */
+export const STOP_POST_ROLL_MS = 200
+/**
+ * How long past the post-roll the stop waits for the renderer to confirm (was 1.2 s in all). Only a
+ * slow renderer waits it out; past it the flushed last chunk is lost, so it is not cut too fine.
+ */
+export const STOP_CONFIRM_GRACE_MS = 600
+/** Less voiced audio than this after the speculation's pause: nothing was said after it (Android: Hallucination.MIN_SPEECH_MS). */
+export const QUIET_AFTER_SPEC_MS = 120
+/**
+ * Formats made while speaking share one wait at release (Android FORMAT_WAIT_MS): past it the whole
+ * text is formatted now, which is quicker than waiting longer for a model that is stuck.
+ */
+export const FORMAT_WAIT_MS = 3_000
 
 export interface SessionDeps {
   settings: SettingsStore
@@ -436,6 +452,28 @@ export class DictationController extends EventEmitter {
     log.info(`session ${session.id.slice(0, 8)} cancelled`)
   }
 
+  /**
+   * The speech threshold (dB) when the last QUIET_STOP_MS of the recording so far held no speech
+   * (Android silentAtStop), else null.
+   */
+  private silentAtStop(id: string, floorDb: number): number | null {
+    const recorder = this.deps.recorder as Partial<Recorder>
+    if (typeof recorder.read !== 'function' || typeof recorder.sampleCount !== 'function')
+      return null
+    try {
+      const n = recorder.sampleCount(id)
+      const recent = recorder.read(id, Math.max(0, n - 5 * SAMPLE_RATE))
+      if (recent.length < SAMPLE_RATE) return null
+      const end = recent.subarray(recent.length - Math.floor((QUIET_STOP_MS * SAMPLE_RATE) / 1000))
+      const threshold = adaptiveThreshold(recent, SAMPLE_RATE, floorDb)
+      return analyze(end, { sampleRate: SAMPLE_RATE, thresholdDb: threshold }).speechMs === 0
+        ? threshold
+        : null
+    } catch {
+      return null
+    }
+  }
+
   private async stop(): Promise<void> {
     const session = this.active
     if (!session) return
@@ -455,7 +493,17 @@ export class DictationController extends EventEmitter {
       inject: true
     }
     try {
-      const pcm = await this.deps.recorder.stop(session.id)
+      // The last 300 ms before the stop held no speech: the post-roll that catches a last word
+      // still sounding has nothing to catch, and the stop skips its 200 ms (Android #134).
+      // The renderer may still run the post-roll (a word starting as the key came up), so the
+      // grace always covers it; a renderer that answers at once is not held by it.
+      const quietDb = this.silentAtStop(session.id, s.audio.silenceThresholdDb)
+      const postRoll = quietDb === null
+      const pcm = await this.deps.recorder.stop(
+        session.id,
+        STOP_POST_ROLL_MS + STOP_CONFIRM_GRACE_MS,
+        postRoll ? { postRoll } : { postRoll, quietDb }
+      )
       const streamed = this.stopStreaming(session)
       // Store the audio before anything can go wrong with it: a failed request is retried from
       // this file, and a kept recording is what History plays back. The write runs alongside
@@ -603,8 +651,11 @@ export class DictationController extends EventEmitter {
         })
         if (resolved.provider !== MURMUR_PROVIDER) throw new Error('streaming is for Murmur only')
         // Open the connection to Murmur's gateway now, so the release does not pay for it.
+        // Two at once, as Android warms its speech and formatting clients: the release's tail and
+        // its formatting (or a piece and the tail) then each find an open connection.
         if (resolved.source === 'murmur')
-          void prewarmGateway(resolved.cfg.baseUrl, resolved.cfg.apiKey).catch(() => undefined)
+          for (let i = 0; i < 2; i++)
+            void prewarmGateway(resolved.cfg.baseUrl, resolved.cfg.apiKey).catch(() => undefined)
         const app = classifyApp(w.app, w.title)
         const speed = effectiveSpeed(s.stt.speed, style.rule)
         const smart = formattingModeAt(style.mode, speed) === 'smart'
@@ -694,9 +745,14 @@ export class DictationController extends EventEmitter {
       const n = pieceTexts.length
       const text = await transcribeOnly(pcm, n)
       const before = n > 0 ? await pieceTexts[n - 1].catch(() => '') : ''
-      const format: Promise<FormatOutcome | 'empty' | null> = text
-        ? this.speculateFormat(text, (await resolveTarget())!, tag, n, before)
-        : Promise.resolve('empty')
+      // A short dictation (no pieces yet) is not formatted while speaking: the release formats its
+      // whole text about as quickly, and each format here is a call on the shared pool (Android).
+      const format: Promise<FormatOutcome | 'empty' | null> =
+        n === 0
+          ? Promise.resolve(null)
+          : text
+            ? this.speculateFormat(text, (await resolveTarget())!, tag, n, before)
+            : Promise.resolve('empty')
       format.catch(() => undefined)
       return { text, format }
     }
@@ -709,6 +765,10 @@ export class DictationController extends EventEmitter {
       // MURMUR_TAIL_SPECULATION=0 turns it off (diagnostics, and tests of the plain pipeline).
       process.env.MURMUR_TAIL_SPECULATION === '0' ? undefined : speculateTail
     )
+    // Open the connection to the gateway (and warm its grant) as soon as the user starts talking,
+    // as Android does, not only once a long dictation cuts its first piece: a short dictation
+    // otherwise paid the handshake on its release.
+    void resolveTarget()?.catch(() => undefined)
     session.streamListener = (id, samples) => {
       if (id === session.id) session.stream?.onSamples(samples)
     }
@@ -964,7 +1024,9 @@ export class DictationController extends EventEmitter {
             runTail,
             tag,
             runWhole,
-            s.audio.silenceThresholdDb
+            s.audio.silenceThresholdDb,
+            // A piece sent again is plain speech: never the tail's one-call release.
+            (clip, endSec) => run(clip, endSec)
           )
         : await runWhole()
       // One answer for the whole (trimmed) clip: its timings line up with `audio`.
@@ -1104,6 +1166,8 @@ export class DictationController extends EventEmitter {
       if (
         mode === 'smart' &&
         !streamed &&
+        // A formatter that just failed is not asked again for the layout.
+        formatted.status.outcome !== 'failed' &&
         !(formatted as LaidOut).laidOut &&
         wantsLayout(formatted.text, app.category, style.layout)
       ) {
@@ -1234,7 +1298,8 @@ export class DictationController extends EventEmitter {
     run: (clip: Int16Array, endSec: number) => Promise<CompleteResult>,
     tag: string,
     whole: () => Promise<CompleteResult>,
-    configuredDb = -48
+    configuredDb = -48,
+    runPiece: (clip: Int16Array, endSec: number) => Promise<CompleteResult> = run
   ): Promise<StreamedStt> {
     const sendFrom = (
       from: number
@@ -1264,52 +1329,118 @@ export class DictationController extends EventEmitter {
       return { rest, a, tail, clip }
     }
     // With a speculation, only the audio after its pause is sent now; if it failed, the whole
-    // stretch after the pieces is sent as before.
-    // A speculation still running at release (its speech, or its background-tier formatting) is
-    // dropped: waiting on that chain is what made some releases take 2-3 s. The whole stretch
-    // after the pieces goes up at release priority instead.
+    // stretch after the pieces is sent as before (Android DictationController.process).
+    // A speculation whose speech is still running at release is dropped, not waited for: the tail
+    // was sent only after it came back, which put the background-tier request on the critical path.
+    // Unless nothing was said after it: then it covers the whole dictation, and sending the same
+    // audio again would take as long as letting it finish (a stop in a pause, the usual case).
     const t0 = Date.now()
     let specUsable = false
+    let spec: TailSpec | undefined
+    // Judged like the tail itself (sendFrom): a soft last word after a loud dictation still counts.
+    const afterSpec = streamed.spec
+      ? pcm.subarray(Math.min(Math.max(0, streamed.spec.samples), pcm.length))
+      : null
+    const quietAfterSpec =
+      !!afterSpec &&
+      analyze(afterSpec, {
+        sampleRate: SAMPLE_RATE,
+        thresholdDb: Math.min(threshold, adaptiveThreshold(afterSpec, SAMPLE_RATE, configuredDb))
+      }).speechMs < QUIET_AFTER_SPEC_MS
     if (streamed.spec) {
-      const PENDING = Symbol('pending')
-      const ready = await Promise.race([
-        streamed.spec.result.then(
-          (r) => r,
-          () => null
-        ),
-        new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), SPEC_RELEASE_GRACE_MS))
-      ])
-      if (ready && ready !== PENDING) {
-        const f = await Promise.race([
-          ready.format.then(
-            (x) => x,
+      const specResult = streamed.spec.result
+      if (streamed.samples === 0 && !quietAfterSpec) {
+        // A short dictation that went on after its speculation is sent whole, as before.
+        log.info(`session ${tag}: speech went on after the last pause; sending the whole recording`)
+      } else if (streamed.samples === 0) {
+        // Stopped in the pause the speculation was cut in, its speech maybe still running: the
+        // whole recording goes up at release priority at once, and whichever comes back first is
+        // used, so a slow background request never holds the release.
+        const PENDING = Symbol('pending')
+        const done = await Promise.race([
+          specResult.then(
+            (r) => r,
+            () => null
+          ),
+          new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), 0))
+        ])
+        if (done !== PENDING && done !== null) {
+          spec = done
+          specUsable = true
+        } else if (done === PENDING) {
+          const fresh = whole()
+          fresh.catch(() => undefined)
+          type Winner =
+            | { kind: 'spec'; v: TailSpec | null }
+            | { kind: 'fresh'; v: CompleteResult | null; err?: unknown }
+          const first: Winner = await Promise.race([
+            specResult.then(
+              (v): Winner => ({ kind: 'spec', v }),
+              (): Winner => ({ kind: 'spec', v: null })
+            ),
+            fresh.then(
+              (v): Winner => ({ kind: 'fresh', v }),
+              (err): Winner => ({ kind: 'fresh', v: null, err })
+            )
+          ])
+          if (first.kind === 'spec' && first.v) {
+            spec = first.v
+            specUsable = true
+            log.info(
+              `session ${tag}: release race: the speculation came back first (${Date.now() - t0} ms)`
+            )
+          } else if (first.kind === 'fresh' && first.v) {
+            log.info(
+              `session ${tag}: release race: the whole recording came back first (${Date.now() - t0} ms)`
+            )
+            return first.v
+          } else if (first.kind === 'spec') {
+            return fresh // the speculation failed: the whole recording decides
+          } else {
+            // The whole recording failed first: the speculation decides.
+            const v = await specResult.catch(() => null)
+            if (!v) return fresh
+            spec = v
+            specUsable = true
+          }
+        }
+      } else {
+        const PENDING = Symbol('pending')
+        const ready = await Promise.race([
+          specResult.then(
+            (r) => r,
             () => null
           ),
           new Promise<typeof PENDING>((r) => setTimeout(() => r(PENDING), SPEC_RELEASE_GRACE_MS))
         ])
-        specUsable = f !== PENDING && f !== null
+        if (ready && ready !== PENDING) {
+          spec = ready
+          specUsable = true
+        }
       }
-      if (!specUsable)
-        log.info(`session ${tag}: tail speculation not ready at release; sending the whole tail`)
+      log.info(
+        `session ${tag}: release: spec ${specUsable ? 'used' : 'dropped'} after ${Date.now() - t0} ms${specUsable && quietAfterSpec ? ' (nothing said after it)' : ''}`
+      )
+      if (!specUsable && streamed.samples === 0) return whole()
     }
-    let sent = sendFrom(specUsable && streamed.spec ? streamed.spec.samples : streamed.samples)
-    let spec: TailSpec | undefined
+    // Nothing said after the speculation: it is the whole text, and no tail goes up.
+    const sent =
+      specUsable && quietAfterSpec
+        ? {
+            rest: new Int16Array(0),
+            a: analyze(new Int16Array(0), { sampleRate: SAMPLE_RATE, thresholdDb: threshold }),
+            tail: Promise.resolve(null),
+            clip: new Int16Array(0)
+          }
+        : sendFrom(specUsable && streamed.spec ? streamed.spec.samples : streamed.samples)
     // Everything streamed shares one wait; past it the whole dictation goes up instead.
     const streamDeadline = Date.now() + STREAM_WAIT_MS
     const left = (): number => Math.max(1, streamDeadline - Date.now())
-    if (streamed.spec && specUsable) {
-      try {
-        spec = await within(streamed.spec.result, left())
-      } catch (err) {
-        log.warn(`session ${tag}: the tail speculation failed; sending the whole tail`, err)
-        sent = sendFrom(streamed.samples)
-      }
-    }
     const tSpec = Date.now()
     const { rest, a, tail, clip } = sent
     let texts: string[]
     try {
-      texts = await this.settlePieces(streamed, pcm, threshold, run, left, tag)
+      texts = await this.settlePieces(streamed, pcm, threshold, runPiece, left, tag)
     } catch (err) {
       log.warn(
         `session ${tag}: a streamed piece failed twice; transcribing the whole dictation`,
@@ -1367,6 +1498,11 @@ export class DictationController extends EventEmitter {
   ): Promise<FormatOutcome | null> {
     if (!streamed || !stt.streamed || formatter.source !== 'murmur') return null
     if (streamed.formats.length !== stt.streamed.texts.length) return null
+    // A short dictation: its speculation is not formatted while speaking (see speculateTail), so
+    // the whole text is formatted at release, as on Android.
+    if (stt.streamed.texts.length === 0) return null
+    const formatDeadline = Date.now() + FORMAT_WAIT_MS
+    const formatLeft = (): number => Math.max(1, formatDeadline - Date.now())
     const tail = stt.streamed.tail
     const lastPiece = stt.streamed.texts[stt.streamed.texts.length - 1] ?? ''
     // A tail speculation already formatted: its last sentence is formatted again with the words
@@ -1374,10 +1510,18 @@ export class DictationController extends EventEmitter {
     let specHead: FormatOutcome | null = null
     let tailInput = tail
     let tailBefore = lastPiece
+    let specUnformatted = false
     if (stt.streamed.spec) {
-      const f = await within(stt.streamed.spec.format, STREAM_WAIT_MS).catch(() => null)
-      if (f === null) return null
-      if (f !== 'empty') {
+      const f = await within(stt.streamed.spec.format, formatLeft()).catch(() => null)
+      if (f === null) {
+        // Its background format is not back: it is formatted now with the tail, which is far
+        // less than formatting the whole dictation again.
+        log.info(
+          `session ${tag}: the speculation was not formatted in time; formatting it with the tail`
+        )
+        tailInput = joinSeam(stt.streamed.spec.text, tail).text
+        specUnformatted = true
+      } else if (f !== 'empty') {
         const at = lastSentenceStart(f.text)
         const head = f.text.slice(0, at).trim()
         const lastSentence = f.text.slice(at)
@@ -1399,7 +1543,8 @@ export class DictationController extends EventEmitter {
       : preformatted && preformatted[0] === tailInput
         ? Promise.resolve(preformatted[1])
         : // A few words after formatted text: rule-based formatting, no model round trip.
-          countWords(tail) > 0 &&
+          !specUnformatted &&
+            countWords(tail) > 0 &&
             countWords(tail) <= SHORT_TAIL_WORDS &&
             (specHead || stt.streamed.texts.length)
           ? formatTranscript(tailRequest, null)
@@ -1556,7 +1701,8 @@ export class DictationController extends EventEmitter {
         try {
           return await within(
             late ? firstOf<FormatOutcome | 'empty'>([late, again]) : again,
-            STREAM_WAIT_MS
+            // A stalled formatter gets the shared format wait (as main's release had), then rules.
+            FORMAT_WAIT_MS
           )
         } catch {
           const rules = await formatTranscript(request, null)
@@ -1651,7 +1797,17 @@ export class DictationController extends EventEmitter {
     forceMethod?: 'clipboard'
   ): Promise<InjectResult> {
     const run = async (): Promise<InjectResult> => {
-      await this.deps.hook.waitForKeysUp(1500)
+      // One wait for the hotkey to come up, before our own keystrokes. (It was waited for again
+      // inside injectText, after beginSynthetic, where no release could be seen: a key the hook
+      // thought held cost 1.5 s twice on every insertion.)
+      // Say what the pill is waiting for instead of a vague "Transcribing…" while it waits.
+      if (this.deps.hook.anyKeyDown && !this.active)
+        this.deps.overlay.setState({ phase: 'processing', message: 'Release the keys to insert…' })
+      const released = await this.deps.hook.waitForKeysUp(1500)
+      if (!released)
+        log.warn(
+          `keys still held after 1.5 s (${(this.deps.hook as Partial<HookService>).heldKeys?.join(', ') ?? '?'}); inserting anyway`
+        )
       this.deps.hook.beginSynthetic()
       try {
         // Replacing a selection through the clipboard is unreliable when we own the X CLIPBOARD
@@ -1665,8 +1821,7 @@ export class DictationController extends EventEmitter {
           restoreClipboardDelayMs: s.injection.restoreClipboardDelayMs,
           typeChunkSize: s.injection.typeChunkSize,
           typeChunkDelayMs: s.injection.typeChunkDelayMs,
-          pressEnter,
-          waitForKeysUp: () => this.deps.hook.waitForKeysUp(1500)
+          pressEnter
         })
       } finally {
         // Keep suppressing briefly so the trailing synthesized key-ups are ignored too.

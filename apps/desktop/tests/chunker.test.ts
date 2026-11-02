@@ -91,7 +91,7 @@ describe('findSpecCut', () => {
 })
 
 describe('ChunkStreamer speculation', () => {
-  it('does not speculate before the first piece (short clips stay whole)', async () => {
+  it('speculates on a short clip only at a pause still going on (Android #135)', async () => {
     const pcm = gap(gap(loud(12), 3, 3.8), 8, 8.8)
     let fed = 0
     let specs = 0
@@ -106,14 +106,36 @@ describe('ChunkStreamer speculation', () => {
         return 'spec'
       }
     )
-    while (fed < pcm.length) {
+    // Fed 0.1 s at a time: the pause at 3 s is caught once 600 ms of it have gone by.
+    while (fed < Math.floor(3.75 * RATE)) {
       fed = Math.min(pcm.length, fed + 1600)
       s.onSamples(fed)
     }
-    const done = s.finish()
+    expect(specs).toBe(1)
+    const spec = s.speculation()!
+    expect(spec.pieces).toBe(0)
+    expect(spec.samples / RATE).toBeGreaterThan(2.9)
+    expect(spec.samples / RATE).toBeLessThan(3.4)
+    await s.finish().texts
+  })
+  it('does not speculate on a short clip at a pause the speaker went on after', async () => {
+    const pcm = gap(loud(12), 3, 3.8)
+    let specs = 0
+    const s = new ChunkStreamer(
+      (from) => pcm.slice(from),
+      async () => 'piece',
+      RATE,
+      -30,
+      DEFAULT_CHUNK_PLAN,
+      async () => {
+        specs++
+        return 'spec'
+      }
+    )
+    s.onSamples(pcm.length)
     expect(specs).toBe(0)
     expect(s.speculation()).toBeNull()
-    await done.texts
+    await s.finish().texts
   })
   it('speculates on the stretch after a piece', async () => {
     // 22 s with a clean pause at 19 s (piece cut), then a later pause for speculation.

@@ -17,6 +17,11 @@ private val NOT_FRAGMENT = ("today tonight now yet really sure quite much exactl
     "only just bad great good likely possible mine here there when if because with without to " +
     "after before until since one any like enough necessarily entirely completely").split(" ").toSet()
 
+/** Prepositions often left at a real sentence end ("someone to talk to."); see pause-stops.ts. */
+private val STRANDABLE = "of to for from with at into onto".split(" ").toSet()
+private val CLAUSE_START =
+    "i you he she it we they my our your his her their this that these those there then so".split(" ").toSet()
+
 private val STOP = Regex("""(\p{L}+)(['’]\p{L}+)?\.(\s+)(\p{Lu}[\p{L}'’]*)(?=(\s+([\p{L}'’]+))?)""")
 
 private fun isName(word: String, text: String): Boolean {
@@ -33,7 +38,7 @@ fun joinPauseStops(text: String): String = STOP.replace(text) { m ->
     // "plan A. Then": a capital letter is a name for an option, not an article.
     if (clitic != null || !last[0].isLowerCase()) return@replace m.value
     val key = last.lowercase()
-    val split = key in SPLIT
+    val split = key in SPLIT && !(key in STRANDABLE && next.lowercase() in CLAUSE_START)
     val not = key in AUXILIARY && next == "Not" && after != null && after.lowercase() !in NOT_FRAGMENT
     if (!split && !not) return@replace m.value
     val lower = next.lowercase()

@@ -38,6 +38,8 @@ export interface Cut {
   pauseMs: number
   /** No usable pause: the cut may split a word, so the next piece should overlap it. */
   forced: boolean
+  /** The pause is still going on at the end of the audio (the speaker may be done). */
+  trailing?: boolean
 }
 
 /**
@@ -105,19 +107,29 @@ export function findCut(
  * last cut) that ends at least `minSec` in, or null. The audio up to its middle can be transcribed
  * and formatted while the user is still talking, so release only waits for what follows it.
  */
+/** How far into a trailing pause its cut sits, at most (the rest of the pause goes up with the tail). */
+export const SPEC_TRAILING_CUT_MS = 300
+
 export function findSpecCut(
   pcm: Int16Array,
   sampleRate: number,
   thresholdDb: number,
   minPauseMs = 400,
-  minSec = 2
+  minSec = 2,
+  /**
+   * With a value, a pause at least this long that is still going on at the end of the audio counts
+   * too (Android ChunkStreamer.findSpecCut): the speaker may be about to stop, and a stop in that
+   * pause then finds everything said already transcribed.
+   */
+  trailingPauseMs?: number
 ): Cut | null {
   const frame = Math.floor((sampleRate * FRAME_MS) / 1000)
   const need = Math.ceil(minPauseMs / FRAME_MS)
   const from = Math.floor(minSec * sampleRate)
   let run = 0
   let best: Cut | null = null
-  for (let at = 0; at + frame <= pcm.length; at += frame) {
+  let at = 0
+  for (; at + frame <= pcm.length; at += frame) {
     if (rmsDb(pcm, at, at + frame) < thresholdDb) {
       run++
       continue
@@ -125,6 +137,16 @@ export function findSpecCut(
     if (run >= need && at >= from)
       best = { at: at - Math.floor((run * frame) / 2), pauseMs: run * FRAME_MS, forced: false }
     run = 0
+  }
+  if (trailingPauseMs !== undefined && run * FRAME_MS >= trailingPauseMs) {
+    const start = at - run * frame
+    if (start >= from) {
+      const into = Math.min(
+        Math.floor((run * frame) / 2),
+        Math.floor((SPEC_TRAILING_CUT_MS * sampleRate) / 1000)
+      )
+      return { at: start + into, pauseMs: run * FRAME_MS, forced: false, trailing: true }
+    }
   }
   return best
 }

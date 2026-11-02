@@ -61,6 +61,8 @@ export interface CaptureEvents {
 interface Session {
   id: string
   samples: number
+  /** Loudness of the newest chunk (dBFS), to catch a word that starts as the key comes up. */
+  lastDb?: number
 }
 
 /**
@@ -141,23 +143,39 @@ export class MicCapture {
     this.preBuffer = []
   }
 
-  stop(id: string): void {
+  /**
+   * `postRoll: false`: main saw the last moments as quiet, so there is no last word to wait for.
+   * Main's audio trails this one by up to a chunk, so the newest audio is checked here too: if the
+   * flushed buffer is louder than `quietDb` (main's speech threshold), a word started as the key
+   * came up and the post-roll runs after all.
+   */
+  stop(id: string, postRoll = true, quietDb?: number): void {
     if (!this.session || this.session.id !== id) {
       this.events.onStopped(id, 0)
       return
     }
     const s = this.session
     this.pendingStart = null
-    // Post-roll: the key comes up while the last word is still sounding and audio still in the
-    // graph; keep the session open briefly, then flush the worklet's partial buffer.
-    setTimeout(() => {
+    const close = (): void => {
+      if (this.session === s) this.session = null
+      this.events.onStopped(s.id, s.samples)
+    }
+    // The flushed buffer arrives as one more message; give it a tick before closing.
+    const flush = (then: () => void): void => {
       this.node?.port.postMessage('flush')
-      // The flushed buffer arrives as one more message; give it a tick before closing.
-      setTimeout(() => {
-        if (this.session === s) this.session = null
-        this.events.onStopped(s.id, s.samples)
-      }, 20)
-    }, STOP_POST_ROLL_MS)
+      setTimeout(then, 20)
+    }
+    if (postRoll) {
+      // Post-roll: the key comes up while the last word is still sounding and audio still in the
+      // graph; keep the session open briefly, then flush the worklet's partial buffer.
+      setTimeout(() => flush(close), STOP_POST_ROLL_MS)
+    } else {
+      flush(() => {
+        if (quietDb !== undefined && s.lastDb !== undefined && s.lastDb > quietDb)
+          setTimeout(() => flush(close), STOP_POST_ROLL_MS)
+        else close()
+      })
+    }
     if (this.cfg && !this.cfg.keepWarm) {
       this.releaseTimer = setTimeout(() => void this.release(), 4000)
     }
@@ -247,6 +265,7 @@ export class MicCapture {
     if (++this.levelTick % 2 === 0) this.events.onLevel(level)
     if (this.session) {
       this.session.samples += pcm.byteLength / 2
+      this.session.lastDb = db
       this.events.onChunk(this.session.id, pcm, level)
       return
     }

@@ -39,7 +39,9 @@
         </intent>
     </queries>
 
-    <!-- usesCleartextTraffic: a self-hosted whisper server on the LAN (http://192.168.x.x:8000/v1)
+    <!-- Backups: res/xml/backup_rules.xml (Android 11 and lower) and data_extraction_rules.xml (12+)
+         keep the plain-text provider API keys in murmur_settings out of unencrypted backups.
+         usesCleartextTraffic: a self-hosted whisper server on the LAN (http://192.168.x.x:8000/v1)
          is a first-class provider, and Android otherwise refuses every plain-http base URL. Hosted
          providers keep using https.
          enableOnBackInvokedCallback: predictive back. The system previews going home (Android 13+,
@@ -48,6 +50,8 @@
     <application
         android:name=".MurmurApplication"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.36': [
+    'Desktop catches up with Android on speed. Short dictations now start transcribing during your pauses, so when you let go of the hotkey in a pause the words are already there. The stop also skips the extra 0.2 s wait when you had already stopped talking, and the connection to Murmur is opened as soon as you start speaking.',
+    'No more 3-second stall before text appears on Windows. A key whose release Murmur missed (for example one let go over an admin window) no longer makes every insertion wait for it. If keys really are still held, the pill now says "Release the keys to insert…".',
+    'Fewer made-up words at the end of a dictation. Noise after you stop talking (a rustle, a click, the mic being handled) is no longer typed as text like "Dictation with punctuation."'
+  ],
   '0.6.35': [
     'Faster finishes on Android. Short dictations now start transcribing during your pauses, so when you tap Done in a pause the words are already there: about 0.7 s quicker on average in testing, with the same text. The stop also no longer waits an extra 0.2 s when you had already stopped talking.',
     'A simpler dictionary that learns. The dictionary is now a plain list of words Murmur should spell your way. When you fix a misheard word right after dictating, Android offers to add it (Add / Not a word), and on desktop History has a Fix words option.',

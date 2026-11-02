@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and lower (cloud backup and `adb backup`). murmur_settings holds the speech and AI
+     provider API keys in plain text, so it stays out of backups; the sync outbox and app data
+     are kept. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="murmur_settings.xml" />
+</full-backup-content>

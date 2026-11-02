@@ -61,8 +61,12 @@ function Heading({
     return (
       <div className={cn('mx-auto max-w-2xl text-center', className)}>
         {eyebrow && <div className="eyebrow">{eyebrow}</div>}
-        <Tag className={cn('serif-display mt-4 text-balance', titleClassName)}>{title}</Tag>
-        {lede && <p className="mt-5 text-lead text-pretty text-muted-foreground">{lede}</p>}
+        <Tag className={cn('display-type mt-4 text-balance', titleClassName)}>{title}</Tag>
+        {lede && (
+          <p className="mx-auto mt-5 max-w-xl text-lead text-pretty text-muted-foreground">
+            {lede}
+          </p>
+        )}
         {meta && <p className="mt-3 text-meta text-muted-foreground">{meta}</p>}
       </div>
     )
@@ -71,7 +75,7 @@ function Heading({
     <div className={cn('grid gap-card lg:grid-cols-split lg:items-end lg:gap-x-12', className)}>
       <div>
         {eyebrow && <div className="eyebrow">{eyebrow}</div>}
-        <Tag className={cn('serif-display mt-4 text-balance', titleClassName)}>{title}</Tag>
+        <Tag className={cn('display-type mt-4 text-balance', titleClassName)}>{title}</Tag>
       </div>
       {(lede || meta) && (
         <div className="lg:pb-1">
@@ -103,7 +107,7 @@ export function SectionHeading({
       title={title}
       lede={lede}
       align={align}
-      titleClassName="text-title"
+      titleClassName="text-[36px] leading-[1.06] sm:text-title"
       className={className}
     />
   )

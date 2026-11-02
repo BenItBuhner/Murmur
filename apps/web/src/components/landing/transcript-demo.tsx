@@ -41,7 +41,7 @@ export function TranscriptDemo() {
         <div className="px-4 pb-1">
           <div className="eyebrow mb-2">What landed where your cursor was</div>
           {TYPED.map((line) => (
-            <p key={line} className="serif-display text-heading">
+            <p key={line} className="display-type text-heading">
               {line}
             </p>
           ))}

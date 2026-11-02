@@ -1,13 +1,22 @@
 import type { Metadata, Viewport } from 'next'
-import { Inter, Instrument_Serif } from 'next/font/google'
+import { Inter, Inter_Tight, Instrument_Serif } from 'next/font/google'
 import type { ReactNode } from 'react'
 import { SiteFooter } from '@/components/site-footer'
 import { SiteHeader } from '@/components/site-header'
 import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, siteUrl } from '@/lib/site'
 import './globals.css'
 
-/* Instrument Serif is the display face the desktop and Android apps ship; Inter is their body face. */
+/*
+ * Inter is the apps' body face. The site sets headlines in Inter Tight and keeps Instrument Serif,
+ * the apps' display face, for one italic accent word per headline.
+ */
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+const interTight = Inter_Tight({
+  subsets: ['latin'],
+  weight: ['500', '600', '700'],
+  variable: '--font-inter-tight',
+  display: 'swap'
+})
 const instrumentSerif = Instrument_Serif({
   subsets: ['latin'],
   weight: '400',
@@ -35,8 +44,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f5f4f2' },
-    { media: '(prefers-color-scheme: dark)', color: '#1c1b1a' }
+    { media: '(prefers-color-scheme: light)', color: '#0e0c16' },
+    { media: '(prefers-color-scheme: dark)', color: '#0e0c16' }
   ],
   width: 'device-width',
   initialScale: 1
@@ -44,7 +53,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${instrumentSerif.variable} h-full`}>
+    <html
+      lang="en"
+      className={`${inter.variable} ${interTight.variable} ${instrumentSerif.variable} h-full`}
+    >
       <body className="flex min-h-full flex-col">
         <SiteHeader />
         <main className="flex-1">{children}</main>

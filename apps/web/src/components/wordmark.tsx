@@ -37,12 +37,14 @@ export function Mark({
   )
 }
 
-/** Mark plus the name, set in the display serif exactly as the apps set it. */
+/** Mark plus the name in the display face, semibold and tracked in. */
 export function Wordmark({ className, id }: { className?: string; id?: string }) {
   return (
     <span className={cn('inline-flex items-center gap-2.5', className)}>
-      <Mark id={id} />
-      <span className="serif-display text-[27px] leading-none tracking-[-0.02em]">Murmur</span>
+      <Mark id={id} size={28} />
+      <span className="font-display text-[21px] leading-none font-semibold tracking-[-0.035em]">
+        Murmur
+      </span>
     </span>
   )
 }

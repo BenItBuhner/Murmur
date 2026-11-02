@@ -7,7 +7,8 @@ import { cn } from '@/lib/cn'
  * ghost (bare text); raised is a tonal button that sits on a well, lifted like the apps' switch
  * thumb. None of them draws an edge.
  */
-export type ButtonVariant = 'primary' | 'brand' | 'tonal' | 'raised' | 'ghost'
+export type ButtonVariant =
+  'primary' | 'brand' | 'tonal' | 'raised' | 'ghost' | 'light' | 'night-ghost'
 export type ButtonSize = 'sm' | 'md' | 'lg'
 
 const BASE =
@@ -17,16 +18,20 @@ const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-primary text-primary-foreground hover:bg-primary/88',
   // The site's main call to action: brand ink with a soft voice glow (Aurora).
   brand:
-    'bg-brand-ink text-white shadow-[0_10px_30px_-10px_var(--brand-violet)] hover:bg-brand-ink/90 hover:shadow-[0_14px_36px_-10px_var(--brand-violet)]',
+    'bg-brand-ink text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_10px_30px_-12px_var(--brand-violet)] hover:bg-brand-ink/90 hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_14px_36px_-10px_var(--brand-violet)]',
+  // On night: a white pill with ink text, the strongest thing on a dark band.
+  light:
+    'bg-white text-[oklch(0.17_0.03_285)] shadow-[0_8px_24px_-10px_rgb(255_255_255/0.45)] hover:bg-white/90',
+  'night-ghost': 'text-night-muted hover:bg-white/8 hover:text-white',
   tonal: 'well text-foreground hover:bg-accent',
   raised: 'bg-card text-foreground shadow-raised hover:bg-accent',
   ghost: 'text-muted-foreground hover:bg-accent hover:text-foreground'
 }
 
 const SIZES: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3.5 text-note',
+  sm: 'h-8 px-3.5 text-note font-semibold',
   md: 'h-9 px-4.5 text-body',
-  lg: 'h-12 px-7 text-lead'
+  lg: 'h-12 px-6 text-body font-semibold'
 }
 
 export function buttonClasses(

@@ -56,7 +56,7 @@ export function LegalDocument({
               id={section.id}
               className="scroll-mt-24 py-row first:pt-0 last:pb-0"
             >
-              <h2 className="serif-display text-heading">
+              <h2 className="display-type text-heading">
                 <span className="mr-3 text-muted-foreground tabular-nums">{index + 1}.</span>
                 {section.title}
               </h2>

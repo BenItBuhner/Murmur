@@ -13,7 +13,7 @@ the voice gradient (coral `#FF8A6B` into violet `#8B5CFF` into indigo `#5B3DF5`)
 - Minimum size 16 px. Clear space: a quarter of the tile on every side.
 - The tile always carries the gradient; don't flatten it to one colour or put the m on a photo.
 
-**Wordmark.** The mark, then "Murmur" in Instrument Serif at 27 px, tracking -0.02em, as the apps set the name.
+**Wordmark.** The mark, then "Murmur" in Inter Tight SemiBold at 21 px, tracking -0.035em.
 
 **Voice.** Quiet, exact and checkable. Say what happens to your words and where they go; point to the source when a
 claim can be checked. No "magic", no "10x".
@@ -25,10 +25,33 @@ claim can be checked. No "magic", no "10x".
 
 ## Type (site)
 
-The site now reads larger than the apps, because a page is read at arm's length and an app panel is glanced at:
-caption 12, meta 13, note 14.5, body 16, lead 18 px (sans, Inter); heading 27, numeral 34, title 44, display 60,
-hero 80 px (Instrument Serif). Muted text is darker (`oklch(0.45 0.012 60)` in light mode). Eyebrows are 600 weight
-in brand ink (brand violet in dark mode).
+Second pass (Nov 2026): the condensed serif headlines read as an editorial blog and looked cramped, so headlines
+move to a clean sans and the serif becomes a single accent.
+
+| Role | Face | Size / weight |
+|---|---|---|
+| Hero | Inter Tight | 44 / 64 / 80 px by breakpoint, 600, -0.03em, line height 1.02 |
+| Section title | Inter Tight | 36 px mobile, 44 px desktop, 600, -0.03em |
+| Card title | Inter Tight | 27 px, 600 |
+| Accent word | Instrument Serif italic | one word per headline, 1.06-1.08em, on the voice gradient |
+| Body | Inter | 16 px; lead 18 px; notes 14.5 px with 1.65 line height |
+| Eyebrow | Inter | 12 px, 600, 0.12em tracking, uppercase, brand ink (violet on night) |
+
+Instrument Serif stays the apps' display face; on the site it only carries the accent word.
+
+## Page rhythm
+
+The page alternates two grounds so it never reads as one long beige column:
+
+- **Night** (`--night`, `oklch(0.145 0.02 285)`): header, hero stage, the engine, the closing band, the footer.
+- **Canvas** (`--background`, a cool near-white): steps, destinations, models, platforms, principles.
+
+The hero is a stage: headline centred, then the product at work. A compose window shows the text Murmur typed, the
+dictation pill floats at its bottom edge as on a real desktop, and two night-glass notes show the raw transcript
+(removed words struck through in coral) and the verifier's checks for the same pair.
+
+Cards are white with a 1 px hairline plus a soft shadow (`--elevation-raised`); nested panels are tinted, never
+grey boxes. Step and principle cards carry a visual or an icon, not only text.
 
 ## Brand layer
 
@@ -49,9 +72,14 @@ The site shares its tokens with the desktop and Android apps (see the header of 
 
 - `brand-text`: one italic word per headline in the violet-to-coral gradient. It is only used on display sizes, where 3:1 applies.
 - `aurora`: two blurred, slowly drifting glows behind the hero's transcript demo and in the closing band.
-- `voice-wave` (`components/landing/voice-wave.tsx`): a spoken line drawn across the bottom of the hero and through the closing band. It is two copies of one path, so the drift loops without a seam.
+- `hero-glow`, `hero-grid`, `cta-glow`: the violet bloom with a coral ember and a faint dot grid on the night bands.
+- `stage-frame`, `stage-card`: the product window and the night-glass notes beside it.
+- `spoken-cut`: words the engine removed, struck through in coral.
+- `voice-wave` is no longer used on the home page.
 - `night-band`: the final call to action as a dark violet band, in both colour schemes.
-- `Button` variant `brand`: brand ink with a soft violet glow. It is used for Download in the header, the hero and the closing band. Every other button keeps the app variants.
+- `Button` variants: `light` (white pill on night: Download in the header, hero and closing band), `night-ghost`
+  (outlined on night), `brand` (brand ink on the canvas, for the account call to action). Every other button keeps
+  the app variants.
 
 All motion stops under `prefers-reduced-motion`.
 
@@ -64,3 +92,5 @@ axe-core flagged three issues on the home page. They predate this proposal and a
 - The transcript demo's `<dl>` wrapped `dt`/`dd` in an extra `div`. The status dot now sits inside the `dt`.
 
 axe-core (WCAG 2 A and AA) is now clean on `/`, `/download`, `/pricing` and `/account`.
+
+Second pass: axe-core is clean on `/`, `/download` and `/account` (`/pricing` is off while billing is off).

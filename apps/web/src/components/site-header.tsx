@@ -4,13 +4,14 @@ import { Container } from '@/components/ui/section'
 import { Wordmark } from '@/components/wordmark'
 import { navLinks } from '@/lib/site'
 
+/* The header is a strip of night glass on every page, so the mark always sits on the same ground. */
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">
+    <header className="sticky top-0 z-40 border-b border-night-line bg-night text-night-foreground">
       <Container className="flex h-16 items-center justify-between gap-4">
         <Link
           href="/"
-          className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+          className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/40"
           aria-label="Murmur home"
         >
           <Wordmark />
@@ -24,7 +25,7 @@ export function SiteHeader() {
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-full px-3.5 py-1.5 text-note font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground"
+                className="rounded-full px-3.5 py-1.5 text-note font-medium text-night-muted transition-colors duration-200 hover:bg-white/8 hover:text-white"
               >
                 {item.label}
               </Link>
@@ -32,10 +33,10 @@ export function SiteHeader() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <ButtonLink href="/account" variant="ghost" size="sm">
+          <ButtonLink href="/account" variant="night-ghost" size="sm">
             Account
           </ButtonLink>
-          <ButtonLink href="/download" variant="brand" size="sm">
+          <ButtonLink href="/download" variant="light" size="sm">
             Download
           </ButtonLink>
         </div>

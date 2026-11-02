@@ -3,11 +3,11 @@ import type { ComponentProps, ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 
 /*
- * Buttons are pills, as in the apps: filled (primary), tonal (a well that darkens on hover) and
+ * Buttons are pills, as in the apps: filled (primary), brand (the website's main call to action), tonal (a well that darkens on hover) and
  * ghost (bare text); raised is a tonal button that sits on a well, lifted like the apps' switch
  * thumb. None of them draws an edge.
  */
-export type ButtonVariant = 'primary' | 'tonal' | 'raised' | 'ghost'
+export type ButtonVariant = 'primary' | 'brand' | 'tonal' | 'raised' | 'ghost'
 export type ButtonSize = 'sm' | 'md' | 'lg'
 
 const BASE =
@@ -15,6 +15,9 @@ const BASE =
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-primary text-primary-foreground hover:bg-primary/88',
+  // The site's main call to action: brand ink with a soft voice glow (Aurora).
+  brand:
+    'bg-brand-ink text-white shadow-[0_10px_30px_-10px_var(--brand-violet)] hover:bg-brand-ink/90 hover:shadow-[0_14px_36px_-10px_var(--brand-violet)]',
   tonal: 'well text-foreground hover:bg-accent',
   raised: 'bg-card text-foreground shadow-raised hover:bg-accent',
   ghost: 'text-muted-foreground hover:bg-accent hover:text-foreground'

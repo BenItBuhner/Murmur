@@ -49,7 +49,7 @@ export function Engine() {
               key={stage.title}
               className="grid grid-cols-[3.25rem_1fr] gap-x-4 sm:grid-cols-[4rem_1fr]"
             >
-              <span className="serif-display pt-0.5 text-numeral text-muted-foreground/60 tabular-nums">
+              <span className="serif-display pt-0.5 text-numeral text-brand-violet tabular-nums">
                 {String(i + 1).padStart(2, '0')}
               </span>
               <div>
@@ -93,7 +93,9 @@ export function Engine() {
               <div className="h-2" />
             </div>
             <div className="mt-2 rounded-md bg-record/10 px-4 py-3.5 text-note">
-              <span className="font-medium text-record">Caught:</span>{' '}
+              <span className="font-medium text-[oklch(0.5_0.19_32)] dark:text-record">
+                Caught:
+              </span>{' '}
               <span className="text-foreground/85">
                 for “five thousand, five thousand” the model wrote a single{' '}
                 <span className="font-medium tabular-nums">5,000</span>. Signature{' '}

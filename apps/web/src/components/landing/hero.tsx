@@ -5,6 +5,7 @@ import { formatDate } from '@/lib/format'
 import type { ReleaseManifest } from '@/lib/releases'
 import { repoUrl } from '@/lib/site'
 import { TranscriptDemo } from './transcript-demo'
+import { VoiceWave } from './voice-wave'
 
 /**
  * The sentence before "MIT licensed" in the note under the hero's buttons: the pricing pitch while
@@ -16,12 +17,14 @@ export function heroNote(selling: boolean): string {
 
 export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
   return (
-    <div className="pt-10 pb-8 sm:pt-16 sm:pb-12">
+    <div className="relative isolate pt-10 pb-24 sm:pt-16 sm:pb-32">
+      <VoiceWave className="bottom-0 opacity-60" />
       <Container className="grid items-center gap-14 lg:grid-cols-2 lg:gap-16">
         <div className="stagger max-w-xl">
           <div className="eyebrow">Voice dictation · Windows, Linux, Android</div>
-          <h1 className="serif-display mt-5 text-title text-balance sm:text-display">
-            Hold a key. Speak. The words <em className="italic">land</em> where your cursor is.
+          <h1 className="serif-display mt-5 text-title text-balance sm:text-display xl:text-hero">
+            Hold a key. Speak. The words <em className="brand-text italic">land</em> where your
+            cursor is.
           </h1>
           <p className="mt-6 max-w-lg text-lead text-pretty text-muted-foreground">
             Murmur turns what you say into clean, punctuated text and types it into whatever you are
@@ -30,7 +33,7 @@ export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
             invented or lost.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <ButtonLink href="/download" size="lg">
+            <ButtonLink href="/download" variant="brand" size="lg">
               Download Murmur
             </ButtonLink>
             <ButtonLink href="/#engine" variant="tonal" size="lg">
@@ -60,7 +63,8 @@ export function Hero({ manifest }: { manifest: ReleaseManifest | null }) {
             .
           </p>
         </div>
-        <div className="animate-rise-in pt-6 lg:pt-0 [animation-delay:160ms]">
+        <div className="relative animate-rise-in pt-6 lg:pt-0 [animation-delay:160ms]">
+          <div className="aurora" aria-hidden="true" />
           <TranscriptDemo />
         </div>
       </Container>

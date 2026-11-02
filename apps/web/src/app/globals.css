@@ -81,6 +81,19 @@
   --sidebar: oklch(0.95 0.003 85);
   --overlay: oklch(0.18 0 0);
   --overlay-foreground: oklch(1 0 0);
+
+  /*
+   * Aurora: the website's brand layer (site only; the apps keep the neutral palette). A voice
+   * glow from violet to the record coral, used for the hero, the brand button and one italic word
+   * per headline. Text never sits on the gradient except white on brand-ink.
+   */
+  --brand-violet: oklch(0.56 0.2 295);
+  --brand-coral: oklch(0.68 0.19 35);
+  --brand-ink: oklch(0.36 0.15 290);
+  --brand-glow: oklch(0.62 0.2 300 / 0.3);
+  --night: oklch(0.17 0.02 290);
+  --night-foreground: oklch(0.96 0.01 290);
+  --night-muted: oklch(0.76 0.03 290);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -113,6 +126,9 @@
     --warning: oklch(0.8 0.15 75);
     --info: oklch(0.7 0.14 250);
     --sidebar: oklch(0.125 0.004 60);
+    --brand-violet: oklch(0.7 0.17 295);
+    --brand-ink: oklch(0.5 0.17 290);
+    --brand-glow: oklch(0.62 0.2 300 / 0.3);
   }
 }
 
@@ -186,6 +202,8 @@
   --text-title--line-height: 1.05;
   --text-display: 56px;
   --text-display--line-height: 1;
+  --text-hero: 76px;
+  --text-hero--line-height: 0.98;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -213,10 +231,37 @@
   --color-sidebar: var(--sidebar);
   --color-overlay: var(--overlay);
   --color-overlay-foreground: var(--overlay-foreground);
+  --color-brand-violet: var(--brand-violet);
+  --color-brand-coral: var(--brand-coral);
+  --color-brand-ink: var(--brand-ink);
+  --color-night: var(--night);
+  --color-night-foreground: var(--night-foreground);
+  --color-night-muted: var(--night-muted);
 
   --animate-rise-in: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
   --animate-pill-bar: pill-bar 1.15s ease-in-out infinite;
   --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
+  --animate-aurora: aurora 14s ease-in-out infinite alternate;
+}
+
+@keyframes aurora {
+  0% {
+    transform: translate3d(-4%, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, -3%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(-1%, 3%, 0) scale(0.98);
+  }
+}
+@keyframes wave-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }
 
 @keyframes rise-in {
@@ -267,6 +312,57 @@
   letter-spacing: -0.015em;
   line-height: 1.05;
   font-feature-settings: normal;
+}
+
+/* One word of a headline carries the voice: violet into coral. */
+@utility brand-text {
+  background-image: linear-gradient(100deg, var(--brand-violet) 10%, var(--brand-coral) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  padding-right: 0.06em;
+}
+
+/*
+ * The voice glow behind the hero's demo: two soft blobs that drift slowly. Purely decorative,
+ * aria-hidden at the call site, and still under reduced motion.
+ */
+@utility aurora {
+  position: absolute;
+  inset: -12% -8%;
+  z-index: -1;
+  pointer-events: none;
+  filter: blur(48px);
+  background:
+    radial-gradient(40% 45% at 30% 40%, var(--brand-glow), transparent 70%),
+    radial-gradient(35% 40% at 70% 60%, oklch(0.68 0.19 35 / 0.2), transparent 70%);
+  animation: var(--animate-aurora);
+}
+
+/* A spoken line drawn across a band: two copies of the same wave scroll so it never ends. */
+@utility voice-wave {
+  position: absolute;
+  inset-inline: 0;
+  height: 120px;
+  pointer-events: none;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+  & > svg {
+    width: 200%;
+    height: 100%;
+    animation: wave-drift 18s linear infinite;
+  }
+}
+
+/* The night band: the closing call to action, dark in both colour schemes. */
+@utility night-band {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--night);
+  color: var(--night-foreground);
+  box-shadow: var(--elevation-overlay);
 }
 
 /*
@@ -348,6 +444,8 @@
       scroll-behavior: auto;
     }
     .stagger > *,
+    .aurora,
+    .voice-wave > svg,
     .animate-rise-in,
     .animate-pill-bar,
     .animate-pulse-soft {

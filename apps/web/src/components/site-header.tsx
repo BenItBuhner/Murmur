@@ -35,7 +35,7 @@ export function SiteHeader() {
           <ButtonLink href="/account" variant="ghost" size="sm">
             Account
           </ButtonLink>
-          <ButtonLink href="/download" size="sm">
+          <ButtonLink href="/download" variant="brand" size="sm">
             Download
           </ButtonLink>
         </div>

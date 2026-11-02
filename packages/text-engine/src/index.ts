@@ -84,6 +84,7 @@ export {
 } from './languages'
 export {
   cleanModelOutput,
+  endingCovered,
   endingKept,
   verifyOutput,
   type Verdict,

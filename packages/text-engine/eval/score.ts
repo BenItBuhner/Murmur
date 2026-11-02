@@ -8,6 +8,7 @@ import type {
   ResolvedTone
 } from '../src/types'
 import { digitSignature } from '../src/numbers'
+import { prepareTranscript } from '../src/cleanup'
 import { verifyOutput } from '../src/verify'
 
 /**
@@ -99,8 +100,9 @@ export function scoreText(
   const push = (name: string, pass: boolean, detail?: string): void => {
     checks.push({ name, pass, detail })
   }
-  // The invariants every answer must satisfy, whatever the fixture says.
-  const invariant = verifyOutput(f.transcript, text, {
+  // The invariants every answer must satisfy, whatever the fixture says. They hold against the
+  // transcript the model sees, with spoken commands such as "press enter" already taken out.
+  const invariant = verifyOutput(prepareTranscript(f.transcript).text, text, {
     language: f.context.language,
     keepVerbatim: f.context.keepVerbatim
   })

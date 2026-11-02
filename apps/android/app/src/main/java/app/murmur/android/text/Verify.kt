@@ -66,6 +66,44 @@ object Verify {
     private val CONTENT_WORD = Regex("\\p{L}+(?:['’]\\p{L}+)?")
     private val SENTENCE_SPLIT = Regex("(?<=[.!?])\\s+")
 
+    /** Words a model may drop or rewrite at the very end without losing what was said. */
+    private val ENDING_SKIP = ("you know like um uh so well okay yeah quote unquote end new line paragraph period comma " +
+        "scratch that wait actually mean percent and the of").split(" ").toSet()
+    /** Words a model writes as digits or symbols ("third" -> 3rd, "dollars" -> $). */
+    private val ENDING_NUMERIC = ("first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth " +
+        "dollars dollar bucks cents grand percent euros pounds point zero").split(" ").toSet()
+    private val ENDING_SPLIT = Regex("[^\\p{L}\\p{N}']+")
+    private val TEENTH_TIETH = Regex("(teenth|tieth)$")
+    private val DIGIT = Regex("\\d")
+
+    private fun endingNumeric(w: String): Boolean =
+        NumberSignature.isNumberWord(w) || w in ENDING_NUMERIC || (w.isNotEmpty() && w[0].isDigit()) || TEENTH_TIETH.containsMatchIn(w)
+
+    /** One spoken word against one written: the same, a number as digits, or the same first 4 letters. */
+    private fun endingSame(said: String, written: String): Boolean =
+        said == written ||
+            (endingNumeric(said) && DIGIT.containsMatchIn(written)) ||
+            (said.length >= 4 && written.length >= 4 && said.take(4) == written.take(4))
+
+    private fun endingWords(s: String): List<String> =
+        s.lowercase().replace('’', '\'').split(ENDING_SPLIT).filter { it.isNotEmpty() }
+
+    /**
+     * Does `text` still end where the speaker ended? Of the transcript's last 3 words that carry
+     * meaning, the very last must be among the output's last 4 words, or 2 of the 3 among its last
+     * 6. Mirrors the desktop engine's `endingCovered`.
+     */
+    fun endingCovered(transcript: String, text: String): Boolean {
+        val want = endingWords(transcript)
+            .filter { (endingNumeric(it) || it.replace("'", "").length >= 3) && it !in ENDING_SKIP }
+            .takeLast(3)
+        if (want.size < 2) return true
+        val out = endingWords(text)
+        if (out.takeLast(4).any { endingSame(want.last(), it) }) return true
+        val tail = out.takeLast(6)
+        return want.count { w -> tail.any { endingSame(w, it) } } >= 2
+    }
+
     data class Verdict(val ok: Boolean, val reason: String? = null, val expected: String? = null, val actual: String? = null)
 
     private fun contentWords(s: String): Set<String> {
@@ -115,6 +153,10 @@ object Verify {
 
         // Content said twice that the speaker said once (a looping or padding model).
         if (repeatedRuns(raw, text, 4).isNotEmpty()) return Verdict(false, "repeated")
+
+        // The end of what was said must still be at the end (a model that stops early, or drops
+        // the last clause, otherwise passes every check above).
+        if (!endingCovered(raw, text)) return Verdict(false, "ending-lost")
 
         for (phrase in keepVerbatim) {
             val p = phrase.trim().lowercase()

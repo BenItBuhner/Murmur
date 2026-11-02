@@ -2,6 +2,7 @@ import {
   handleChatCompletions,
   handleDictateRelease,
   handleFormat,
+  handleLayout,
   handleModels,
   handleTranscriptions,
   type Gate,
@@ -31,6 +32,7 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  *   POST /v1/audio/transcriptions
  *   POST /v1/chat/completions
  *   POST /v1/format
+ *   POST /v1/layout
  *
  * The bearer token is the same Clerk session JWT the apps already send, verified here against
  * Clerk's JWKS. Convex is asked for an account's allowance at most once every two minutes per
@@ -121,6 +123,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     if (path === '/v1/audio/transcriptions') return await handleTranscriptions(hooks, identity, request)
     if (path === '/v1/chat/completions') return await handleChatCompletions(hooks, identity, request)
     if (path === '/v1/format') return await handleFormat(hooks, identity, request)
+    if (path === '/v1/layout') return await handleLayout(hooks, identity, request)
     if (path === '/v1/dictate/release') return await handleDictateRelease(hooks, identity, request)
     return gatewayError(404, 'bad_request', 'Not found')
   } catch (err) {

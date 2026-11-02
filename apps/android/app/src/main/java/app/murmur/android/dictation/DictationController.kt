@@ -55,6 +55,7 @@ import app.murmur.android.text.STT_BASE_PROMPT
 import app.murmur.android.text.Verify
 import app.murmur.android.text.buildSttPrompt
 import app.murmur.android.text.classifyPackage
+import app.murmur.android.text.AppCategory
 import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
 import app.murmur.android.text.joinPieces
@@ -1202,6 +1203,16 @@ object DictationController {
                     else -> Unit
                 }
             }
+            // A long dictation into a document, email or notes gets paragraphs and lists, laid out
+            // on the gateway from the model's plan without a word changed (desktop: layout).
+            if (mode == FormattingMode.SMART && wantsLayout(formatted.text, app.category)) {
+                val layoutStarted = System.currentTimeMillis()
+                val laid = runCatching {
+                    withTimeoutOrNull(LAYOUT_TIMEOUT_MS) { router.formatter().layout?.invoke(formatted.text, app.category) }
+                }.getOrNull()
+                trace.step("layout", System.currentTimeMillis() - layoutStarted)
+                if (laid != null) formatted = formatted.copy(text = laid, stages = formatted.stages + "layout")
+            }
             val finished = finish(formatted.text, app.category, s.dictionaryEntries, style.trailingSpace, snippets = s.snippets)
             final = finished.text
             pressEnter = formatted.pressEnter
@@ -1442,6 +1453,16 @@ object DictationController {
 
 /** A release tail of at most this many words is formatted by rules (mirrors SHORT_TAIL_WORDS in the gateway). */
 const val SHORT_TAIL_WORDS = 6
+
+/** The longest the paragraph and list layout of a long dictation may add to its release. */
+const val LAYOUT_TIMEOUT_MS = 4_000L
+/** Below this many words a dictation is short enough to read without paragraphs (layout.ts). */
+const val LAYOUT_MIN_WORDS = 150
+
+/** Destinations where paragraphs and lists help (desktop: wantsLayout). */
+fun wantsLayout(text: String, category: AppCategory): Boolean =
+    category != AppCategory.CHAT && category != AppCategory.CODE && category != AppCategory.TERMINAL &&
+        countWords(text) >= LAYOUT_MIN_WORDS
 
 /** How long release waits for a piece's formatting still out before formatting it again. */
 const val FORMAT_RESEND_AFTER_MS = 1_500L

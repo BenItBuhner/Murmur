@@ -33,7 +33,6 @@ import {
   lastSentenceStart,
   seamContext,
   stripEcho,
-  layoutText,
   wantsLayout,
   type LayoutResult
 } from '@engine'
@@ -1397,12 +1396,9 @@ export class DictationController extends EventEmitter {
   /** Paragraphs and lists for a long dictation, within LAYOUT_TIMEOUT_MS; the text as it was otherwise. */
   private async layout(text: string, category: AppContext['category'], tag: string): Promise<LayoutResult> {
     try {
-      const llm = (await this.deps.inference.llm()).cfg
-      if (!llm.baseUrl || !llm.model) return { text, outcome: 'skipped', detail: 'no model', llmMs: 0 }
-      const laid = await within(
-        layoutText(text, category, (messages, opts) => this.deps.inference.complete(llm, messages, opts)),
-        LAYOUT_TIMEOUT_MS
-      )
+      const formatter = await this.deps.inference.formatter()
+      if (!formatter.layout) return { text, outcome: 'skipped', detail: 'no model', llmMs: 0 }
+      const laid = await within(formatter.layout(text, category), LAYOUT_TIMEOUT_MS)
       log.info(
         `session ${tag}: layout ${laid.outcome}${laid.detail ? ` (${laid.detail})` : ''} in ${laid.llmMs} ms`
       )

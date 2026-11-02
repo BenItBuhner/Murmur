@@ -132,6 +132,31 @@ object LlmClient {
         }
     }
 
+    /**
+     * Murmur's `POST /v1/layout`: paragraphs and lists for a long, formatted dictation. The answer
+     * is `{ text, outcome, detail?, llmMs }`; the gateway answers the text as it was when it can
+     * not lay it out.
+     */
+    suspend fun layout(cfg: LlmConfig, text: String, category: String): JSONObject = withContext(Dispatchers.IO) {
+        val base = normalizeBaseUrl(cfg.baseUrl)
+        if (base.isEmpty()) throw SttException("No LLM base URL configured", SttErrorKind.BAD_REQUEST)
+        val body = JSONObject().put("text", text).put("category", category)
+        val req = Request.Builder()
+            .url("$base/layout")
+            .header("Content-Type", "application/json")
+            .apply { if (cfg.apiKey.isNotEmpty()) header("Authorization", "Bearer ${cfg.apiKey}") }
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        try {
+            client(cfg.timeoutMs + 2000).newCall(req).execute().use { r ->
+                if (!r.isSuccessful) throw errorFromResponse(r.code, r.body?.string() ?: "")
+                JSONObject(r.body?.string() ?: "{}")
+            }
+        } catch (e: Exception) {
+            throw toSttException(e, "Layout request failed")
+        }
+    }
+
     suspend fun listModels(baseUrl: String, apiKey: String): List<String> = withContext(Dispatchers.IO) {
         val base = normalizeBaseUrl(baseUrl)
         if (base.isEmpty()) throw SttException("No LLM base URL configured", SttErrorKind.BAD_REQUEST)

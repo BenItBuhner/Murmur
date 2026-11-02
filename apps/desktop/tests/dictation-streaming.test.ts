@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SttError, type TranscribeOutput } from '@core/stt'
 import { defaultSettings, type Settings } from '@shared/settings'
+import { layoutText, type AppCategory } from '@engine'
 
 // The session talks to the desktop through the injector (Electron's clipboard and native key
 // synthesis) and the speech provider (HTTP). Both are replaced; everything else is the real code.
@@ -331,12 +332,15 @@ describe('precision mode formats pieces while the user speaks', () => {
     const sentence = 'We talked about the roadmap for the next quarter and what ships first.'
     provider.text = `${sentence} ${sentence} ${sentence} ${sentence} ${sentence} Part`
     const asked: string[] = []
-    const orig = { llm: inference.llm, complete: inference.complete }
-    inference.llm = (async () => ({ source: 'murmur', cfg: { baseUrl: 'http://llm.test/v1', model: 'm' } })) as never
-    inference.complete = (async (_cfg: unknown, messages: Array<{ content: string }>) => {
-      asked.push(messages[1].content)
-      return { text: '{"paragraphs":[6,12],"lists":[]}' }
-    }) as never
+    const orig = inference.formatter
+    inference.formatter = (async () => ({
+      ...(await orig()),
+      layout: (text: string, category: AppCategory) =>
+        layoutText(text, category, async (messages) => {
+          asked.push(messages[1].content)
+          return { text: '{"paragraphs":[6,12],"lists":[]}' }
+        })
+    })) as never
     try {
       controller.handle({ type: 'start', mode: 'hold' })
       recorder.feedAll()
@@ -344,8 +348,7 @@ describe('precision mode formats pieces while the user speaks', () => {
       controller.handle({ type: 'stop' })
       await settle()
     } finally {
-      inference.llm = orig.llm
-      inference.complete = orig.complete
+      inference.formatter = orig
     }
     const entry = history.list().entries[0]
     expect(asked).toHaveLength(1)

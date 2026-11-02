@@ -1121,6 +1121,60 @@ describe('POST /v1/format', () => {
   })
 })
 
+describe('POST /v1/layout', () => {
+  const sentence = 'We went over the roadmap for next quarter and what should ship first.'
+  const long = Array.from({ length: 16 }, () => sentence).join(' ')
+  const post = (text: string, category = 'document'): RequestInit => ({
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text, category })
+  })
+  const chat = (content: string): Response =>
+    jsonResponse({
+      choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 300, completion_tokens: 20, total_tokens: 320 }
+    })
+
+  it('lays out a long document dictation from the model plan, words unchanged, and bills the tokens', async () => {
+    stubEnv(LLM_ENV)
+    const calls = stubFetch(() => chat('{"paragraphs":[6,11],"lists":[]}'))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const res = await asAda.fetch('/v1/layout', post(long))
+    expect(res.status).toBe(200)
+    const out = await res.json()
+    expect(out.outcome).toBe('used')
+    expect(out.text.split('\n\n')).toHaveLength(3)
+    expect(out.text.replace(/\s+/g, ' ')).toBe(long)
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(calls[0].init.body as string).messages[1].content).toContain('[16] ')
+    const status = await asAda.query(api.inference.status, {})
+    expect(status.usage.llmTokens).toBe(320)
+  })
+
+  it('leaves chat, short text and a failing model alone, without an error', async () => {
+    stubEnv(LLM_ENV)
+    const calls = stubFetch(() => jsonResponse({ error: { message: 'down' } }, 500))
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const chatOut = await (await asAda.fetch('/v1/layout', post(long, 'chat'))).json()
+    expect(chatOut).toMatchObject({ outcome: 'skipped', text: long })
+    const short = await (await asAda.fetch('/v1/layout', post('Short one.'))).json()
+    expect(short).toMatchObject({ outcome: 'skipped', text: 'Short one.' })
+    expect(calls).toHaveLength(0)
+    const failed = await (await asAda.fetch('/v1/layout', post(long))).json()
+    expect(failed).toMatchObject({ outcome: 'failed', text: long })
+  })
+
+  it('refuses a request that is not one, and the signed out', async () => {
+    stubEnv(LLM_ENV)
+    const t = setup()
+    expect((await t.fetch('/v1/layout', post(long))).status).toBe(401)
+    const asAda = t.withIdentity(ada)
+    expect((await asAda.fetch('/v1/layout', { method: 'POST', body: '{"text":3}' })).status).toBe(400)
+  })
+})
+
 describe('Ogg Opus clips', () => {
   // Encoded by the desktop app's Opus upload path; ffprobe reads 11.0065 s.
   const ogg = new Uint8Array(readFileSync(new URL('./fixtures/jfk.ogg', import.meta.url)))

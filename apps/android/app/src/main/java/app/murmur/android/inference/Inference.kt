@@ -21,6 +21,7 @@ import app.murmur.android.stt.SttConfig
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.SttException
 import app.murmur.android.stt.TranscribeOutput
+import app.murmur.android.text.AppCategory
 import app.murmur.android.text.Engine
 import app.murmur.android.text.FormatInput
 import app.murmur.android.text.FormatResult
@@ -152,7 +153,12 @@ class Formatter(
     val source: InferenceSource,
     val format: suspend (FormatInput) -> FormatResult,
     /** A piece formatted while the user keeps talking; on Murmur it is sent as the background tier. */
-    val formatBackground: suspend (FormatInput) -> FormatResult = format
+    val formatBackground: suspend (FormatInput) -> FormatResult = format,
+    /**
+     * Paragraphs and lists for a long, formatted dictation: the laid-out text, or null to keep it
+     * as it is. Murmur's gateway only (`POST /v1/layout`, shared with the desktop app).
+     */
+    val layout: (suspend (text: String, category: AppCategory) -> String?)? = null
 )
 
 /**
@@ -318,7 +324,8 @@ class InferenceRouter(
             return Formatter(
                 InferenceSource.MURMUR,
                 format = { input -> remoteFormat(cfg, input) },
-                formatBackground = { input -> remoteFormat(cfg, input, Inference.TIER_BACKGROUND) }
+                formatBackground = { input -> remoteFormat(cfg, input, Inference.TIER_BACKGROUND) },
+                layout = { text, category -> remoteLayout(cfg, text, category) }
             )
         }
         if (cfg.baseUrl.isEmpty() || cfg.model.isEmpty()) {
@@ -341,6 +348,17 @@ class InferenceRouter(
             Log.i(TAG, "session token rejected by the gateway; refreshing and retrying")
             FormatResult.fromJson(LlmClient.format(cfg.copy(apiKey = sessionToken(true)), body, tier))
         }
+    }
+
+    private suspend fun remoteLayout(cfg: LlmConfig, text: String, category: AppCategory): String? {
+        val json = try {
+            LlmClient.layout(cfg, text, category.id)
+        } catch (e: SttException) {
+            if (e.kind != SttErrorKind.AUTH) throw e
+            LlmClient.layout(cfg.copy(apiKey = sessionToken(true)), text, category.id)
+        }
+        Log.i(TAG, "layout ${json.optString("outcome")} ${json.optString("detail")}".trim())
+        return if (json.optString("outcome") == "used") json.optString("text").ifEmpty { null } else null
     }
 
     /** Chat completion that survives an expired session token: a 401 from the gateway is retried once. */

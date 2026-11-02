@@ -344,15 +344,23 @@ data class StylePreferences(
         )
     }
 
-    /** Mutation arguments for `preferences:update`; only the sections that differ from [previous]. */
-    fun patchArgs(previous: StylePreferences?): Map<String, Any?> {
-        val formatting = mapOf(
-            "mode" to mode,
-            "tone" to tone,
-            "trailingSpace" to trailingSpace,
-            "llmInstructions" to llmInstructions,
-            "profile" to profile
-        )
+    /**
+     * Mutation arguments for `preferences:update`; only the sections that differ from [previous].
+     * The profile is left out while it is Default (a server from before profiles rejects the field,
+     * and with it the whole update) unless it is going back to Default from another profile:
+     * [serverProfile] (or [previous]) holds one, so that server knows the field.
+     */
+    fun patchArgs(previous: StylePreferences?, serverProfile: String? = null): Map<String, Any?> {
+        val sendProfile = profile != "default" ||
+            (serverProfile != null && serverProfile != "default") ||
+            (previous != null && previous.profile != "default")
+        val formatting = buildMap<String, Any?> {
+            put("mode", mode)
+            put("tone", tone)
+            put("trailingSpace", trailingSpace)
+            put("llmInstructions", llmInstructions)
+            if (sendProfile) put("profile", profile)
+        }
         val args = LinkedHashMap<String, Any?>()
         if (previous == null || previous.copy(language = language, historySync = historySync) != this) args["formatting"] = formatting
         if (previous == null || previous.language != language) args["language"] = language

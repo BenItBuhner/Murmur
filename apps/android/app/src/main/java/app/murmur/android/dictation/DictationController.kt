@@ -66,6 +66,7 @@ import app.murmur.android.text.seamContext
 import app.murmur.android.text.stripEcho
 import app.murmur.android.text.resolveStyle
 import app.murmur.android.text.Layout
+import app.murmur.android.text.layoutPossible
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -1530,9 +1531,7 @@ const val LAYOUT_MIN_WORDS = 150
  * at the release, so a chat dictation would wait for it.
  */
 fun wantsLayout(text: String, category: AppCategory, layout: Layout? = null): Boolean =
-    layout != Layout.MINIMAL &&
-        category != AppCategory.CHAT && category != AppCategory.CODE && category != AppCategory.TERMINAL &&
-        countWords(text) >= LAYOUT_MIN_WORDS
+    layoutPossible(category, layout) && countWords(text) >= LAYOUT_MIN_WORDS
 
 /** How long release waits for a piece's speech still out before sending it again. */
 const val PIECE_RESEND_AFTER_MS = 3_000L

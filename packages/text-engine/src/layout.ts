@@ -28,10 +28,14 @@ export function wantsLayout(text: string, category: AppCategory, layout?: Layout
   return layoutPossible(category, layout) && countWords(text) >= LAYOUT_MIN_WORDS
 }
 
-/** Would a long enough dictation into `category` get the layout pass at all? */
+/**
+ * Would a long enough dictation into `category` get the layout pass at all? Never in chat, even
+ * with a structured profile: the pass can run at the key-up, and chat is where a wait shows most.
+ * There the "Layout" line of the formatting request (no extra round trip) is all a profile adds.
+ */
 export function layoutPossible(category: AppCategory, layout?: Layout): boolean {
-  if (layout === 'minimal' || category === 'code' || category === 'terminal') return false
-  return category !== 'chat' || layout === 'structured'
+  if (layout === 'minimal') return false
+  return category !== 'chat' && category !== 'code' && category !== 'terminal'
 }
 
 export interface LayoutUnit {

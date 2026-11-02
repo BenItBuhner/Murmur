@@ -57,7 +57,7 @@ async function upsertRule(
     formatting: input.formatting,
     trailingSpace: input.trailingSpace,
     speed: input.speed,
-    profile: input.profile?.trim() || undefined,
+    profile: input.profile?.trim().slice(0, 64) || undefined,
     lists: input.lists,
     numbers: input.numbers,
     freedom: input.freedom,

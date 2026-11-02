@@ -397,7 +397,7 @@ fun finish(
         if (one != out) stages.add("terminal")
         out = one
     }
-    val cased = applyCasing(out, casing, category)
+    val cased = applyCasing(out, casing, category, dictionary.map { it.word })
     if (cased != out) stages.add("casing")
     out = cased
     val expanded = expandSnippets(out, snippets, snippetContext)

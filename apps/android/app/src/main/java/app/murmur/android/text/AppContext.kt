@@ -86,10 +86,11 @@ data class FormatStyle(
      */
     val speed: SttSpeed = SttSpeed.NORMAL,
     /** The profile in effect: the rule's, else the global one (desktop: `ResolvedStyle.profile`). */
-    val profile: Profile = Profiles.DEFAULT
+    val profile: Profile = Profiles.DEFAULT,
+    /** The profile's casing where it applies: the global profile's in chat only, a rule's anywhere. */
+    val casing: Casing = profile.casing
 ) {
     val layout: Layout get() = profile.layout
-    val casing: Casing get() = profile.casing
     val grammar: Grammar get() = profile.grammar
 
     /**
@@ -115,8 +116,11 @@ fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
     val rule = findRule(s.appRules, ctx)
     val ruleProfile = rule?.profile?.takeIf { it.isNotEmpty() }?.let { Profiles.of(it) }
     val globalProfile = Profiles.of(s.profile)
-    val tone = listOfNotNull(rule?.tone, ruleProfile?.tone, s.tone, globalProfile.tone)
-        .firstOrNull { it != Tone.AUTO } ?: autoTone(ctx.category)
+    // A rule that picks a profile replaces the global tone and profile (desktop: resolveStyle).
+    val tones = if (ruleProfile != null) listOfNotNull(rule.tone, ruleProfile.tone)
+    else listOfNotNull(rule?.tone, s.tone, globalProfile.tone)
+    val tone = tones.firstOrNull { it != Tone.AUTO } ?: autoTone(ctx.category)
+    val profile = ruleProfile ?: globalProfile
     val instructions = listOf(s.llmInstructions.trim(), rule?.instructions?.trim() ?: "")
         .filter { it.isNotEmpty() }
         .joinToString("\n\n")
@@ -126,7 +130,8 @@ fun resolveStyle(s: MurmurSettings, ctx: AppContext): FormatStyle {
         instructions = instructions,
         trailingSpace = rule?.trailingSpace ?: s.trailingSpace,
         rule = rule,
-        profile = ruleProfile ?: globalProfile,
+        profile = profile,
+        casing = if (ruleProfile != null || ctx.category == AppCategory.CHAT) profile.casing else Casing.STANDARD,
         // One automatic mode since 0.6.23 (desktop: `effectiveSpeed`): a stored Fast, on the device
         // or a rule, runs as Normal and no longer turns AI formatting off.
         speed = SttSpeed.NORMAL

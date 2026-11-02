@@ -1,5 +1,13 @@
 import { profileOf, type ProfileId } from './profiles'
-import type { AppCategory, Casing, FormattingMode, Grammar, Layout, ResolvedTone, Tone } from './types'
+import type {
+  AppCategory,
+  Casing,
+  FormattingMode,
+  Grammar,
+  Layout,
+  ResolvedTone,
+  Tone
+} from './types'
 
 export interface AppContext {
   app: string
@@ -112,8 +120,10 @@ export function findRule<R extends StyleRule>(rules: readonly R[], ctx: AppConte
 
 /**
  * Precedence: the matching per-app rule, then the global settings, then the destination's
- * defaults. Within each level an explicit tone wins over the one its profile carries, so a rule
- * that picks a profile overrides a global tone, and a tone set on the rule overrides its profile.
+ * defaults. Within each level an explicit tone wins over the one its profile carries. A rule that
+ * picks a profile replaces the global tone and profile altogether (Default on a rule means "adapt
+ * to this app", whatever the global choice). The global profile's casing applies in chat only;
+ * a rule's applies wherever the rule does.
  */
 export function resolveStyle<R extends StyleRule>(
   prefs: StylePrefs,
@@ -124,10 +134,10 @@ export function resolveStyle<R extends StyleRule>(
   const profile = profileOf(rule?.profile || prefs.profile)
   const ruleProfile = rule?.profile ? profileOf(rule.profile) : undefined
   const globalProfile = profileOf(prefs.profile)
-  const tone =
-    [rule?.tone, ruleProfile?.tone, prefs.tone, globalProfile.tone].find(
-      (t): t is ResolvedTone => !!t && t !== 'auto'
-    ) ?? autoTone(ctx.category)
+  const tones = ruleProfile
+    ? [rule?.tone, ruleProfile.tone]
+    : [rule?.tone, prefs.tone, globalProfile.tone]
+  const tone = tones.find((t): t is ResolvedTone => !!t && t !== 'auto') ?? autoTone(ctx.category)
   const instructions = [prefs.instructions.trim(), rule?.instructions?.trim() ?? '']
     .filter(Boolean)
     .join('\n\n')
@@ -139,7 +149,7 @@ export function resolveStyle<R extends StyleRule>(
     trailingSpace: rule?.trailingSpace ?? prefs.trailingSpace,
     profile: profile.id,
     layout: profile.layout,
-    casing: profile.casing,
+    casing: ruleProfile || ctx.category === 'chat' ? profile.casing : 'standard',
     grammar: profile.grammar
   }
 }

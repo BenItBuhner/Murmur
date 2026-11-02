@@ -55,6 +55,16 @@ describe('resolveStyle with profiles', () => {
     expect(t({ tone: 'neutral', profile: 'polished' })).toBe('neutral')
     expect(t({ profile: 'polished' })).toBe('professional')
     expect(t({})).toBe('casual')
+    // Default picked on the rule means "adapt to this app", whatever the global profile or tone.
+    expect(t({ profile: 'polished' }, { profile: 'default' })).toBe('casual')
+    expect(t({ tone: 'neutral' }, { profile: 'default' })).toBe('casual')
+  })
+
+  it("the global profile's casing applies in chat; a rule's applies wherever it matches", () => {
+    expect(resolveStyle(prefs({ profile: 'casual' }), [], slack).casing).toBe('lowercase')
+    expect(resolveStyle(prefs({ profile: 'casual' }), [], word).casing).toBe('standard')
+    const rules = [{ match: 'winword', profile: 'casual' }]
+    expect(resolveStyle(prefs(), rules, word).casing).toBe('lowercase')
   })
 
   it('an unknown profile id (from a newer build) reads as Default', () => {
@@ -88,7 +98,8 @@ describe('layout', () => {
     expect(wantsLayout(long, 'email')).toBe(true)
     expect(wantsLayout(long, 'email', 'minimal')).toBe(false)
     expect(wantsLayout(long, 'chat')).toBe(false)
-    expect(wantsLayout(long, 'chat', 'structured')).toBe(true)
+    // Never in chat: the pass can run at the key-up; the prompt's Layout line is all chat gets.
+    expect(wantsLayout(long, 'chat', 'structured')).toBe(false)
     expect(wantsLayout(long, 'code', 'structured')).toBe(false)
   })
 })
@@ -166,6 +177,22 @@ describe('casing', () => {
     expect(applyCasing("I'm in. NASA called.", 'lowercase')).toBe("I'm in. NASA called")
     expect(applyCasing('Meet at 5 p.m.', 'lowercase')).toBe('meet at 5 p.m.')
     expect(applyCasing('Wait...', 'lowercase')).toBe('wait...')
+  })
+
+  it('keeps a frequent word the text uses as a name, and dictionary words', () => {
+    expect(applyCasing('Will is coming. Ask Will about it.', 'lowercase')).toBe(
+      'Will is coming. ask Will about it'
+    )
+    expect(applyCasing('Apple shipped it.', 'lowercase', 'chat', ['Apple'])).toBe(
+      'Apple shipped it'
+    )
+    const out = finish('Apple shipped it.', {
+      category: 'chat',
+      dictionary: [{ word: 'Apple', aliases: [] }],
+      trailingSpace: false,
+      casing: 'lowercase'
+    })
+    expect(out.text).toBe('Apple shipped it')
   })
 
   it('keeps the period on multi-line text and leaves standard casing alone', () => {

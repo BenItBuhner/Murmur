@@ -125,6 +125,10 @@ class CloudSyncTest {
         // The global profile is a style preference like the tone.
         assertEquals("casual", (base.copy(profile = "casual").patchArgs(base)["formatting"] as Map<*, *>)["profile"])
         assertTrue(base.patchArgs(base).isEmpty())
+        // Default is left out (a server from before profiles rejects the field) unless going back to it.
+        assertFalse((base.patchArgs(null)["formatting"] as Map<*, *>).containsKey("profile"))
+        assertEquals("default", (base.patchArgs(base.copy(profile = "casual"))["formatting"] as Map<*, *>)["profile"])
+        assertEquals("default", (base.patchArgs(null, serverProfile = "casual")["formatting"] as Map<*, *>)["profile"])
 
         val applied = applyRemotePreferences(
             MurmurSettings(),

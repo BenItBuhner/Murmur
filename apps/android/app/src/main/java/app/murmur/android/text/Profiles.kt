@@ -96,10 +96,13 @@ fun grammarLine(grammar: Grammar?): String =
 fun addsParagraphs(layout: ResolvedLayout): Boolean =
     layout == ResolvedLayout.BALANCED || layout == ResolvedLayout.STRUCTURED
 
-/** Would a long enough dictation into [category] get the layout pass at all (desktop: layoutPossible)? */
+/**
+ * Would a long enough dictation into [category] get the layout pass at all (desktop:
+ * layoutPossible)? Never in chat, even when structured: there the prompt's Layout line is all.
+ */
 fun layoutPossible(category: AppCategory, layout: Layout?): Boolean {
-    if (layout == Layout.MINIMAL || category == AppCategory.CODE || category == AppCategory.TERMINAL) return false
-    return category != AppCategory.CHAT || layout == Layout.STRUCTURED
+    if (layout == Layout.MINIMAL) return false
+    return category != AppCategory.CHAT && category != AppCategory.CODE && category != AppCategory.TERMINAL
 }
 
 /** Frequent message openers COMMON_WORDS leaves out (it skips some short function words). */
@@ -115,18 +118,25 @@ private val SENTENCE_START = Regex("((?:^|\\n)\\s*(?:[-*•]\\s+|\\d{1,3}[.)]\\s
 private val FINAL_PERIOD = Regex("[^.]\\.$")
 private val INITIALISM_END = Regex("\\b\\p{L}\\.\\p{L}\\.$")
 
+/** Capitalized after a word or a comma somewhere in [text]: a name ("Will"), not a sentence start. */
+private fun capitalizedMidSentence(word: String, text: String): Boolean =
+    Regex("""[\p{L}\p{N},;:]\s+""" + Regex.escape(word) + """(?![\p{L}'’])""").containsMatchIn(text)
+
 /**
  * Lower-case casing, the "very casual" chat style: sentence starts lose their capital (frequent
- * words only, so names, "I" and acronyms keep theirs) and a one-line message loses its final
+ * words only, so names, "I" and acronyms keep theirs, as do words the text capitalizes
+ * mid-sentence and the dictionary's [keep]) and a one-line message loses its final
  * period. Mirrors `applyCasing` in profiles.ts.
  */
-fun applyCasing(text: String, casing: Casing?, category: AppCategory? = null): String {
+fun applyCasing(text: String, casing: Casing?, category: AppCategory? = null, keep: Collection<String> = emptyList()): String {
     if (casing != Casing.LOWERCASE || category == AppCategory.CODE || category == AppCategory.TERMINAL) return text
     var out = SENTENCE_START.replace(text) { m ->
         val sep = m.groupValues[1]
         val word = m.groupValues[2]
         val lower = word.lowercase()
-        if (word == "I" || Regex("^i['’]").containsMatchIn(lower) || !lowerable(lower)) m.value else sep + lower
+        if (word == "I" || Regex("^i['’]").containsMatchIn(lower) || !lowerable(lower)) m.value
+        else if (word in keep || capitalizedMidSentence(word, text)) m.value
+        else sep + lower
     }
     val trimmed = out.trimEnd()
     if (!trimmed.contains('\n') && FINAL_PERIOD.containsMatchIn(trimmed) && !INITIALISM_END.containsMatchIn(trimmed))

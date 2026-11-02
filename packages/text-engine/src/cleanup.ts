@@ -119,7 +119,12 @@ export function finish(text: string, opts: FinishOptions): Finished {
     if (one !== out) stages.push('terminal')
     out = one
   }
-  const cased = applyCasing(out, opts.casing, opts.category)
+  const cased = applyCasing(
+    out,
+    opts.casing,
+    opts.category,
+    opts.dictionary.map((d) => d.word)
+  )
   if (cased !== out) stages.push('casing')
   out = cased
   const snippets = expandSnippets(out, opts.snippets ?? [], opts.snippetContext)

@@ -1251,7 +1251,10 @@ class CloudSync internal constructor(
             is SyncOp.AppRuleRemove ->
                 convex.mutation<Boolean>("appRules:remove", mapOf("id" to op.remoteId))
             is SyncOp.PreferencesUpdate ->
-                convex.mutation<PreferencesDto>("preferences:update", op.prefs.patchArgs(null))
+                convex.mutation<PreferencesDto>(
+                    "preferences:update",
+                    op.prefs.patchArgs(null, serverPreferences?.formatting?.profile)
+                )
             is SyncOp.StatsRecord -> {
                 // The run of stats ops at the head of the queue goes in one call: an offline backlog
                 // of hundreds of dictations drains in a handful of mutations, not one per dictation.

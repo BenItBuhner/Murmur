@@ -123,21 +123,28 @@ const lowerable = (lower: string): boolean =>
 const SENTENCE_START =
   /((?:^|\n)\s*(?:[-*•]\s+|\d{1,3}[.)]\s+)?|[.!?]["')\]]*\s+)(\p{Lu}[\p{Ll}'’]*)(?![\p{L}\p{N}])/gu
 
+/** Capitalized after a word or a comma somewhere in `text`: a name ("Will", "May"), not a sentence start. */
+const capitalizedMidSentence = (word: string, text: string): boolean =>
+  new RegExp(`[\\p{L}\\p{N},;:]\\s+${word}(?![\\p{L}'’])`, 'u').test(text)
+
 /**
  * Lower-case casing, the "very casual" chat style: sentence starts lose their capital and a
  * one-line message loses its final period. Only frequent words are lowered (`COMMON_WORDS`), so
- * names, "I" and acronyms keep their capitals; "?" and "!" stay. Runs on the device after
+ * names, "I" and acronyms keep their capitals, as do a word the text capitalizes mid-sentence
+ * and the user's dictionary words (`keep`); "?" and "!" stay. Runs on the device after
  * formatting, so it needs no model and costs microseconds.
  */
 export function applyCasing(
   text: string,
   casing: Casing | undefined,
-  category?: AppCategory
+  category?: AppCategory,
+  keep: readonly string[] = []
 ): string {
   if (casing !== 'lowercase' || category === 'code' || category === 'terminal') return text
   let out = text.replace(SENTENCE_START, (m, sep: string, word: string) => {
     const lower = word.toLowerCase()
     if (word === 'I' || /^i['’]/.test(lower) || !lowerable(lower)) return m
+    if (keep.includes(word) || capitalizedMidSentence(word, text)) return m
     return sep + lower
   })
   const trimmed = out.replace(/\s+$/u, '')

@@ -31,6 +31,18 @@ describe('profiles in settings and sync', () => {
     expect(toFormattingPatch({ profile: 'polished' })).toEqual({ profile: 'polished' })
   })
 
+  it('Default is not sent (a server from before profiles rejects the field) unless going back to it', () => {
+    const a = defaultSettings()
+    expect(extractPreferences(a).formatting).not.toHaveProperty('profile')
+    const toned = { ...a, formatting: { ...a.formatting, tone: 'neutral' as const } }
+    expect(
+      preferencesPatch(extractPreferences(a), extractPreferences(toned)).formatting
+    ).not.toHaveProperty('profile')
+    const casual = { ...a, formatting: { ...a.formatting, profile: 'casual' } }
+    const back = preferencesPatch(extractPreferences(casual), extractPreferences(a))
+    expect(back.formatting?.profile).toBe('default')
+  })
+
   it("a rule's profile syncs with the rule, and only when it is set", () => {
     const base = { id: 'r1', match: 'slack', tone: 'auto' as const }
     expect(sameAppRule(base, { ...base, profile: 'casual' })).toBe(false)

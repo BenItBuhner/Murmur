@@ -611,6 +611,16 @@
       "result": "- eggs\n- milk"
     },
     {
+      "text": "Will is coming. Ask Will about it.",
+      "category": null,
+      "result": "Will is coming. ask Will about it"
+    },
+    {
+      "text": "So we left. Then, So what?",
+      "category": null,
+      "result": "So we left. then, So what?"
+    },
+    {
       "text": "Sounds good.",
       "category": "code",
       "result": "Sounds good."

@@ -8,8 +8,11 @@ import app.murmur.android.text.AppContext
 import app.murmur.android.text.Casing
 import app.murmur.android.text.Layout
 import app.murmur.android.text.finish
+import app.murmur.android.text.layoutPossible
 import app.murmur.android.text.resolveStyle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Profiles resolve as on the desktop (packages/text-engine/tests/profiles.test.ts). */
@@ -47,6 +50,24 @@ class ProfilesTest {
         assertEquals(Tone.NEUTRAL, tone(MurmurSettings(tone = Tone.NEUTRAL, profile = "polished")))
         assertEquals(Tone.PROFESSIONAL, tone(MurmurSettings(profile = "polished")))
         assertEquals(Tone.CASUAL, tone(MurmurSettings()))
+        // Default picked on the rule means "adapt to this app", whatever the global choice.
+        assertEquals(Tone.CASUAL, tone(MurmurSettings(profile = "polished"), AppRule("r", "slack", profile = "default")))
+        assertEquals(Tone.CASUAL, tone(MurmurSettings(tone = Tone.NEUTRAL), AppRule("r", "slack", profile = "default")))
+    }
+
+    @Test
+    fun `the global casing applies in chat, a rule's wherever it matches`() {
+        assertEquals(Casing.LOWERCASE, resolveStyle(MurmurSettings(profile = "casual"), slack).casing)
+        assertEquals(Casing.STANDARD, resolveStyle(MurmurSettings(profile = "casual"), gmail).casing)
+        val rule = MurmurSettings(appRules = listOf(AppRule("r", "gmail", profile = "casual")))
+        assertEquals(Casing.LOWERCASE, resolveStyle(rule, gmail).casing)
+    }
+
+    @Test
+    fun `no layout pass in chat, even structured`() {
+        assertFalse(layoutPossible(AppCategory.CHAT, Layout.STRUCTURED))
+        assertTrue(layoutPossible(AppCategory.EMAIL, null))
+        assertFalse(layoutPossible(AppCategory.EMAIL, Layout.MINIMAL))
     }
 
     @Test

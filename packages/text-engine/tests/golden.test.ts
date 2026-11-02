@@ -117,6 +117,8 @@ const CASING_CASES: Array<[string, string?]> = [
   ['First line.\nSecond line.'],
   ['Will you be there. My bad.'],
   ['- Eggs\n- Milk'],
+  ['Will is coming. Ask Will about it.'],
+  ['So we left. Then, So what?'],
   ['Sounds good.', 'code']
 ]
 

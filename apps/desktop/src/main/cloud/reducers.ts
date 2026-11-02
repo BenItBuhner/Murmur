@@ -54,7 +54,8 @@ export interface SyncedFormatting {
   tone: Settings['formatting']['tone']
   trailingSpace: boolean
   llmInstructions: string
-  profile: Settings['formatting']['profile']
+  /** Absent while Default (see extractPreferences). */
+  profile?: Settings['formatting']['profile']
 }
 
 export interface SyncedPreferences {
@@ -391,7 +392,9 @@ export function extractPreferences(s: Settings): SyncedPreferences {
       tone: f.tone,
       trailingSpace: f.trailingSpace,
       llmInstructions: f.instructions,
-      profile: f.profile
+      // Left out while Default: a server from before profiles rejects the field, and with it the
+      // whole update. preferencesPatch sends 'default' when going back from another profile.
+      ...(f.profile && f.profile !== 'default' ? { profile: f.profile } : {})
     },
     language: s.stt.language,
     sync: { history: s.cloud.historySync }
@@ -409,7 +412,10 @@ export function preferencesPatch(
 ): RemotePreferences {
   const patch: RemotePreferences = {}
   if (JSON.stringify(prev.formatting) !== JSON.stringify(next.formatting))
-    patch.formatting = next.formatting
+    patch.formatting =
+      prev.formatting.profile !== undefined && next.formatting.profile === undefined
+        ? { ...next.formatting, profile: 'default' }
+        : next.formatting
   if (prev.language !== next.language) patch.language = next.language
   if (prev.sync.history !== next.sync.history) patch.sync = { history: next.sync.history }
   return patch

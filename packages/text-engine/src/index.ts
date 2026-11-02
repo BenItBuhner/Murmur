@@ -131,3 +131,14 @@ export {
   stripEcho,
   type SeamJoin
 } from './seam'
+export {
+  LAYOUT_MIN_WORDS,
+  applyLayout,
+  buildLayoutMessages,
+  layoutText,
+  parseLayout,
+  splitUnits,
+  wantsLayout,
+  type LayoutPlan,
+  type LayoutResult
+} from './layout'

@@ -32,7 +32,10 @@ import {
   joinSeam,
   lastSentenceStart,
   seamContext,
-  stripEcho
+  stripEcho,
+  layoutText,
+  wantsLayout,
+  type LayoutResult
 } from '@engine'
 import {
   FAST_SKIP_DETAIL,
@@ -999,6 +1002,18 @@ export class DictationController extends EventEmitter {
           softLimit = planLimitOf(err)
         }
       }
+      // A long dictation into a document, email or notes gets paragraphs and lists, laid out from
+      // the model's plan without changing a word (the formatting prompt never adds paragraphs).
+      if (mode === 'smart' && wantsLayout(formatted.text, app.category)) {
+        const laid = await this.layout(formatted.text, app.category, job.id.slice(0, 8))
+        formatted = {
+          ...formatted,
+          llmMs: formatted.llmMs + laid.llmMs,
+          ...(laid.outcome === 'used'
+            ? { text: laid.text, stages: [...formatted.stages, 'layout'] }
+            : {})
+        }
+      }
       const finished = finish(formatted.text, {
         category: app.category,
         dictionary: s.dictionary,
@@ -1379,6 +1394,25 @@ export class DictationController extends EventEmitter {
     return out
   }
 
+  /** Paragraphs and lists for a long dictation, within LAYOUT_TIMEOUT_MS; the text as it was otherwise. */
+  private async layout(text: string, category: AppContext['category'], tag: string): Promise<LayoutResult> {
+    try {
+      const llm = (await this.deps.inference.llm()).cfg
+      if (!llm.baseUrl || !llm.model) return { text, outcome: 'skipped', detail: 'no model', llmMs: 0 }
+      const laid = await within(
+        layoutText(text, category, (messages, opts) => this.deps.inference.complete(llm, messages, opts)),
+        LAYOUT_TIMEOUT_MS
+      )
+      log.info(
+        `session ${tag}: layout ${laid.outcome}${laid.detail ? ` (${laid.detail})` : ''} in ${laid.llmMs} ms`
+      )
+      return laid
+    } catch (err) {
+      log.warn(`session ${tag}: layout skipped: ${friendlyError(err)}`)
+      return { text, outcome: 'failed', detail: friendlyError(err), llmMs: 0 }
+    }
+  }
+
   private async transcribeWithFallback(
     wav: Uint8Array,
     prompt: string | undefined,
@@ -1597,6 +1631,8 @@ async function releasePlan(
   if (!head) return null
   return { prefix: f.text.slice(at), before: head, format: {} }
 }
+/** The longest the paragraph and list layout of a long dictation may add to its release. */
+export const LAYOUT_TIMEOUT_MS = 4_000
 /** How long release waits for a piece still out before sending it again (racing the original). */
 export const PIECE_RESEND_AFTER_MS = 3_000
 /** How long release waits for a piece's formatting still out before formatting it again. */

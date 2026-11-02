@@ -327,6 +327,32 @@ describe('precision mode formats pieces while the user speaks', () => {
     expect(text).toContain('[piece 1]')
     expect(text).toContain('[piece 2]')
   })
+  it('a long dictation gets paragraphs from a layout plan without a word changed', async () => {
+    const sentence = 'We talked about the roadmap for the next quarter and what ships first.'
+    provider.text = `${sentence} ${sentence} ${sentence} ${sentence} ${sentence} Part`
+    const asked: string[] = []
+    const orig = { llm: inference.llm, complete: inference.complete }
+    inference.llm = (async () => ({ source: 'murmur', cfg: { baseUrl: 'http://llm.test/v1', model: 'm' } })) as never
+    inference.complete = (async (_cfg: unknown, messages: Array<{ content: string }>) => {
+      asked.push(messages[1].content)
+      return { text: '{"paragraphs":[6,12],"lists":[]}' }
+    }) as never
+    try {
+      controller.handle({ type: 'start', mode: 'hold' })
+      recorder.feedAll()
+      await new Promise((r) => setTimeout(r, 30))
+      controller.handle({ type: 'stop' })
+      await settle()
+    } finally {
+      inference.llm = orig.llm
+      inference.complete = orig.complete
+    }
+    const entry = history.list().entries[0]
+    expect(asked).toHaveLength(1)
+    expect(entry.stages).toContain('layout')
+    expect(entry.finalText).toContain('\n\n')
+    expect(entry.finalText.replace(/\s+/g, ' ')).toBe(entry.finalText.replace(/\n\n/g, ' '))
+  })
 })
 
 describe('speculating on the tail while the user speaks', () => {

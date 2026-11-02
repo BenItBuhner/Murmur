@@ -1,0 +1,92 @@
+import { describe, expect, it } from 'vitest'
+import { applyLayout, itemText, layoutText, parseLayout, splitUnits } from '../src/layout'
+import type { Complete } from '../src/types'
+
+const long = (n: number): string =>
+  Array.from(
+    { length: n },
+    (_, i) => `This is sentence number ${i + 1} of the update and it goes on a while.`
+  ).join(' ')
+
+describe('splitting into sentences', () => {
+  it('keeps the line breaks the text already had', () => {
+    const u = splitUnits('One. Two!\n\nThree?\n- four\n- five')
+    expect(u.map((x) => [x.text, x.hardBreak, x.listLine])).toEqual([
+      ['One.', '', false],
+      ['Two!', '', false],
+      ['Three?', '\n\n', false],
+      ['- four', '\n', true],
+      ['- five', '\n', true]
+    ])
+  })
+})
+
+describe('reading the model answer', () => {
+  it('takes 1-based numbers, drops what is out of range or overlapping', () => {
+    const plan = parseLayout(
+      'Sure: {"paragraphs":[1,3,3,9,99],"lists":[{"items":[4,5,6],"end":7,"ordered":true},{"items":[6,8]}]}',
+      10
+    )
+    expect(plan).toEqual({
+      paragraphs: [2, 8],
+      lists: [{ items: [3, 4, 5], end: 6, ordered: true }]
+    })
+  })
+
+  it('is null for anything that is not a layout', () => {
+    expect(parseLayout('I cannot help with that.', 5)).toBeNull()
+    expect(parseLayout('{not json', 5)).toBeNull()
+  })
+})
+
+describe('laying out', () => {
+  const units = splitUnits(
+    'Here is the plan. We have three phases. First, design in March. Second, build in April. And finally, launch in May. Next, hiring. We need two engineers. Both start in June.'
+  )
+
+  it('puts paragraphs and list items on their own lines, without changing a word', () => {
+    const text = applyLayout(units, {
+      paragraphs: [5],
+      lists: [{ items: [2, 3, 4], end: 4, ordered: true }]
+    })
+    expect(text).toBe(
+      'Here is the plan. We have three phases.\n\n1. Design in March.\n2. Build in April.\n3. Launch in May.\n\nNext, hiring. We need two engineers. Both start in June.'
+    )
+  })
+
+  it('ignores a plan that breaks after nearly every sentence', () => {
+    const text = applyLayout(units, { paragraphs: [1, 2, 3, 4, 5, 6, 7], lists: [] })
+    expect(text).not.toContain('\n')
+  })
+
+  it('removes only the spoken cue from an item', () => {
+    expect(itemText('number two, email the vendor.')).toBe('Email the vendor.')
+    expect(itemText('First of all, we ship.')).toBe('We ship.')
+    expect(itemText('Firstly.')).toBe('Firstly.')
+    expect(itemText('the first thing is speed.')).toBe('The first thing is speed.')
+  })
+})
+
+describe('layoutText', () => {
+  const answer =
+    (text: string): Complete =>
+    async () => ({ text })
+
+  it('lays out a long document dictation', async () => {
+    const r = await layoutText(long(30), 'document', answer('{"paragraphs":[8,16,24],"lists":[]}'))
+    expect(r.outcome).toBe('used')
+    expect(r.text.split('\n\n')).toHaveLength(4)
+    expect(r.text.replace(/\s+/g, ' ')).toBe(long(30))
+  })
+
+  it('leaves chat, short text and failures alone', async () => {
+    const plan = answer('{"paragraphs":[8],"lists":[]}')
+    expect((await layoutText(long(30), 'chat', plan)).outcome).toBe('skipped')
+    expect((await layoutText(long(3), 'document', plan)).outcome).toBe('skipped')
+    const r = await layoutText(long(30), 'document', async () => {
+      throw new Error('503')
+    })
+    expect(r).toMatchObject({ outcome: 'failed', text: long(30) })
+    expect((await layoutText(long(30), 'notes', answer('no'))).outcome).toBe('failed')
+  })
+})

@@ -30,6 +30,7 @@ import {
   stripPromptEcho,
   joinPieces,
   joinSeam,
+  rawSeamContinues,
   lastSentenceStart,
   seamContext,
   stripEcho,
@@ -185,7 +186,7 @@ async function formatLong(formatter: Formatter, input: FormatInput): Promise<For
 }
 
 /** Pieces formatted separately, joined in order with their seams repaired; the last decides Enter. */
-function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
+function joinFormatted(parts: FormatOutcome[], continues: readonly boolean[] = []): FormatOutcome {
   const rank: Record<string, number> = {
     used: 0,
     'skipped-clean': 1,
@@ -200,10 +201,16 @@ function joinFormatted(parts: FormatOutcome[]): FormatOutcome {
   const stages: string[] = []
   for (const p of parts) for (const st of p.stages) if (!stages.includes(st)) stages.push(st)
   return {
-    text: joinPieces(parts.map((p) => p.text)).text,
+    text: joinPieces(
+      parts.map((p) => p.text),
+      continues
+    ).text,
     pressEnter: parts[parts.length - 1].pressEnter,
     modelText: parts.every((p) => p.modelText !== undefined)
-      ? joinPieces(parts.map((p) => p.modelText!)).text
+      ? joinPieces(
+          parts.map((p) => p.modelText!),
+          continues
+        ).text
       : undefined,
     llmMs: parts[parts.length - 1].llmMs,
     // A piece the model left as it was, or a short tail formatted by rules, does not make the
@@ -607,7 +614,7 @@ export class DictationController extends EventEmitter {
           session.streamLayout = new RollingLayout(
             app.category,
             (text) => this.layout(text, app.category, tag),
-            (parts) => joinFormatted(parts).text
+            (parts, continues) => joinFormatted(parts, continues).text
           )
         const prompt = s.stt.useDictionaryPrompt
           ? buildSttPrompt(
@@ -625,8 +632,8 @@ export class DictationController extends EventEmitter {
         undefined
       formats[index] = new Promise((r) => (settle = r))
       formats[index].then(
-        (v) => session.streamLayout?.settle(index, v),
-        () => session.streamLayout?.settle(index, null)
+        (v) => session.streamLayout?.settle(index, v, partialTexts[index] ?? ''),
+        () => session.streamLayout?.settle(index, null, '')
       )
       const own = transcribeOnly(pcm, index)
       own.catch(() => undefined)
@@ -1394,8 +1401,17 @@ export class DictationController extends EventEmitter {
       tag
     )
     const parts = pieces.filter((p): p is FormatOutcome => p !== 'empty')
+    // What the recognizer heard at each seam, so formatting each piece alone (which gives the next
+    // piece a capital) does not close a sentence the speaker never closed.
+    const raws = stt.streamed.texts.filter((_, i) => pieces[i] !== 'empty')
     const piecesDone = parts.length
-    if (specHead) parts.push(specHead)
+    if (specHead) {
+      parts.push(specHead)
+      raws.push(stt.streamed.spec?.text ?? '')
+    }
+    const continues = raws.slice(0, -1).map((raw, k) => rawSeamContinues(raw, raws[k + 1]))
+    // The tail after a speculation starts at a sentence start; after the pieces, at the cut.
+    if (tailFormat && !specHead) continues.push(rawSeamContinues(raws[raws.length - 1] ?? '', tail))
     if (tailFormat) {
       try {
         let t = await tailFormat
@@ -1414,7 +1430,7 @@ export class DictationController extends EventEmitter {
     log.info(
       `session ${tag}: ${parts.length - (tailFormat ? 1 : 0)} piece(s) formatted while speaking; tail formatted at release`
     )
-    const joined = joinFormatted(parts)
+    const joined = joinFormatted(parts, continues)
     // The pieces were laid out while the user spoke: the newest answer that has arrived is used,
     // and what was said after it (the last pieces and the tail) joins it as it is. Nothing waits
     // for a layout at release.
@@ -1425,9 +1441,12 @@ export class DictationController extends EventEmitter {
       early &&
       early.parts <= piecesDone &&
       early.laid.outcome === 'used' &&
-      joinFormatted(parts.slice(0, early.parts)).text === early.prefix
+      joinFormatted(parts.slice(0, early.parts), continues).text === early.prefix
     ) {
-      done.text = joinPieces([early.laid.text, ...parts.slice(early.parts).map((p) => p.text)]).text
+      done.text = joinPieces(
+        [early.laid.text, ...parts.slice(early.parts).map((p) => p.text)],
+        continues.slice(early.parts - 1)
+      ).text
       done.stages = [...joined.stages, 'layout']
       done.llmMs += early.laid.llmMs
     }

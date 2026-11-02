@@ -87,7 +87,7 @@ private fun looksLikeName(word: String, vararg texts: String): Boolean {
     return texts.any { re.containsMatchIn(it) }
 }
 
-fun joinSeam(prev: String, next: String): SeamJoin {
+fun joinSeam(prev: String, next: String, continues: Boolean = false): SeamJoin {
     var h = prev.trimEnd()
     var t = next.trimStart()
     if (t.isEmpty()) return SeamJoin(h, 0, false)
@@ -157,7 +157,7 @@ fun joinSeam(prev: String, next: String): SeamJoin {
     val endsBare = !Regex("""[.!?…:;,"')\]]$""").containsMatchIn(h)
     val firstAtStart = first != null && first.start == 0
     val nextLower = firstAtStart && first!!.text[0].isLowerCase()
-    val midSentence = deduped > 0 || Regex("""(\.{2,}|…)["')\]]*$""").containsMatchIn(h) ||
+    val midSentence = continues || deduped > 0 || Regex("""(\.{2,}|…)["')\]]*$""").containsMatchIn(h) ||
         (last != null && last.key in CONTINUATION && !capitalizedMidSentence(h, last)) || nextLower
     var joined = false
     if (firstAtStart && midSentence && (endsSoft || endsBare)) {
@@ -177,18 +177,34 @@ fun joinSeam(prev: String, next: String): SeamJoin {
 
 data class PiecesJoin(val text: String, val deduped: Int, val joined: Int)
 
-fun joinPieces(pieces: List<String>): PiecesJoin {
+/** [continues] k: the seam after pieces k ran a sentence on in the raw speech (see rawSeamContinues). */
+fun joinPieces(pieces: List<String>, continues: List<Boolean> = emptyList()): PiecesJoin {
     var text = ""
     var deduped = 0
     var joined = 0
-    for (p in pieces) {
+    for ((i, p) in pieces.withIndex()) {
         if (p.isBlank()) continue
-        val j = joinSeam(text, p)
+        // The seam before this piece: the one after the last non-empty piece before it.
+        var k = i - 1
+        while (k >= 0 && pieces[k].isBlank()) k--
+        val j = joinSeam(text, p, k >= 0 && continues.getOrElse(k) { false })
         text = j.text
         deduped += j.deduped
         if (j.joined) joined++
     }
     return PiecesJoin(text.trim(), deduped, joined)
+}
+
+/**
+ * Whether the recognizer's own pieces say a sentence runs on across this cut: the next piece starts
+ * in lower case, or joining the two raw pieces repaired a sentence the cut had closed. Formatting
+ * each piece alone loses this (it gives the next piece a capital). Desktop: rawSeamContinues.
+ */
+fun rawSeamContinues(prev: String, next: String): Boolean {
+    val n = next.trim()
+    if (prev.isBlank() || n.isEmpty()) return false
+    if (Regex("""[!?]["')\]]*$""").containsMatchIn(prev.trim())) return false
+    return n[0].isLowerCase() || joinSeam(prev, next).joined
 }
 
 /** The end of the piece before, from its last sentence start, at most [maxWords] words. */

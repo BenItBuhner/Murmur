@@ -1,4 +1,10 @@
-import { countWords, wantsLayout, type AppCategory, type LayoutResult } from '@engine'
+import {
+  countWords,
+  rawSeamContinues,
+  wantsLayout,
+  type AppCategory,
+  type LayoutResult
+} from '@engine'
 import type { FormatOutcome } from '../inference/router'
 
 /** A layout answer for the first `parts` formatted pieces, whose joined text was `prefix`. */
@@ -20,6 +26,8 @@ export const RELAYOUT_WORDS = 100
  */
 export class RollingLayout {
   private settled: Array<FormatOutcome | 'empty' | null | undefined> = []
+  /** Each piece's text as the recognizer gave it, for how its seams join. */
+  private raws: string[] = []
   private running = false
   private latest: LaidPrefix | null = null
   private laidWords = 0
@@ -29,13 +37,14 @@ export class RollingLayout {
   constructor(
     private readonly category: AppCategory,
     private readonly layout: (text: string) => Promise<LayoutResult>,
-    private readonly join: (parts: FormatOutcome[]) => string,
+    private readonly join: (parts: FormatOutcome[], continues: boolean[]) => string,
     private minNewWords = RELAYOUT_WORDS
   ) {}
 
   /** Piece `index` was formatted ('empty': no speech; null: not formatted, which stops the layout there). */
-  settle(index: number, value: FormatOutcome | 'empty' | null): void {
+  settle(index: number, value: FormatOutcome | 'empty' | null, raw = ''): void {
     this.settled[index] = value
+    this.raws[index] = raw
     this.kick()
   }
 
@@ -53,14 +62,18 @@ export class RollingLayout {
   private kick(): void {
     if (this.running) return
     const parts: FormatOutcome[] = []
-    for (const v of this.settled) {
+    const raws: string[] = []
+    for (let i = 0; i < this.settled.length; i++) {
+      const v = this.settled[i]
       if (v === undefined || v === null) break
       if (v === 'empty') continue
       if (v.status.outcome !== 'used' && v.status.outcome !== 'skipped-clean') break
       parts.push(v)
+      raws.push(this.raws[i] ?? '')
     }
     if (parts.length <= this.tried) return
-    const prefix = this.join(parts)
+    const continues = raws.slice(0, -1).map((raw, k) => rawSeamContinues(raw, raws[k + 1]))
+    const prefix = this.join(parts, continues)
     const words = countWords(prefix)
     if (words - this.laidWords < this.minNewWords || !wantsLayout(prefix, this.category)) return
     this.running = true

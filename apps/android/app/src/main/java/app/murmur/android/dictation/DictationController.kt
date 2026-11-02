@@ -60,6 +60,7 @@ import app.murmur.android.text.countWords
 import app.murmur.android.text.finish
 import app.murmur.android.text.joinPieces
 import app.murmur.android.text.joinSeam
+import app.murmur.android.text.rawSeamContinues
 import app.murmur.android.text.lastSentenceStart
 import app.murmur.android.text.seamContext
 import app.murmur.android.text.stripEcho
@@ -782,24 +783,33 @@ object DictationController {
                 scope.async { runCatching { Engine.formatTranscript(tailInput, null) } }
             else -> scope.async { runCatching { formatter.format(tailInput) } }
         }
-        val done = settleFormats(formatter, input, specs, texts, trace)
+        val settled = settleFormats(formatter, input, specs, texts, trace)
         trace?.step("waiting for formatting done while speaking", System.currentTimeMillis() - waitStarted)
+        val done = settled.filterNotNull()
         val parts = done.toMutableList()
-        specHead?.let { parts.add(it) }
+        // What the recognizer heard at each seam, so formatting each piece alone (which gives the
+        // next piece a capital) does not close a sentence the speaker never closed.
+        val raws = texts.filterIndexed { i, _ -> settled.getOrNull(i) != null }.toMutableList()
+        specHead?.let {
+            parts.add(it)
+            raws.add(specFormat?.first?.takeIf { j -> j.isCompleted && !j.isCancelled }?.let { j -> runCatching { j.await() }.getOrDefault("") } ?: "")
+        }
+        val continues = raws.zipWithNext { a, b -> rawSeamContinues(a, b) }.toMutableList()
+        if (tailJob != null && specHead == null) continues.add(rawSeamContinues(raws.lastOrNull().orEmpty(), tail))
         if (tailJob != null) parts.add(tailJob.await().getOrElse { return null }.let { it.copy(text = stripEcho(it.text, lastPiece)) })
         if (parts.isEmpty()) return null
         Log.i(TAG, "${done.size} piece(s) formatted while speaking; tail formatted at release")
         val worst = parts.maxBy { it.status.outcome.ordinal.let { o -> listOf(0, 2, 1, 3, 4)[o] } }
         val stages = LinkedHashSet<String>().apply { parts.forEach { addAll(it.stages) } }.toList()
         return FormatResult(
-            text = joinPieces(parts.map { it.text }).text,
+            text = joinPieces(parts.map { it.text }, continues).text,
             pressEnter = parts.last().pressEnter,
             // A piece the model left as it was, or a short tail formatted by rules, does not make the
             // dictation "not formatted" (desktop: joinFormatted; Oct 15: 13 formatted pieces, llmUsed=false).
             status = (parts.firstOrNull { it.status.outcome == FormatOutcome.USED }
                 ?.takeIf { worst.status.outcome in setOf(FormatOutcome.USED, FormatOutcome.SKIPPED_CLEAN, FormatOutcome.SKIPPED) }
                 ?.status?.copy(detail = "${parts.size} pieces, formatted while speaking")) ?: worst.status,
-            modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }).text else null,
+            modelText = if (parts.all { it.modelText != null }) joinPieces(parts.map { it.modelText!! }, continues).text else null,
             llmMs = parts.last().llmMs,
             stages = stages,
             limit = parts.firstNotNullOfOrNull { it.limit },
@@ -862,7 +872,7 @@ object DictationController {
         specs: List<Deferred<PieceFormat>>,
         texts: List<String>,
         trace: TraceRecorder?
-    ): List<FormatResult> = kotlinx.coroutines.coroutineScope {
+    ): List<FormatResult?> = kotlinx.coroutines.coroutineScope {
         val gate = kotlinx.coroutines.sync.Semaphore(MAX_RESENDS_IN_FLIGHT)
         val deadline = System.currentTimeMillis() + FORMAT_RESEND_AFTER_MS
         val redone = java.util.concurrent.atomic.AtomicInteger(0)
@@ -896,7 +906,7 @@ object DictationController {
                         it.copy(status = it.status.copy(outcome = FormatOutcome.FAILED, detail = "piece not formatted"))
                     }
             }
-        }.awaitAll().filterNotNull()
+        }.awaitAll()
         if (redone.get() > 0) trace?.note("${redone.get()} piece(s) formatted again at release instead of the whole text")
         results
     }

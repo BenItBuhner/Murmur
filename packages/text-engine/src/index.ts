@@ -130,6 +130,7 @@ export { isPromptEcho, stripPromptEcho } from './prompt-echo'
 export {
   joinSeam,
   joinPieces,
+  rawSeamContinues,
   lastSentenceStart,
   seamContext,
   stripEcho,

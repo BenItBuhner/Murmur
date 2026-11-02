@@ -155,7 +155,15 @@ function looksLikeName(word: string, ...texts: string[]): boolean {
  * Join two consecutive pieces of one dictation. `prev` and `next` may each be raw speech
  * recognition or formatted text.
  */
-export function joinSeam(prev: string, next: string): SeamJoin {
+export function joinSeam(
+  prev: string,
+  next: string,
+  /**
+   * The same seam in the raw speech continued a sentence (see rawSeamContinues): a period and a
+   * capital that formatting the two sides separately put back at the cut are taken out again.
+   */
+  continues = false
+): SeamJoin {
   let h = prev.trimEnd()
   let t = next.replace(/^\s+/u, '')
   if (!t) return { text: h, deduped: 0, joined: false }
@@ -233,6 +241,7 @@ export function joinSeam(prev: string, next: string): SeamJoin {
   const firstAtStart = first && first.start === 0
   const nextLower = firstAtStart && /^\p{Ll}/u.test(first.text)
   const midSentence =
+    continues ||
     deduped > 0 ||
     /(\.{2,}|…)["')\]]*$/u.test(h) ||
     (last && CONTINUATION.has(last.key) && !capitalizedMidSentence(h, last)) ||
@@ -260,7 +269,11 @@ export function joinSeam(prev: string, next: string): SeamJoin {
 }
 
 /** joinSeam over a whole list of pieces, in order. */
-export function joinPieces(pieces: readonly string[]): {
+export function joinPieces(
+  pieces: readonly string[],
+  /** continues[i]: the seam after pieces[i] continued a sentence in the raw speech. */
+  continues: readonly boolean[] = []
+): {
   text: string
   deduped: number
   joined: number
@@ -268,14 +281,31 @@ export function joinPieces(pieces: readonly string[]): {
   let text = ''
   let deduped = 0
   let joined = 0
-  for (const p of pieces) {
+  for (let i = 0; i < pieces.length; i++) {
+    const p = pieces[i]
     if (!p.trim()) continue
-    const j = joinSeam(text, p)
+    // The seam before this piece: the one after the last non-empty piece before it.
+    let k = i - 1
+    while (k >= 0 && !pieces[k].trim()) k--
+    const j = joinSeam(text, p, k >= 0 && continues[k] === true)
     text = j.text
     deduped += j.deduped
     if (j.joined) joined++
   }
   return { text: text.trim(), deduped, joined }
+}
+
+/**
+ * Whether the speech recognizer's own pieces say a sentence runs on across this cut: the next
+ * piece starts in lower case (the recognizer heard it as a continuation), or joining the two raw
+ * pieces repaired a sentence the cut had closed. Formatting each piece alone loses this (it gives
+ * the next piece a capital), so the formatted pieces are joined with it.
+ */
+export function rawSeamContinues(prev: string, next: string): boolean {
+  const n = next.trim()
+  if (!prev.trim() || !n) return false
+  if (/[!?]["')\]]*$/u.test(prev.trim())) return false
+  return /^\p{Ll}/u.test(n) || joinSeam(prev, next).joined
 }
 
 /**

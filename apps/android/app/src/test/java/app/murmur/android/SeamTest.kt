@@ -2,6 +2,7 @@ package app.murmur.android
 
 import app.murmur.android.text.joinPieces
 import app.murmur.android.text.joinSeam
+import app.murmur.android.text.rawSeamContinues
 import app.murmur.android.text.seamContext
 import app.murmur.android.text.stripEcho
 import org.junit.Assert.assertEquals
@@ -99,5 +100,20 @@ class SeamTest {
     fun `a capitalized month is not a word that carries the sentence on`() {
         assertEquals("We ship in May. Next we hire.", j("We ship in May", "Next we hire."))
         assertEquals("we should go with the second option.", j("we should go with the", "Second option."))
+    }
+
+    @Test
+    fun `formatted pieces join as the recognizer heard the seam`() {
+        // Raw: "…before it" | "starts the timer" (one sentence); formatted alone: "…before it." | "Starts…"
+        assertEquals(true, rawSeamContinues("Check the queue before it", "starts the timer."))
+        assertEquals(false, rawSeamContinues("Is it done?", "starts the timer."))
+        assertEquals(
+            "Check the queue before it starts the timer.",
+            joinPieces(listOf("Check the queue before it.", "Starts the timer."), listOf(true)).text
+        )
+        assertEquals(
+            "Check the queue. Starts the timer.",
+            joinPieces(listOf("Check the queue.", "Starts the timer."), listOf(false)).text
+        )
     }
 }

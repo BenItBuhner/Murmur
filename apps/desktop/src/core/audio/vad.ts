@@ -16,6 +16,18 @@ export function rmsDb(frame: Int16Array, start = 0, end = frame.length): number 
   return rms <= 1e-9 ? -100 : 20 * Math.log10(rms)
 }
 
+/**
+ * Each frame's level in dB (20 ms frames by default). A long recording is analyzed several times
+ * at release (threshold, speech, trim); computed once here, those passes share it.
+ */
+export function frameLevelsDb(pcm: Int16Array, sampleRate: number, frameMs = 20): Float64Array {
+  const frameLen = Math.max(1, Math.floor((sampleRate * frameMs) / 1000))
+  const frames = Math.floor(pcm.length / frameLen)
+  const levels = new Float64Array(frames)
+  for (let f = 0; f < frames; f++) levels[f] = rmsDb(pcm, f * frameLen, (f + 1) * frameLen)
+  return levels
+}
+
 export interface VadOptions {
   sampleRate: number
   thresholdDb: number
@@ -24,6 +36,8 @@ export interface VadOptions {
   paddingMs?: number
   /** Minimum voiced time to consider the clip to contain speech. */
   minSpeechMs?: number
+  /** `frameLevelsDb(pcm, sampleRate, frameMs)` of this same audio, when already computed. */
+  levels?: Float64Array
 }
 
 export interface VadResult {
@@ -43,8 +57,9 @@ export function analyze(pcm: Int16Array, opts: VadOptions): VadResult {
   let last = -1
   let peak = -100
   const frames = Math.floor(pcm.length / frameLen)
+  const levels = opts.levels?.length === frames ? opts.levels : null
   for (let f = 0; f < frames; f++) {
-    const db = rmsDb(pcm, f * frameLen, (f + 1) * frameLen)
+    const db = levels ? levels[f] : rmsDb(pcm, f * frameLen, (f + 1) * frameLen)
     if (db > peak) peak = db
     if (db >= opts.thresholdDb) {
       voicedFrames++
@@ -91,15 +106,17 @@ export function trimSilence(pcm: Int16Array, opts: VadOptions): TrimResult {
 export function adaptiveThreshold(
   pcm: Int16Array,
   sampleRate: number,
-  configuredDb: number
+  configuredDb: number,
+  levels?: Float64Array
 ): number {
   const frameLen = Math.floor((sampleRate * 20) / 1000)
   const frames = Math.floor(pcm.length / frameLen)
   if (frames < 10) return configuredDb
-  const levels: number[] = []
-  for (let f = 0; f < frames; f++) levels.push(rmsDb(pcm, f * frameLen, (f + 1) * frameLen))
-  levels.sort((a, b) => a - b)
-  const noiseFloor = levels[Math.floor(levels.length * 0.2)]
+  // A copy: the caller's levels stay in time order for the passes after this one.
+  const sorted =
+    levels?.length === frames ? Float64Array.from(levels) : frameLevelsDb(pcm, sampleRate)
+  sorted.sort()
+  const noiseFloor = sorted[Math.floor(sorted.length * 0.2)]
   // Speech is normally >12 dB above the floor; never go below what the user configured.
   return Math.max(configuredDb, noiseFloor + 12)
 }

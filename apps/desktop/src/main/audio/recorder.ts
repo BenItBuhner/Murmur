@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events'
 import { ipcMain } from 'electron'
-import { concatInt16 } from '@core/audio/wav'
 import {
   IPC,
   type AudioChunkMessage,
@@ -19,8 +18,15 @@ import {
 
 const log = createLogger('recorder')
 
+/** Room for the first 30 s; the buffer doubles from there. */
+const INITIAL_SAMPLES = SAMPLE_RATE * 30
+
 interface Capture {
-  chunks: Int16Array[]
+  /**
+   * Everything captured so far, in one buffer that grows by doubling while recording, so stopping
+   * hands the dictation over without copying it (a 25-minute one is ~48 MB).
+   */
+  pcm: Int16Array
   samples: number
   stopped: (() => void) | null
   timer: NodeJS.Timeout | null
@@ -83,7 +89,13 @@ export class Recorder extends EventEmitter {
   }
 
   start(sessionId: string, includePreBuffer: boolean): void {
-    const cap: Capture = { chunks: [], samples: 0, stopped: null, timer: null, fixture: null }
+    const cap: Capture = {
+      pcm: new Int16Array(INITIAL_SAMPLES),
+      samples: 0,
+      stopped: null,
+      timer: null,
+      fixture: null
+    }
     this.captures.set(sessionId, cap)
     if (this.testAudio) {
       this.startFixture(this.testAudio, sessionId, cap)
@@ -123,7 +135,7 @@ export class Recorder extends EventEmitter {
       // The clip lives in this process: what is due up to now lands at once, no renderer to wait for.
       cap.fixture.stop()
       this.captures.delete(sessionId)
-      return Promise.resolve(concatInt16(cap.chunks))
+      return Promise.resolve(cap.pcm.subarray(0, cap.samples))
     }
     this.overlay.send(IPC.audioStop, { sessionId })
     if (!cap) return Promise.resolve(new Int16Array(0))
@@ -131,7 +143,7 @@ export class Recorder extends EventEmitter {
       const finish = (): void => {
         if (cap.timer) clearTimeout(cap.timer)
         this.captures.delete(sessionId)
-        resolve(concatInt16(cap.chunks))
+        resolve(cap.pcm.subarray(0, cap.samples))
       }
       cap.stopped = finish
       cap.timer = setTimeout(() => {
@@ -155,19 +167,7 @@ export class Recorder extends EventEmitter {
   read(sessionId: string, from: number): Int16Array {
     const cap = this.captures.get(sessionId)
     if (!cap) return new Int16Array(0)
-    const out = new Int16Array(Math.max(0, cap.samples - from))
-    let pos = 0
-    let at = 0
-    for (const c of cap.chunks) {
-      const end = pos + c.length
-      if (end > from) {
-        const start = Math.max(0, from - pos)
-        out.set(c.subarray(start), at)
-        at += c.length - start
-      }
-      pos = end
-    }
-    return out
+    return cap.pcm.slice(Math.min(Math.max(0, from), cap.samples), cap.samples)
   }
 
   samplesFor(sessionId: string): number {
@@ -182,7 +182,14 @@ export class Recorder extends EventEmitter {
   }
 
   private push(sessionId: string, cap: Capture, pcm: Int16Array, level: number): void {
-    cap.chunks.push(pcm)
+    if (cap.samples + pcm.length > cap.pcm.length) {
+      let size = cap.pcm.length * 2
+      while (size < cap.samples + pcm.length) size *= 2
+      const grown = new Int16Array(size)
+      grown.set(cap.pcm.subarray(0, cap.samples))
+      cap.pcm = grown
+    }
+    cap.pcm.set(pcm, cap.samples)
     cap.samples += pcm.length
     this.lastLevel = level
     this.emit('chunk', sessionId, cap.samples, level)

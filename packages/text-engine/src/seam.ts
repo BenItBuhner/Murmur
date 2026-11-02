@@ -49,6 +49,28 @@ function words(s: string): Word[] {
   return out
 }
 
+/**
+ * The last `n` words of `s` (or all of them), with offsets into `s`. Only the end of the text is
+ * read: joining 80 pieces one after another must not read the whole dictation again at each seam.
+ */
+function lastWords(s: string, n: number): Word[] {
+  for (let span = 512; ; span *= 4) {
+    const from = Math.max(0, s.length - span)
+    const ws = words(s.slice(from))
+    // The first word of a window that does not reach the start may be cut; it never counts.
+    if (from > 0) ws.shift()
+    if (from === 0 || ws.length >= n) {
+      const out = ws.slice(-n)
+      if (from > 0)
+        for (const w of out) {
+          w.start += from
+          w.end += from
+        }
+      return out
+    }
+  }
+}
+
 /** How many words each side of a seam are searched for a repeat (a piece can echo a whole clause). */
 export const SEAM_WINDOW = 20
 /** Words at the end of the text before that an echo may stop short of (the model dropped or changed them). */
@@ -134,17 +156,17 @@ function looksLikeName(word: string, ...texts: string[]): boolean {
  * recognition or formatted text.
  */
 export function joinSeam(prev: string, next: string): SeamJoin {
-  let h = prev.replace(/\s+$/u, '')
+  let h = prev.trimEnd()
   let t = next.replace(/^\s+/u, '')
   if (!t) return { text: h, deduped: 0, joined: false }
   if (!h) return { text: t, deduped: 0, joined: false }
   // A line break either side already had at the cut (a paragraph, a list) survives the join.
-  const edge = (/\s+$/u.exec(prev)?.[0] ?? '') + (/^\s+/u.exec(next)?.[0] ?? '')
+  const edge = prev.slice(prev.trimEnd().length) + (/^\s+/u.exec(next)?.[0] ?? '')
   const keptBreak = edge.includes('\n') ? (/\n[^\S\n]*\n/u.test(edge) ? '\n\n' : '\n') : ''
 
   // 1. The words at the cut heard (or echoed by the formatter) by both pieces: up to
   // SEAM_WINDOW words, near-exact for long runs, possibly stopping a few words short of prev's end.
-  const hw = words(h).slice(-SEAM_WINDOW)
+  const hw = lastWords(h, SEAM_WINDOW)
   let tw = words(t).slice(0, SEAM_WINDOW)
   let deduped = 0
   const rep = findRepeat(hw, tw)
@@ -153,7 +175,8 @@ export function joinSeam(prev: string, next: string): SeamJoin {
     // next goes on with those same words, its version is kept and prev's is dropped.
     const slackWords = hw.slice(hw.length - rep.slack)
     const after = tw.slice(rep.k, rep.k + rep.slack)
-    const redone = after.length === rep.slack && slackWords.every((w, i) => sameKey(w.key, after[i].key))
+    const redone =
+      after.length === rep.slack && slackWords.every((w, i) => sameKey(w.key, after[i].key))
     if (redone) {
       h = h.slice(0, slackWords[0].start).replace(/[\s,;:]+$/u, '')
       // Drop the run itself; next carries the rest.
@@ -192,7 +215,8 @@ export function joinSeam(prev: string, next: string): SeamJoin {
   // never owed, and next opens with the one or two words that finish prev's sentence, in lower
   // case, then its own mark. Those words go back before prev's mark ("in this chat?"), so neither
   // the reader nor the formatter sees a stray fragment it might move elsewhere.
-  const frag = /^(\p{Ll}[\p{L}\p{N}'’-]*(?:\s+[\p{L}\p{N}'’-]+)?)([.?!…]+)["')\]]*\s+(?=\p{Lu})/u.exec(t)
+  const frag =
+    /^(\p{Ll}[\p{L}\p{N}'’-]*(?:\s+[\p{L}\p{N}'’-]+)?)([.?!…]+)["')\]]*\s+(?=\p{Lu})/u.exec(t)
   const hMark = /([.?!…]+)(["')\]]*)$/u.exec(h)
   if (frag && hMark) {
     const mark = hMark[1].includes('?') || frag[2].includes('?') ? '?' : frag[2]
@@ -202,8 +226,7 @@ export function joinSeam(prev: string, next: string): SeamJoin {
   }
 
   // 2. A period or ellipsis the cut put in the middle of a sentence.
-  const hWords = words(h)
-  const last = hWords[hWords.length - 1]
+  const last = lastWords(h, 1)[0]
   const first = tw[0]
   const endsSoft = /(\.{2,}|…|(?<!\.)\.)["')\]]*$/u.test(h) && !/[!?]["')\]]*$/u.test(h)
   const endsBare = !/[.!?…:;,"')\]]$/u.test(h)

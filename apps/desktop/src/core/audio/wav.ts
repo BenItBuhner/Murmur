@@ -1,8 +1,9 @@
 /** Encode mono 16-bit PCM as a RIFF/WAVE byte array. */
-export function encodeWavPcm16(pcm: Int16Array, sampleRate: number): Uint8Array {
-  const dataBytes = pcm.length * 2
-  const buffer = new ArrayBuffer(44 + dataBytes)
-  const view = new DataView(buffer)
+/** The 44-byte header of a 16-bit mono PCM WAV holding `samples` samples. */
+export function wavHeader(samples: number, sampleRate: number): Uint8Array {
+  const dataBytes = samples * 2
+  const header = new Uint8Array(44)
+  const view = new DataView(header.buffer)
   const writeStr = (offset: number, s: string): void => {
     for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i))
   }
@@ -19,10 +20,14 @@ export function encodeWavPcm16(pcm: Int16Array, sampleRate: number): Uint8Array 
   view.setUint16(34, 16, true) // bits per sample
   writeStr(36, 'data')
   view.setUint32(40, dataBytes, true)
-  const out = new Uint8Array(buffer)
+  return header
+}
+
+export function encodeWavPcm16(pcm: Int16Array, sampleRate: number): Uint8Array {
+  const out = new Uint8Array(44 + pcm.length * 2)
+  out.set(wavHeader(pcm.length, sampleRate))
   // Int16Array views may not be 2-byte aligned relative to the ArrayBuffer start (offset 44 is fine).
-  const target = new Int16Array(buffer, 44, pcm.length)
-  target.set(pcm)
+  new Int16Array(out.buffer, 44, pcm.length).set(pcm)
   return out
 }
 

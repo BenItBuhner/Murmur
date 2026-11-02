@@ -29,14 +29,16 @@ const enabled = !!process.env.MURMUR_BENCH
 const MINUTES = Number(process.env.MURMUR_BENCH_MINUTES ?? '25')
 const TRIALS = Number(process.env.MURMUR_BENCH_TRIALS ?? '5')
 const SPEED = Number(process.env.MURMUR_BENCH_SPEED ?? '1')
+/** Tail speculation, as the app runs by default; MURMUR_BENCH_SPEC=0 turns it off. */
+const SPEC = process.env.MURMUR_BENCH_SPEC !== '0'
 const SAMPLE_RATE = 16000
 
 const inject = vi.hoisted(() => ({
-  injectText: vi.fn(async (_text: string, opts: { method: string }) => ({
-    ok: true,
-    method: opts.method === 'clipboard' ? 'clipboard' : 'paste',
-    ms: 1
-  })),
+  injectedAt: 0,
+  injectText: vi.fn(async (_text: string, opts: { method: string }) => {
+    inject.injectedAt = Date.now()
+    return { ok: true, method: opts.method === 'clipboard' ? 'clipboard' : 'paste', ms: 1 }
+  }),
   readSelection: vi.fn(async () => ({ text: '', restore: () => undefined }))
 }))
 vi.mock('../../src/main/inject', () => ({
@@ -77,6 +79,8 @@ const net = vi.hoisted(() => {
     failFormat: new Set<number>(),
     /** Background format calls (1-based) still out at the key-up; they answer this long after it. */
     slowFormat: new Map<number, number>(),
+    /** Layout requests made after the key-up never answer. */
+    hangLayout: false,
     sentence: 0
   }
 })
@@ -167,7 +171,8 @@ class FakeRecorder extends EventEmitter {
     this.id = id
   }
   cancel = (): void => undefined
-  stop = async (): Promise<Int16Array> => this.pcm.slice(0, this.fed)
+  // Like the app's recorder: the samples are handed over without a copy.
+  stop = async (): Promise<Int16Array> => this.pcm.subarray(0, this.fed)
   read(_id: string, from: number): Int16Array {
     return this.pcm.slice(from, this.fed)
   }
@@ -186,6 +191,40 @@ const hook = {
   notifySessionStarted: () => undefined,
   notifySessionEnded: () => undefined
 }
+
+// The one-call release on Murmur's gateway: speech of the audio after the speculation, then
+// formatting of the speculation's last sentence + that text, on the edge.
+vi.mock('@core/stt/openai-compatible', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@core/stt/openai-compatible')>()
+  return {
+    ...actual,
+    prewarmGateway: async () => undefined,
+    dictateRelease: async (input: { wav: Uint8Array }, _cfg: unknown, prefix?: string) => {
+      const seconds = (input.wav.length - 44) / 2 / SAMPLE_RATE
+      net.releaseSttCalls++
+      const target = Math.max(1, Math.round((seconds / 60) * 150))
+      const parts: string[] = []
+      while (words(parts.join(' ')) < target) parts.push(sentence())
+      const text = parts.join(' ')
+      const transcript = `${prefix ?? ''} ${text}`.trim()
+      net.releaseFormatCalls++
+      net.releaseFormatWords += words(transcript)
+      await sleep(((600 + 25 * seconds + 5 * words(transcript)) * net.noise()) / net.speed)
+      return {
+        stt: { text, language: 'en', durationSec: seconds, latencyMs: 1 },
+        transcript,
+        format: {
+          text: transcript.charAt(0).toUpperCase() + transcript.slice(1),
+          pressEnter: false,
+          llmMs: 1,
+          status: { outcome: 'used', attempts: 1 },
+          stages: ['llm']
+        },
+        rules: false
+      }
+    }
+  }
+})
 
 interface FormatIn {
   transcript: string
@@ -223,13 +262,24 @@ const formatter = {
     }
   },
   layout: async (text: string) => {
-    await sleep(((800 + 0.2 * words(text)) * net.noise()) / net.speed)
-    return { text, outcome: 'skipped', detail: 'bench', llmMs: 1 }
+    if (!net.released) {
+      // Laid out while the user speaks, like the pieces' formatting.
+      net.inFlight++
+      try {
+        await sleep(2)
+      } finally {
+        net.inFlight--
+      }
+    } else if (net.hangLayout) await new Promise(() => undefined)
+    else await sleep(((800 + 0.2 * words(text)) * net.noise()) / net.speed)
+    return { text, outcome: 'used', llmMs: 1 }
   }
 }
 
 const inference = {
+  routing: () => ({ stt: 'murmur', llm: 'murmur' }),
   stt: async () => ({
+    source: 'murmur',
     provider: 'murmur',
     cfg: {
       kind: 'openai-compatible' as const,
@@ -299,12 +349,18 @@ interface Trial {
 
 const results: Trial[] = []
 
-async function runTrial(condition: Condition, seed: number): Promise<Trial> {
+async function runTrial(
+  condition: Condition,
+  seed: number,
+  minutes = MINUTES,
+  speed = SPEED
+): Promise<Trial> {
   net.reseed(seed)
   Object.assign(net, {
     released: false,
     releasedAt: 0,
-    speed: SPEED,
+    speed,
+    hangLayout: false,
     sttCalls: 0,
     formatCalls: 0,
     releaseSttCalls: 0,
@@ -321,7 +377,7 @@ async function runTrial(condition: Condition, seed: number): Promise<Trial> {
   try {
     const recordings = new RecordingStore(join(dir, 'recordings'))
     const history = new HistoryStore(dir, recordings)
-    const recorder = new FakeRecorder(talk(MINUTES * 60))
+    const recorder = new FakeRecorder(talk(minutes * 60))
     const controller = new DictationController({
       settings: new FakeSettings() as never,
       history,
@@ -332,7 +388,7 @@ async function runTrial(condition: Condition, seed: number): Promise<Trial> {
       overlay: { setState: () => undefined, playSound: () => undefined },
       getActiveWindow: async () => ({ title: 'Notes', app: 'notes' })
     })
-    condition.arm(Math.round(MINUTES * PIECES_PER_MIN))
+    condition.arm(Math.round(minutes * PIECES_PER_MIN))
     controller.handle({ type: 'start', mode: 'hold' })
     recorder.feedAll()
     // Let the background work finish (it would have, while the user spoke), all but a slow call.
@@ -342,11 +398,28 @@ async function runTrial(condition: Condition, seed: number): Promise<Trial> {
       quiet = net.inFlight > net.slowFormat.size ? 0 : quiet + 1
     }
     const background = { stt: net.sttCalls, format: net.formatCalls }
+    const { Session } = await import('node:inspector/promises')
+    const prof = process.env.MURMUR_BENCH_PROFILE ? new Session() : null
+    if (prof) {
+      prof.connect()
+      await prof.post('Profiler.enable')
+      await prof.post('Profiler.start')
+    }
     net.released = true
     net.releasedAt = Date.now()
     controller.handle({ type: 'stop' })
+    inject.injectedAt = 0
     for (let i = 0; i < 24000 && controller.isBusy; i++) await sleep(5)
-    const releaseMs = Date.now() - net.releasedAt
+    // Key-up to the text landing in the field: what the user waits for.
+    const releaseMs = (inject.injectedAt || Date.now()) - net.releasedAt
+    if (prof) {
+      const { profile } = await prof.post('Profiler.stop')
+      writeFileSync(
+        `${process.env.MURMUR_BENCH_PROFILE}-${seed}.cpuprofile`,
+        JSON.stringify(profile)
+      )
+      prof.disconnect()
+    }
     const entry = history.list().entries[0]
     if (process.env.MURMUR_BENCH_DEBUG)
       writeFileSync(process.env.MURMUR_BENCH_DEBUG, `${condition.name}\n${entry?.finalText}\n`, {
@@ -374,8 +447,37 @@ const pct = (xs: number[], p: number): number => {
   return s[Math.min(s.length - 1, Math.floor(p * s.length))]
 }
 
+/**
+ * Runs in CI: with the network made instant, what is left of the release is Murmur's own work
+ * (joins, silence scan, saving, finishing), which must stay well under a second however long the
+ * dictation. The budgets are several times what a laptop measures, for slower CI machines.
+ */
+describe.skipIf(enabled)('release time spent outside the network', () => {
+  const quick: Condition = { name: 'no failures', arm: () => undefined }
+  for (const [label, minutes, budgetMs] of [
+    ['a 10-second dictation', 10 / 60, 250],
+    ['a 3-minute dictation', 3, 400],
+    ['a 25-minute dictation', 25, 900]
+  ] as const)
+    it(`${label} is in the field within ${budgetMs} ms of the key-up`, async () => {
+      const trial = await runTrial(quick, 1000, minutes, 1000)
+      expect(trial.error).toBeUndefined()
+      expect(trial.words).toBeGreaterThan(0)
+      expect(trial.releaseMs).toBeLessThan(budgetMs)
+    }, 60_000)
+
+  it('a layout still out at the key-up never holds the text back', async () => {
+    const hang: Condition = { name: 'layout hangs', arm: () => (net.hangLayout = true) }
+    const trial = await runTrial(hang, 1000, 5, 1000)
+    expect(trial.error).toBeUndefined()
+    expect(trial.releaseMs).toBeLessThan(400)
+    // The pieces were laid out while recording; that answer is used.
+    expect(trial.stages).toContain('layout')
+  }, 60_000)
+})
+
 describe.skipIf(!enabled)(`release latency of a ${MINUTES}-minute dictation`, () => {
-  vi.stubEnv('MURMUR_TAIL_SPECULATION', '0')
+  if (!SPEC) vi.stubEnv('MURMUR_TAIL_SPECULATION', '0')
   for (const c of conditions)
     it(
       c.name,

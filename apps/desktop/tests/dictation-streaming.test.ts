@@ -355,7 +355,7 @@ describe('precision mode formats pieces while the user speaks', () => {
     expect(entry.stages).toContain('layout')
     expect(entry.finalText).toContain('\n\n')
     expect(entry.finalText.replace(/\s+/g, ' ')).toBe(entry.finalText.replace(/\n\n/g, ' '))
-    // The layout ran on the pieces while the tail was on its way; the tail joined its answer.
+    // The pieces were laid out while recording; the tail joined that answer, never waited on.
     expect(asked[0]).not.toContain(`Part ${provider.requests}`)
     expect(entry.finalText).toMatch(new RegExp(`Part ${provider.requests}\\.?\\]?\\.?$`))
   })

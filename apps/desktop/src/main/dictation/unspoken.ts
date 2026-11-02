@@ -36,6 +36,13 @@ export function dropUnspokenEnding<T extends TranscribeOutput & { resumed?: numb
   const phrase = trailingStockPhrase(words)
   // The whole transcript being the phrase is the "nothing heard" check's job.
   if (!phrase || phrase.count >= words.length) return out
+  // The gateway may already have removed the phrase from the text (its silent-segment and echo
+  // checks edit text and segments, not words): then the text no longer ends with it, and cutting
+  // its word count would cut real words.
+  const norm = (w: string): string => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '')
+  const tailWords = out.text.trim().split(/\s+/).slice(-phrase.count).map(norm)
+  const phraseWords = words.slice(-phrase.count).map((w) => norm(w.word))
+  if (tailWords.join(' ') !== phraseWords.join(' ')) return out
   const pitched = pitchedMs(clip, SAMPLE_RATE, phrase.start - 0.1, phrase.end + 0.1)
   if (pitched >= STOCK_PHRASE_MIN_PITCHED_MS) return out
   const text = dropLastWords(out.text, phrase.count)

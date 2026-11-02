@@ -32,6 +32,15 @@ const NOT_FRAGMENT = new Set(
   ).split(' ')
 )
 
+/**
+ * Prepositions English often leaves at a real sentence end ("someone to talk to.", "what it's
+ * for."): after one of these, a next sentence that opens with a subject or determiner is kept.
+ */
+const STRANDABLE = new Set('of to for from with at into onto'.split(' '))
+const CLAUSE_START = new Set(
+  'i you he she it we they my our your his her their this that these those there then so'.split(' ')
+)
+
 const STOP = /(\p{L}+)(['’]\p{L}+)?\.(\s+)(\p{Lu}[\p{L}'’]*)(?=(\s+([\p{L}'’]+))?)/gu
 
 function isName(word: string, text: string): boolean {
@@ -56,7 +65,7 @@ export function joinPauseStops(text: string): string {
       // "plan A. Then": a capital letter is a name for an option, not an article.
       if (clitic || !/^\p{Ll}/u.test(last)) return m
       const key = last.toLowerCase()
-      const split = SPLIT.has(key)
+      const split = SPLIT.has(key) && !(STRANDABLE.has(key) && CLAUSE_START.has(next.toLowerCase()))
       const not =
         AUXILIARY.has(key) &&
         next === 'Not' &&

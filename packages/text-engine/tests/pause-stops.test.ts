@@ -19,7 +19,6 @@ describe('joinPauseStops', () => {
     expect(joinPauseStops('Send the budget to. Sarah by Friday.')).toBe(
       'Send the budget to Sarah by Friday.'
     )
-    expect(joinPauseStops('Talk to. I mean, ask her.')).toBe('Talk to I mean, ask her.')
   })
 
   it('leaves real sentence ends alone', () => {
@@ -28,7 +27,11 @@ describe('joinPauseStops', () => {
       'I wish I could. Not today though.',
       'We went with plan A. Then it rained.',
       'Wait for it... The window.',
-      'Is it done? The build is red.'
+      'Is it done? The build is red.',
+      // A preposition left at a real sentence end, then a new subject.
+      'I need someone to talk to. My manager is out.',
+      "That's the one I was looking for. I found it.",
+      'Talk to. I mean, ask her.'
     ])
       expect(joinPauseStops(s)).toBe(s)
   })

@@ -108,3 +108,19 @@ describe('a stock phrase at the end of a transcript', () => {
     expect(out.text).toBe('They look right. Ship it.')
   })
 })
+
+describe('a phrase the gateway already removed', () => {
+  it('cuts nothing when the text no longer ends with the phrase the words still hold', () => {
+    // Voice for "Send it to me.", then a rustle under the "Thank you." the gateway removed.
+    const clip = concat(voiced(1.2), noise(0.6))
+    const out = answer('Send it to me.', [
+      ['Send', 0, 0.3],
+      ['it', 0.3, 0.5],
+      ['to', 0.5, 0.8],
+      ['me.', 0.8, 1.2],
+      ['Thank', 1.25, 1.5],
+      ['you.', 1.5, 1.8]
+    ])
+    expect(dropUnspokenEnding(out, clip).text).toBe('Send it to me.')
+  })
+})

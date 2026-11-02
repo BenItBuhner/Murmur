@@ -1023,7 +1023,9 @@ export class DictationController extends EventEmitter {
             runTail,
             tag,
             runWhole,
-            s.audio.silenceThresholdDb
+            s.audio.silenceThresholdDb,
+            // A piece sent again is plain speech: never the tail's one-call release.
+            (clip, endSec) => run(clip, endSec)
           )
         : await runWhole()
       // One answer for the whole (trimmed) clip: its timings line up with `audio`.
@@ -1163,6 +1165,8 @@ export class DictationController extends EventEmitter {
       if (
         mode === 'smart' &&
         !streamed &&
+        // A formatter that just failed is not asked again for the layout.
+        formatted.status.outcome !== 'failed' &&
         !(formatted as LaidOut).laidOut &&
         wantsLayout(formatted.text, app.category)
       ) {
@@ -1287,7 +1291,8 @@ export class DictationController extends EventEmitter {
     run: (clip: Int16Array, endSec: number) => Promise<CompleteResult>,
     tag: string,
     whole: () => Promise<CompleteResult>,
-    configuredDb = -48
+    configuredDb = -48,
+    runPiece: (clip: Int16Array, endSec: number) => Promise<CompleteResult> = run
   ): Promise<StreamedStt> {
     const sendFrom = (
       from: number
@@ -1428,7 +1433,7 @@ export class DictationController extends EventEmitter {
     const { rest, a, tail, clip } = sent
     let texts: string[]
     try {
-      texts = await this.settlePieces(streamed, pcm, threshold, run, left, tag)
+      texts = await this.settlePieces(streamed, pcm, threshold, runPiece, left, tag)
     } catch (err) {
       log.warn(
         `session ${tag}: a streamed piece failed twice; transcribing the whole dictation`,
@@ -1689,7 +1694,8 @@ export class DictationController extends EventEmitter {
         try {
           return await within(
             late ? firstOf<FormatOutcome | 'empty'>([late, again]) : again,
-            STREAM_WAIT_MS
+            // A stalled formatter gets the shared format wait (as main's release had), then rules.
+            FORMAT_WAIT_MS
           )
         } catch {
           const rules = await formatTranscript(request, null)

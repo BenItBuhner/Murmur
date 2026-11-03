@@ -1023,7 +1023,8 @@ object DictationController {
         // goes up in pieces cut at pauses, never as one request: the gateway refuses clips over
         // 600 s, and one huge request is the slowest way to get a 30-minute dictation back.
         suspend fun runWholeUntimed(): CompleteResult {
-            if (pcm.size.toDouble() / SAMPLE_RATE <= LONG_CLIP_SEC) return runStt(pcm)
+            // One answer for the whole clip: its word timings line up with `pcm`.
+            if (pcm.size.toDouble() / SAMPLE_RATE <= LONG_CLIP_SEC) return withoutUnspokenEnding(runStt(pcm), pcm)
             val started = System.currentTimeMillis()
             val texts = transcribeInPieces(pcm, SAMPLE_RATE, -48.0) { clip, _ -> runStt(clip).output.text }
             val joined = joinPieces(texts)
@@ -1137,6 +1138,8 @@ object DictationController {
                     Log.i(TAG, "dropped a stock phrase from a quiet tail")
                     last = last.copy(output = last.output.copy(text = ""))
                 }
+                // A stock phrase after real speech, with no voice under it ("...a solid week you").
+                if (last != null) last = withoutUnspokenEnding(last, rest)
                 val specText = if (specOk) streamed.specText!!.await() else null
                 if (specOk) streamedSpec = streamed.specText
                 streamedTexts = texts.getOrThrow()
@@ -1566,3 +1569,10 @@ private const val SPEC_RELEASE_GRACE_MS = 150L
 
 /** Silence at the end of a recording that makes the stop skip its post-roll. */
 private const val QUIET_STOP_MS = 300
+
+/** [result] without a stock phrase nobody said at its end (see [dropUnspokenEnding]); one answer for [clip] only. */
+private fun withoutUnspokenEnding(result: CompleteResult, clip: ShortArray): CompleteResult {
+    if (result.resumed > 0) return result
+    val text = dropUnspokenEnding(result.output.text, result.output.words, clip, SAMPLE_RATE)
+    return if (text == result.output.text) result else result.copy(output = result.output.copy(text = text))
+}

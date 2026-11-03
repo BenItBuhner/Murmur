@@ -91,6 +91,53 @@ object Wav {
         return voiced * 20
     }
 
+    /**
+     * Milliseconds of pitched sound (a voice) between [startSec] and [endSec]: 20 ms frames over
+     * [floorDb] whose autocorrelation peaks at 0.5 or more for a pitch of 80-400 Hz. Breath, clicks
+     * and rustle are loud but unpitched. Mirrors the desktop `pitchedMs`.
+     */
+    fun pitchedMs(
+        pcm: ShortArray,
+        sampleRate: Int,
+        startSec: Double = 0.0,
+        endSec: Double = pcm.size.toDouble() / sampleRate,
+        floorDb: Double = -50.0
+    ): Int {
+        val frame = sampleRate / 50
+        val minLag = sampleRate / 400
+        val maxLag = sampleRate / 80
+        val from = maxOf(0, Math.floor(startSec * sampleRate).toInt())
+        val to = minOf(pcm.size, Math.floor(endSec * sampleRate).toInt())
+        var ms = 0
+        var s = from
+        while (s + frame + maxLag <= to) {
+            var sum = 0.0
+            for (i in s until s + frame + maxLag) { val x = pcm[i] / 32768.0; sum += x * x }
+            val rms = Math.sqrt(sum / (frame + maxLag))
+            val db = if (rms <= 1e-9) -100.0 else 20 * Math.log10(rms)
+            if (db >= floorDb) {
+                var best = 0.0
+                for (lag in minLag..maxLag) {
+                    var xy = 0.0
+                    var xx = 0.0
+                    var yy = 0.0
+                    for (i in s until s + frame) {
+                        val x = pcm[i].toDouble()
+                        val y = pcm[i + lag].toDouble()
+                        xy += x * y
+                        xx += x * x
+                        yy += y * y
+                    }
+                    val r = if (xx > 0 && yy > 0) xy / Math.sqrt(xx * yy) else 0.0
+                    if (r > best) best = r
+                }
+                if (best >= 0.5) ms += 20
+            }
+            s += frame
+        }
+        return ms
+    }
+
     fun peakDb(pcm: ShortArray): Double {
         var peak = 0
         for (s in pcm) {

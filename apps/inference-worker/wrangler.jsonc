@@ -30,10 +30,13 @@
     // (murmur-fast-format), for about 50 ms more at the median (0.74 s against 0.69 s).
     "MURMUR_INFERENCE_LLM_FAST_MODEL": "complete",
     "MURMUR_INFERENCE_LLM_BG_MODEL": "complete",
-    // The release's backup formatter, on another provider than Groq so a Groq rate-limit cooldown
-    // (all Groq models at once) does not take it down too. murmur-bg-format (nvidia) took 7 s at the
-    // median and up to a minute; gemini-3.6-flash answered in about 1 s and passed 22 of 23 evals.
-    "MURMUR_INFERENCE_LLM_HEDGE_MODEL": "gemini-3.6-flash",
+    // The release's backup formatters. Nov 3 2026: with `complete` (gpt-oss-120b) rate-limited,
+    // gemini-3.6-flash hung 20-40 s on every call while murmur-fast-format (gpt-oss-20b, its own Groq
+    // quota) answered in ~0.7-1.7 s, so the quick Groq model goes first and gemini, on another
+    // provider, gets what is left of the release deadline when Groq is down as a whole (Oct 24).
+    // murmur-bg-format (nvidia) took 7 s at the median and up to a minute.
+    "MURMUR_INFERENCE_LLM_HEDGE_MODEL": "murmur-fast-format",
+    "MURMUR_INFERENCE_LLM_FALLBACK_MODEL": "gemini-3.6-flash",
     "MURMUR_INFERENCE_LLM_RELEASE_FAST": "on",
     // Where limit errors link to; same value as MURMUR_SITE_URL in the Convex deployment.
     "MURMUR_SITE_URL": "https://murmur.techlitnow.com"
@@ -41,5 +44,6 @@
   // Secrets, applied by the deploy workflow from the repository's Actions secrets (the same
   // values the Convex deployment carries): MURMUR_WORKER_SECRET, MURMUR_INFERENCE_STT_KEY,
   // MURMUR_INFERENCE_LLM_KEY. Optional vars left unset, like in Convex: MURMUR_INFERENCE_STT_PRO_MODEL,
-  // _LLM_PRO_MODEL and MURMUR_BILLING_ENABLED (billing stays off).
+  // _LLM_PRO_MODEL and MURMUR_BILLING_ENABLED (billing stays off). MURMUR_INFERENCE_LLM_RELEASE_DEADLINE_MS
+  // (default 6000) caps the time a release waits on formatting models before the rule-based text.
 }

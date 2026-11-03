@@ -536,3 +536,180 @@ describe('the gateway when its provider is slow or down', () => {
     expect(calls).toHaveLength(1)
   })
 })
+
+describe('one deadline for a release format (Nov 3 2026: primary rate-limited, backup hung)', () => {
+  const HEDGED_LLM_ENV = {
+    ...LLM_ENV,
+    MURMUR_INFERENCE_LLM_FAST_MODEL: 'complete',
+    MURMUR_INFERENCE_LLM_HEDGE_MODEL: 'backup-model',
+    MURMUR_INFERENCE_LLM_RELEASE_FAST: 'on'
+  }
+  const ok = (text: string): Response =>
+    new Response(JSON.stringify({ choices: [{ message: { content: text }, finish_reason: 'stop' }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  const routesFailed = (): Response =>
+    jsonResponse({ error: { message: "All routes failed for model 'complete'" } }, 503)
+  /** The primary fails after `failMs`; the backup never answers until the gateway aborts it. */
+  function primaryFailsBackupHangs(failMs: number) {
+    const models: string[] = []
+    const fn = vi.fn(async (_url: string, init: RequestInit = {}) => {
+      const model = (JSON.parse(String(init.body)) as { model: string }).model
+      models.push(model)
+      if (model === 'complete') {
+        await new Promise((r) => setTimeout(r, failMs))
+        return routesFailed()
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+      })
+    })
+    vi.stubGlobal('fetch', fn)
+    return { fn, models }
+  }
+
+  it('a backup that hangs after the primary failed is cut at the deadline, not given a fresh budget', async () => {
+    quiet()
+    stubEnv({ ...HEDGED_LLM_ENV, MURMUR_INFERENCE_LLM_TIMEOUT_MS: '3000', MURMUR_INFERENCE_LLM_RELEASE_DEADLINE_MS: '600' })
+    const { models } = primaryFailsBackupHangs(200)
+    const asAda = setup().withIdentity(ada)
+    const started = Date.now()
+    const res = await asAda.fetch('/v1/format', formatRequest('so um i think we should ship it tomorrow morning'))
+    const took = Date.now() - started
+    // Before: 200 ms + a fresh 3 s for the backup. Now: the 600 ms deadline, plus test overhead.
+    expect(took).toBeLessThan(1_500)
+    expect(res.status).toBe(200)
+    const out = await res.json()
+    expect(out.status).toMatchObject({ outcome: 'failed' })
+    expect(out.text.toLowerCase()).toContain('ship it tomorrow morning')
+    expect(models).toEqual(['complete', 'backup-model'])
+  })
+
+  it('does not start a call it has no time left for, and counts the request once against the breaker', async () => {
+    quiet()
+    stubEnv({ ...HEDGED_LLM_ENV, MURMUR_INFERENCE_LLM_RELEASE_DEADLINE_MS: '400' })
+    // The primary takes longer than the whole deadline to fail: no backup is started after it.
+    const { models } = primaryFailsBackupHangs(450)
+    stubEnv({ MURMUR_INFERENCE_LLM_HEDGE_MS: '5000' })
+    const t = setup()
+    const asAda = t.withIdentity(ada)
+    const res = await asAda.fetch('/v1/format', formatRequest('so um i think we should ship it tomorrow morning'))
+    expect((await res.json()).status).toMatchObject({ outcome: 'failed' })
+    expect(models).toEqual(['complete'])
+    const row = await t.run(async (ctx) => ctx.db.query('providerHealth').first())
+    expect(row).toMatchObject({ failures: 1 })
+  })
+
+  it('a healthy release, and a backup that answers in time, are untouched', async () => {
+    quiet()
+    stubEnv({ ...HEDGED_LLM_ENV, MURMUR_INFERENCE_LLM_RELEASE_DEADLINE_MS: '2000' })
+    const models: string[] = []
+    let primaryUp = true
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit = {}) => {
+        const model = (JSON.parse(String(init.body)) as { model: string }).model
+        models.push(model)
+        if (model === 'complete' && !primaryUp) return routesFailed()
+        return ok('So, I think we should ship it tomorrow morning.')
+      })
+    )
+    const asAda = setup().withIdentity(ada)
+    const healthy = await (await asAda.fetch('/v1/format', formatRequest('so um i think we should ship it tomorrow morning'))).json()
+    expect(healthy.status).toMatchObject({ outcome: 'used' })
+    expect(models).toEqual(['complete'])
+    primaryUp = false
+    models.length = 0
+    const failedOver = await (await asAda.fetch('/v1/format', formatRequest('so um i think we should ship it tomorrow morning'))).json()
+    expect(failedOver.status).toMatchObject({ outcome: 'used' })
+    expect(failedOver.text).toBe('So, I think we should ship it tomorrow morning.')
+    expect(models).toEqual(['complete', 'backup-model'])
+  })
+
+  it('background pieces keep the per-call budget (nobody is waiting on them)', async () => {
+    quiet()
+    stubEnv({
+      ...HEDGED_LLM_ENV,
+      MURMUR_INFERENCE_LLM_BG_MODEL: 'bg-model',
+      MURMUR_INFERENCE_LLM_TIMEOUT_MS: '700',
+      MURMUR_INFERENCE_LLM_RELEASE_DEADLINE_MS: '100'
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        await new Promise((r) => setTimeout(r, 300))
+        return ok('So, I think we should ship it tomorrow morning.')
+      })
+    )
+    const asAda = setup().withIdentity(ada)
+    const base = formatRequest('so um i think we should ship it tomorrow morning')
+    const req = { ...base, headers: { ...(base.headers as Record<string, string>), 'x-murmur-tier': 'background' } }
+    const out = await (await asAda.fetch('/v1/format', req)).json()
+    expect(out.status).toMatchObject({ outcome: 'used' })
+  })
+})
+
+describe('a fallback formatter after the hedge (_FALLBACK_MODEL)', () => {
+  const ENV = {
+    ...LLM_ENV,
+    MURMUR_INFERENCE_LLM_FAST_MODEL: 'complete',
+    MURMUR_INFERENCE_LLM_HEDGE_MODEL: 'quick-backup',
+    MURMUR_INFERENCE_LLM_FALLBACK_MODEL: 'other-provider',
+    MURMUR_INFERENCE_LLM_BG_MODEL: 'bg-model',
+    MURMUR_INFERENCE_LLM_RELEASE_FAST: 'on'
+  }
+  const answerFor = (down: Set<string>, models: string[]) =>
+    vi.fn(async (_url: string, init: RequestInit = {}) => {
+      const model = (JSON.parse(String(init.body)) as { model: string }).model
+      models.push(model)
+      if (down.has(model)) return jsonResponse({ error: { message: `All API keys for ${model} are in cooldown` } }, 503)
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: 'So, I think we should ship it tomorrow morning.' }, finish_reason: 'stop' }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    })
+
+  it('is asked when the release model and the hedge both failed, and its answer is used', async () => {
+    quiet()
+    stubEnv(ENV)
+    const models: string[] = []
+    vi.stubGlobal('fetch', answerFor(new Set(['complete', 'quick-backup']), models))
+    const out = await (await setup().withIdentity(ada).fetch('/v1/format', formatRequest('so um i think we should ship it tomorrow morning'))).json()
+    expect(out.status).toMatchObject({ outcome: 'used' })
+    expect(out.text).toBe('So, I think we should ship it tomorrow morning.')
+    expect(models).toEqual(['complete', 'quick-backup', 'other-provider'])
+    expect(out.trace.calls[0]).toMatchObject({ role: 'fallback', ok: true, failover: true })
+  })
+
+  it('is not asked when the hedge answered, nor for background pieces', async () => {
+    quiet()
+    stubEnv(ENV)
+    const models: string[] = []
+    vi.stubGlobal('fetch', answerFor(new Set(['complete']), models))
+    const asAda = setup().withIdentity(ada)
+    const out = await (await asAda.fetch('/v1/format', formatRequest('so um i think we should ship it tomorrow morning'))).json()
+    expect(out.trace.calls[0]).toMatchObject({ role: 'hedge', ok: true })
+    expect(models).toEqual(['complete', 'quick-backup'])
+
+    vi.stubGlobal('fetch', answerFor(new Set(['bg-model', 'quick-backup']), (models.length = 0, models)))
+    const base = formatRequest('so um i think we should ship it tomorrow morning')
+    const bg = { ...base, headers: { ...(base.headers as Record<string, string>), 'x-murmur-tier': 'background' } }
+    const piece = await (await asAda.fetch('/v1/format', bg)).json()
+    expect(piece.status).toMatchObject({ outcome: 'failed' })
+    expect(models).toEqual(['bg-model', 'quick-backup'])
+  })
+
+  it('all three down: rule-based text, one breaker failure', async () => {
+    quiet()
+    stubEnv(ENV)
+    const models: string[] = []
+    vi.stubGlobal('fetch', answerFor(new Set(['complete', 'quick-backup', 'other-provider']), models))
+    const t = setup()
+    const out = await (await t.withIdentity(ada).fetch('/v1/format', formatRequest('so um i think we should ship it tomorrow morning'))).json()
+    expect(out.status).toMatchObject({ outcome: 'failed' })
+    expect(out.text.toLowerCase()).toContain('ship it tomorrow morning')
+    expect(models).toEqual(['complete', 'quick-backup', 'other-provider'])
+    expect(await t.run(async (ctx) => ctx.db.query('providerHealth').first())).toMatchObject({ failures: 1 })
+  })
+})

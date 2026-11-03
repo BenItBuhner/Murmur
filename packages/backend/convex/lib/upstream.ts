@@ -77,6 +77,24 @@ export function sttBudgetMs(budget: SttBudget, clipSeconds: number): number {
   return Math.min(budget.maxMs, Math.round(budget.baseMs + seconds * budget.perAudioSecondMs))
 }
 
+/**
+ * Longest a release waits on formatting models in all (MURMUR_INFERENCE_LLM_RELEASE_DEADLINE_MS),
+ * across the primary, the hedge or failover and the engine's strict retry; past it the rule-based
+ * text goes out. Each call still has its own `formatMs`, but without this a primary that failed
+ * after a few seconds handed a fresh 8 s to a backup that then hung: on Nov 3 2026, with the Groq
+ * keys in their rate-limit cooldown, `complete` failed in 0.4-3 s and gemini-3.6-flash hung for
+ * 20-40 s, so releases waited ~11 s for rule-based text. A healthy release formats in ~0.75 s, a
+ * hedged one in ~2-3.5 s, and a strict retry adds about one more round trip, all inside 6 s.
+ */
+export const RELEASE_FORMAT_DEADLINE_MS = 6_000
+
+export function releaseFormatDeadlineMs(env: Record<string, string | undefined>): number {
+  return readMs(env.MURMUR_INFERENCE_LLM_RELEASE_DEADLINE_MS) ?? RELEASE_FORMAT_DEADLINE_MS
+}
+
+/** A call with less than this left before the deadline is not started: it could not answer. */
+export const MIN_CALL_MS = 300
+
 // ---- one call, with a deadline and one safe retry ---------------------------------------------
 
 /** A failure the retry was quick enough to be worth it: the whole attempt took no longer than this. */

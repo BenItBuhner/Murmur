@@ -54,12 +54,14 @@ import type { AccessState, Plan } from './plans'
 import { admitFormat, dedupeFormat, releaseFormat } from './formatGuard'
 import {
   FAILOVER_ONLY_MS,
+  MIN_CALL_MS,
   callUpstream,
   failoverWorthwhile,
   hedgeAfterMs,
   llmHedgeAfterMs,
   hedged,
   readUpstreamBudgets,
+  releaseFormatDeadlineMs,
   sttBudgetMs,
   type UnavailableReason,
   type UpstreamOutcome
@@ -90,7 +92,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' }
  */
 export const TRACE_HEADER = 'x-murmur-trace'
 
-export type ModelRole = 'fast' | 'normal' | 'pro' | 'background' | 'hedge'
+export type ModelRole = 'fast' | 'normal' | 'pro' | 'background' | 'hedge' | 'fallback'
 
 export interface CallTrace {
   /** The model that gave the answer (or the primary's, when nothing usable came back). */
@@ -109,6 +111,7 @@ export interface CallTrace {
 export function roleOf(upstream: Upstream, model: string): ModelRole {
   if (model === upstream.fastModel) return 'fast'
   if (model === upstream.hedgeModel) return 'hedge'
+  if (model === upstream.fallbackModel) return 'fallback'
   if (model === upstream.bgModel) return 'background'
   if (upstream.proModel && model === upstream.proModel) return 'pro'
   return 'normal'
@@ -753,24 +756,53 @@ async function formatOnce(
   // Assigned inside `complete`; typed through the assertion so the check below sees the union.
   let unavailable = null as UpstreamFailure | null
   const started = Date.now()
+  // Someone is waiting on a release: every model call of this request (primary, hedge or failover,
+  // strict retry, parallel pieces) shares one deadline, so a backup that hangs after the primary
+  // failed cannot hold the text back past it. Background pieces keep the per-call budget.
+  const deadline = tier === 'background' ? null : started + releaseFormatDeadlineMs(hooks.env)
+  const ask = (m: string, messages: ChatMessage[], opts: ChatOptions): ReturnType<typeof upstreamChat> => {
+    const toDeadline = deadline === null ? Infinity : deadline - Date.now()
+    if (toDeadline < MIN_CALL_MS)
+      return Promise.resolve({
+        ok: false,
+        failure: describeUpstreamOutcome('llm', { kind: 'timeout', attempts: 0, elapsedMs: 0 })
+      })
+    return upstreamChat(upstream, m, messages, opts, Math.min(budgetMs, toDeadline))
+  }
+  const canFailOver = (a: Awaited<ReturnType<typeof upstreamChat>>): boolean =>
+    !a.ok && (a.failure.unavailable !== undefined || failoverWorthwhile(a.failure.status) || a.failure.code === 'upstream_error')
   const complete = async (messages: ChatMessage[], opts: ChatOptions): Promise<ChatResult> => {
     // Once the provider said it is busy or down, the rest of this request (other pieces, the
     // strict retry) does not ask it again.
     if (unavailable) throw new UpstreamError(unavailable.message, unavailable.status, unavailable.code)
     const callStarted = Date.now()
     const other = alternate ?? failoverModel
+    // A release's last resort: when the hedge failed too, the fallback model gets what is left.
+    const last =
+      tier !== 'background' && upstream.fallbackModel && upstream.fallbackModel !== model && upstream.fallbackModel !== other
+        ? upstream.fallbackModel
+        : null
+    let otherAnswered = other
+    const askOther = async (): ReturnType<typeof upstreamChat> => {
+      const first = await ask(other!, messages, opts)
+      if (first.ok || !last || !canFailOver(first)) return first
+      console.warn(`[gateway] format ${tier} hedge failed too; asking the fallback model`)
+      const second = await ask(last, messages, opts)
+      if (second.ok) otherAnswered = last
+      return second.ok ? second : first
+    }
     const { value: answer, hedged: didHedge, winner, failover } = await hedged(
-      () => upstreamChat(upstream, model, messages, opts, budgetMs),
-      other ? () => upstreamChat(upstream, other, messages, opts, budgetMs) : null,
+      () => ask(model, messages, opts),
+      other ? askOther : null,
       // A failover-only alternate is never started on time alone.
       alternate ? hedgeMs : failoverModel ? FAILOVER_ONLY_MS : null,
       (a) => a.ok,
-      (a) => !a.ok && (a.failure.unavailable !== undefined || failoverWorthwhile(a.failure.status) || a.failure.code === 'upstream_error')
+      canFailOver
     )
     if (failover) console.warn(`[gateway] format ${tier} primary failed before the hedge; failed over, ${winner} won`)
     else if (didHedge) console.log(`[gateway] format hedged after ${hedgeMs} ms; ${winner} won`)
     calls.push({
-      role: roleOf(upstream, winner === 'alternate' && other ? other : model),
+      role: roleOf(upstream, winner === 'alternate' && otherAnswered ? otherAnswered : model),
       ms: Date.now() - callStarted,
       ok: answer.ok,
       ...(didHedge && !failover ? { hedged: true } : {}),

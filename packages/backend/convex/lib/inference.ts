@@ -62,6 +62,12 @@ export interface Upstream {
   releaseFast?: boolean
   /** `_HEDGE_MODEL`: what a slow release is hedged with, ideally a different provider pool. */
   hedgeModel?: string
+  /**
+   * `_FALLBACK_MODEL` (formatting): asked when the release model and the hedge both failed and the
+   * release deadline still leaves time. Lets the hedge be a quick model that may share the
+   * primary's rate limits while a model on another provider still gets a turn.
+   */
+  fallbackModel?: string
 }
 
 export interface Upstreams {
@@ -95,6 +101,7 @@ export function readUpstreams(env: Env): Upstreams {
     const fastModel = (env[`${prefix}_FAST_MODEL`] ?? '').trim()
     const bgModel = (env[`${prefix}_BG_MODEL`] ?? '').trim()
     const hedgeModel = (env[`${prefix}_HEDGE_MODEL`] ?? '').trim()
+    const fallbackModel = (env[`${prefix}_FALLBACK_MODEL`] ?? '').trim()
     const releaseFast = /^(on|1|true|yes)$/i.test((env[`${prefix}_RELEASE_FAST`] ?? '').trim())
     return {
       baseUrl,
@@ -104,6 +111,7 @@ export function readUpstreams(env: Env): Upstreams {
       fastModel: fastModel || undefined,
       bgModel: bgModel || undefined,
       hedgeModel: hedgeModel || undefined,
+      fallbackModel: fallbackModel || undefined,
       releaseFast: releaseFast && !!fastModel ? true : undefined,
       reasoningEffort: speedModes ? undefined : reasoningFrom(env[`${prefix}_REASONING`])
     }

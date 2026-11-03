@@ -223,6 +223,8 @@ data class TranscribeOutput(
      * speech did and resume from that point.
      */
     val spans: List<TimedSpan>? = null,
+    /** The transcript's words with their timings, when the provider gave them (Whisper's verbose answer). */
+    val words: List<TimedWord>? = null,
     /** What a Murmur instance said about the speed mode that ran; null from any other server. */
     val speed: SpeedOutcome? = null,
     /** What a Murmur instance said about the request (model, server time, hedge); null elsewhere. */
@@ -348,6 +350,7 @@ object SttClient {
                     (0 until segments.length()).sumOf { segments.getJSONObject(it).optDouble("no_speech_prob", 0.0) } / segments.length()
                 else null,
                 spans = spansFromVerbose(stt),
+                words = wordsFromVerbose(stt),
                 latencyMs = (System.nanoTime() - started) / 1_000_000,
                 speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed),
                 trace = GatewayCall.parse("speech", json.optJSONObject("timing")?.optJSONObject("stt"))
@@ -467,6 +470,7 @@ object SttClient {
             var duration: Double? = null
             var noSpeech: Double? = null
             var spans: List<TimedSpan>? = null
+            var words: List<TimedWord>? = null
             if (contentType.contains("json")) {
                 val json = JSONObject(bodyText)
                 text = json.optString("text", "")
@@ -480,6 +484,7 @@ object SttClient {
                     noSpeech = acc / segments.length()
                 }
                 spans = spansFromVerbose(json)
+                words = wordsFromVerbose(json)
             }
             return TranscribeOutput(
                 text = text.trim(),
@@ -488,6 +493,7 @@ object SttClient {
                 noSpeechProb = noSpeech,
                 latencyMs = (System.nanoTime() - started) / 1_000_000,
                 spans = spans,
+                words = words,
                 speed = SpeedOutcome.fromHeaders({ name -> r.header(name) }, cfg.speed),
                 trace = GatewayCall.fromHeader("speech", r.header(Inference.TRACE_HEADER))
             )

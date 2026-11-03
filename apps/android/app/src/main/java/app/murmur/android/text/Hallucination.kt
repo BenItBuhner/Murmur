@@ -98,4 +98,27 @@ object Hallucination {
         }
         return out.append(text.substring(from)).toString()
     }
+
+    /** Pitched audio under a stock phrase below which nobody said it: "thank you" has ~250 ms. */
+    const val STOCK_PHRASE_MIN_PITCHED_MS = 80
+
+    /**
+     * How many of the last words (up to six) form a stock phrase ("...right to me. Thank you."),
+     * or 0. Mirrors the desktop `trailingStockPhrase`.
+     */
+    fun trailingStockPhraseCount(words: List<String>): Int {
+        for (count in minOf(6, words.size) downTo 1) {
+            if (isSilencePhrase(words.subList(words.size - count, words.size).joinToString(" "))) return count
+        }
+        return 0
+    }
+
+    private val WORD_TOKEN = Regex("[\\p{L}\\p{N}]+(?:['’][\\p{L}\\p{N}]+)*")
+
+    /** [text] without its last [count] words (and the punctuation that followed them). */
+    fun dropLastWords(text: String, count: Int): String {
+        val starts = WORD_TOKEN.findAll(text).map { it.range.first }.toList()
+        if (count <= 0 || starts.size < count) return text
+        return text.substring(0, starts[starts.size - count]).trimEnd()
+    }
 }

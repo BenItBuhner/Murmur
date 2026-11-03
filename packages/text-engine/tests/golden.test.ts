@@ -16,6 +16,7 @@ import {
 import { prepareTranscript } from '../src/cleanup'
 import { editedSpan, findCorrections, parseLexicon } from '../src/corrections'
 import { applyDictionary } from '../src/dictionary'
+import { collapseLoops } from '../src/hallucination'
 import { digitSignature } from '../src/numbers'
 import { buildCommandMessages, buildFormatMessages, type CommandPromptInput } from '../src/prompt'
 import { applyCasing } from '../src/profiles'
@@ -201,6 +202,18 @@ const CLEAN_CASES: Array<[string, string]> = [
   ['Hello there.\n\nLet me know if you need anything else!', 'hello there'],
   ['**Hello** there.', 'hello there'],
   ['<think>hmm</think>```\nHello there.\n```\n\nLet me know!', 'hello there']
+]
+
+/** Recognizer loops collapse to one copy; what a speaker repeats on purpose stays. */
+const LOOP_CASES: string[] = [
+  'and finally step 5 shows the keyboard. Step 5 shows the keyboard. Step 5 shows the keyboard. Step 5 shows the keyboard. Step 5 shows fur cut and lets them change it.',
+  'thanks everyone this has been a really solid week this has been a really solid week this has been a really solid week',
+  'I think that I think that I think that we should go',
+  'the code is one two three one two three one two three',
+  'very very very good',
+  'we need more tests, we need more tests, and then we ship',
+  'Go team go! Go team go! Go team go!',
+  'it is what it is'
 ]
 
 const VERIFY_CASES: Array<[string, string, { language?: string; keepVerbatim?: string[] }?]> = [
@@ -412,6 +425,7 @@ function build(): unknown {
       transcript,
       cleaned: cleanModelOutput(output, transcript)
     })),
+    loops: LOOP_CASES.map((text) => ({ text, collapsed: collapseLoops(text) })),
     verify: VERIFY_CASES.map(([transcript, output, opts]) => {
       const v = verifyOutput(transcript, output, opts)
       return { transcript, output, options: opts ?? null, ok: v.ok, reason: v.reason ?? null }

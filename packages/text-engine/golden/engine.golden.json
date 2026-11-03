@@ -769,6 +769,40 @@
       "cleaned": "Hello there."
     }
   ],
+  "loops": [
+    {
+      "text": "and finally step 5 shows the keyboard. Step 5 shows the keyboard. Step 5 shows the keyboard. Step 5 shows the keyboard. Step 5 shows fur cut and lets them change it.",
+      "collapsed": "and finally step 5 shows the keyboard. Step 5 shows fur cut and lets them change it."
+    },
+    {
+      "text": "thanks everyone this has been a really solid week this has been a really solid week this has been a really solid week",
+      "collapsed": "thanks everyone this has been a really solid week"
+    },
+    {
+      "text": "I think that I think that I think that we should go",
+      "collapsed": "I think that we should go"
+    },
+    {
+      "text": "the code is one two three one two three one two three",
+      "collapsed": "the code is one two three one two three one two three"
+    },
+    {
+      "text": "very very very good",
+      "collapsed": "very very very good"
+    },
+    {
+      "text": "we need more tests, we need more tests, and then we ship",
+      "collapsed": "we need more tests, we need more tests, and then we ship"
+    },
+    {
+      "text": "Go team go! Go team go! Go team go!",
+      "collapsed": "Go team go!"
+    },
+    {
+      "text": "it is what it is",
+      "collapsed": "it is what it is"
+    }
+  ],
   "verify": [
     {
       "transcript": "wir treffen uns um zehn uhr dreißig",

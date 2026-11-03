@@ -1,3 +1,5 @@
+import { isNumberWord } from './numbers'
+
 /**
  * Whisper-family models, given a clip with no speech in it (the quiet tail of a streamed
  * dictation, a breath, a click), answer with the closing lines of the videos they were trained
@@ -148,4 +150,57 @@ export function dropLastWords(text: string, count: number): string {
   for (const m of text.matchAll(re)) starts.push(m.index)
   if (count <= 0 || starts.length < count) return text
   return text.slice(0, starts[starts.length - count]).trimEnd()
+}
+
+/** Shortest and longest run of words a recognizer loop repeats ("Step 5 shows the keyboard."). */
+const LOOP_MIN_WORDS = 3
+const LOOP_MAX_WORDS = 12
+/** Back-to-back copies that make a loop: a speaker may say a phrase twice, not three times. */
+const LOOP_MIN_COPIES = 3
+
+/**
+ * Speech models can get stuck and write one phrase over and over where the speaker said it once
+ * ("…step 5 shows the keyboard. Step 5 shows the keyboard. Step 5 shows the keyboard…"). A run of
+ * 3 to 12 words that appears 3 or more times back to back keeps its first copy. Runs of numbers
+ * only are left alone: "one two three, one two three, one two three" may have been read out.
+ */
+export function collapseLoops(text: string): string {
+  const words = [...text.matchAll(/\S+/gu)].map((m) => ({
+    start: m.index,
+    end: m.index + m[0].length,
+    key: m[0].toLowerCase().replace(/[^\p{L}\p{N}']/gu, '')
+  }))
+  if (words.length < LOOP_MIN_WORDS * LOOP_MIN_COPIES) return text
+  let out = ''
+  let from = 0 // text before this offset is already in `out`
+  let i = 0
+  while (i < words.length) {
+    let found: { k: number; copies: number } | null = null
+    for (let k = LOOP_MIN_WORDS; k <= LOOP_MAX_WORDS && i + k * LOOP_MIN_COPIES <= words.length; k++) {
+      const unit = words.slice(i, i + k)
+      if (unit.some((w) => !w.key)) continue
+      if (unit.every((w) => isNumberWord(w.key) || /^\d/.test(w.key))) continue
+      let copies = 1
+      while (
+        i + (copies + 1) * k <= words.length &&
+        unit.every((w, j) => words[i + copies * k + j].key === w.key)
+      )
+        copies++
+      if (copies >= LOOP_MIN_COPIES) {
+        found = { k, copies }
+        break
+      }
+    }
+    if (!found) {
+      i++
+      continue
+    }
+    // Keep the first copy (with its punctuation), then go on from where the copies end.
+    out += text.slice(from, words[i + found.k - 1].end)
+    const next = i + found.k * found.copies
+    from = next < words.length ? words[next].start : text.length
+    if (next < words.length) out += ' '
+    i = next
+  }
+  return out + text.slice(from)
 }

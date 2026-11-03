@@ -42,4 +42,60 @@ object Hallucination {
     const val MIN_SPEECH_MS = 120
     /** Frame level counted as voiced for that check; VOICE_RECOGNITION has no AGC, so speech is quiet. */
     const val VOICED_DB = -50.0
+
+    private const val LOOP_MIN_WORDS = 3
+    private const val LOOP_MAX_WORDS = 12
+    private const val LOOP_MIN_COPIES = 3
+    private val WORD = Regex("\\S+")
+    private val NOT_WORD_CHAR = Regex("[^\\p{L}\\p{N}']")
+
+    private class Tok(val start: Int, val end: Int, val key: String)
+
+    /**
+     * A run of 3 to 12 words the speech model wrote 3 or more times back to back keeps its first
+     * copy (a stuck recognizer); runs of numbers only are left alone. Mirrors `collapseLoops`.
+     */
+    fun collapseLoops(text: String): String {
+        val words = WORD.findAll(text).map {
+            Tok(it.range.first, it.range.last + 1, it.value.lowercase().replace(NOT_WORD_CHAR, ""))
+        }.toList()
+        if (words.size < LOOP_MIN_WORDS * LOOP_MIN_COPIES) return text
+        val out = StringBuilder()
+        var from = 0
+        var i = 0
+        while (i < words.size) {
+            var foundK = 0
+            var foundCopies = 0
+            var k = LOOP_MIN_WORDS
+            while (k <= LOOP_MAX_WORDS && i + k * LOOP_MIN_COPIES <= words.size) {
+                val unit = words.subList(i, i + k)
+                if (unit.any { it.key.isEmpty() } ||
+                    unit.all { NumberSignature.isNumberWord(it.key) || it.key[0].isDigit() }
+                ) {
+                    k++
+                    continue
+                }
+                var copies = 1
+                while (i + (copies + 1) * k <= words.size &&
+                    unit.indices.all { j -> words[i + copies * k + j].key == unit[j].key }
+                ) copies++
+                if (copies >= LOOP_MIN_COPIES) {
+                    foundK = k
+                    foundCopies = copies
+                    break
+                }
+                k++
+            }
+            if (foundK == 0) {
+                i++
+                continue
+            }
+            out.append(text, from, words[i + foundK - 1].end)
+            val next = i + foundK * foundCopies
+            from = if (next < words.size) words[next].start else text.length
+            if (next < words.size) out.append(' ')
+            i = next
+        }
+        return out.append(text.substring(from)).toString()
+    }
 }

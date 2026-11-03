@@ -9,6 +9,7 @@ import app.murmur.android.text.DictionaryTerm
 import app.murmur.android.text.FormatContext
 import app.murmur.android.text.Casing
 import app.murmur.android.text.Grammar
+import app.murmur.android.text.Hallucination
 import app.murmur.android.text.Layout
 import app.murmur.android.text.applyCasing
 import app.murmur.android.text.NumberSignature
@@ -132,6 +133,15 @@ class GoldenEngineTest {
         for (i in 0 until cases.length()) {
             val c = cases.getJSONObject(i)
             assertEquals(c.getString("output"), c.getString("cleaned"), Verify.cleanModelOutput(c.getString("output"), c.getString("transcript")))
+        }
+    }
+
+    @Test
+    fun `loops collapse the same`() {
+        val cases = golden.getJSONArray("loops")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            assertEquals(c.getString("text"), c.getString("collapsed"), Hallucination.collapseLoops(c.getString("text")))
         }
     }
 

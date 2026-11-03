@@ -117,6 +117,7 @@ export {
 } from './clean'
 export { formatTranscript, type FormatInput } from './format'
 export {
+  collapseLoops,
   dropLastWords,
   dropSilentSegments,
   isSilenceHallucination,

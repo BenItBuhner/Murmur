@@ -16,6 +16,7 @@ import {
   isMeaningful,
   normalizeWhitespace
 } from './text'
+import { collapseLoops } from './hallucination'
 import { joinPauseStops } from './pause-stops'
 import type { AppCategory, Casing, DictionaryTerm } from './types'
 
@@ -54,6 +55,8 @@ export function prepareTranscript(raw: string): PreparedTranscript {
     if (next !== text) stages.push(name)
     text = next
   }
+  // A phrase the speech model wrote over and over ("…the keyboard. Step 5 shows the keyboard.").
+  step('loops', collapseLoops)
   step('line-commands', applyLineCommands)
   step('literal-punctuation', applyLiteralPunctuation)
   // Before the model sees it too: a period at a pause where no sentence can end.

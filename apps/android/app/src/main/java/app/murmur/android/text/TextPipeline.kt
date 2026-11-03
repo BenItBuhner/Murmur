@@ -339,6 +339,8 @@ fun prepareTranscript(raw: String): PreparedTranscript {
         if (next != text) stages.add(name)
         text = next
     }
+    // A phrase the speech model wrote over and over ("...the keyboard. Step 5 shows the keyboard.").
+    step("loops", Hallucination::collapseLoops)
     step("line-commands", ::applyLineCommands)
     step("literal-punctuation", ::applyLiteralPunctuation)
     // Before the model sees it too: a period at a pause where no sentence can end.

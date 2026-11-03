@@ -110,6 +110,17 @@ describe('keepParagraphs and repairOutput', () => {
   const answer =
     'Hi team, quick update.\n\nThe beta is out. We fixed the crash.\n\nOn the budget side, we are waiting. More soon.'
 
+  it('gives a greeting on its own line a paragraph of its own', () => {
+    expect(keepParagraphs('Hi Sam,\nThanks for the notes. I will look tonight.')).toBe(
+      'Hi Sam,\n\nThanks for the notes. I will look tonight.'
+    )
+    expect(keepParagraphs('Hello Ms. Alvarez,\n\nThank you.')).toBe(
+      'Hello Ms. Alvarez,\n\nThank you.'
+    )
+    // Not a greeting: a blank line inside a sentence is still joined.
+    expect(keepParagraphs('We went,\n\nand then left.')).toBe('We went, and then left.')
+  })
+
   it('keeps blank lines between sentences when the layout allows paragraphs', () => {
     expect(repairOutput(said, answer, { paragraphs: true })).toBe(answer)
   })

@@ -1,0 +1,225 @@
+[
+  {
+    "id": "list/ordered-counted-email",
+    "profile": "default",
+    "category": "email",
+    "transcript": "Hi Mark, a few things before Friday. First, can you send me the signed contract. Second, we need the updated floor plan from the architect. And third, please confirm the move-in date with the landlord. Thanks.",
+    "expect": { "list": "ordered", "items": 3, "end": "landlord" }
+  },
+  {
+    "id": "list/number-one-number-two-doc",
+    "profile": "default",
+    "category": "document",
+    "transcript": "The setup has three steps. Number one, install the CLI with npm. Number two, run the login command and paste your token. Number three, start the dev server and open localhost.",
+    "expect": { "list": "ordered", "items": 3, "end": "localhost" }
+  },
+  {
+    "id": "list/pause-split-items-email",
+    "profile": "default",
+    "category": "email",
+    "transcript": "So for the offsite we still need to. First, book a room that fits. Twenty people. Second, order lunch for. Both days. And third, send the agenda to everyone. By Wednesday.",
+    "expect": {
+      "list": "ordered",
+      "items": 3,
+      "end": "Wednesday",
+      "split": ["fits\\. Twenty", "for\\. Both", "everyone\\. By"]
+    }
+  },
+  {
+    "id": "list/colon-series-notes",
+    "profile": "default",
+    "category": "notes",
+    "transcript": "Grocery list: eggs, oat milk, two avocados, a bag of rice, and dish soap.",
+    "expect": { "list": "any", "items": 5, "end": "soap", "inline_ok": true }
+  },
+  {
+    "id": "list/polished-uncounted-steps",
+    "profile": "polished",
+    "category": "document",
+    "transcript": "To reset the router you unplug it for thirty seconds, then you hold the reset button until the light blinks, then you plug the ethernet cable back in and wait for the green light.",
+    "expect": { "list": "any", "items": 3, "end": "green light" }
+  },
+  {
+    "id": "list/polished-chat-series",
+    "profile": "polished",
+    "category": "chat",
+    "transcript": "For the release I still need the changelog, the screenshots for the store, and the final build signed by Apple.",
+    "expect": { "list": "any", "items": 3, "end": "Apple", "inline_ok": true }
+  },
+  {
+    "id": "list/as-spoken-no-list",
+    "profile": "as-spoken",
+    "category": "email",
+    "transcript": "First we gotta fix the login bug, second we gotta ship the beta, and third we gotta tell the team about it.",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "about it", "keep": ["gotta"] }
+  },
+  {
+    "id": "list/casual-chat-counted",
+    "profile": "casual",
+    "category": "chat",
+    "transcript": "ok so three things. first grab the keys from Dana. second feed the cat. third lock the back door when you leave",
+    "expect": { "list": "any", "items": 3, "end": "leave" }
+  },
+  {
+    "id": "para/email-topics",
+    "profile": "default",
+    "category": "email",
+    "transcript": "Hi team, quick update on the launch. The landing page is done and the copy has been approved by legal. We also finished the onboarding emails and they go out on Monday. On the budget side, we are still waiting for finance to sign off on the ad spend. I will chase them tomorrow. Finally, the press release is drafted and I will share it with you by Thursday. Thanks, Priya.",
+    "expect": { "list": "none", "paragraphs": [3, 5], "end": "Priya" }
+  },
+  {
+    "id": "para/document-sections",
+    "profile": "default",
+    "category": "document",
+    "transcript": "The current onboarding flow loses about a third of new users before they finish setup. Most of them drop off at the permissions screen, where we ask for microphone and accessibility access at the same time. Users told us it feels like too much at once. We propose splitting the permissions into two steps. The microphone request would come first, right after the welcome screen. Accessibility access would only be requested the first time the user tries to type into another app. For the rollout, we will ship the change to ten percent of new users next week. If the completion rate improves, we will roll it out to everyone by the end of the month.",
+    "expect": { "list": "none", "paragraphs": [2, 4], "end": "end of the month" }
+  },
+  {
+    "id": "para/polished-email-topics",
+    "profile": "polished",
+    "category": "email",
+    "transcript": "Hello Ms. Alvarez, thank you for meeting with us yesterday. We really enjoyed hearing about your plans for the new clinic. As discussed, we can start the design work in early March. The first draft would be ready about four weeks later. Regarding the budget, our estimate is forty two thousand dollars, including two rounds of revisions. Please let me know if you have any questions. Best regards, Tom.",
+    "expect": { "list": "none", "paragraphs": [3, 6], "end": "Tom" }
+  },
+  {
+    "id": "para/short-email-no-break",
+    "profile": "default",
+    "category": "email",
+    "transcript": "Hi Sam, thanks for the notes. I will look at them tonight and get back to you tomorrow.",
+    "expect": { "list": "none", "paragraphs": [1, 2], "end": "tomorrow" }
+  },
+  {
+    "id": "para/chat-no-break",
+    "profile": "default",
+    "category": "chat",
+    "transcript": "Yeah that works for me. I can do the morning shift on Saturday. But I need to leave by two because I have a dentist appointment. Let me know if that's a problem.",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "problem" }
+  },
+  {
+    "id": "para/as-spoken-long-email",
+    "profile": "as-spoken",
+    "category": "email",
+    "transcript": "Hey so I looked at the numbers and they ain't great. Sales was down like ten percent last month. The new ads didn't do nothing for us. I think we should pull them and try something different. Anyway let's talk Monday.",
+    "expect": {
+      "list": "none",
+      "paragraphs": [1, 1],
+      "end": "Monday",
+      "keep": ["ain't", "Sales was", "didn't do nothing"]
+    }
+  },
+  {
+    "id": "split/at-least-a-minute",
+    "profile": "default",
+    "category": "document",
+    "transcript": "To test the recorder, you need to talk for at least. A minute. Without stopping. Then check whether the transcript. Has every word.",
+    "expect": {
+      "list": "none",
+      "end": "every word",
+      "split": ["least\\. A", "minute\\. Without", "transcript\\. Has"]
+    }
+  },
+  {
+    "id": "split/email-pauses",
+    "profile": "default",
+    "category": "email",
+    "transcript": "I wanted to let you know that the package. Arrived this morning. But the box was damaged and. Two of the glasses were broken. Could you send. Replacements for them?",
+    "expect": {
+      "list": "none",
+      "end": "Replacements for them",
+      "split": ["package\\. Arrived", "and\\. Two", "send\\. Replacements"]
+    }
+  },
+  {
+    "id": "split/chat-casual-pauses",
+    "profile": "casual",
+    "category": "chat",
+    "transcript": "I'm gonna be. Like ten minutes late. Because the train is. Stuck outside the station.",
+    "expect": { "list": "none", "end": "station", "split": ["be\\. Like", "is\\. Stuck"] }
+  },
+  {
+    "id": "split/polished-pauses",
+    "profile": "polished",
+    "category": "email",
+    "transcript": "We reviewed the proposal and. We would like to move forward. With the second option. Please send the contract. To our legal team. When it is ready.",
+    "expect": {
+      "list": "none",
+      "end": "ready",
+      "split": ["and\\. We", "forward\\. With", "contract\\. To", "team\\. When"]
+    }
+  },
+  {
+    "id": "split/as-spoken-pauses",
+    "profile": "as-spoken",
+    "category": "document",
+    "transcript": "The tests was failing because. The config file got deleted. Somebody should. Add it back.",
+    "expect": {
+      "list": "none",
+      "end": "back",
+      "split": ["because\\. The", "should\\. Add"],
+      "keep": ["tests was"]
+    }
+  },
+  {
+    "id": "split/complete-short-sentences-stay",
+    "profile": "default",
+    "category": "chat",
+    "transcript": "That's bad. Really bad. We lost the whole day. I'm not happy.",
+    "expect": { "list": "none", "end": "happy", "keep": ["Really bad.", "We lost the whole day."] }
+  },
+  {
+    "id": "end/trailing-question",
+    "profile": "default",
+    "category": "email",
+    "transcript": "Can you check whether the invoice was paid and if not, who we should call about it",
+    "expect": { "list": "none", "end": "call about it" }
+  },
+  {
+    "id": "end/trailing-short-clause",
+    "profile": "polished",
+    "category": "document",
+    "transcript": "The migration finished without errors, although the search index still needs to be rebuilt, which should take about an hour or so",
+    "expect": { "list": "none", "end": "an hour" }
+  },
+  {
+    "id": "short/chat-default",
+    "profile": "default",
+    "category": "chat",
+    "transcript": "sounds good see you at six",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "six|6" }
+  },
+  {
+    "id": "short/chat-casual",
+    "profile": "casual",
+    "category": "chat",
+    "transcript": "On my way, be there in five.",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "five|5" }
+  },
+  {
+    "id": "short/email-polished",
+    "profile": "polished",
+    "category": "email",
+    "transcript": "thanks for the update I'll review it this afternoon",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "afternoon" }
+  },
+  {
+    "id": "short/doc-as-spoken",
+    "profile": "as-spoken",
+    "category": "document",
+    "transcript": "um the results was better than we expected",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "expected", "keep": ["results was"] }
+  },
+  {
+    "id": "short/notes-polished-two-things",
+    "profile": "polished",
+    "category": "notes",
+    "transcript": "call the bank and pick up the dry cleaning",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "dry cleaning" }
+  },
+  {
+    "id": "short/email-default-question",
+    "profile": "default",
+    "category": "email",
+    "transcript": "are we still on for lunch tomorrow",
+    "expect": { "list": "none", "paragraphs": [1, 1], "end": "tomorrow" }
+  }
+]

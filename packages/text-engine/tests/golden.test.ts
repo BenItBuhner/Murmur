@@ -137,7 +137,34 @@ const REPAIR_CASES: Array<[string, string, boolean]> = [
   ],
   ['we will ship on friday then rest', 'We will ship\n\non Friday. Then rest.', true],
   ['one thing another thing', 'One thing.\nAnother thing.', true],
-  ['a b', 'A.\n\n\n\nB.', true]
+  ['a b', 'A.\n\n\n\nB.', true],
+  [
+    'hi sam thanks for the notes. i will look tonight',
+    'Hi Sam,\nThanks for the notes. I will look tonight.',
+    true
+  ],
+  ['hello ms alvarez thank you. bye', 'Hello Ms. Alvarez,\n\nThank you. Bye.', true],
+  ['we went and then left', 'We went,\n\nand then left.', true],
+  // Items on their own lines without a marker are numbered.
+  [
+    'a few things first send it second sign it and third file it',
+    'A few things:\nFirst, send it.\nSecond, sign it.\nAnd third, file it.',
+    false
+  ],
+  [
+    'number one install it number two run it',
+    'Number one, install it\nNumber two, run it now\n\nDone.',
+    true
+  ],
+  [
+    'firstly the deck secondly the vendor finally the flights',
+    'firstly the deck\nsecondly the vendor\nfinally the flights',
+    false
+  ],
+  ['first the deck then second the vendor', 'First the deck.\nThen second the vendor.', false],
+  ['first a b second c d', 'Second, a b.\nFirst, c d.', false],
+  ['firstly the deck secondly the vendor', '- Firstly the deck\n- Secondly the vendor', true],
+  ['the deck and the vendor', '- The deck\n- The vendor', true]
 ]
 
 /** Command mode (edit the selection by voice): the same prompt on the desktop and on Android. */
@@ -201,7 +228,8 @@ const CLEAN_CASES: Array<[string, string]> = [
   ['"Hello there."', 'hello there'],
   ['Hello there.\n\nLet me know if you need anything else!', 'hello there'],
   ['**Hello** there.', 'hello there'],
-  ['<think>hmm</think>```\nHello there.\n```\n\nLet me know!', 'hello there']
+  ['<think>hmm</think>```\nHello there.\n```\n\nLet me know!', 'hello there'],
+  ['- Unplug it.  \n- Hold the button.  ', 'unplug it hold the button']
 ]
 
 /** Recognizer loops collapse to one copy; what a speaker repeats on purpose stays. */

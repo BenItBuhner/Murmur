@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { applyLayout, itemText, layoutText, parseLayout, splitUnits } from '../src/layout'
+import {
+  applyLayout,
+  itemText,
+  layoutText,
+  numberCuedLines,
+  parseLayout,
+  splitUnits
+} from '../src/layout'
 import type { Complete } from '../src/types'
 
 const long = (n: number): string =>
@@ -88,5 +95,31 @@ describe('layoutText', () => {
     })
     expect(r).toMatchObject({ outcome: 'failed', text: long(30) })
     expect((await layoutText(long(30), 'notes', answer('no'))).outcome).toBe('failed')
+  })
+})
+
+describe('numberCuedLines', () => {
+  it('numbers items the model put on lines of their own with the cue left in', () => {
+    expect(
+      numberCuedLines(
+        'A few things:\nFirst, send it.\nSecond, sign it.\nAnd third, file it.\n\nThanks.'
+      )
+    ).toBe('A few things:\n1. Send it.\n2. Sign it.\n3. File it.\n\nThanks.')
+    expect(numberCuedLines('- Firstly the deck\n- Secondly the vendor')).toBe(
+      '1. The deck\n2. The vendor'
+    )
+    expect(numberCuedLines('Number one, install it\nNumber two, run it\nFinally, open it up')).toBe(
+      '1. Install it\n2. Run it\n3. Open it up'
+    )
+  })
+
+  it('leaves lines that do not count from one in order', () => {
+    for (const t of [
+      'First the deck.\nThen the vendor.',
+      'Second, a b.\nFirst, c d.',
+      'First, a b.\nThird, c d.',
+      'First, a b. Second, c d.'
+    ])
+      expect(numberCuedLines(t)).toBe(t)
   })
 })

@@ -96,9 +96,9 @@ export function layoutLine(layout: ResolvedLayout): string {
     case 'minimal':
       return 'Layout: running text; no list or line break the speaker did not dictate.'
     case 'balanced':
-      return 'Layout: paragraphs. In text of four or more sentences, leave a blank line where the speaker moves to a new topic.'
+      return 'Layout: paragraphs. In text of four or more sentences, leave a blank line where the speaker moves to a new topic. A counted enumeration ("first..., second...") is still a list, one item per line.'
     case 'structured':
-      return 'Layout: structured. Leave a blank line where the speaker moves to a new topic, and put three or more parallel items or steps one per line as a list, even if not counted.'
+      return "Layout: structured. Leave a blank line where the speaker moves to a new topic. Three or more parallel items or steps said in a row go one per line as a list, even if not counted, each in the speaker's own words. Two items stay in the sentence; sentences that are not a series, and pieces of one sentence cut at pauses, stay prose."
     default:
       return ''
   }
@@ -153,21 +153,29 @@ export function applyCasing(
   return out
 }
 
+/** "Hi Sam," / "Dear Ms. Alvarez," alone on the first line. */
+const GREETING_LINE =
+  /^((?:hi|hello|hey|dear|good (?:morning|afternoon|evening))\b[^\n,!?]{0,40},)[ \t]*\n\s*/iu
+
 /**
  * Line breaks the model added on its own (to text with no list), kept only where a layout allows
  * them: a blank line after a sentence end stays a paragraph break; a single newline, or a blank
  * line inside a sentence, is joined back with a space.
  */
 export function keepParagraphs(text: string): string {
+  // A greeting on its own line opens the letter: a paragraph of its own.
   const paragraphs = text
+    .replace(GREETING_LINE, '$1\n\n')
     .split(/[ \t]*\n[ \t]*\n\s*/u)
     .map((p) => p.replace(/[ \t]*\n[ \t]*/gu, ' ').trim())
     .filter(Boolean)
   let out = paragraphs[0] ?? ''
   for (let i = 1; i < paragraphs.length; i++)
-    out += /[.!?:…]["'’”)\]]*$/u.test(paragraphs[i - 1])
-      ? `\n\n${paragraphs[i]}`
-      : ` ${paragraphs[i]}`
+    out +=
+      /[.!?:…]["'’”)\]]*$/u.test(paragraphs[i - 1]) ||
+      (i === 1 && GREETING_LINE.test(`${paragraphs[0]}\n`))
+        ? `\n\n${paragraphs[i]}`
+        : ` ${paragraphs[i]}`
   return out
 }
 

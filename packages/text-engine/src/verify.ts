@@ -1,4 +1,5 @@
 import { countUnits, digitSignature, isNumberWord } from './numbers'
+import { numberCuedLines } from './layout'
 import { keepParagraphs } from './profiles'
 import { ABBREVIATION, QUESTION_START, countWords, isQuestion } from './text'
 import type { FormatContext } from './types'
@@ -50,7 +51,11 @@ export function cleanModelOutput(output: string, transcript: string): string {
     lines.pop()
   if (lines.length > 2 && COMMENTARY_LINE.test(lines[0].trim()) && lines[1].trim() === '')
     lines.splice(0, 2)
-  text = lines.join('\n').trim()
+  // Trailing spaces (a markdown hard break, "item.  \n") are never meant to be typed.
+  text = lines
+    .join('\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim()
   // A fence that was followed by commentary only closes once the commentary is gone.
   const fenced = /^```[a-z]*\n?([\s\S]*?)\n?```$/i.exec(text)
   if (fenced) text = fenced[1].trim()
@@ -241,6 +246,8 @@ export function repairOutput(
   // other break it added is joined back.
   if (out.includes('\n') && !LAYOUT_CUE.test(transcript) && !LIST_LINE.test(out))
     out = opts.paragraphs ? keepParagraphs(out) : out.replace(/[ \t]*\n+[ \t]*/g, ' ')
+  // Items on lines of their own but without a marker get their numbers.
+  if (out.includes('\n')) out = numberCuedLines(out)
   return out.trim()
 }
 

@@ -49,7 +49,8 @@ object Verify {
             lines.removeAt(0)
             lines.removeAt(0)
         }
-        text = lines.joinToString("\n").trim()
+        // Trailing spaces (a markdown hard break, "item.  \n") are never meant to be typed.
+        text = lines.joinToString("\n").replace(TRAILING_SPACES, "\n").trim()
         // A fence that was followed by commentary only closes once the commentary is gone.
         FENCE.find(text)?.let { text = it.groupValues[1].trim() }
         return LABEL_PREFIX.replace(text, "").trim()
@@ -230,7 +231,67 @@ object Verify {
         if (out.contains('\n') && !LAYOUT_CUE.containsMatchIn(transcript) && !LIST_LINE.containsMatchIn(out))
             // A layout that lets the model start paragraphs keeps its blank lines between sentences.
             out = if (paragraphs) keepParagraphs(out) else out.replace(Regex("[ \\t]*\\n+[ \\t]*"), " ")
+        // Items on lines of their own but without a marker get their numbers.
+        if (out.contains('\n')) out = numberCuedLines(out)
         return out.trim()
+    }
+
+    private val TRAILING_SPACES = Regex("[ \\t]+\\n")
+    private val ORDINALS = listOf("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth")
+    private val NUMBERS = listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+    private val CUED_LINE = Regex(
+        "^(?:and\\s+|also\\s+)?(?:(${ORDINALS.joinToString("|")})(?:ly)?|number\\s+(${NUMBERS.joinToString("|")}|\\d{1,2})|(finally|lastly))\\b",
+        RegexOption.IGNORE_CASE
+    )
+    /** The spoken cue an item opens with, which its list marker replaces (layout.ts ITEM_CUE). */
+    private val ITEM_CUE = Regex(
+        "^(?:and\\s+|also\\s+)?(?:(?:${ORDINALS.joinToString("|")})(?:ly)?|finally|lastly|number\\s+(?:${NUMBERS.joinToString("|")}|\\d{1,2})|item\\s+(?:${NUMBERS.joinToString("|")}|\\d{1,2}))\\b(?:\\s+(?:of\\s+all|off))?[,:;.]?\\s+",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val BULLET = Regex("^[-*•]\\s+")
+    /** A line without its leading "- " bullet: "- First, the deck" keeps its cue. */
+    private fun unbulleted(line: String): String = BULLET.replaceFirst(line.trim(), "")
+
+    /** The position (1-based) a line's spoken cue counts to, -1 for "finally", or 0 for none. */
+    private fun cuePosition(line: String): Int {
+        val m = CUED_LINE.find(unbulleted(line)) ?: return 0
+        if (m.groupValues[3].isNotEmpty()) return -1
+        if (m.groupValues[1].isNotEmpty()) return ORDINALS.indexOf(m.groupValues[1].lowercase()) + 1
+        val n = m.groupValues[2].lowercase()
+        return n.toIntOrNull() ?: (NUMBERS.indexOf(n) + 1)
+    }
+
+    /** An item's first sentence without its spoken cue, capitalized (layout.ts itemText). */
+    private fun itemText(sentence: String): String {
+        val stripped = ITEM_CUE.replaceFirst(sentence, "")
+        val text = if (countWords(stripped) >= 2) stripped else sentence
+        return text.replaceFirstChar { it.uppercaseChar() }
+    }
+
+    /**
+     * Lines the model put one per item but left without a number (or bulleted with the cue kept): two or more lines in a row whose
+     * cues count 1, 2, 3 (a "finally" may close them) become a numbered list (layout.ts).
+     */
+    fun numberCuedLines(text: String): String {
+        val lines = text.split('\n').toMutableList()
+        var i = 0
+        while (i < lines.size) {
+            if (cuePosition(lines[i]) != 1) { i++; continue }
+            var j = i + 1
+            while (j < lines.size) {
+                val p = cuePosition(lines[j])
+                if (p == j - i + 1 || p == -1) {
+                    j++
+                    if (p == -1) break
+                } else break
+            }
+            if (j - i >= 2) {
+                for (k in i until j) lines[k] = "${k - i + 1}. ${itemText(unbulleted(lines[k]))}"
+                i = j
+            } else i++
+        }
+        return lines.joinToString("\n")
     }
 
     private val LOWER_I = Regex("(?<![\\p{L}\\p{N}'’._@/\\\\-])i(?=(?:['’](?:m|ll|ve|d))?(?![\\p{L}\\p{N}'’_@/\\\\-])(?!\\.\\p{L}))")

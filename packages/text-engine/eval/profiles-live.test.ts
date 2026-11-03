@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { autoTone } from '../src/context'
 import { formatTranscript } from '../src/format'
 import { layoutText } from '../src/layout'
+import { isNumberWord } from '../src/numbers'
 import { applyCasing, profileOf } from '../src/profiles'
 import type { AppCategory, ChatMessage, ChatOptions, ChatResult, FormatContext } from '../src/types'
 
@@ -31,6 +32,8 @@ const apiKey = process.env.MURMUR_API_KEY ?? ''
 const model = process.env.MURMUR_LLM_MODEL ?? ''
 const enabled = !!process.env.MURMUR_LIVE && !!baseUrl && !!model
 const RUNS = Number(process.env.MURMUR_PROFILE_RUNS ?? '1')
+/** Pause between requests, for providers that rate-limit bursts (default 0). */
+const DELAY_MS = Number(process.env.MURMUR_EVAL_DELAY_MS ?? '0')
 
 interface ProfileFixture {
   id: string
@@ -72,7 +75,8 @@ const words = (s: string): string[] =>
 
 /** Words in `out` the speaker never said (numbers and list cues aside). */
 export function inventedWords(transcript: string, out: string): string[] {
-  const said = new Set(words(transcript))
+  // "and" joining two sentences the speaker said is punctuation, not content.
+  const said = new Set([...words(transcript), 'and'])
   // Forms a contraction or a number may take on either side.
   for (const w of [...said]) {
     for (const part of w.split("'")) said.add(part)
@@ -83,6 +87,25 @@ export function inventedWords(transcript: string, out: string): string[] {
     if (said.has(w.replace(/'s$/, '')) || said.has(`${w}s`) || said.has(w.replace(/s$/, '')))
       return false
     return !w.split("'").every((p) => said.has(p))
+  })
+}
+
+/** Said but not typed: fillers, list cues and numbers (written as digits) aside. */
+const MAY_GO = new Set(
+  'um uh so like okay ok well yeah you know i mean and also then first second third fourth fifth firstly secondly thirdly finally lastly number item percent dollars dollar or'.split(
+    ' '
+  )
+)
+
+/** Words the speaker said that are missing from `out`. */
+export function lostWords(transcript: string, out: string): string[] {
+  const typed = new Set(words(out))
+  for (const w of [...typed]) for (const part of w.split("'")) typed.add(part)
+  return words(transcript).filter((w) => {
+    if (typed.has(w) || MAY_GO.has(w) || isNumberWord(w) || /\d/.test(w)) return false
+    if (typed.has(w.replace(/'s$/, '')) || typed.has(`${w}s`) || typed.has(w.replace(/s$/, '')))
+      return false
+    return !w.split("'").every((p) => typed.has(p))
   })
 }
 
@@ -119,12 +142,17 @@ export function scoreProfile(f: ProfileFixture, text: string): ProfileCheck[] {
   push('ending', new RegExp(e.end, 'i').test(tail), JSON.stringify(tail.slice(-30)))
   const left = (e.split ?? []).filter((r) => new RegExp(r).test(text))
   if (e.split) push('split joined', left.length === 0, left.join(', '))
-  const lost = (e.keep ?? []).filter((k) => !text.toLowerCase().includes(k.toLowerCase()))
-  if (e.keep) push('kept wording', lost.length === 0, lost.join(', '))
+  const dropped = (e.keep ?? []).filter((k) => !text.toLowerCase().includes(k.toLowerCase()))
+  if (e.keep) push('kept wording', dropped.length === 0, dropped.join(', '))
   const invented = inventedWords(f.transcript, text)
   push('no invented words', invented.length === 0, invented.join(' '))
+  const lost = lostWords(f.transcript, text)
+  push('no lost words', lost.length === 0, lost.join(' '))
   return checks
 }
+
+/** Tokens per request, to compare prompts by cost and by the reasoning they set off. */
+const tokens = { completion: [] as number[], prompt: [] as number[] }
 
 const completeWith =
   (m: string) =>
@@ -148,6 +176,9 @@ const completeWith =
     const json = (await res.json()) as {
       choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
     }
+    const usage = (json as { usage?: { completion_tokens?: number; prompt_tokens?: number } }).usage
+    tokens.completion.push(usage?.completion_tokens ?? 0)
+    tokens.prompt.push(usage?.prompt_tokens ?? 0)
     return {
       text: json.choices?.[0]?.message?.content ?? '',
       finishReason: json.choices?.[0]?.finish_reason
@@ -172,6 +203,7 @@ describe.skipIf(!enabled)('profiles (live)', () => {
       let total = 0
       for (let r = 0; r < RUNS; r++)
         for (const f of loadProfileFixtures()) {
+          if (DELAY_MS) await new Promise((r) => setTimeout(r, DELAY_MS))
           const p = profileOf(f.profile)
           const ctx: FormatContext = {
             category: f.category,
@@ -233,7 +265,15 @@ describe.skipIf(!enabled)('profiles (live)', () => {
           Object.entries(byCheck).map(([k, v]) => [k, `${v.pass}/${v.total}`])
         ),
         outcomes,
-        llmMs: { p50: pct(ms, 0.5), p95: pct(ms, 0.95) }
+        llmMs: { p50: pct(ms, 0.5), p95: pct(ms, 0.95) },
+        completionTokens: {
+          mean: Math.round(
+            tokens.completion.reduce((a, b) => a + b, 0) / Math.max(1, tokens.completion.length)
+          ),
+          p50: pct(tokens.completion, 0.5),
+          p95: pct(tokens.completion, 0.95)
+        },
+        promptTokensP50: pct(tokens.prompt, 0.5)
       }
       console.log(JSON.stringify(summary, null, 2))
       writeFileSync(

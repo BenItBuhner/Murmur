@@ -159,6 +159,61 @@ export function itemText(sentence: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+const ORDINALS = [
+  'first',
+  'second',
+  'third',
+  'fourth',
+  'fifth',
+  'sixth',
+  'seventh',
+  'eighth',
+  'ninth',
+  'tenth'
+]
+const NUMBERS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
+const CUED_LINE = new RegExp(
+  `^(?:and\\s+|also\\s+)?(?:(${ORDINALS.join('|')})(?:ly)?|number\\s+(${NUMBERS.join('|')}|\\d{1,2})|(finally|lastly))\\b`,
+  'iu'
+)
+
+/** A line without its leading "- " bullet: "- First, the deck" keeps its cue. */
+const unbulleted = (line: string): string => line.trim().replace(/^[-*•]\s+/u, '')
+
+/** The position (1-based) a line's spoken cue counts to, `last` for "finally", or 0 for none. */
+function cuePosition(line: string): number | 'last' {
+  const m = CUED_LINE.exec(unbulleted(line))
+  if (!m) return 0
+  if (m[3]) return 'last'
+  if (m[1]) return ORDINALS.indexOf(m[1].toLowerCase()) + 1
+  const n = m[2].toLowerCase()
+  return /^\d/.test(n) ? Number(n) : NUMBERS.indexOf(n) + 1
+}
+
+/**
+ * Lines the model put one per item but left without a number ("First, send the contract.\nSecond,
+ * ...", or bulleted with the cue kept): two or more lines in a row whose cues count 1, 2, 3 (a "finally" may close them) become
+ * a numbered list, the cue replaced by the number. Anything else is left as it is.
+ */
+export function numberCuedLines(text: string): string {
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    if (cuePosition(lines[i]) !== 1) continue
+    let j = i + 1
+    while (j < lines.length) {
+      const p = cuePosition(lines[j])
+      if (p === j - i + 1 || (p === 'last' && j > i)) {
+        j++
+        if (p === 'last') break
+      } else break
+    }
+    if (j - i < 2) continue
+    for (let k = i; k < j; k++) lines[k] = `${k - i + 1}. ${itemText(unbulleted(lines[k]))}`
+    i = j - 1
+  }
+  return lines.join('\n')
+}
+
 /** The sentences laid out by the plan. Existing line breaks and list lines are kept. */
 export function applyLayout(units: readonly LayoutUnit[], plan: LayoutPlan): string {
   const paragraphStarts = new Set(plan.paragraphs)

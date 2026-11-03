@@ -83,8 +83,8 @@ fun resolveLayout(layout: Layout?, category: AppCategory): ResolvedLayout = when
 
 fun layoutLine(layout: ResolvedLayout): String = when (layout) {
     ResolvedLayout.MINIMAL -> "Layout: running text; no list or line break the speaker did not dictate."
-    ResolvedLayout.BALANCED -> "Layout: paragraphs. In text of four or more sentences, leave a blank line where the speaker moves to a new topic."
-    ResolvedLayout.STRUCTURED -> "Layout: structured. Leave a blank line where the speaker moves to a new topic, and put three or more parallel items or steps one per line as a list, even if not counted."
+    ResolvedLayout.BALANCED -> "Layout: paragraphs. In text of four or more sentences, leave a blank line where the speaker moves to a new topic. A counted enumeration (\"first..., second...\") is still a list, one item per line."
+    ResolvedLayout.STRUCTURED -> "Layout: structured. Leave a blank line where the speaker moves to a new topic. Three or more parallel items or steps said in a row go one per line as a list, even if not counted, each in the speaker's own words. Two items stay in the sentence; sentences that are not a series, and pieces of one sentence cut at pauses, stay prose."
     ResolvedLayout.LISTS -> ""
 }
 
@@ -148,16 +148,26 @@ private val BLANK_LINE = Regex("[ \\t]*\\n[ \\t]*\\n\\s*")
 private val SINGLE_BREAK = Regex("[ \\t]*\\n[ \\t]*")
 private val SENTENCE_END = Regex("[.!?:…][\"'’”)\\]]*$")
 
+/** "Hi Sam," / "Dear Ms. Alvarez," alone on the first line. */
+private val GREETING_LINE = Regex(
+    "^((?:hi|hello|hey|dear|good (?:morning|afternoon|evening))\\b[^\\n,!?]{0,40},)[ \\t]*\\n\\s*",
+    RegexOption.IGNORE_CASE
+)
+
 /**
  * Line breaks the model added on its own (to text with no list), kept only where a layout allows
  * them: a blank line after a sentence end stays a paragraph break; any other break is a space.
  */
 fun keepParagraphs(text: String): String {
-    val paragraphs = text.split(BLANK_LINE).map { it.replace(SINGLE_BREAK, " ").trim() }.filter { it.isNotEmpty() }
+    // A greeting on its own line opens the letter: a paragraph of its own.
+    val paragraphs = GREETING_LINE.replaceFirst(text, "$1\n\n").split(BLANK_LINE)
+        .map { it.replace(SINGLE_BREAK, " ").trim() }.filter { it.isNotEmpty() }
     if (paragraphs.isEmpty()) return ""
     val sb = StringBuilder(paragraphs[0])
     for (i in 1 until paragraphs.size) {
-        if (SENTENCE_END.containsMatchIn(paragraphs[i - 1])) sb.append("\n\n") else sb.append(' ')
+        val breaks = SENTENCE_END.containsMatchIn(paragraphs[i - 1]) ||
+            (i == 1 && GREETING_LINE.containsMatchIn(paragraphs[0] + "\n"))
+        if (breaks) sb.append("\n\n") else sb.append(' ')
         sb.append(paragraphs[i])
     }
     return sb.toString()

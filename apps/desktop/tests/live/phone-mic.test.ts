@@ -14,6 +14,8 @@
  *   MURMUR_TEST_JWT_ISSUER=https://murmur-test.local MURMUR_TEST_JWT_KEY=/tmp/key.pem \
  *   npm run test:live -- tests/live/phone-mic.test.ts
  */
+/* eslint-disable @typescript-eslint/no-explicit-any -- Playwright pages and the globals the
+   bundled pages expose are untyped here, so the app's types stay free of Playwright. */
 import { EventEmitter } from 'node:events'
 import { createPrivateKey, createSign, randomUUID, type KeyObject } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
@@ -63,7 +65,11 @@ function mintJwt(key: KeyObject, sub: string): string {
   return `${header}.${payload}.${b64(signer.sign(key))}`
 }
 
-async function waitFor<T>(check: () => T | undefined | false, what: string, ms = 20_000): Promise<T> {
+async function waitFor<T>(
+  check: () => T | undefined | false,
+  what: string,
+  ms = 20_000
+): Promise<T> {
   const started = Date.now()
   for (;;) {
     const v = check()
@@ -171,16 +177,22 @@ describe.skipIf(!enabled)('phone as microphone, end to end', () => {
       this.emit('state', 'processing')
       const id = this.id
       void desk.evaluate((sid: string) => (window as any).desk.stop(sid), id)
-      void waitFor(() => fromDesk.find((e) => e.type === 'stopped' && e.payload.id === id), 'stop').then(
-        (e) => {
-          this.isBusy = false
-          const secs = (e.payload.n / 16000).toFixed(1)
-          this.emit('entry', { finalText: `Heard ${secs} seconds from the phone.`, mode: 'hands-free' })
-          this.emit('state', 'idle')
-        }
-      )
+      void waitFor(
+        () => fromDesk.find((e) => e.type === 'stopped' && e.payload.id === id),
+        'stop'
+      ).then((e) => {
+        this.isBusy = false
+        const secs = (e.payload.n / 16000).toFixed(1)
+        this.emit('entry', {
+          finalText: `Heard ${secs} seconds from the phone.`,
+          mode: 'hands-free'
+        })
+        this.emit('state', 'idle')
+      })
     }
-    handle(): void {}
+    handle(): void {
+      // cancel: not used by these tests
+    }
   }
   const dictation = new Dictation()
 
@@ -235,7 +247,9 @@ describe.skipIf(!enabled)('phone as microphone, end to end', () => {
         '--autoplay-policy=no-user-gesture-required'
       ]
     })
-    const deskBrowser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] })
+    const deskBrowser = await chromium.launch({
+      args: ['--autoplay-policy=no-user-gesture-required']
+    })
     browsers = [phoneBrowser, deskBrowser]
     desk = await deskBrowser.newPage()
     phone = await phoneBrowser.newPage()
@@ -251,10 +265,10 @@ describe.skipIf(!enabled)('phone as microphone, end to end', () => {
     await phone.goto(`${origin}/phone`)
     await desk.waitForFunction(() => !!(window as any).desk)
     await phone.waitForFunction(() => !!(window as any).phone)
-    await phone.evaluate(([u, t]: [string, string]) => (window as any).phone.init(u, t), [
-      convexUrl,
-      token
-    ])
+    await phone.evaluate(
+      ([u, t]: [string, string]) => (window as any).phone.init(u, t),
+      [convexUrl, token]
+    )
 
     // The desktop's main process: the real host on a real Convex client.
     client = new ConvexClient(convexUrl, { skipConvexDeploymentUrlCheck: true })
@@ -285,7 +299,10 @@ describe.skipIf(!enabled)('phone as microphone, end to end', () => {
       overlay: {
         offer: (m) => void desk.evaluate((o: unknown) => (window as any).desk.offer(o), m),
         send: (id, m) =>
-          void desk.evaluate(([l, msg]: [string, unknown]) => (window as any).desk.send(l, msg), [id, m]),
+          void desk.evaluate(
+            ([l, msg]: [string, unknown]) => (window as any).desk.send(l, msg),
+            [id, m]
+          ),
         close: (id) => void desk.evaluate((l: string) => (window as any).desk.close(l), id)
       }
     })
@@ -329,7 +346,10 @@ describe.skipIf(!enabled)('phone as microphone, end to end', () => {
       if (!welcome.length) await new Promise((r) => setTimeout(r, 100))
     }
     expect(welcome[0]).toMatchObject({ name: 'E2E laptop', state: 'idle' })
-    await waitFor(() => fromDesk.some((e) => e.type === 'stream' && e.payload === true), 'audio track')
+    await waitFor(
+      () => fromDesk.some((e) => e.type === 'stream' && e.payload === true),
+      'audio track'
+    )
 
     expect(await phone.evaluate(() => (window as any).phone.send('start'))).toBe(true)
     await waitFor(() => dictation.isListening, 'the dictation to start')
@@ -339,7 +359,9 @@ describe.skipIf(!enabled)('phone as microphone, end to end', () => {
       () => fromDesk.find((e) => e.type === 'stopped')?.payload,
       'the capture to stop'
     )
-    console.log(`desktop captured ${stopped.n} samples, rms ${stopped.rms.toFixed(4)}, loud ${stopped.loud}`)
+    console.log(
+      `desktop captured ${stopped.n} samples, rms ${stopped.rms.toFixed(4)}, loud ${stopped.loud}`
+    )
     // About six seconds of 16 kHz audio, and it is speech, not silence.
     expect(stopped.n).toBeGreaterThan(16_000 * 5)
     expect(stopped.rms).toBeGreaterThan(0.01)
@@ -406,6 +428,9 @@ describe.skipIf(!enabled)('phone as microphone, end to end', () => {
     )
     expect(result).toMatch(/not_listening/)
     const log = await phoneLog()
-    expect(log.at(-1)).toMatchObject({ phase: 'closed', detail: expect.stringMatching(/not listening/) })
+    expect(log.at(-1)).toMatchObject({
+      phase: 'closed',
+      detail: expect.stringMatching(/not listening/)
+    })
   }, 30_000)
 })

@@ -7,7 +7,8 @@ const aliases = {
   '@renderer': resolve('src/renderer/src'),
   '@core': resolve('src/core'),
   '@shared': resolve('src/shared'),
-  '@engine': resolve('../../packages/text-engine/src')
+  '@engine': resolve('../../packages/text-engine/src'),
+  '@backend': resolve('../../packages/backend/convex')
 }
 
 export default defineConfig({

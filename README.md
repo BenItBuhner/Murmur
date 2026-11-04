@@ -213,6 +213,16 @@ leave the device. Both apps keep working offline from a local mirror; local edit
 outbox and replay in order, and a device that already had a dictionary merges it into the account the
 first time it signs in.
 
+### Phone as microphone
+
+A signed-in phone can be the microphone of a computer on the same account: turn on **Use a phone as
+the microphone** on the desktop's Microphone page, then open **Phone microphone** in the Android app's
+settings, or `/mic` on the website from any phone browser (iPhone included). Start, stop and discard
+from the phone; the text lands at the cursor on the computer, and sessions can run as long as a normal
+dictation. The voice goes phone to computer over WebRTC, never through Convex: the instance only
+carries one offer and one answer per link (about seven function calls), and an idle computer holds a
+single small subscription. [docs/phone-microphone.md](docs/phone-microphone.md) has the design.
+
 ### Managed models and plans
 
 The backend exposes an OpenAI-compatible **inference gateway** on the deployment's HTTP-actions
@@ -236,6 +246,7 @@ quota, whatever a retry costs in tokens.
 | `MURMUR_BILLING_ENABLED` | **Feature switch, off by default.** The literal `true` sells Pro: the Stripe actions and webhook work, statuses and limit errors carry upgrade links, the apps and the website show plans, the trial countdown and billing. Off, none of that shows; the plan machinery keeps running underneath. The website has the same switch at build time as `NEXT_PUBLIC_MURMUR_BILLING_ENABLED`. |
 | `MURMUR_SITE_URL` | Origin of the website (`https://…`): the account page and the privacy/terms links the apps show; where limit errors send people to upgrade and where Stripe returns them after Checkout when billing is on. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Pro billing (see below), read only while `MURMUR_BILLING_ENABLED` is `true`. Without them billing is off and the account page says so. |
+| `MURMUR_MIC_ICE_SERVERS` | Optional, for **Phone as microphone**: a JSON array of WebRTC ICE servers (`[{"urls":"turn:turn.example.com:3478","username":"…","credential":"…"}]`) handed to both ends of each link. Unset, links use public STUN, which connects phone and computer directly on the same network and across most home routers; add a TURN server only if links fail on networks that block direct connections. |
 
 A kind is offered only when its URL and model are set; an instance without them tells the apps so,
 and they fall back to the user's own provider. Every account starts a **14-day Pro trial** with no

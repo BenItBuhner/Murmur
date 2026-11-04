@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  */
 enum class Glyph {
     MENU, HOME, HISTORY, DICTIONARY, STYLE, BUTTON, KEYBOARD, MODEL, LANGUAGE, APPEARANCE, PERMISSIONS, UPDATES,
-    TRY_IT, ACCOUNT, SETTINGS, WORDS, PACE, TIME, STREAK, SEARCH
+    TRY_IT, PHONE_MIC, ACCOUNT, SETTINGS, WORDS, PACE, TIME, STREAK, SEARCH
 }
 
 @Composable
@@ -95,6 +95,24 @@ fun DrawScope.draw(glyph: Glyph, color: Color) {
                 style = stroke()
             )
             drawCircle(color, size.width * 0.05f, p(0.5f, 0.5f))
+        }
+        Glyph.PHONE_MIC -> {
+            // A phone with sound leaving it.
+            val r = size.width * 0.08f
+            drawRoundRect(
+                color,
+                topLeft = p(0.2f, 0.14f),
+                size = Size(size.width * 0.36f, size.height * 0.72f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
+                style = stroke()
+            )
+            line(color, 0.34f, 0.76f, 0.42f, 0.76f)
+            path(color) { w, h ->
+                moveTo(w * 0.68f, h * 0.38f)
+                quadraticTo(w * 0.76f, h * 0.5f, w * 0.68f, h * 0.62f)
+                moveTo(w * 0.78f, h * 0.28f)
+                quadraticTo(w * 0.92f, h * 0.5f, w * 0.78f, h * 0.72f)
+            }
         }
         Glyph.KEYBOARD -> {
             val r = size.height * 0.1f

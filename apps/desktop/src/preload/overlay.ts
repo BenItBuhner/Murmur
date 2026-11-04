@@ -6,10 +6,14 @@ import {
   type AudioStartMessage,
   type AudioStatusMessage,
   type AudioStoppedMessage,
+  type PhoneMicAnswerMessage,
+  type PhoneMicEventMessage,
+  type PhoneMicOfferMessage,
   type SoundName,
   type ThemeMessage
 } from '@shared/ipc'
 import type { OverlayState } from '@shared/types'
+import type { DesktopToPhone } from '@backend/lib/micProtocol'
 
 type Unsub = () => void
 const on = <T>(channel: string, cb: (payload: T) => void): Unsub => {
@@ -38,7 +42,16 @@ const api = {
   openUrl: (url: string): void => ipcRenderer.send(IPC.overlayOpenUrl, url),
   openModels: (): void => ipcRenderer.send(IPC.overlayOpenModels),
   /** Pointer over the pill: main lets the window take clicks only while this is true. */
-  hover: (over: boolean): void => ipcRenderer.send(IPC.overlayHover, over)
+  hover: (over: boolean): void => ipcRenderer.send(IPC.overlayHover, over),
+  /** Phone as microphone: the peer connection lives in this renderer, signaling in main. */
+  phoneMic: {
+    onOffer: (cb: (m: PhoneMicOfferMessage) => void): Unsub => on(IPC.phoneMicOffer, cb),
+    onSend: (cb: (m: { linkId: string; message: DesktopToPhone }) => void): Unsub =>
+      on(IPC.phoneMicSend, cb),
+    onClose: (cb: (m: { linkId: string }) => void): Unsub => on(IPC.phoneMicClose, cb),
+    answer: (m: PhoneMicAnswerMessage): void => ipcRenderer.send(IPC.phoneMicAnswer, m),
+    event: (m: PhoneMicEventMessage): void => ipcRenderer.send(IPC.phoneMicEvent, m)
+  }
 }
 
 export type MurmurOverlayApi = typeof api

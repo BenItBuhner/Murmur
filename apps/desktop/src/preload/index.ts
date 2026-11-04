@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { exposeClerkBridge } from '@clerk/electron/preload'
-import { IPC, type RecordingsInfo, type RetryResult, type ThemeReport } from '@shared/ipc'
+import {
+  IPC,
+  type PhoneMicStatus,
+  type RecordingsInfo,
+  type RetryResult,
+  type ThemeReport
+} from '@shared/ipc'
 import type { Settings, SttProviderKind } from '@shared/settings'
 import type {
   CloudConfig,
@@ -84,6 +90,11 @@ const api = {
     audio: (id: string): Promise<Uint8Array | null> => ipcRenderer.invoke(IPC.historyAudio, id),
     onAdded: (cb: (e: HistoryEntry) => void): Unsub => on(IPC.historyAdded, cb),
     onChanged: (cb: () => void): Unsub => on(IPC.historyChanged, cb)
+  },
+  /** Phone as microphone: the link's status for the Microphone page. */
+  phoneMic: {
+    status: (): Promise<PhoneMicStatus> => ipcRenderer.invoke(IPC.phoneMicStatus),
+    onStatus: (cb: (s: PhoneMicStatus) => void): Unsub => on(IPC.phoneMicStatusChanged, cb)
   },
   recordings: {
     info: (): Promise<RecordingsInfo> => ipcRenderer.invoke(IPC.recordingsInfo),

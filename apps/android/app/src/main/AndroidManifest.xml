@@ -134,6 +134,13 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- Phone as microphone: holds the foreground while this phone is a computer's microphone
+             (docs/phone-microphone.md), so the link survives the screen turning off. -->
+        <service
+            android:name=".phonemic.PhoneMicService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- The "Dictate" Quick Settings tile. It never starts the microphone service itself: a
              tap fires the same TOGGLE at the trampoline, where the gates, the keyguard and the
              debounce apply as for every other entry point. -->

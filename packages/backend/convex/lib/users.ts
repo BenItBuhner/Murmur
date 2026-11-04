@@ -184,6 +184,17 @@ export async function purgeUserData(ctx: MutationCtx, userId: Id<'users'>): Prom
   for (const doc of historyEntries) await ctx.db.delete('historyEntries', doc._id)
   for (const doc of inferenceUsage) await ctx.db.delete('inferenceUsage', doc._id)
   for (const doc of inferenceDays) await ctx.db.delete('inferenceDays', doc._id)
+  // Phone as microphone: the listed desktops and any signal still in flight (a handful of rows).
+  for (const doc of await ctx.db
+    .query('micReceivers')
+    .withIndex('by_user_and_deviceId', (q) => q.eq('userId', userId))
+    .collect())
+    await ctx.db.delete('micReceivers', doc._id)
+  for (const doc of await ctx.db
+    .query('micSignals')
+    .withIndex('by_user_and_to', (q) => q.eq('userId', userId))
+    .collect())
+    await ctx.db.delete('micSignals', doc._id)
   await ctx.db.delete('users', userId)
 }
 

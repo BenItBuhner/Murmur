@@ -744,6 +744,16 @@ class CloudSync internal constructor(
     }
 
     /**
+     * The Convex client while it is authenticated, for the phone microphone's signaling
+     * (phonemic/PhoneMicSignaling.kt); null while signed out or not yet connected.
+     */
+    internal val authedClient: ConvexClientWithAuth<ClerkCredentials>?
+        get() = if (authenticated) client else null
+
+    /** This install's id, as `devices:heartbeat` registers it. */
+    val deviceId: String get() = settings.get().deviceId
+
+    /**
      * One answer to a query, then the subscription is dropped: the Android client has no one-shot
      * query, and a live subscription re-sends its whole result after every write it depends on.
      * Null when no answer came within [ONE_SHOT_TIMEOUT_MS].

@@ -62,6 +62,13 @@ android {
     namespace = "app.murmur.android"
     compileSdk = 36
 
+    packaging {
+        jniLibs {
+            // WebRTC (phone as microphone) ships emulator-only x86 libraries; phones are ARM.
+            excludes += setOf("lib/x86/libjingle_peerconnection_so.so", "lib/x86_64/libjingle_peerconnection_so.so")
+        }
+    }
+
     defaultConfig {
         applicationId = "app.murmur.android"
         minSdk = 26
@@ -208,6 +215,9 @@ dependencies {
     implementation("dev.convex:android-convexmobile:0.8.0@aar") {
         isTransitive = true
     }
+    // Phone as microphone (docs/phone-microphone.md): WebRTC carries the phone's microphone to the
+    // computer peer to peer. Its x86 and x86_64 libraries are left out below (emulators only).
+    implementation("io.getstream:stream-webrtc-android:1.3.10")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

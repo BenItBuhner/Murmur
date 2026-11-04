@@ -1314,15 +1314,8 @@ export class CloudSync extends EventEmitter {
   private async heartbeat(): Promise<void> {
     const client = this.client
     if (!client || !this.authenticated) return
-    const s = this.deps.settings.get()
-    const platform: Platform =
-      this.deps.platform === 'win32' || this.deps.platform === 'darwin'
-        ? this.deps.platform
-        : 'linux'
     await client.mutation(api.devices.heartbeat, {
-      deviceId: s.cloud.deviceId,
-      name: s.cloud.deviceName || hostname() || 'This computer',
-      platform,
+      ...this.deviceIdentity,
       appVersion: this.deps.appVersion
     })
   }
@@ -1337,6 +1330,28 @@ export class CloudSync extends EventEmitter {
   private stopHeartbeat(): void {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
     this.heartbeatTimer = null
+  }
+
+  /**
+   * The Convex client once it is authenticated, for a feature that holds its own small
+   * subscription (the phone microphone's signaling inbox); null otherwise. `status` events say
+   * when this changes.
+   */
+  get authedClient(): ConvexClient | null {
+    return this.authenticated && this.client ? this.client : null
+  }
+
+  /** This install's name and platform as `devices.heartbeat` registers them. */
+  get deviceIdentity(): { deviceId: string; name: string; platform: Platform } {
+    const s = this.deps.settings.get()
+    return {
+      deviceId: s.cloud.deviceId,
+      name: s.cloud.deviceName || hostname() || 'This computer',
+      platform:
+        this.deps.platform === 'win32' || this.deps.platform === 'darwin'
+          ? this.deps.platform
+          : 'linux'
+    }
   }
 
   async removeDevice(deviceId: string): Promise<boolean> {

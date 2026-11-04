@@ -84,12 +84,21 @@ export class MicCapture {
   private levelTick = 0
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryDelay = 1500
+  /**
+   * A stream that stands in for the microphone: a linked phone's audio (phone-link.ts). It is used
+   * instead of getUserMedia while set, and owned by whoever set it (release never stops it).
+   */
+  private external: MediaStream | null = null
+  /** The source changed during a session; switch once that session has stopped. */
+  private switchPending = false
+  /** Source switches run one after another (a phone re-linking sends null, then a stream). */
+  private switching: Promise<void> = Promise.resolve()
 
   constructor(private events: CaptureEvents) {
     // A microphone plugged in (or a PulseAudio/CoreAudio device appearing) after launch should
     // bring the warm mic back without user action.
     navigator.mediaDevices.addEventListener('devicechange', () => {
-      if (this.cfg?.keepWarm && !this.isWarm && !this.session)
+      if (this.cfg?.keepWarm && !this.isWarm && !this.session && !this.external)
         void this.ensure().catch(() => undefined)
     })
   }
@@ -107,14 +116,49 @@ export class MicCapture {
 
   async configure(cfg: AudioConfigureMessage): Promise<void> {
     const deviceChanged =
+      !this.external &&
       this.cfg &&
       (this.cfg.deviceId !== cfg.deviceId ||
         this.cfg.noiseSuppression !== cfg.noiseSuppression ||
         this.cfg.autoGainControl !== cfg.autoGainControl)
     this.cfg = cfg
     if (deviceChanged && !this.session) await this.release()
-    if (cfg.keepWarm) await this.ensure()
+    if (cfg.keepWarm || this.external) await this.ensure()
     else if (!this.session) await this.release()
+  }
+
+  /**
+   * Capture from `stream` (a linked phone) instead of the microphone, or go back to the microphone
+   * with null. A session in progress finishes on the source it started with.
+   */
+  async setExternalStream(stream: MediaStream | null): Promise<void> {
+    if (stream === this.external) return
+    this.external = stream
+    if (this.session) {
+      this.switchPending = true
+      return
+    }
+    await this.switchSource()
+  }
+
+  private switchSource(): Promise<void> {
+    this.switchPending = false
+    this.switching = this.switching.then(() => this.doSwitch())
+    return this.switching
+  }
+
+  private async doSwitch(): Promise<void> {
+    // A microphone being opened right now would otherwise land after the release below.
+    if (this.acquiring) await this.acquiring.catch(() => undefined)
+    // Already on the wanted source (an earlier switch in the queue got there).
+    if (this.external && this.stream === this.external) return
+    if (this.session) {
+      // A dictation began while this switch waited; it keeps its source and the switch follows.
+      this.switchPending = true
+      return
+    }
+    await this.release()
+    if (this.external || this.cfg?.keepWarm) await this.ensure().catch(() => undefined)
   }
 
   async start(id: string, includePreBuffer: boolean): Promise<void> {
@@ -159,6 +203,7 @@ export class MicCapture {
     const close = (): void => {
       if (this.session === s) this.session = null
       this.events.onStopped(s.id, s.samples)
+      if (this.switchPending && !this.session) void this.switchSource()
     }
     // The flushed buffer arrives as one more message; give it a tick before closing.
     const flush = (then: () => void): void => {
@@ -176,7 +221,7 @@ export class MicCapture {
         else close()
       })
     }
-    if (this.cfg && !this.cfg.keepWarm) {
+    if (this.cfg && !this.cfg.keepWarm && !this.external) {
       this.releaseTimer = setTimeout(() => void this.release(), 4000)
     }
   }
@@ -194,7 +239,12 @@ export class MicCapture {
 
   private async acquire(): Promise<void> {
     const cfg = this.cfg
+    const external = this.external
     try {
+      if (external) {
+        await this.attach(external, 'Phone')
+        return
+      }
       const constraints: MediaTrackConstraints = {
         channelCount: 1,
         echoCancellation: false,
@@ -214,48 +264,54 @@ export class MicCapture {
         } else throw err
       }
       this.retryDelay = 1500
-      this.stream = stream
-      let ctx: AudioContext
-      try {
-        ctx = new AudioContext({ sampleRate: TARGET_RATE, latencyHint: 'interactive' })
-      } catch {
-        ctx = new AudioContext({ latencyHint: 'interactive' })
-      }
-      if (ctx.sampleRate !== TARGET_RATE) {
-        throw new Error(`Audio context refused 16 kHz (got ${ctx.sampleRate})`)
-      }
-      if (!this.workletUrl) {
-        this.workletUrl = URL.createObjectURL(
-          new Blob([WORKLET_SOURCE], { type: 'application/javascript' })
-        )
-      }
-      await ctx.audioWorklet.addModule(this.workletUrl)
-      const source = ctx.createMediaStreamSource(stream)
-      const node = new AudioWorkletNode(ctx, 'pcm-capture', {
-        numberOfInputs: 1,
-        numberOfOutputs: 0,
-        channelCount: 1
-      })
-      node.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) =>
-        this.onChunk(e.data.pcm, e.data.rms)
-      source.connect(node)
-      if (ctx.state !== 'running') await ctx.resume()
-      this.ctx = ctx
-      this.node = node
-      const track = stream.getAudioTracks()[0]
-      this.events.onStatus({ ready: true, warm: true, deviceLabel: track?.label })
-      track?.addEventListener('ended', () => {
-        this.events.onStatus({ ready: false, warm: false, error: 'Microphone disconnected' })
-        void this.release()
-        if (this.cfg?.keepWarm) setTimeout(() => void this.ensure(), 1500)
-      })
+      await this.attach(stream)
     } catch (err) {
       const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
       this.events.onStatus({ ready: false, warm: false, error: message })
       await this.release()
-      this.scheduleRetry()
+      if (!external) this.scheduleRetry()
       throw err
     }
+  }
+
+  /** Runs `stream` through the 16 kHz capture graph. */
+  private async attach(stream: MediaStream, label?: string): Promise<void> {
+    this.stream = stream
+    let ctx: AudioContext
+    try {
+      ctx = new AudioContext({ sampleRate: TARGET_RATE, latencyHint: 'interactive' })
+    } catch {
+      ctx = new AudioContext({ latencyHint: 'interactive' })
+    }
+    if (ctx.sampleRate !== TARGET_RATE) {
+      throw new Error(`Audio context refused 16 kHz (got ${ctx.sampleRate})`)
+    }
+    if (!this.workletUrl) {
+      this.workletUrl = URL.createObjectURL(
+        new Blob([WORKLET_SOURCE], { type: 'application/javascript' })
+      )
+    }
+    await ctx.audioWorklet.addModule(this.workletUrl)
+    const source = ctx.createMediaStreamSource(stream)
+    const node = new AudioWorkletNode(ctx, 'pcm-capture', {
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
+      channelCount: 1
+    })
+    node.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) =>
+      this.onChunk(e.data.pcm, e.data.rms)
+    source.connect(node)
+    if (ctx.state !== 'running') await ctx.resume()
+    this.ctx = ctx
+    this.node = node
+    const track = stream.getAudioTracks()[0]
+    this.events.onStatus({ ready: true, warm: true, deviceLabel: label ?? track?.label })
+    track?.addEventListener('ended', () => {
+      if (this.stream !== stream) return
+      this.events.onStatus({ ready: false, warm: false, error: 'Microphone disconnected' })
+      void this.release()
+      if (this.cfg?.keepWarm) setTimeout(() => void this.ensure(), 1500)
+    })
   }
 
   private onChunk(pcm: ArrayBuffer, rms: number): void {
@@ -286,7 +342,8 @@ export class MicCapture {
     }
     this.node = null
     if (this.stream) {
-      for (const t of this.stream.getTracks()) t.stop()
+      // A linked phone's stream belongs to its peer connection; only our own tracks are stopped.
+      if (this.stream !== this.external) for (const t of this.stream.getTracks()) t.stop()
       this.stream = null
     }
     if (this.ctx) {

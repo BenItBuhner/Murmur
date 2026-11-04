@@ -22,6 +22,7 @@ import { CloudSync, type TokenSource } from './cloud/sync-engine'
 import { FileTokenSource, resolveTestAuth, TEST_AUTH_TOKEN_FILE } from './cloud/test-auth'
 import { TokenBridge } from './cloud/token-bridge'
 import { DictationController } from './dictation/session'
+import { installPhoneMic } from './phone-mic'
 import { HookService } from './hotkeys/hook'
 import { InferenceRouter } from './inference/router'
 import { registerIpc } from './ipc'
@@ -249,6 +250,9 @@ async function main(): Promise<void> {
     partials
   })
 
+  // Phone as microphone (docs/phone-microphone.md); idle unless the Microphone page's switch is on.
+  const phoneMic = installPhoneMic({ settings, cloud: cloudSync, controller, recorder, overlay })
+
   const resolvedTheme = (s: Settings): 'light' | 'dark' =>
     s.general.theme === 'system'
       ? nativeTheme.shouldUseDarkColors
@@ -419,6 +423,7 @@ async function main(): Promise<void> {
     setQuitting(true)
     hook.stop()
     updates.dispose()
+    phoneMic.dispose()
     cloudSync.dispose()
     tokenBridge.dispose()
     systemAccent.dispose()

@@ -126,6 +126,39 @@ export default defineSchema({
     lastSeenAt: v.number()
   }).index('by_user_and_deviceId', ['userId', 'deviceId']),
 
+  /**
+   * Desktops with "Phone as microphone" on (docs/phone-microphone.md): what a phone lists. Written
+   * when the switch or the device's name changes and at most once a day otherwise, never by a
+   * heartbeat; kept apart from `devices` so `devices.list` and `bootstrap.get` never re-run for it.
+   */
+  micReceivers: defineTable({
+    userId: v.id('users'),
+    deviceId: v.string(),
+    name: v.string(),
+    platform: platformValidator,
+    registeredAt: v.number()
+  }).index('by_user_and_deviceId', ['userId', 'deviceId']),
+
+  /**
+   * Phone-microphone signaling: one offer and one answer per link, each deleted once read (the
+   * desktop deletes the offer it answers, the phone the answer it takes) and swept after
+   * MIC_SIGNAL_TTL_MS. Audio never comes here; it goes peer to peer over WebRTC.
+   */
+  micSignals: defineTable({
+    userId: v.id('users'),
+    /** The addressee's deviceId. */
+    to: v.string(),
+    from: v.string(),
+    fromName: v.string(),
+    linkId: v.string(),
+    kind: v.union(v.literal('offer'), v.literal('answer'), v.literal('decline')),
+    /** The complete SDP (ICE gathered, no trickle). Empty on a decline. */
+    sdp: v.string(),
+    /** Why a link was declined, in one sentence. */
+    reason: v.optional(v.string()),
+    createdAt: v.number()
+  }).index('by_user_and_to', ['userId', 'to']),
+
   dictionaryEntries: defineTable({
     userId: v.id('users'),
     word: v.string(),

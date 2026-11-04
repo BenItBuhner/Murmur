@@ -19,7 +19,8 @@ export default defineConfig({
     alias: {
       '@core': resolve('src/core'),
       '@shared': resolve('src/shared'),
-      '@engine': resolve('../../packages/text-engine/src')
+      '@engine': resolve('../../packages/text-engine/src'),
+      '@backend': resolve('../../packages/backend/convex')
     }
   },
   test: {

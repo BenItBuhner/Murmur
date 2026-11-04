@@ -15,7 +15,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sync:mic-protocol": "node -e \"const f=require('fs');f.writeFileSync('src/lib/mic-protocol.ts','// A copy of packages/backend/convex/lib/micProtocol.ts (this app cannot import across its root); mic-protocol.test.ts keeps it identical.\\n'+f.readFileSync('../../packages/backend/convex/lib/micProtocol.ts','utf8'))\""
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.2",

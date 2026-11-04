@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { RecordingsInfo } from '@shared/ipc'
+import type { PhoneMicStatus, RecordingsInfo } from '@shared/ipc'
 import { SETTINGS_RANGES, clampToRange } from '@shared/settings'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
@@ -17,6 +17,7 @@ import {
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { MicMeter, useMicDevices } from '@renderer/components/MicMeter'
 import { useSettings } from '@renderer/hooks/useSettings'
+import { useCloud } from '@renderer/hooks/useCloud'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
@@ -37,6 +38,71 @@ function useRecordingsInfo(): RecordingsInfo {
     return () => unsubs.forEach((u) => u())
   }, [])
   return info
+}
+
+/** The phone-microphone link as main reports it. */
+function usePhoneMicStatus(): PhoneMicStatus | null {
+  const [status, setStatus] = useState<PhoneMicStatus | null>(null)
+  useEffect(() => {
+    let live = true
+    void window.murmur.phoneMic.status().then((s) => live && setStatus(s))
+    const unsub = window.murmur.phoneMic.onStatus(setStatus)
+    return () => {
+      live = false
+      unsub()
+    }
+  }, [])
+  return status
+}
+
+const ROUTE_LABEL: Record<NonNullable<PhoneMicStatus['route']>, string> = {
+  direct: 'directly over your network',
+  stun: 'peer to peer across networks',
+  relay: 'through your relay server',
+  unknown: 'peer to peer'
+}
+
+export function phoneMicLine(status: PhoneMicStatus | null, signedIn: boolean): string {
+  if (!signedIn) return 'Sign in to use a phone signed in to the same account.'
+  if (!status || status.state === 'off')
+    return 'Talk into your phone anywhere in the room and the text lands here. The audio goes straight from the phone to this computer, never through Murmur’s servers.'
+  switch (status.state) {
+    case 'unavailable':
+    case 'offline':
+      return status.error
+        ? `Not reachable by your phone: ${status.error}`
+        : 'Waiting for the connection to your account.'
+    case 'waiting':
+      return 'Ready. On your phone, signed in to this account, open Phone microphone in the Murmur app or /mic on Murmur’s website and pick this computer.'
+    case 'connecting':
+      return `Linking ${status.phoneName ?? 'your phone'}…`
+    case 'connected':
+      return `${status.phoneName ?? 'Your phone'} is the microphone, ${ROUTE_LABEL[status.route ?? 'unknown']}. Start and stop on the phone, or use your shortcut here as usual.`
+    case 'interrupted':
+      return `Lost ${status.phoneName ?? 'your phone'} for a moment; waiting for it to come back. Nothing said so far is lost.`
+  }
+}
+
+function PhoneMicSection(): React.JSX.Element | null {
+  const { settings, patch } = useSettings()
+  const { enabled: cloudEnabled, status: cloud } = useCloud()
+  const status = usePhoneMicStatus()
+  if (!cloudEnabled) return null
+  const signedIn = !!cloud?.signedIn
+  return (
+    <Section title="Phone as microphone">
+      <SettingRow
+        title="Use a phone as the microphone"
+        description={phoneMicLine(status, signedIn)}
+      >
+        <Switch
+          checked={settings.audio.phoneMic}
+          disabled={!signedIn}
+          onCheckedChange={(v) => void patch({ audio: { phoneMic: v } })}
+        />
+      </SettingRow>
+    </Section>
+  )
 }
 
 export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Element {
@@ -214,6 +280,8 @@ export function AudioPage({ embedded }: { embedded?: boolean }): React.JSX.Eleme
           </div>
         </SettingRow>
       </Section>
+
+      {!embedded && <PhoneMicSection />}
 
       {!embedded && (
         <Section title="Recordings">

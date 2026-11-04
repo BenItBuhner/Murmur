@@ -23,6 +23,14 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' }
         ]
+      },
+      {
+        // The phone microphone page is the one page that may use the microphone. Later rules
+        // override earlier ones for the same header.
+        source: '/mic',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=()' }
+        ]
       }
     ]
   }

@@ -29,6 +29,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
 import app.murmur.android.cloud.CloudConfig
@@ -167,10 +168,13 @@ class IaScreenshotTest {
         show()
         compose.runOnUiThread { navigator.select(Route.SETTINGS) }
         compose.waitForIdle()
-        for (label in listOf("Speech model", "Language", "Dictation button", "Keyboard", "Appearance", "Permissions", "Updates", "Try it")) {
-            compose.onNodeWithText(label).assertIsDisplayed()
+        // The list is taller than this screen now: each page is reachable by scrolling.
+        for (label in listOf("Speech model", "Language", "Dictation button", "Keyboard", "Phone microphone", "Appearance", "Permissions", "Updates", "Try it")) {
+            compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
         }
-        compose.onNodeWithContentDescription("Sections").assertIsDisplayed()
+        // Back to the top for the screenshots.
+        compose.onNodeWithContentDescription("Sections").performScrollTo().assertIsDisplayed()
+        compose.waitForIdle()
         save("android-settings-after-light.png")
         dark = true
         compose.waitForIdle()

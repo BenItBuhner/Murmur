@@ -65,7 +65,7 @@ const ROUTE_LABEL: Record<NonNullable<PhoneMicStatus['route']>, string> = {
 export function phoneMicLine(status: PhoneMicStatus | null, signedIn: boolean): string {
   if (!signedIn) return 'Sign in to use a phone signed in to the same account.'
   if (!status || status.state === 'off')
-    return 'Talk into your phone anywhere in the room and the text lands here. The audio goes straight from the phone to this computer, never through Murmur’s servers.'
+    return 'Talk into your phone anywhere in the room and the text lands here. The audio goes straight from the phone to this computer, never through a server.'
   switch (status.state) {
     case 'unavailable':
     case 'offline':

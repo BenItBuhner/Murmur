@@ -2,7 +2,7 @@ import { clerkMiddleware } from '@clerk/nextjs/server'
 import { NextResponse, type NextMiddleware } from 'next/server'
 
 /**
- * Clerk runs only for the account page, so every other route is served without it. Without an
+ * Clerk runs only for the account page and the phone microphone page, so every other route is served without it. Without an
  * instance configured (no keys) this is a pass-through and /account renders its "accounts are not
  * switched on" state instead.
  *
@@ -22,5 +22,5 @@ const passthrough: NextMiddleware = () => NextResponse.next()
 export default configured ? clerkMiddleware() : passthrough
 
 export const config = {
-  matcher: ['/account(.*)']
+  matcher: ['/account(.*)', '/mic(.*)']
 }

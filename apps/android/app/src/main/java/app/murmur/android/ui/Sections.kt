@@ -58,12 +58,16 @@ fun settingsEntries(
     permissionsGranted: Boolean,
     updates: String?,
     updateReady: Boolean,
-    tryIt: String? = "Dictate into a test pad"
-): List<SettingsEntry> = listOf(
+    tryIt: String? = "Dictate into a test pad",
+    phoneMic: String? = "Be the microphone for your computer",
+    /** Phone microphone needs an account; builds without one leave it out. */
+    showPhoneMic: Boolean = true
+): List<SettingsEntry> = listOfNotNull(
     SettingsEntry(Route.MODEL, "Speech model", Glyph.MODEL, model, group = "Dictation", attention = !modelReady),
     SettingsEntry(Route.LANGUAGE, "Language", Glyph.LANGUAGE, language),
     SettingsEntry(Route.BUTTON, "Dictation button", Glyph.BUTTON, button),
     SettingsEntry(Route.KEYBOARD, "Keyboard", Glyph.KEYBOARD, keyboard),
+    if (showPhoneMic) SettingsEntry(Route.PHONE_MIC, "Phone microphone", Glyph.PHONE_MIC, phoneMic) else null,
     SettingsEntry(Route.APPEARANCE, "Appearance", Glyph.APPEARANCE, appearance, group = "App"),
     SettingsEntry(Route.PERMISSIONS, "Permissions", Glyph.PERMISSIONS, permissions, attention = !permissionsGranted),
     SettingsEntry(Route.UPDATES, "Updates", Glyph.UPDATES, updates, attention = updateReady),

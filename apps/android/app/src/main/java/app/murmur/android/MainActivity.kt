@@ -54,6 +54,7 @@ import app.murmur.android.ui.DrawerRow
 import app.murmur.android.ui.HistoryScreen
 import app.murmur.android.ui.HomeScreen
 import app.murmur.android.ui.KeyboardScreen
+import app.murmur.android.ui.PhoneMicScreen
 import app.murmur.android.ui.LanguageScreen
 import app.murmur.android.ui.OnboardingScreen
 import app.murmur.android.ui.PermissionsScreen
@@ -244,6 +245,7 @@ private fun Main(
     val updateReady = readyVersion != null
     val sections = drawerSections(settingsAttention = !modelReady || !permissions.allGranted || updateReady)
     val entries = settingsEntries(
+        showPhoneMic = config.enabled,
         model = when {
             inference.routing.murmurStt -> "Murmur's models · ${settings.sttSpeed.label}"
             !modelReady -> "Not connected"
@@ -319,6 +321,7 @@ private fun Main(
             Route.PERMISSIONS -> PermissionsScreen(nav)
             Route.UPDATES -> UpdatesScreen(store, settings, nav)
             Route.TRY_IT -> TryItScreen(store, settings, nav)
+            Route.PHONE_MIC -> PhoneMicScreen(config, cloud, signedIn, nav)
             Route.ACCOUNT -> AccountScreen(
                 config, cloud, store, nav,
                 onSignIn = { store.update { it.copy(accountSkipped = false) } }

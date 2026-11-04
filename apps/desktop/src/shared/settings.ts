@@ -188,7 +188,13 @@ export const settingsSchema = z.object({
        * Store the audio of every dictation next to its History entry (play it back, send it again).
        * Off, only failed dictations keep their audio, and only until they succeed or are deleted.
        */
-      keepRecordings: z.boolean().default(true)
+      keepRecordings: z.boolean().default(true),
+      /**
+       * Phone as microphone (docs/phone-microphone.md): a phone signed in to the same account can
+       * link to this desktop and be its microphone. Off by default; on, this device is listed for
+       * the account's phones and holds one idle signaling subscription.
+       */
+      phoneMic: z.boolean().default(false)
     })
     .prefault({}),
   stt: z

@@ -92,7 +92,22 @@ export const IPC = {
   audioChunk: 'audio:chunk',
   audioStopped: 'audio:stopped',
   audioStatus: 'audio:status',
-  audioLevel: 'audio:level'
+  audioLevel: 'audio:level',
+
+  // phone as microphone (docs/phone-microphone.md)
+  /** An offer from a phone, for the overlay to answer (main -> overlay). */
+  phoneMicOffer: 'phone-mic:offer',
+  /** A control message for the linked phone (main -> overlay). */
+  phoneMicSend: 'phone-mic:send',
+  /** Close the link (main -> overlay). */
+  phoneMicClose: 'phone-mic:close',
+  /** The overlay's answer to an offer, or why it could not answer (overlay -> main). */
+  phoneMicAnswer: 'phone-mic:answer',
+  /** The link's state changes and the phone's control messages (overlay -> main). */
+  phoneMicEvent: 'phone-mic:event',
+  /** The link as the settings window shows it (invoke, and main -> renderer). */
+  phoneMicStatus: 'phone-mic:status',
+  phoneMicStatusChanged: 'phone-mic:status-changed'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
@@ -164,5 +179,48 @@ export interface RecordingsInfo {
 
 export interface RetryResult {
   ok: boolean
+  error?: string
+}
+
+/** A phone's offer, handed to the overlay renderer (where WebRTC lives) to answer. */
+export interface PhoneMicOfferMessage {
+  offerId: string
+  linkId: string
+  phoneName: string
+  sdp: string
+  iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }>
+}
+
+export type PhoneMicAnswerMessage =
+  | { offerId: string; linkId: string; sdp: string }
+  | { offerId: string; linkId: string; error: string }
+
+export type PhoneMicLinkState = 'connecting' | 'connected' | 'interrupted' | 'closed'
+
+export type PhoneMicEventMessage =
+  | {
+      linkId: string
+      type: 'state'
+      state: PhoneMicLinkState
+      /** How the link reached the phone, once connected (see micProtocol `routeOf`). */
+      route?: 'direct' | 'stun' | 'relay' | 'unknown'
+    }
+  /** The data channel opened: control messages can flow. */
+  | { linkId: string; type: 'open' }
+  /** A raw control message from the phone (main parses it). */
+  | { linkId: string; type: 'message'; data: string }
+
+/** "Phone as microphone" as the Microphone page shows it. */
+export interface PhoneMicStatus {
+  /** The switch (`audio.phoneMic`). */
+  enabled: boolean
+  /**
+   * off: the switch is off. unavailable: no account on this build, or signed out. offline: no
+   * connection to the account yet. waiting: listed for the account's phones. connecting / connected:
+   * a phone is linking or linked; `interrupted`: the link dropped and may come back.
+   */
+  state: 'off' | 'unavailable' | 'offline' | 'waiting' | 'connecting' | 'connected' | 'interrupted'
+  phoneName?: string
+  route?: 'direct' | 'stun' | 'relay' | 'unknown'
   error?: string
 }

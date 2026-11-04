@@ -53,7 +53,7 @@ class NavigationStructureTest {
     @Test
     fun `the Settings screen lists every former top-level setting under its old name, in two groups`() {
         assertEquals(
-            listOf("Speech model", "Language", "Dictation button", "Keyboard", "Appearance", "Permissions", "Updates", "Try it"),
+            listOf("Speech model", "Language", "Dictation button", "Keyboard", "Phone microphone", "Appearance", "Permissions", "Updates", "Try it"),
             settings.map { it.label }
         )
         assertEquals(listOf("Dictation", "App"), settings.mapNotNull { it.group })

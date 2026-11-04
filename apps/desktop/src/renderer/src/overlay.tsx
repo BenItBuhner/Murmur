@@ -6,6 +6,7 @@ import { buildTheme, resolveSeed } from '@shared/theme'
 import { applyTheme } from './lib/apply-theme'
 import { Overlay } from './overlay/Overlay'
 import { MicCapture } from './overlay/capture'
+import { PhoneLinkHost } from './overlay/phone-link'
 import { playSound, setSoundVolume } from './overlay/sounds'
 
 const bridge = window.murmurOverlay
@@ -55,6 +56,18 @@ function App(): React.JSX.Element {
       }),
       bridge.onAudioStop((m) => capture.stop(m.sessionId, m.postRoll !== false, m.quietDb))
     ]
+    // Phone as microphone: a linked phone's audio replaces the microphone while the link is up.
+    const phone = new PhoneLinkHost({
+      answer: (m) => bridge.phoneMic.answer(m),
+      event: (m) => bridge.phoneMic.event(m),
+      stream: (stream) => void capture.setExternalStream(stream).catch(() => undefined)
+    })
+    unsubs.push(
+      bridge.phoneMic.onOffer((m) => void phone.accept(m)),
+      bridge.phoneMic.onSend((m) => phone.send(m.linkId, m.message)),
+      bridge.phoneMic.onClose((m) => phone.close(m.linkId)),
+      () => phone.close()
+    )
     bridge.sendStatus({ ready: false, warm: false })
     return () => unsubs.forEach((u) => u())
   }, [])

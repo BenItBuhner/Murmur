@@ -2,6 +2,7 @@ import { v } from 'convex/values'
 import type { Doc } from './_generated/dataModel'
 import { authedMutation, authedQuery } from './lib/functions'
 import { LIMITS } from './lib/limits'
+import { purgeMicDevice } from './lib/micStore'
 import { requireMaxLength, requireNonEmpty } from './lib/normalize'
 import { deviceDtoValidator, platformValidator, type DeviceDto } from './lib/validators'
 
@@ -68,21 +69,31 @@ export const heartbeat = authedMutation({
   returns: deviceDtoValidator,
   handler: async (ctx, args) => {
     const deviceId = requireNonEmpty(args.deviceId, 'deviceId')
-    const name = requireMaxLength(requireNonEmpty(args.name, 'name'), LIMITS.deviceNameLength, 'name')
+    const name = requireMaxLength(
+      requireNonEmpty(args.name, 'name'),
+      LIMITS.deviceNameLength,
+      'name'
+    )
     const now = Date.now()
     const existing = await ctx.db
       .query('devices')
-      .withIndex('by_user_and_deviceId', (q) => q.eq('userId', ctx.user._id).eq('deviceId', deviceId))
+      .withIndex('by_user_and_deviceId', (q) =>
+        q.eq('userId', ctx.user._id).eq('deviceId', deviceId)
+      )
       .unique()
 
     if (existing) {
       const liveness = await ctx.db
         .query('deviceLiveness')
-        .withIndex('by_user_and_deviceId', (q) => q.eq('userId', ctx.user._id).eq('deviceId', deviceId))
+        .withIndex('by_user_and_deviceId', (q) =>
+          q.eq('userId', ctx.user._id).eq('deviceId', deviceId)
+        )
         .unique()
       const seen = Math.max(existing.lastSeenAt, liveness?.lastSeenAt ?? 0)
       const changed =
-        existing.name !== name || existing.platform !== args.platform || existing.appVersion !== args.appVersion
+        existing.name !== name ||
+        existing.platform !== args.platform ||
+        existing.appVersion !== args.appVersion
       // A real registration change applies at once (a rename is what devices.list exists to show);
       // the routine heartbeat, which changes nothing, writes nothing at all.
       if (changed)
@@ -93,7 +104,8 @@ export const heartbeat = authedMutation({
         })
       if (now - seen >= LIVENESS_WRITE_MS) {
         if (liveness) await ctx.db.patch('deviceLiveness', liveness._id, { lastSeenAt: now })
-        else await ctx.db.insert('deviceLiveness', { userId: ctx.user._id, deviceId, lastSeenAt: now })
+        else
+          await ctx.db.insert('deviceLiveness', { userId: ctx.user._id, deviceId, lastSeenAt: now })
         return toDto({
           ...existing,
           ...(changed ? { name, platform: args.platform, appVersion: args.appVersion } : {}),
@@ -160,6 +172,7 @@ export const remove = authedMutation({
       )
       .unique()
     if (liveness) await ctx.db.delete('deviceLiveness', liveness._id)
+    await purgeMicDevice(ctx, ctx.user._id, args.deviceId)
     return true
   }
 })

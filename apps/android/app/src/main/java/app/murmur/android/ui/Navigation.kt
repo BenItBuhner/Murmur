@@ -13,12 +13,12 @@ import androidx.compose.runtime.setValue
  * pages of the settings section, listed on the Settings screen and reached from there.
  */
 enum class Route {
-    HOME, HISTORY, BUTTON, KEYBOARD, MODEL, LANGUAGE, STYLE, DICTIONARY, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT, ACCOUNT, SETTINGS;
+    HOME, HISTORY, BUTTON, KEYBOARD, MODEL, LANGUAGE, STYLE, DICTIONARY, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT, PHONE_MIC, ACCOUNT, SETTINGS;
 
     /** A page of the settings section rather than a section of its own. */
     val inSettings: Boolean
         get() = when (this) {
-            MODEL, LANGUAGE, BUTTON, KEYBOARD, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT -> true
+            MODEL, LANGUAGE, BUTTON, KEYBOARD, PHONE_MIC, APPEARANCE, PERMISSIONS, UPDATES, TRY_IT -> true
             else -> false
         }
 

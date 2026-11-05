@@ -1,0 +1,23 @@
+name: tmp-portfolio-dns-clear
+on: workflow_dispatch
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete bennett.techlitnow.com DNS + note
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ZONE_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones?name=techlitnow.com")
+          echo "$ZONE_JSON" | jq "{success, errors, zone: (.result[0].id // null)}"
+          ZONE_ID=$(echo "$ZONE_JSON" | jq -r ".result[0].id")
+          test -n "$ZONE_ID" && test "$ZONE_ID" != null
+          DNS=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=bennett.techlitnow.com")
+          echo "$DNS" | jq "{success, errors, records: [.result[]? | {id,type,name,content}]}"
+          echo "$DNS" | jq -r ".result[]?.id" | while read -r id; do
+            echo "Deleting $id"
+            curl -sS -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$id" | jq "{success, errors}"
+          done
+          AFTER=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=bennett.techlitnow.com")
+          echo "$AFTER" | jq "{success, remaining: (.result|length), errors}"

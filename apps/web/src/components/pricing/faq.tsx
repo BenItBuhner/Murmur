@@ -7,7 +7,7 @@ export function Faq() {
     <div className="mx-auto max-w-3xl">
       <div className="text-center">
         <div className="eyebrow">Questions</div>
-        <h2 className="serif-display mt-4 text-title">The fine print, without the fine print.</h2>
+        <h2 className="display-type mt-4 text-title">The fine print, without the fine print.</h2>
       </div>
       <Surface padding="card-tight" className="mt-section">
         <div className="grid">

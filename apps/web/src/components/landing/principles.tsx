@@ -1,6 +1,13 @@
 import { Section, SectionHeading } from '@/components/ui/section'
 import { repoUrl } from '@/lib/site'
 
+const ICONS = [
+  'M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6z M9 12l2 2 4-4',
+  'M15.5 7.5a3.5 3.5 0 1 1-3.4 4.4L4 12v3h3v-2h2l1.6-1.1 M15.5 7.5h.01',
+  'M20 12a8 8 0 1 1-2.3-5.6 M20 4v4h-4 M9 12l2 2 4-4',
+  'm8 8-4 4 4 4 M16 8l4 4-4 4 M13.5 5l-3 14'
+]
+
 const PRINCIPLES = [
   {
     title: 'Recordings never leave the device',
@@ -28,20 +35,40 @@ export function Principles() {
         title="Dictation hears everything you say. Murmur is built like it knows that."
         lede="Four commitments about where your words go, each one checkable in the source rather than promised in a policy."
       />
-      <dl className="mt-section grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
-        {PRINCIPLES.map((p) => (
-          <div key={p.title}>
-            <dt className="text-lead font-semibold tracking-tight">{p.title}</dt>
-            <dd className="mt-2 text-body text-pretty text-muted-foreground">{p.body}</dd>
+      <dl className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        {PRINCIPLES.map((p, i) => (
+          <div key={p.title} className="surface-raised rounded-2xl p-6">
+            <dt className="text-body font-semibold tracking-tight">
+              <span className="mb-5 flex size-10 items-center justify-center rounded-xl bg-brand-violet/10 text-brand-ink dark:text-brand-violet">
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                  className="size-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  {ICONS[i]!.split(' M').map((d, j) => (
+                    <path key={j} d={j === 0 ? d : `M${d}`} />
+                  ))}
+                </svg>
+              </span>
+              {p.title}
+            </dt>
+            <dd className="mt-2 text-note leading-relaxed text-pretty text-muted-foreground">
+              {p.body}
+            </dd>
           </div>
         ))}
       </dl>
-      <p className="mt-10 text-body text-muted-foreground">
+      <p className="mt-8 text-body">
         <a
           href={repoUrl()}
-          className="text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
+          className="font-medium text-brand-ink underline decoration-brand-ink/30 underline-offset-4 hover:decoration-brand-ink dark:text-brand-violet"
         >
-          Read the source
+          Read the source →
         </a>
       </p>
     </Section>

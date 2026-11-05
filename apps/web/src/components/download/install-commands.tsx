@@ -13,7 +13,7 @@ export function InstallCommands({ manifest }: { manifest: ReleaseManifest | null
   ]
   return (
     <Surface>
-      <h2 className="serif-display text-heading">Install in one command</h2>
+      <h2 className="display-type text-heading">Install in one command</h2>
       <p className="mt-2 text-body text-muted-foreground">
         The scripts pick the right file for your machine from the latest release and verify it
         against the release’s checksums before installing.

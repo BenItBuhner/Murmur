@@ -33,10 +33,13 @@ export function Platforms({ manifest }: { manifest: ReleaseManifest | null }) {
         title="A desktop app for Windows and Linux. A native app for Android."
         lede="Both check GitHub Releases for updates, verify every download against the release’s checksums and install it when you are not dictating. You download Murmur by hand exactly once."
       />
-      <div className="mt-section grid gap-card md:grid-cols-3">
+      <div className="mt-12 grid gap-5 md:grid-cols-3">
         {CARDS.map((card) => (
-          <Surface key={card.platform} className="flex flex-col">
-            <h3 className="serif-display text-heading">{card.title}</h3>
+          <Surface key={card.platform} className="flex flex-col rounded-2xl p-7">
+            <span className="inline-flex size-11 items-center justify-center rounded-xl bg-foreground text-background">
+              <PlatformIcon platform={card.platform} />
+            </span>
+            <h3 className="display-type mt-5 text-heading">{card.title}</h3>
             <p className="mt-3 flex-1 text-body text-muted-foreground">{card.body}</p>
             <p className="mt-4 text-note text-muted-foreground/90">{card.formats}</p>
             <PlatformDownloadButton
@@ -58,5 +61,49 @@ export function Platforms({ manifest }: { manifest: ReleaseManifest | null }) {
         .
       </p>
     </Section>
+  )
+}
+
+/* Simple glyphs drawn for the site, not the platforms' logos. */
+function PlatformIcon({ platform }: { platform: Platform }) {
+  if (platform === 'windows')
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden className="size-5" fill="currentColor">
+        <rect x="3" y="3" width="8.2" height="8.2" rx="1.2" />
+        <rect x="12.8" y="3" width="8.2" height="8.2" rx="1.2" />
+        <rect x="3" y="12.8" width="8.2" height="8.2" rx="1.2" />
+        <rect x="12.8" y="12.8" width="8.2" height="8.2" rx="1.2" />
+      </svg>
+    )
+  if (platform === 'linux')
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden
+        className="size-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect x="3" y="4" width="18" height="16" rx="3" />
+        <path d="m7.5 10 3 2.5-3 2.5M13 15.5h4" />
+      </svg>
+    )
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      className="size-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+      <path d="M10.5 18.5h3" />
+    </svg>
   )
 }

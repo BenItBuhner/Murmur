@@ -124,6 +124,16 @@ export type AppRule = z.infer<typeof appRuleSchema>
 
 export const hotkeySchema = z.array(z.number().int()).max(3)
 
+/**
+ * What goes to Ephemeris when the integration is on: `all` sends every finished dictation (it is
+ * still typed at the cursor), `notes-hotkey` only dictations started with the note shortcut, which
+ * are sent instead of typed.
+ */
+export const ephemerisModeSchema = z.enum(['notes-hotkey', 'all'])
+export type EphemerisMode = z.infer<typeof ephemerisModeSchema>
+
+export const EPHEMERIS_DEFAULT_URL = 'http://127.0.0.1:4317'
+
 export const settingsSchema = z.object({
   version: z.number().default(SETTINGS_VERSION),
   onboardingComplete: z.boolean().default(false),
@@ -314,6 +324,22 @@ export const settingsSchema = z.object({
       includePrereleases: z.boolean().default(false),
       /** Version the user chose to skip; ignored until a newer one appears or they check manually. */
       skippedVersion: z.string().default('')
+    })
+    .prefault({}),
+  /**
+   * Optional hand-off to Ephemeris, a local app on this machine (core/ephemeris.ts). Off by
+   * default; device-local and never synced. A new section needs no migration: older files get
+   * these defaults.
+   */
+  ephemeris: z
+    .object({
+      enabled: z.boolean().default(false),
+      url: z.string().default(EPHEMERIS_DEFAULT_URL),
+      /** Sent as `Authorization: Bearer <token>` when set. Stored as typed (loopback only). */
+      token: z.string().default(''),
+      mode: ephemerisModeSchema.default('all'),
+      /** Hold (or tap) to dictate a note straight to Ephemeris. Used in `notes-hotkey` mode only. */
+      noteHotkey: hotkeySchema.default([])
     })
     .prefault({})
 })

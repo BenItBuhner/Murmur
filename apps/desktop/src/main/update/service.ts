@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Settings } from '@shared/settings'
 import type { InstallKind, UpdateStatus } from '@shared/updates'
@@ -28,7 +28,7 @@ import { releasesUrl, type UpdateSource } from './source'
 interface UpdaterState {
   lastCheckedAt: number | null
   /** Written right before an installer runs; the next start uses it to confirm the update. */
-  pending: { version: string; from: string; showWindow: boolean } | null
+  pending: { version: string; from: string; showWindow: boolean; startedAt?: number } | null
 }
 
 function parseState(raw: unknown): UpdaterState {
@@ -38,7 +38,12 @@ function parseState(raw: unknown): UpdaterState {
     lastCheckedAt: typeof obj.lastCheckedAt === 'number' ? obj.lastCheckedAt : null,
     pending:
       pending && typeof pending.version === 'string' && typeof pending.from === 'string'
-        ? { version: pending.version, from: pending.from, showWindow: !!pending.showWindow }
+        ? {
+            version: pending.version,
+            from: pending.from,
+            showWindow: !!pending.showWindow,
+            ...(typeof pending.startedAt === 'number' ? { startedAt: pending.startedAt } : {})
+          }
         : null
   }
 }
@@ -69,12 +74,31 @@ export interface UpdateServiceDeps {
   autoInstallDelayMs?: number
   /** Pauses before the second and third attempt at downloading SHA256SUMS.txt. */
   checksumRetryDelaysMs?: number[]
+  now?: () => number
+  /** Whether another process (the running Windows installer) holds this file open. */
+  isFileLocked?: (path: string) => boolean
 }
 
 export const DEFAULT_CHECK_INTERVAL_MS = 60 * 60 * 1000
 export const DEFAULT_INITIAL_DELAY_MS = 20_000
 export const DEFAULT_AUTO_INSTALL_DELAY_MS = 4_000
 export const DEFAULT_CHECKSUM_RETRY_DELAYS_MS = [1_000, 3_000]
+/** How long after launching an installer a start of the old version may still be mid-install. */
+export const INSTALL_IN_PROGRESS_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * A running .exe is opened without write sharing, so opening it for writing fails while the
+ * installer runs. Any other error (the file is gone, say) means it is not running.
+ */
+export function defaultIsFileLocked(path: string): boolean {
+  try {
+    closeSync(openSync(path, 'r+'))
+    return false
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES'
+  }
+}
 
 /**
  * Keeps this install current from the repository's GitHub Releases.
@@ -97,6 +121,8 @@ export class UpdateService extends EventEmitter {
   private readonly restoreWindow: boolean
   /** This process was started by an update; confirm "up to date" soon instead of waiting a cycle. */
   private readonly justUpdated: boolean
+  /** The old version was started while the installer replacing it is still running. */
+  readonly installInProgress: boolean
   /** Whether the asset selected for the current release can be applied on this install kind. */
   private installable = false
   private checkTimer: NodeJS.Timeout | null = null
@@ -112,7 +138,13 @@ export class UpdateService extends EventEmitter {
     const persisted = this.state.get()
     let updatedFrom: string | null = null
     let restoreWindow = false
-    if (persisted.pending) {
+    this.installInProgress = this.detectInstallInProgress(persisted.pending)
+    if (this.installInProgress) {
+      // Leave the pending record and the installer alone: the new version confirms the update.
+      deps.log.warn(
+        `the installer for ${persisted.pending?.version} is still running; this copy will exit`
+      )
+    } else if (persisted.pending) {
       if (persisted.pending.version === deps.currentVersion) {
         updatedFrom = persisted.pending.from
         restoreWindow = persisted.pending.showWindow
@@ -125,7 +157,7 @@ export class UpdateService extends EventEmitter {
     }
     this.restoreWindow = restoreWindow
     this.justUpdated = updatedFrom !== null
-    this.cleanDownloadDir()
+    if (!this.installInProgress) this.cleanDownloadDir()
     this.lastPrefs = deps.settings.get().updates
     this.status = {
       phase: 'idle',
@@ -474,7 +506,8 @@ export class UpdateService extends EventEmitter {
       pending: {
         version: release.version,
         from: this.deps.currentVersion,
-        showWindow: this.deps.isMainWindowVisible()
+        showWindow: this.deps.isMainWindowVisible(),
+        startedAt: this.now()
       }
     })
     this.state.flush()
@@ -574,6 +607,31 @@ export class UpdateService extends EventEmitter {
   private discardDownload(): void {
     const path = this.status.downloadedPath
     if (path) rmSync(path, { force: true })
+  }
+
+  private now(): number {
+    return this.deps.now ? this.deps.now() : Date.now()
+  }
+
+  /**
+   * Windows only: the user (or Windows) started the old version while the silent installer is
+   * still replacing it. Carrying on would fight the installer for the install folder, and the
+   * installer kills it anyway, so the caller exits instead and lets the new version start.
+   */
+  private detectInstallInProgress(pending: UpdaterState['pending']): boolean {
+    if (this.deps.platform !== 'win32' || this.deps.installKind !== 'nsis') return false
+    if (!pending || pending.version === this.deps.currentVersion) return false
+    if (typeof pending.startedAt !== 'number') return false
+    const age = this.now() - pending.startedAt
+    if (age < 0 || age > INSTALL_IN_PROGRESS_WINDOW_MS) return false
+    const isLocked = this.deps.isFileLocked ?? defaultIsFileLocked
+    try {
+      return readdirSync(this.deps.downloadDir).some((name) =>
+        isLocked(join(this.deps.downloadDir, name))
+      )
+    } catch {
+      return false
+    }
   }
 
   private cleanDownloadDir(): void {

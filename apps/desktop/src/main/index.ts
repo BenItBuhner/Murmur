@@ -288,7 +288,8 @@ async function main(): Promise<void> {
     })
     overlay.configureVisibility(
       s.general.showOverlayWhenIdle && s.onboardingComplete,
-      s.general.overlayPosition
+      s.general.overlayPosition,
+      s.general.tuckOverlayWhenIdle && s.onboardingComplete
     )
     tray?.setHotkeyLabel(chordLabel(s.hotkeys.pushToTalk, hook.platform, s.hotkeys.sideSensitive))
     applyLaunchAtLogin(s.general.launchAtLogin)

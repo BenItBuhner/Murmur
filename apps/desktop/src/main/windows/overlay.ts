@@ -18,6 +18,9 @@ const HEIGHT = 120
 const LIMIT_WIDTH = 600
 const LIMIT_HEIGHT = 160
 const MARGIN = 28
+/** How long the pill takes to slide out from under the screen edge, or back under it. */
+const SLIDE_MS = 220
+const SLIDE_FRAME_MS = 16
 
 /** How long results stay up. An error that can be retried waits for the user much longer. */
 const SUCCESS_HOLD_MS = 1100
@@ -46,6 +49,9 @@ export class OverlayWindow {
   private state: OverlayState = { phase: 'idle' }
   private showWhenIdle = true
   private position: OverlayPosition = 'bottom-center'
+  /** Idle, the pill waits just past the screen edge and slides into view when dictation starts. */
+  private tuck = false
+  private slideTimer: NodeJS.Timeout | null = null
   private ready: Promise<void>
   private resolveReady!: () => void
   /** The pill has buttons right now (a retryable error), so the window must take clicks. */
@@ -123,9 +129,10 @@ export class OverlayWindow {
     return this.ready
   }
 
-  configureVisibility(showWhenIdle: boolean, position: OverlayPosition): void {
+  configureVisibility(showWhenIdle: boolean, position: OverlayPosition, tuck = false): void {
     this.showWhenIdle = showWhenIdle
     this.position = position
+    this.tuck = tuck
     this.applyVisibility()
   }
 
@@ -219,34 +226,87 @@ export class OverlayWindow {
   private applyVisibility(): void {
     if (!this.win) return
     const active = this.state.phase !== 'idle'
-    if (active || this.showWhenIdle) {
+    if (this.tuck) {
+      const wasVisible = this.win.isVisible()
+      if (!wasVisible) {
+        // Start hidden under the edge so the first appearance slides in too.
+        this.stopSlide()
+        const t = this.target(true)
+        if (t) this.win.setBounds(t)
+        this.win.showInactive()
+      }
+      this.reposition(true)
+    } else if (active || this.showWhenIdle) {
+      this.stopSlide()
       this.reposition()
       if (!this.win.isVisible()) this.win.showInactive()
     } else if (this.win.isVisible()) {
+      this.stopSlide()
       this.win.hide()
     }
   }
 
-  reposition(): void {
+  /**
+   * Where the window belongs now. Tucked, it sits entirely past the screen's own edge (not the
+   * work area's, so it also clears the taskbar or dock) on the display the pointer is on.
+   */
+  private target(tucked = this.tuck && this.state.phase === 'idle'): Electron.Rectangle | null {
+    const cursor = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(cursor)
+    const area = display.workArea
+    const { width, height } = this.size()
+    const top = this.position === 'top-center'
+    let x = Math.round(area.x + (area.width - width) / 2)
+    let y = Math.round(area.y + area.height - height - MARGIN)
+    if (top) y = area.y + MARGIN
+    if (this.position === 'bottom-right') x = area.x + area.width - width - MARGIN
+    if (tucked) {
+      const b = display.bounds
+      y = top ? b.y - height : b.y + b.height
+    }
+    return { x, y, width, height }
+  }
+
+  reposition(animate = false): void {
     if (!this.win) return
     try {
-      const cursor = screen.getCursorScreenPoint()
-      const display = screen.getDisplayNearestPoint(cursor)
-      const area = display.workArea
-      const { width, height } = this.size()
-      let x = Math.round(area.x + (area.width - width) / 2)
-      let y = Math.round(area.y + area.height - height - MARGIN)
-      if (this.position === 'top-center') y = area.y + MARGIN
-      if (this.position === 'bottom-right') x = area.x + area.width - width - MARGIN
+      const t = this.target()
+      if (!t) return
       const b = this.win.getBounds()
-      if (b.x !== x || b.y !== y || b.width !== width || b.height !== height)
-        this.win.setBounds({ x, y, width, height })
+      if (b.x === t.x && b.y === t.y && b.width === t.width && b.height === t.height) return
+      // Slide only along the edge axis on the same display; anything else jumps.
+      if (animate && b.x === t.x && b.width === t.width && b.height === t.height) this.slide(b.y, t)
+      else {
+        this.stopSlide()
+        this.win.setBounds(t)
+      }
     } catch (err) {
       log.warn('reposition failed', err)
     }
   }
 
+  private stopSlide(): void {
+    if (this.slideTimer) {
+      clearInterval(this.slideTimer)
+      this.slideTimer = null
+    }
+  }
+
+  /** Eases the window from `fromY` to its target, like a sheet rising from under the screen. */
+  private slide(fromY: number, to: Electron.Rectangle): void {
+    this.stopSlide()
+    const start = Date.now()
+    this.slideTimer = setInterval(() => {
+      if (!this.win) return this.stopSlide()
+      const p = Math.min(1, (Date.now() - start) / SLIDE_MS)
+      const e = 1 - Math.pow(1 - p, 3)
+      this.win.setBounds({ ...to, y: Math.round(fromY + (to.y - fromY) * e) })
+      if (p >= 1) this.stopSlide()
+    }, SLIDE_FRAME_MS)
+  }
+
   destroy(): void {
+    this.stopSlide()
     this.win?.destroy()
     this.win = null
   }

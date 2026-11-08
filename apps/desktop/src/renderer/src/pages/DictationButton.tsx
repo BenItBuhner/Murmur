@@ -54,7 +54,17 @@ export function DictationButtonPage(): React.JSX.Element {
         >
           <Switch
             checked={g.showOverlayWhenIdle}
+            disabled={g.tuckOverlayWhenIdle}
             onCheckedChange={(v) => void patch({ general: { showOverlayWhenIdle: v } })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Hide below the screen"
+          description="When idle, the pill tucks away past the screen edge and slides up when you start dictating."
+        >
+          <Switch
+            checked={g.tuckOverlayWhenIdle}
+            onCheckedChange={(v) => void patch({ general: { tuckOverlayWhenIdle: v } })}
           />
         </SettingRow>
       </Section>

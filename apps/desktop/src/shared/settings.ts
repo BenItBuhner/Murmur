@@ -146,6 +146,11 @@ export const settingsSchema = z.object({
       soundVolume: z.number().min(0).max(1).default(0.35),
       overlayPosition: overlayPositionSchema.default('bottom-center'),
       showOverlayWhenIdle: z.boolean().default(true),
+      /**
+       * Idle, the pill hides just past the screen edge and slides into view when dictation
+       * starts, like a mobile keyboard. Takes the place of the idle indicator while on.
+       */
+      tuckOverlayWhenIdle: z.boolean().default(false),
       showLatencyInHistory: z.boolean().default(true)
     })
     .prefault({}),

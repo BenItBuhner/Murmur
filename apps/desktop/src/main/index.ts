@@ -36,7 +36,7 @@ import { AppTray } from './tray'
 import { SystemAccent } from './theme/system-accent'
 import { detectInstallKind } from './update/install-kind'
 import { applyUpdate, UPDATED_FLAG } from './update/installers'
-import { UpdateService } from './update/service'
+import { UpdateService, updateInstallInProgress } from './update/service'
 import { buildTimeUpdateRepo, resolveUpdateSource } from './update/source'
 import {
   createMainWindow,
@@ -115,6 +115,20 @@ async function main(): Promise<void> {
     `Murmur ${app.getVersion()} starting (electron ${process.versions.electron}, ${process.platform}/${process.arch})`
   )
   log.info(`logs: ${logPath}`)
+  const installing = app.isPackaged
+    ? updateInstallInProgress({
+        stateFile: join(userData, 'updater.json'),
+        platform: process.platform,
+        currentVersion: app.getVersion()
+      })
+    : null
+  if (installing) {
+    // Started (by hand, or by Windows) while the installer for the update replaces this version:
+    // step aside before opening anything. The installer starts the new version itself.
+    log.warn(`the installer for ${installing} is still running; exiting so it can finish`)
+    app.exit(0)
+    return
+  }
   for (const warning of cloud.warnings) log.warn(warning)
   log.info(
     cloudConfig.accountMode === 'off'
@@ -188,7 +202,8 @@ async function main(): Promise<void> {
       const phase = overlay.getState().phase
       // An open settings window means the user is mid-task (signing in, say): an automatic
       // restart there looks like a crash. Hiding or closing it re-arms the install.
-      if (getMainWindow()?.isVisible()) return false
+      const win = getMainWindow()
+      if (win && win.isVisible() && !win.isMinimized()) return false
       return phase !== 'listening' && phase !== 'processing'
     },
     isMainWindowVisible: () => getMainWindow()?.isVisible() ?? false,
@@ -208,14 +223,8 @@ async function main(): Promise<void> {
   // A deferred automatic update waits for the settings window to go away.
   const rearmUpdateOnHide = (window: BrowserWindow): void => {
     window.on('hide', () => updates.notifyIdle())
+    window.on('minimize', () => updates.notifyIdle())
     window.on('closed', () => updates.notifyIdle())
-  }
-  if (updates.installInProgress) {
-    // Started (by hand, or by Windows) while the update installer replaces this version: step aside
-    // so the installer can finish; it starts the new version itself.
-    log.warn('an update is being installed; exiting so the installer can finish')
-    app.exit(0)
-    return
   }
 
   const overlay = new OverlayWindow()

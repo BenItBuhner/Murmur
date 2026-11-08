@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseSettings, type Settings } from '../src/shared/settings'
 import type { InstallKind, UpdateStatus } from '../src/shared/updates'
 import type { GithubRelease } from '../src/core/update/releases'
-import { UpdateService, type UpdateServiceDeps } from '../src/main/update/service'
+import {
+  UpdateService,
+  updateInstallInProgress,
+  type UpdateServiceDeps
+} from '../src/main/update/service'
 import { ChecksumMismatchError, downloadFile } from '../src/main/update/download'
 import type { SettingsStore } from '../src/main/store/settings'
 
@@ -307,7 +311,8 @@ describe('UpdateService', () => {
       version: '0.2.0',
       from: '0.1.0',
       showWindow: false,
-      startedAt: expect.any(Number)
+      startedAt: expect.any(Number),
+      installer: ready.downloadedPath
     })
 
     // The relaunched app (now 0.2.0) sees the pending record, reports it once and clears it.
@@ -322,50 +327,62 @@ describe('UpdateService', () => {
 
   describe('old version started while the Windows installer is running', () => {
     const T0 = 1_800_000_000_000
-    function seed(pending: Record<string, unknown> | null): string {
-      writeFileSync(join(dir, 'updater.json'), JSON.stringify({ lastCheckedAt: null, pending }))
-      mkdirSync(join(dir, 'updates'), { recursive: true })
-      const setup = join(dir, 'updates', 'Murmur-0.2.0-x64-setup.exe')
-      writeFileSync(setup, 'installer')
-      return setup
+    const stateFile = (): string => join(dir, 'updater.json')
+    function seed(pending: Record<string, unknown> | null): void {
+      writeFileSync(stateFile(), JSON.stringify({ lastCheckedAt: null, pending }))
     }
-    const win = (locked: boolean, now = T0 + 15_000): Partial<UpdateServiceDeps> => ({
-      platform: 'win32',
-      installKind: 'nsis',
-      now: () => now,
-      isFileLocked: () => locked
-    })
-
-    it('steps aside and leaves the pending record and installer alone', () => {
-      const setup = seed({ version: '0.2.0', from: '0.1.0', showWindow: true, startedAt: T0 })
-      const service = make(win(true))
-      expect(service.installInProgress).toBe(true)
-      expect(existsSync(setup)).toBe(true)
-      expect(JSON.parse(readFileSync(join(dir, 'updater.json'), 'utf8')).pending).toMatchObject({
-        version: '0.2.0'
+    const check = (
+      opts: { running?: boolean; now?: number; platform?: NodeJS.Platform } = {}
+    ): string | null =>
+      updateInstallInProgress({
+        stateFile: stateFile(),
+        platform: opts.platform ?? 'win32',
+        currentVersion: '0.1.0',
+        now: opts.now ?? T0 + 15_000,
+        isRunning: () => opts.running ?? true
       })
-      // The new version still confirms the update afterwards.
-      const next = make({ ...win(false), currentVersion: '0.2.0' })
-      expect(next.installInProgress).toBe(false)
-      expect(next.getStatus().updatedFrom).toBe('0.1.0')
-      expect(next.shouldShowWindowAfterUpdate).toBe(true)
+    const record = { version: '0.2.0', from: '0.1.0', showWindow: true, startedAt: T0 }
+
+    it('reports the version being installed while its installer runs', () => {
+      seed({ ...record, installer: 'C:/x/Murmur-0.2.0-x64-setup.exe' })
+      expect(check()).toBe('0.2.0')
+      expect(check({ running: false })).toBeNull()
     })
 
-    it('carries on when the installer is no longer running', () => {
-      const setup = seed({ version: '0.2.0', from: '0.1.0', showWindow: false, startedAt: T0 })
-      const service = make(win(false))
-      expect(service.installInProgress).toBe(false)
-      expect(existsSync(setup)).toBe(false)
-      expect(JSON.parse(readFileSync(join(dir, 'updater.json'), 'utf8')).pending).toBeNull()
-    })
-
-    it('ignores stale or undated records and other platforms', () => {
-      seed({ version: '0.2.0', from: '0.1.0', showWindow: false, startedAt: T0 })
-      expect(make(win(true, T0 + 11 * 60_000)).installInProgress).toBe(false)
+    it('ignores stale, undated, finished and non-Windows records', () => {
+      seed({ ...record, installer: 'C:/x/setup.exe' })
+      expect(check({ now: T0 + 4 * 60_000 })).toBeNull()
+      expect(check({ platform: 'linux' })).toBeNull()
       seed({ version: '0.2.0', from: '0.1.0', showWindow: false })
-      expect(make(win(true)).installInProgress).toBe(false)
-      seed({ version: '0.2.0', from: '0.1.0', showWindow: false, startedAt: T0 })
-      expect(make({ now: () => T0 + 1000, isFileLocked: () => true }).installInProgress).toBe(false)
+      expect(check()).toBeNull()
+      seed({ ...record, version: '0.1.0', installer: 'C:/x/setup.exe' })
+      expect(check()).toBeNull()
+      seed(null)
+      expect(check()).toBeNull()
+      rmSync(stateFile())
+      expect(check()).toBeNull()
+    })
+
+    it('records the installer path and launch time when installing', async () => {
+      settings.patch({ updates: { autoInstall: false } })
+      const service = make({ now: () => T0 })
+      await service.check({ manual: true })
+      const ready = await service.download()
+      await service.install()
+      const pending = JSON.parse(readFileSync(stateFile(), 'utf8')).pending
+      expect(pending).toMatchObject({ startedAt: T0, installer: ready.downloadedPath })
+    })
+
+    it('does not re-arm an automatic install after dispose', async () => {
+      idle = false
+      const service = make()
+      await service.check({ manual: false })
+      await vi.waitFor(() => expect(service.getStatus().waitingForIdle).toBe(true))
+      service.dispose()
+      idle = true
+      service.notifyIdle()
+      await sleep(40)
+      expect(applied).toEqual([])
     })
   })
 

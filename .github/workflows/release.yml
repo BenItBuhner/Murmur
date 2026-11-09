@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to build and publish (e.g. v0.4.0)
+        description: Tag to build and publish (e.g. v0.4.0); a new tag is created on the chosen branch's head
         required: true
         type: string
       draft:
@@ -60,6 +60,24 @@ jobs:
       version: ${{ steps.versions.outputs.version }}
       prerelease: ${{ steps.versions.outputs.prerelease }}
     steps:
+      # A dispatch can name a tag that does not exist yet: it is then created on the dispatched
+      # commit, so a release can be cut without pushing a tag. Tags made with GITHUB_TOKEN do not
+      # trigger the push event, so this does not start a second run.
+      - name: Create the tag if a dispatch names a new one
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag must look like v1.2.3, got '$RELEASE_TAG'"; exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists."
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${RELEASE_TAG}" -f sha="$GITHUB_SHA" >/dev/null
+            echo "Created tag $RELEASE_TAG at $GITHUB_SHA."
+          fi
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}

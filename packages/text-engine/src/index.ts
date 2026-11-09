@@ -120,6 +120,7 @@ export {
 export { formatTranscript, type FormatInput } from './format'
 export {
   collapseLoops,
+  suspectTail,
   dropLastWords,
   dropSilentSegments,
   isSilenceHallucination,

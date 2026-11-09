@@ -38,6 +38,7 @@ import {
   stripEcho,
   wantsLayout,
   evenParagraphs,
+  suspectTail,
   type LayoutResult
 } from '@engine'
 import {
@@ -1035,6 +1036,13 @@ export class DictationController extends EventEmitter {
       // One answer for the whole (trimmed) clip: its timings line up with `audio`.
       if (!streamed && audio.length / SAMPLE_RATE <= LONG_CLIP_SEC)
         stt = dropUnspokenEnding(stt, audio, tag)
+      // An ending that repeats stock filler is often made up over real speech: the whole clip is
+      // transcribed once more, and the second answer is kept when it does not look made up.
+      if (suspectTail(stt.text) && audio.length / SAMPLE_RATE <= LONG_CLIP_SEC) {
+        log.warn(`session ${tag}: transcript ending looks made up; transcribing again`)
+        const again = await run(audio, speechEndSec).catch(() => null)
+        if (again?.text.trim() && !suspectTail(again.text)) stt = again
+      }
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
       return failure('', resolved, err)

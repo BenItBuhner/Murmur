@@ -9,7 +9,8 @@ import {
   type Gate,
   type GatewayHooks
 } from './lib/gatewayCore'
-import { gatewayError, identityOf, type GatewayIdentity } from './lib/inference'
+import { MURMUR_MODELS, gatewayError, identityOf, type GatewayIdentity } from './lib/inference'
+import { audioStats, readWav, scorePiece } from './lib/timelineAudio'
 import type { Id } from './_generated/dataModel'
 
 /**
@@ -21,7 +22,11 @@ import type { Id } from './_generated/dataModel'
  * release by setting MURMUR_CONVEX_GATEWAY=off in the deployment's environment.
  */
 
-function callerArgs(identity: GatewayIdentity): { clerkId: string; email?: string; emailVerified?: boolean } {
+function callerArgs(identity: GatewayIdentity): {
+  clerkId: string
+  email?: string
+  emailVerified?: boolean
+} {
   return { clerkId: identity.subject, email: identity.email, emailVerified: identity.emailVerified }
 }
 
@@ -38,16 +43,20 @@ function gatewayOff(): Response {
   )
 }
 
-function convexHooks(ctx: ActionCtx): GatewayHooks {
+export function convexHooks(ctx: ActionCtx): GatewayHooks {
   return {
     env: process.env,
     access: (identity) => ctx.runQuery(internal.inference.access, callerArgs(identity)),
     authorize: async ({ identity, ...rest }) =>
-      (await ctx.runMutation(internal.inference.authorize, { ...callerArgs(identity), ...rest })) as Gate,
+      (await ctx.runMutation(internal.inference.authorize, {
+        ...callerArgs(identity),
+        ...rest
+      })) as Gate,
     record: async ({ userId, identity: _identity, ...rest }) => {
       await ctx.runMutation(internal.inference.record, { userId: userId as Id<'users'>, ...rest })
     },
-    providerFailed: (kind, reason) => ctx.runMutation(internal.inference.providerFailed, { kind, reason }),
+    providerFailed: (kind, reason) =>
+      ctx.runMutation(internal.inference.providerFailed, { kind, reason }),
     providerRecovered: async (kind) => {
       await ctx.runMutation(internal.inference.providerRecovered, { kind })
     }
@@ -77,4 +86,55 @@ export const format = httpAction(async (ctx, request) => {
 export const layout = httpAction(async (ctx, request) => {
   if (!convexGatewayEnabled(process.env)) return gatewayOff()
   return handleLayout(convexHooks(ctx), await identityOf(ctx.auth), request)
+})
+
+/**
+ * All-day recording: a device sends a piece of audio and nothing else. The server measures it, skips
+ * silence, transcribes speech with the managed model (same quotas as dictation), scores it, and keeps
+ * the text for the account's desktop to pick up. `?device=&startedAt=&endedAt=` describe the piece.
+ */
+export const timelineAudio = httpAction(async (ctx, request) => {
+  if (!convexGatewayEnabled(process.env)) return gatewayOff()
+  const identity = await identityOf(ctx.auth)
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to record all day')
+  const url = new URL(request.url)
+  const device = url.searchParams.get('device') ?? ''
+  const startedAt = url.searchParams.get('startedAt') ?? ''
+  const endedAt = url.searchParams.get('endedAt') ?? ''
+  if (!device || !startedAt || !endedAt)
+    return gatewayError(400, 'bad_request', 'device, startedAt and endedAt are required')
+  const bytes = new Uint8Array(await request.arrayBuffer())
+  const wav = readWav(bytes)
+  if (!wav) return gatewayError(400, 'bad_request', 'Send the piece as a 16-bit PCM WAV')
+  const stats = audioStats(wav.pcm, wav.rate)
+  const seconds = wav.pcm.length / wav.rate
+  const json = (body: unknown): Response =>
+    new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+  if (stats.speechRatio < 0.02) return json({ skipped: true, ...stats })
+  const sttUrl = new URL(request.url)
+  sttUrl.search = new URLSearchParams({ model: MURMUR_MODELS.stt }).toString()
+  const res = await handleTranscriptions(
+    convexHooks(ctx),
+    identity,
+    new Request(sttUrl, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: bytes })
+  )
+  if (!res.ok) return res
+  const text = String(((await res.json()) as { text?: string }).text ?? '').trim()
+  const { score, tags } = scorePiece({ text, seconds, ...stats })
+  if (text)
+    await ctx.runMutation(internal.timeline.store, {
+      clerkId: identity.subject,
+      chunk: {
+        device,
+        startedAt,
+        endedAt,
+        text,
+        engine: 'server',
+        ...stats,
+        speakers: 0,
+        score,
+        tags
+      }
+    })
+  return json({ skipped: false, text, score, tags, ...stats })
 })

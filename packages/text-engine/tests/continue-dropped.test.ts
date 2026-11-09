@@ -68,3 +68,14 @@ describe('evenParagraphs', () => {
     expect(evenParagraphs(list)).toBe(list)
   })
 })
+
+describe('finish sentence case', () => {
+  const opts = { category: 'document' as const, dictionary: [], trailingSpace: false }
+  it('capitalizes a sentence that starts in lower case', () => {
+    expect(finish('We shipped it. then we tested it.', opts).text).toBe('We shipped it. Then we tested it.')
+  })
+  it('leaves abbreviations and lower-case profiles alone', () => {
+    expect(finish('Ask e.g. the team.', opts).text).toBe('Ask e.g. the team.')
+    expect(finish('we shipped. then', { ...opts, casing: 'lowercase' }).text).toBe('we shipped. then')
+  })
+})

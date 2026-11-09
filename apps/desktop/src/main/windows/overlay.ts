@@ -18,6 +18,9 @@ const HEIGHT = 120
 const LIMIT_WIDTH = 600
 const LIMIT_HEIGHT = 160
 const MARGIN = 28
+/** A renderer that keeps dying is reloaded at most this often per minute. */
+const MAX_CRASHES = 3
+const CRASH_WINDOW_MS = 60_000
 /** How long the pill takes to slide out from under the screen edge, or back under it. */
 const SLIDE_MS = 220
 const SLIDE_FRAME_MS = 16
@@ -57,8 +60,12 @@ export class OverlayWindow {
   /** The pill has buttons right now (a retryable error), so the window must take clicks. */
   private interactive = false
   private loads = 0
+  private crashTimes: number[] = []
+  private quitting = false
   /** Called after the overlay page reloads (it was recovered), so the mic and theme can be resent. */
   onReloaded: (() => void) | null = null
+  /** Called when the overlay renderer dies, before it is reloaded. */
+  onRendererGone: (() => void) | null = null
 
   constructor() {
     this.ready = new Promise((r) => (this.resolveReady = r))
@@ -116,8 +123,19 @@ export class OverlayWindow {
     // The pill's renderer also owns the microphone: if it dies, bring it back rather than leave
     // a window that is "shown" but draws nothing.
     win.webContents.on('render-process-gone', (_e, details) => {
+      if (details.reason === 'clean-exit' || this.quitting || win.isDestroyed()) return
+      this.onRendererGone?.()
+      const now = Date.now()
+      this.crashTimes = [...this.crashTimes.filter((t) => now - t < CRASH_WINDOW_MS), now]
+      if (this.crashTimes.length > MAX_CRASHES) {
+        log.error(
+          `overlay renderer gone (${details.reason}, exit ${details.exitCode}); ` +
+            `${this.crashTimes.length} times in a minute, not reloading again`
+        )
+        return
+      }
       log.error(`overlay renderer gone (${details.reason}, exit ${details.exitCode}); reloading`)
-      if (!win.isDestroyed()) win.webContents.reload()
+      win.webContents.reload()
     })
     win.webContents.on('unresponsive', () => log.warn('overlay renderer unresponsive'))
     win.webContents.on('responsive', () => log.info('overlay renderer responsive again'))
@@ -153,9 +171,12 @@ export class OverlayWindow {
   }
 
   setState(state: OverlayState): void {
+    const starting = this.state.phase === 'idle' && state.phase !== 'idle'
     this.state = state
     this.push()
     this.applyVisibility()
+    // A pill that silently stopped being drawn gets a fresh frame whenever a dictation starts.
+    if (starting) this.repaint()
     this.setInteractive(
       state.phase === 'error' && (!!state.retryId || !!state.limit || !!state.service)
     )
@@ -335,14 +356,11 @@ export class OverlayWindow {
     const before = win.getBounds()
     const wasVisible = win.isVisible()
     this.stopSlide()
-    this.reposition()
-    const shouldShow = this.tuck || this.showWhenIdle || this.state.phase !== 'idle'
-    if (shouldShow) {
-      if (wasVisible) win.hide()
-      win.showInactive()
-      win.setAlwaysOnTop(true, 'screen-saver')
-    }
-    win.webContents.invalidate()
+    // Re-showing makes Windows compose the window afresh, but it blinks the pill and drops its
+    // hover state: only do it while nothing is on the pill.
+    if (wasVisible && this.state.phase === 'idle' && !this.interactive) win.hide()
+    this.applyVisibility()
+    this.repaint()
     this.push()
     const after = win.getBounds()
     log.info(
@@ -351,12 +369,16 @@ export class OverlayWindow {
     )
   }
 
-  /** A dictation is starting: if the window somehow is not up and on a screen, recover it now. */
-  ensureShown(): void {
+  /** Re-assert topmost and ask Chromium for a fresh frame. Cheap; no blink. */
+  repaint(): void {
     const win = this.win
-    if (!win || win.isDestroyed()) return
-    if (win.isVisible() && (this.tuck || onAnyDisplay(win.getBounds()))) return
-    this.refresh('not shown at dictation start')
+    if (!win || win.isDestroyed() || !win.isVisible()) return
+    win.setAlwaysOnTop(true, 'screen-saver')
+    win.webContents.invalidate()
+  }
+
+  setQuitting(): void {
+    this.quitting = true
   }
 
   destroy(): void {

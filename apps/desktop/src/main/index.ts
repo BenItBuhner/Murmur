@@ -309,6 +309,7 @@ async function main(): Promise<void> {
   const quit = (): void => {
     quitting = true
     setQuitting(true)
+    overlay.setQuitting()
     app.quit()
   }
 
@@ -376,7 +377,6 @@ async function main(): Promise<void> {
   hook.on('action', (a) => controller.handle(a))
   hook.start()
   controller.on('state', (phase: 'idle' | 'listening' | 'processing') => {
-    if (phase === 'listening') overlay.ensureShown()
     tray?.setPhase(phase)
     if (phase === 'idle') updates.notifyIdle()
   })
@@ -401,26 +401,48 @@ async function main(): Promise<void> {
     recorder.resend()
     pushTheme()
   }
+  overlay.onRendererGone = (): void => recorder.rendererLost()
 
   // The pill is a transparent always-on-top window. Waking from sleep, a display change or a GPU
   // process restart can leave it "visible" with nothing drawn; redraw it after each of those.
   let refreshTimer: NodeJS.Timeout | null = null
-  const refreshOverlay = (reason: string, delayMs = 1500): void => {
+  let refreshAt = 0
+  const refreshReasons = new Set<string>()
+  const cancelRefresh = (): void => {
     if (refreshTimer) clearTimeout(refreshTimer)
+    refreshTimer = null
+    refreshReasons.clear()
+  }
+  const refreshOverlay = (reason: string, delayMs = 1500): void => {
+    refreshReasons.add(reason)
+    const at = Date.now() + delayMs
+    // Several triggers share one refresh, which runs at the earliest time any of them asked for.
+    if (refreshTimer && refreshAt <= at) return
+    if (refreshTimer) clearTimeout(refreshTimer)
+    refreshAt = at
     refreshTimer = setTimeout(() => {
-      refreshTimer = null
-      overlay.refresh(reason)
+      const reasons = [...refreshReasons].join(', ')
+      cancelRefresh()
+      overlay.refresh(reasons)
     }, delayMs)
   }
-  powerMonitor.on('suspend', () => log.info('system suspending'))
+  powerMonitor.on('suspend', () => {
+    log.info('system suspending')
+    cancelRefresh()
+  })
   powerMonitor.on('resume', () => refreshOverlay('resume'))
   powerMonitor.on('unlock-screen', () => refreshOverlay('unlock'))
   screen.on('display-added', () => refreshOverlay('display added'))
   screen.on('display-removed', () => refreshOverlay('display removed'))
-  screen.on('display-metrics-changed', (_e, _display, changed) =>
-    refreshOverlay(`display changed (${changed.join(', ')})`)
-  )
+  screen.on('display-metrics-changed', (_e, _display, changed) => {
+    // workArea alone changes whenever an auto-hiding taskbar slides; that needs no redraw.
+    const relevant = changed.filter(
+      (c) => c === 'bounds' || c === 'scaleFactor' || c === 'rotation'
+    )
+    if (relevant.length > 0) refreshOverlay(`display changed (${relevant.join(', ')})`)
+  })
   app.on('child-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit') return
     log.warn(`${details.type} process gone (${details.reason}, exit ${details.exitCode})`)
     if (details.type === 'GPU') refreshOverlay('GPU process restarted', 500)
   })
@@ -459,6 +481,7 @@ async function main(): Promise<void> {
   app.on('before-quit', () => {
     quitting = true
     setQuitting(true)
+    overlay.setQuitting()
     hook.stop()
     updates.dispose()
     phoneMic.dispose()

@@ -18,6 +18,7 @@ import {
 } from './text'
 import { collapseLoops } from './hallucination'
 import { COMMON_WORDS } from './common-words'
+import { repairCase } from './verify'
 import { joinPauseStops } from './pause-stops'
 import type { AppCategory, Casing, DictionaryTerm } from './types'
 
@@ -133,6 +134,13 @@ export function finish(text: string, opts: FinishOptions): Finished {
   )
   if (cased !== out) stages.push('casing')
   out = cased
+  // A sentence that starts in lower case after a period (a seam between pieces, a model that
+  // lowered it) gets its capital, whichever path the text took. Not for a lower-case profile.
+  if (opts.casing !== 'lowercase') {
+    const up = repairCase('', out, { category: opts.category, precedingText: opts.precedingText })
+    if (up !== out) stages.push('sentence-case')
+    out = up
+  }
   const continued = continueFrom(out, opts.precedingText, opts.category)
   if (continued !== out) stages.push('continue')
   out = continued

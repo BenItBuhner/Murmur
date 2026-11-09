@@ -140,6 +140,11 @@ const EXTRA_RELEASE_FILES = [CHECKSUMS_FILE, ...INSTALL_HELPERS.map((h) => h.fil
  * repository has none). `notes` renders the entry under "What's new" above the download table.
  */
 const WHATS_NEW = {
+  '0.6.39': [
+    'Record all day (Android, off by default). Turn it on under Phone microphone and Murmur keeps listening in the background, from any network. Silence is skipped, and speech is transcribed on the server for Ephemeris, so you can later ask what was said in a meeting or what your idea was this morning.',
+    'Steadier paragraphs and fewer dropped sentences. Breaks land more evenly, a point is kept within one bullet, and sentences that a break cut in two are joined back together.',
+    'Picks up where you left off on Windows. Dictating after text you already typed continues the sentence instead of starting a new one with a capital.'
+  ],
   '0.6.37': [
     'Profiles. Pick how your dictations read in Style: Default adapts to each app, Casual writes relaxed lower-case messages, Polished is professional with paragraphs and lists, and As spoken keeps your own words and grammar. Set one for everything, or a different one per app.',
     'Paragraphs and lists. Longer emails, documents and notes now get a paragraph break where you move to a new topic, and a list when you name several items, with no extra wait when you stop.',

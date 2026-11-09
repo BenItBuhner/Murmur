@@ -248,5 +248,27 @@ export default defineSchema({
   historyMeta: defineTable({
     userId: v.id('users'),
     count: v.number()
-  }).index('by_user', ['userId'])
+  }).index('by_user', ['userId']),
+
+  /**
+   * All-day recording: speech the server transcribed from a device's audio (/v1/timeline/audio),
+   * waiting for the account's desktop to pick it up into its timeline. Text only. The desktop
+   * deletes what it took, and anything left over two weeks is dropped.
+   */
+  timelineChunks: defineTable({
+    userId: v.id('users'),
+    device: v.string(),
+    startedAt: v.string(),
+    endedAt: v.string(),
+    text: v.string(),
+    engine: v.string(),
+    rmsDb: v.number(),
+    speechRatio: v.number(),
+    speakers: v.number(),
+    /** Server-side value score (0..1) and why: speech, idea. */
+    score: v.optional(v.number()),
+    tags: v.optional(v.array(v.string()))
+  })
+    .index('by_user', ['userId'])
+    .index('by_user_device_start', ['userId', 'device', 'startedAt'])
 })

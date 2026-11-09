@@ -2,7 +2,7 @@ import { httpRouter } from 'convex/server'
 import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
 import { stripeWebhook } from './billing'
-import { chatCompletions, format, layout, models, transcriptions } from './gateway'
+import { chatCompletions, format, layout, models, timelineAudio, transcriptions } from './gateway'
 import { parseUsageRecords, workerAuthorized } from './lib/worker'
 import { verifyClerkWebhook, WebhookVerificationError } from './lib/clerkWebhook'
 
@@ -14,6 +14,7 @@ const http = httpRouter()
  */
 http.route({ path: '/v1/models', method: 'GET', handler: models })
 http.route({ path: '/v1/audio/transcriptions', method: 'POST', handler: transcriptions })
+http.route({ path: '/v1/timeline/audio', method: 'POST', handler: timelineAudio })
 http.route({ path: '/v1/chat/completions', method: 'POST', handler: chatCompletions })
 /** Murmur-native: the transcript in, the text to insert out (see gateway.ts `format`). */
 http.route({ path: '/v1/format', method: 'POST', handler: format })
@@ -37,13 +38,17 @@ http.route({
     } catch {
       return new Response('Body must be JSON', { status: 400 })
     }
-    if (typeof body?.clerkId !== 'string' || !body.clerkId) return new Response('"clerkId" is required', { status: 400 })
+    if (typeof body?.clerkId !== 'string' || !body.clerkId)
+      return new Response('"clerkId" is required', { status: 400 })
     const grant = await ctx.runMutation(internal.inference.workerGrant, {
       clerkId: body.clerkId,
       email: typeof body.email === 'string' ? body.email : undefined,
       emailVerified: typeof body.emailVerified === 'boolean' ? body.emailVerified : undefined
     })
-    return new Response(JSON.stringify(grant), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify(grant), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
   })
 })
 
@@ -60,9 +65,13 @@ http.route({
       return new Response('Body must be JSON', { status: 400 })
     }
     const records = parseUsageRecords(body?.records)
-    if (!records) return new Response('"records" must be an array of usage records', { status: 400 })
+    if (!records)
+      return new Response('"records" must be an array of usage records', { status: 400 })
     const result = await ctx.runMutation(internal.inference.recordBatch, { records })
-    return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
   })
 })
 

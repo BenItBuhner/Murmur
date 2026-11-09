@@ -1,4 +1,5 @@
 import { countWords } from './text'
+import { COMMON_WORDS } from './common-words'
 import type { AppCategory, ChatMessage, Complete, Layout } from './types'
 
 /**
@@ -76,7 +77,7 @@ export const LAYOUT_SYSTEM_PROMPT = [
   'You lay out long voice dictations. You are given the sentences of one dictation, numbered. Do not rewrite anything: reply only with where paragraphs start and which sentences are list items, as JSON.',
   '',
   'Paragraphs: start a new paragraph where the speaker moves to a new topic or a new step, typically every 3 to 8 sentences. Never give each sentence its own paragraph.',
-  'Lists: only where the speaker clearly enumerates items ("first..., second..., third...", "number one...", "three things: ... and ..."). Each item starts at one sentence; an item may run over several sentences until the next item. Use "ordered": true when the speaker counted or the order matters. A sentence that introduces the list ("There are three things:") is not an item.',
+  'Lists: only where the speaker clearly enumerates items ("first..., second..., third...", "number one...", "three things: ... and ..."). Each item is one point and starts at one sentence; the sentences after it that qualify, restate or finish the same point (\"This should not be optional.\", \"No exceptions.\") belong to that item, not new items. An item may run over several sentences until the next point. Use "ordered": true when the speaker counted or the order matters. A sentence that introduces the list ("There are three things:") is not an item.',
   '',
   'Reply with exactly this JSON and nothing else: {"paragraphs":[sentence numbers that start a new paragraph],"lists":[{"items":[sentence numbers that start each item],"end":last sentence number of the last item,"ordered":true or false}]}. Use empty arrays when nothing applies.'
 ].join('\n')
@@ -320,4 +321,22 @@ export function evenParagraphs(text: string, transcript = ''): string {
     changed = true
   }
   return changed ? paras.join('\n\n') : text
+}
+
+/** Words a sentence cannot end on: one that does was cut, and goes on after the break. */
+const RUNNING_END = /\b(?:a|an|the|to|of|and|or|but|because|that|which|who|with|for|from|in|on|at|by|is|are|was|were|if|so|than|then|as|into|about|like|my|our|your|their|its)$/iu
+
+/**
+ * A sentence cut by a line break it never had ("- ... because that\n\nIs pretty clutch.", Nov
+ * 2026): when a line ends on a word no sentence ends on, with no punctuation, and the next
+ * paragraph starts with an ordinary word, the two are one sentence again.
+ */
+export function joinRunningSentences(text: string): string {
+  return text.replace(
+    /([\p{L}'’]+)[^\S\n]*\n[^\S\n]*\n?[^\S\n]*(\p{Lu}[\p{Ll}'’]*)(?=[\s,.;:!?])/gu,
+    (m: string, last: string, next: string) =>
+      RUNNING_END.test(last) && (COMMON_WORDS.has(next.toLowerCase()) && next !== 'I')
+        ? `${last} ${next.toLowerCase()}`
+        : m
+  )
 }

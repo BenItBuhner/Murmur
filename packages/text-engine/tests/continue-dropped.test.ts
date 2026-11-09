@@ -79,3 +79,14 @@ describe('finish sentence case', () => {
     expect(finish('we shipped. then', { ...opts, casing: 'lowercase' }).text).toBe('we shipped. then')
   })
 })
+
+describe('joinRunningSentences', () => {
+  const opts = { category: 'document' as const, dictionary: [], trailingSpace: false }
+  it('rejoins a sentence a break cut in two', () => {
+    expect(finish('- Ship it because that\n\nIs pretty clutch.', opts).text).toBe('- Ship it because that is pretty clutch.')
+  })
+  it('keeps headings and ordinary breaks', () => {
+    expect(finish('Agenda\n\nBudget review.', opts).text).toBe('Agenda\n\nBudget review.')
+    expect(finish('We shipped it.\n\nThe next part.', opts).text).toBe('We shipped it.\n\nThe next part.')
+  })
+})

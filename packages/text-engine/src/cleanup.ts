@@ -19,6 +19,7 @@ import {
 import { collapseLoops } from './hallucination'
 import { COMMON_WORDS } from './common-words'
 import { repairCase } from './verify'
+import { joinRunningSentences } from './layout'
 import { joinPauseStops } from './pause-stops'
 import type { AppCategory, Casing, DictionaryTerm } from './types'
 
@@ -140,6 +141,11 @@ export function finish(text: string, opts: FinishOptions): Finished {
     const up = repairCase('', out, { category: opts.category, precedingText: opts.precedingText })
     if (up !== out) stages.push('sentence-case')
     out = up
+  }
+  if (opts.category !== 'code' && opts.category !== 'terminal') {
+    const joined = joinRunningSentences(out)
+    if (joined !== out) stages.push('rejoin')
+    out = joined
   }
   const continued = continueFrom(out, opts.precedingText, opts.category)
   if (continued !== out) stages.push('continue')

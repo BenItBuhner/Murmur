@@ -44,7 +44,6 @@ import app.murmur.android.phonemic.PhoneMic
 import app.murmur.android.ui.components.ListCard
 import app.murmur.android.ui.components.ListRow
 import app.murmur.android.ui.components.Notice
-import app.murmur.android.ui.components.ToggleRow
 import app.murmur.android.ui.components.NoticeTone
 import app.murmur.android.ui.components.PrimaryButton
 import app.murmur.android.ui.components.Screen
@@ -103,23 +102,6 @@ fun PhoneMicScreen(config: CloudConfig, cloud: CloudBoot, signedIn: Boolean, nav
                 Notice("Sign in on the Account page with the account your computer uses.")
             state.desktop != null && state.phase != null -> Linked(state.desktop!!.name, connect)
             else -> Choose(connect)
-        }
-        if (config.enabled && cloud is CloudBoot.Ready && signedIn) {
-            Spacer(Modifier.height(24.dp))
-            var allDay by remember { mutableStateOf(app.murmur.android.allday.AllDay.enabled(context)) }
-            val askForAllDay = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-                micAllowed = granted
-                if (granted) { app.murmur.android.allday.AllDay.setEnabled(context, true); allDay = true }
-            }
-            ToggleRow(
-                title = "Record all day",
-                checked = allDay,
-                onCheckedChange = { on ->
-                    if (on && !micAllowed) askForAllDay.launch(Manifest.permission.RECORD_AUDIO)
-                    else { app.murmur.android.allday.AllDay.setEnabled(context, on); allDay = on }
-                },
-                description = "Keeps listening in the background. Silence is skipped; speech goes to your account, where it is transcribed for Ephemeris on your computer, from any network. Audio is not kept on the phone."
-            )
         }
     }
 }

@@ -129,12 +129,6 @@
             android:name=".learn.WordSuggestionReceiver"
             android:exported="false" />
 
-        <!-- All-day recording: off by default; runs only after the person turns it on. -->
-        <service
-            android:name=".allday.AllDayService"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
-
         <service
             android:name=".service.RecordingService"
             android:exported="false"

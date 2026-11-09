@@ -17,6 +17,7 @@ import {
   normalizeWhitespace
 } from './text'
 import { collapseLoops } from './hallucination'
+import { COMMON_WORDS } from './common-words'
 import { joinPauseStops } from './pause-stops'
 import type { AppCategory, Casing, DictionaryTerm } from './types'
 
@@ -97,6 +98,8 @@ export interface FinishOptions {
   snippetContext?: SnippetContext
   /** The profile's casing; `lowercase` lowers sentence starts before snippets expand. */
   casing?: Casing
+  /** Text before the cursor, when the platform can read it: the dictation continues it. */
+  precedingText?: string
 }
 
 export interface Finished {
@@ -130,10 +133,43 @@ export function finish(text: string, opts: FinishOptions): Finished {
   )
   if (cased !== out) stages.push('casing')
   out = cased
+  const continued = continueFrom(out, opts.precedingText, opts.category)
+  if (continued !== out) stages.push('continue')
+  out = continued
   const snippets = expandSnippets(out, opts.snippets ?? [], opts.snippetContext)
   if (snippets.expanded.length) stages.push('snippets')
   out = normalizeWhitespace(snippets.text)
+  if (continued.startsWith(' ') && !out.startsWith(' ')) out = ` ${out}`
   const empty = !isMeaningful(out)
   if (!empty) out = applyTrailing(out, opts.trailingSpace && !out.endsWith('\n'))
   return { text: empty ? '' : out, empty, stages, snippetsExpanded: snippets.expanded }
+}
+
+/**
+ * A dictation that goes on from text already in the field. Mid-sentence ("I think we should|"),
+ * a capital the speech model or formatter gave the first word comes off when it is an ordinary
+ * word ("Probably" -> "probably"); names, "I", acronyms and words not in the common-word list keep
+ * it. After a sentence end, a lower-case first word gets its capital. And when the text before
+ * ends on a letter or punctuation with no space, one space goes in front, so the words do not run
+ * together. Not in code or a terminal.
+ */
+export function continueFrom(text: string, preceding: string | undefined, category: AppCategory): string {
+  if (!preceding || !text || category === 'code' || category === 'terminal') return text
+  if (!preceding.trim()) return text
+  const m = /^(\p{L}[\p{L}'’]*)/u.exec(text)
+  let out = text
+  const midSentence = /[\p{L}\p{N},;:–—-]["'”’)\]]*\s*$/u.test(preceding) && !/\n\s*$/u.test(preceding)
+  const sentenceEnd = /[.!?…]["'”’)\]]*\s*$/u.test(preceding)
+  if (m) {
+    const w = m[1]
+    const lower = w.toLowerCase()
+    const isCapitalized = /^\p{Lu}\p{Ll}*(?:['’]\p{Ll}+)?$/u.test(w)
+    if (midSentence && isCapitalized && w.length > 1 && !/^i['’]/i.test(w) && COMMON_WORDS.has(lower))
+      out = lower + out.slice(w.length)
+    else if (sentenceEnd && /^\p{Ll}/u.test(w)) out = w.charAt(0).toUpperCase() + out.slice(1)
+  }
+  // One space between the text before and the dictation, unless it starts with punctuation that
+  // closes the word before (",", ".").
+  if (/[^\s]$/u.test(preceding) && !/^[\s,.;:!?…)\]]/u.test(out)) out = ` ${out}`
+  return out
 }

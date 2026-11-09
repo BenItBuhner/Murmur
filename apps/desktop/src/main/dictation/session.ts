@@ -37,6 +37,7 @@ import {
   seamContext,
   stripEcho,
   wantsLayout,
+  evenParagraphs,
   type LayoutResult
 } from '@engine'
 import {
@@ -288,6 +289,8 @@ export interface SessionDeps {
   inference: InferenceRouter
   overlay: { setState: (s: OverlayState) => void; playSound: (n: SoundName) => void }
   getActiveWindow: () => Promise<ActiveWindowInfo>
+  /** Text before the caret in the focused field ('' when it cannot be read); optional. */
+  getPrecedingText?: () => Promise<string>
   /** Streamed pieces' texts kept on disk while a dictation runs (crash recovery); optional. */
   partials?: Pick<PartialStore, 'save' | 'clear'>
 }
@@ -369,7 +372,7 @@ export class DictationController extends EventEmitter {
       mode,
       startedAt: performance.now(),
       locked: mode === 'hands-free',
-      windowInfo: this.deps.getActiveWindow().catch(() => ({ title: '', app: '' })),
+      windowInfo: this.windowWithText(),
       elapsedTimer: null,
       maxTimer: null,
       inputEnded: false
@@ -659,7 +662,7 @@ export class DictationController extends EventEmitter {
         const app = classifyApp(w.app, w.title)
         const speed = effectiveSpeed(s.stt.speed, style.rule)
         const smart = formattingModeAt(style.mode, speed) === 'smart'
-        const context = this.formatContext(s, style, app)
+        const context = this.formatContext(s, style, app, w.precedingText)
         if (smart && session.mode !== 'command' && layoutPossible(app.category, style.layout))
           session.streamLayout = new RollingLayout(
             app.category,
@@ -1130,7 +1133,7 @@ export class DictationController extends EventEmitter {
       const input: FormatInput = {
         transcript: raw,
         mode,
-        context: this.formatContext(s, style, app)
+        context: this.formatContext(s, style, app, windowInfo.precedingText)
       }
       let formatted: FormatOutcome
       if (mode !== 'smart') {
@@ -1181,7 +1184,7 @@ export class DictationController extends EventEmitter {
           ...formatted,
           llmMs: formatted.llmMs + laid.llmMs,
           ...(laid.outcome === 'used'
-            ? { text: laid.text, stages: [...formatted.stages, 'layout'] }
+            ? { text: evenParagraphs(laid.text, stt.text), stages: [...formatted.stages, 'layout'] }
             : {})
         }
       }
@@ -1191,7 +1194,8 @@ export class DictationController extends EventEmitter {
         trailingSpace: style.trailingSpace,
         snippets: s.snippets,
         snippetContext: { now: new Date() },
-        casing: style.casing
+        casing: style.casing,
+        precedingText: windowInfo.precedingText
       })
       timings.llmMs = formatted.llmMs
       timings.formatMs = Math.max(0, Math.round(performance.now() - t) - formatted.llmMs)
@@ -1607,6 +1611,7 @@ export class DictationController extends EventEmitter {
       done.stages = [...joined.stages, 'layout']
       done.llmMs += early.laid.llmMs
     }
+    done.text = evenParagraphs(done.text, [...stt.streamed.texts, tail].join(' '))
     return done
   }
 
@@ -1836,10 +1841,25 @@ export class DictationController extends EventEmitter {
     return result
   }
 
+  /** The focused window, and the text before its caret when it can be read (never fails). */
+  private windowWithText(): Promise<ActiveWindowInfo> {
+    const w = this.deps.getActiveWindow().catch(() => ({ title: '', app: '' }))
+    const text = this.deps.getPrecedingText?.().catch(() => '') ?? Promise.resolve('')
+    return Promise.all([w, text]).then(([info, precedingText]) =>
+      precedingText ? { ...info, precedingText } : info
+    )
+  }
+
   /** What the model is told about this dictation besides the transcript. */
-  formatContext(s: Settings, style: ResolvedStyle, app: AppContext): FormatContext {
+  formatContext(
+    s: Settings,
+    style: ResolvedStyle,
+    app: AppContext,
+    precedingText?: string
+  ): FormatContext {
     return {
       category: app.category,
+      ...(precedingText?.trim() ? { precedingText } : {}),
       app: app.app || undefined,
       tone: style.tone,
       language: s.stt.language,

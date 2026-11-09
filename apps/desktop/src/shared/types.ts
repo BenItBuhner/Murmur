@@ -149,6 +149,8 @@ export interface ActiveWindowInfo {
   title: string
   app: string
   pid?: number
+  /** Text before the caret in the focused field, read at the key-down where the platform allows. */
+  precedingText?: string
 }
 
 export interface DictationEvent {

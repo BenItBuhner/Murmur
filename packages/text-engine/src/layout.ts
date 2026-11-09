@@ -289,3 +289,35 @@ export async function layoutText(
     }
   }
 }
+
+/** Sentences in a paragraph's text. */
+const sentenceCount = (p: string): number => p.trim().split(/(?<=[.!?…]["')\]]*)\s+(?=\S)/u).length
+
+/**
+ * Paragraphs of even size. Pieces formatted one at a time and the layout pass each add breaks of
+ * their own, and together they can leave one sentence alone between two long paragraphs (Nov 2026:
+ * seven sentences, a lone one, then eight more). A lone sentence of prose between two prose
+ * paragraphs joins the one after it (it usually opens the next topic), or the one before when that
+ * is shorter. List lines, short texts and paragraphs the speaker dictated ("new paragraph") are
+ * left as they are.
+ */
+export function evenParagraphs(text: string, transcript = ''): string {
+  if (/\bnew\s?paragraph\b|\bparagraph\s+break\b/iu.test(transcript)) return text
+  const paras = text.split(/\n[^\S\n]*\n\s*/u)
+  if (paras.length < 3) return text
+  const prose = (p: string): boolean => !p.split('\n').some((l) => LIST_LINE.test(l)) && !p.includes('\n')
+  let changed = false
+  for (let i = 1; i < paras.length - 1; i++) {
+    const p = paras[i]
+    if (!prose(p) || sentenceCount(p) > 1 || countWords(p) > 40) continue
+    const prev = paras[i - 1]
+    const next = paras[i + 1]
+    if (!prose(prev) || !prose(next) || sentenceCount(prev) < 3 || sentenceCount(next) < 3) continue
+    if (sentenceCount(prev) < sentenceCount(next)) paras[i - 1] = `${prev.trimEnd()} ${p.trim()}`
+    else paras[i + 1] = `${p.trim()} ${next.trimStart()}`
+    paras.splice(i, 1)
+    i--
+    changed = true
+  }
+  return changed ? paras.join('\n\n') : text
+}

@@ -28,6 +28,7 @@ import { InferenceRouter } from './inference/router'
 import { registerIpc } from './ipc'
 import { createLogger, initLogger } from './logger'
 import { getActiveWindow } from './active-window'
+import { precedingTextWin32, warmPrecedingText } from './inject/preceding-win32'
 import { HistoryStore } from './store/history'
 import { PartialStore, recoveredEntry } from './store/partials'
 import { RecordingStore } from './store/recordings'
@@ -247,8 +248,10 @@ async function main(): Promise<void> {
     inference,
     overlay: { setState: (s) => overlay.setState(s), playSound: (n) => overlay.playSound(n) },
     getActiveWindow,
+    ...(process.platform === 'win32' ? { getPrecedingText: () => precedingTextWin32() } : {}),
     partials
   })
+  warmPrecedingText()
 
   // Phone as microphone (docs/phone-microphone.md); idle unless the Microphone page's switch is on.
   const phoneMic = installPhoneMic({ settings, cloud: cloudSync, controller, recorder, overlay })

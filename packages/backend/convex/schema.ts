@@ -252,8 +252,8 @@ export default defineSchema({
 
   /**
    * All-day recording: speech the server transcribed from a device's audio (/v1/timeline/audio),
-   * waiting for the account's desktop to pick it up into its timeline. Text only. The desktop
-   * deletes what it took, and anything left over two weeks is dropped.
+   * waiting for the account's desktop to pick it up into its timeline. Rows and their audio are
+   * deleted after a week.
    */
   timelineChunks: defineTable({
     userId: v.id('users'),
@@ -267,8 +267,15 @@ export default defineSchema({
     speakers: v.number(),
     /** Server-side value score (0..1) and why: speech, idea. */
     score: v.optional(v.number()),
-    tags: v.optional(v.array(v.string()))
+    tags: v.optional(v.array(v.string())),
+    /** The piece's audio, kept a week so a careful transcript can be made on request. */
+    audio: v.optional(v.id('_storage')),
+    /** The desktop took the text into its timeline (the row stays for careful transcripts). */
+    taken: v.optional(v.boolean()),
+    /** The careful transcript, made once on request (/v1/timeline/refine). */
+    refinedText: v.optional(v.string())
   })
     .index('by_user', ['userId'])
+    .index('by_user_taken', ['userId', 'taken'])
     .index('by_user_device_start', ['userId', 'device', 'startedAt'])
 })

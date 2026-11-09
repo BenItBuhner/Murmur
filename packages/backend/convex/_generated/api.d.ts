@@ -31,7 +31,6 @@ import type * as lib_micStore from "../lib/micStore.js";
 import type * as lib_normalize from "../lib/normalize.js";
 import type * as lib_plans from "../lib/plans.js";
 import type * as lib_streak from "../lib/streak.js";
-import type * as lib_timelineAudio from "../lib/timelineAudio.js";
 import type * as lib_stripe from "../lib/stripe.js";
 import type * as lib_upstream from "../lib/upstream.js";
 import type * as lib_users from "../lib/users.js";
@@ -41,7 +40,6 @@ import type * as micLink from "../micLink.js";
 import type * as preferences from "../preferences.js";
 import type * as snippets from "../snippets.js";
 import type * as stats from "../stats.js";
-import type * as timeline from "../timeline.js";
 import type * as users from "../users.js";
 
 import type {
@@ -74,7 +72,6 @@ declare const fullApi: ApiFromModules<{
   "lib/normalize": typeof lib_normalize;
   "lib/plans": typeof lib_plans;
   "lib/streak": typeof lib_streak;
-  "lib/timelineAudio": typeof lib_timelineAudio;
   "lib/stripe": typeof lib_stripe;
   "lib/upstream": typeof lib_upstream;
   "lib/users": typeof lib_users;
@@ -84,7 +81,6 @@ declare const fullApi: ApiFromModules<{
   preferences: typeof preferences;
   snippets: typeof snippets;
   stats: typeof stats;
-  timeline: typeof timeline;
   users: typeof users;
 }>;
 

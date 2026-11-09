@@ -121,9 +121,7 @@ export const timelineAudio = httpAction(async (ctx, request) => {
   if (!res.ok) return res
   const text = String(((await res.json()) as { text?: string }).text ?? '').trim()
   const { score, tags } = scorePiece({ text, seconds, ...stats })
-  if (text) {
-    // The audio is kept (a week) so a careful transcript can be made later without the device.
-    const audio = await ctx.storage.store(new Blob([bytes], { type: 'audio/wav' }))
+  if (text)
     await ctx.runMutation(internal.timeline.store, {
       clerkId: identity.subject,
       chunk: {
@@ -136,51 +134,7 @@ export const timelineAudio = httpAction(async (ctx, request) => {
         speakers: 0,
         score,
         tags
-      },
-      audio
+      }
     })
-  }
   return json({ skipped: false, text, score, tags, ...stats })
-})
-
-/**
- * A careful transcript of one all-day piece (`{ device, startedAt }`), made from the audio the server
- * kept, with the text before it as context. Made once: asking again returns the stored one.
- */
-export const timelineRefine = httpAction(async (ctx, request) => {
-  if (!convexGatewayEnabled(process.env)) return gatewayOff()
-  const identity = await identityOf(ctx.auth)
-  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use careful transcripts')
-  const body = (await request.json().catch(() => ({}))) as { device?: string; startedAt?: string }
-  if (!body.device || !body.startedAt)
-    return gatewayError(400, 'bad_request', 'device and startedAt are required')
-  const row = await ctx.runQuery(internal.timeline.forRefine, {
-    clerkId: identity.subject,
-    device: body.device,
-    startedAt: body.startedAt
-  })
-  const json = (b: unknown): Response =>
-    new Response(JSON.stringify(b), { headers: { 'content-type': 'application/json' } })
-  if (!row) return gatewayError(404, 'bad_request', 'No such piece, or it is past the keep window')
-  if (row.refinedText != null) return json({ text: row.refinedText, cached: true })
-  const blob = row.audio ? await ctx.storage.get(row.audio) : null
-  if (!blob) return gatewayError(410, 'bad_request', 'This piece has no audio kept')
-  const url = new URL(request.url)
-  url.search = new URLSearchParams({
-    model: MURMUR_MODELS.stt,
-    ...(row.before ? { prompt: row.before.slice(-800) } : {})
-  }).toString()
-  const res = await handleTranscriptions(
-    convexHooks(ctx),
-    identity,
-    new Request(url, {
-      method: 'POST',
-      headers: { 'content-type': 'audio/wav' },
-      body: await blob.arrayBuffer()
-    })
-  )
-  if (!res.ok) return res
-  const text = String(((await res.json()) as { text?: string }).text ?? '').trim()
-  await ctx.runMutation(internal.timeline.saveRefined, { id: row.id, text })
-  return json({ text, cached: false })
 })

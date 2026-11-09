@@ -204,3 +204,29 @@ export function collapseLoops(text: string): string {
   }
   return out + text.slice(from)
 }
+
+/**
+ * A made-up ending: speech models sometimes replace the last seconds of real speech with stock
+ * filler that repeats itself ("…everything of the sort I think it's a good thing to do with the
+ * data, and I think it's really important to do with the data.", Nov 9 2026; the speaker said
+ * "should be done in the cloud threads for us instead, please"). True when a run of 4 words shows
+ * up twice in the last 30 words and nowhere before them. A speaker who repeats a phrase for
+ * emphasis earlier in the dictation does not trip it, and the caller only transcribes again.
+ */
+export function suspectTail(text: string): boolean {
+  const words = (text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [])
+  if (words.length < 12) return false
+  const cut = Math.max(0, words.length - 30)
+  const head = words.slice(0, cut).join(' ')
+  const tail = words.slice(cut)
+  const seen = new Map<string, number>()
+  for (let i = 0; i + 4 <= tail.length; i++) {
+    const run = tail.slice(i, i + 4)
+    if (run.every((w) => isNumberWord(w) || /^\d/.test(w))) continue
+    const key = run.join(' ')
+    const at = seen.get(key)
+    if (at !== undefined && i - at >= 4 && !head.includes(key)) return true
+    if (at === undefined) seen.set(key, i)
+  }
+  return false
+}

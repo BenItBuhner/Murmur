@@ -84,6 +84,7 @@ export {
 } from './languages'
 export {
   cleanModelOutput,
+  droppedRun,
   endingCovered,
   endingKept,
   verifyOutput,
@@ -95,6 +96,7 @@ export {
   prepareTranscript,
   basicCleanup,
   finish,
+  continueFrom,
   type PreparedTranscript,
   type BasicCleanupOptions,
   type FinishOptions,
@@ -141,6 +143,7 @@ export {
 export {
   LAYOUT_MIN_WORDS,
   applyLayout,
+  evenParagraphs,
   buildLayoutMessages,
   layoutPossible,
   layoutText,

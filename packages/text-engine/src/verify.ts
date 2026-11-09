@@ -81,6 +81,7 @@ export type VerifyReason =
   | 'verbatim-lost'
   | 'repeated'
   | 'ending-lost'
+  | 'dropped'
 
 export interface Verdict {
   ok: boolean
@@ -147,6 +148,10 @@ export function verifyOutput(transcript: string, text: string, opts: VerifyOptio
   // Content said twice that the speaker said once (a looping or padding model).
   if (repeatedRuns(raw, text, 4).length) return { ok: false, reason: 'repeated' }
 
+  // A run of what was said missing from the middle: the ratio above lets a model drop most of a
+  // long piece, and the shared-words check only looks at words the answer has.
+  if (droppedRun(raw, text) >= DROPPED_RUN_WORDS) return { ok: false, reason: 'dropped' }
+
   // The end of what was said must still be at the end (a model that stops early, or drops the
   // last clause, otherwise passes every check above).
   if (!endingCovered(raw, text)) return { ok: false, reason: 'ending-lost' }
@@ -174,6 +179,41 @@ export function verifyOutput(transcript: string, text: string, opts: VerifyOptio
   if (withoutMarkers !== expected && withMarkers !== expected)
     return { ok: false, reason: 'numbers-changed', expected, actual: withoutMarkers }
   return { ok: true }
+}
+
+// ---- dropped runs ---------------------------------------------------------------------------
+
+/** Content words in a row the answer may lose before it is taken to have dropped a sentence. */
+export const DROPPED_RUN_WORDS = 7
+/** Words a formatter rightly drops: hesitations and the spoken cues it turns into layout. */
+const DROPPABLE = new Set(
+  'like you know mean kind sort actually basically literally just really okay yeah well right so um uh hmm and the that this then also new line paragraph period comma quote unquote end first second third finally lastly number'.split(
+    ' '
+  )
+)
+/** The speaker took something back: the model is right to drop what came before. */
+const TAKEN_BACK = /\b(?:scratch that|never ?mind|forget that|delete that|i meant|no wait|wait no|or rather|make that|correction|start over)\b/i
+
+/**
+ * The longest run of the transcript's content words (in order) that the answer has none of.
+ * Words match on their first 4 letters, so spelling and tense changes still count as kept. 0 when
+ * the speaker corrected themselves, since dropping the taken-back words is then the job.
+ */
+export function droppedRun(transcript: string, text: string): number {
+  if (TAKEN_BACK.test(transcript)) return 0
+  const key = (w: string): string => w.slice(0, 4)
+  const words = (s: string): string[] =>
+    (s.toLowerCase().replace(/[’]/g, "'").match(/\p{L}+(?:'\p{L}+)?/gu) ?? []).filter(
+      (w) => w.length >= 3 && !DROPPABLE.has(w) && !isNumberWord(w)
+    )
+  const have = new Set(words(text).map(key))
+  let run = 0
+  let longest = 0
+  for (const w of words(transcript)) {
+    if (have.has(key(w))) run = 0
+    else longest = Math.max(longest, ++run)
+  }
+  return longest
 }
 
 // ---- repetition and layout ------------------------------------------------------------------

@@ -1,6 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme, net, powerMonitor, protocol, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  nativeTheme,
+  net,
+  powerMonitor,
+  protocol,
+  screen,
+  shell
+} from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import type { ClerkBridge } from '@clerk/electron'
 import { chordLabel } from '@core/hotkey/keys'
@@ -367,6 +376,7 @@ async function main(): Promise<void> {
   hook.on('action', (a) => controller.handle(a))
   hook.start()
   controller.on('state', (phase: 'idle' | 'listening' | 'processing') => {
+    if (phase === 'listening') overlay.ensureShown()
     tray?.setPhase(phase)
     if (phase === 'idle') updates.notifyIdle()
   })
@@ -386,6 +396,33 @@ async function main(): Promise<void> {
     recorder.resend()
     pushTheme()
     log.info(`overlay ready; hook=${hook.backend}`)
+  })
+  overlay.onReloaded = (): void => {
+    recorder.resend()
+    pushTheme()
+  }
+
+  // The pill is a transparent always-on-top window. Waking from sleep, a display change or a GPU
+  // process restart can leave it "visible" with nothing drawn; redraw it after each of those.
+  let refreshTimer: NodeJS.Timeout | null = null
+  const refreshOverlay = (reason: string, delayMs = 1500): void => {
+    if (refreshTimer) clearTimeout(refreshTimer)
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null
+      overlay.refresh(reason)
+    }, delayMs)
+  }
+  powerMonitor.on('suspend', () => log.info('system suspending'))
+  powerMonitor.on('resume', () => refreshOverlay('resume'))
+  powerMonitor.on('unlock-screen', () => refreshOverlay('unlock'))
+  screen.on('display-added', () => refreshOverlay('display added'))
+  screen.on('display-removed', () => refreshOverlay('display removed'))
+  screen.on('display-metrics-changed', (_e, _display, changed) =>
+    refreshOverlay(`display changed (${changed.join(', ')})`)
+  )
+  app.on('child-process-gone', (_e, details) => {
+    log.warn(`${details.type} process gone (${details.reason}, exit ${details.exitCode})`)
+    if (details.type === 'GPU') refreshOverlay('GPU process restarted', 500)
   })
 
   // Broadcast dictation state to the settings window for its live indicator.

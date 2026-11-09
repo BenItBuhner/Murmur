@@ -56,6 +56,9 @@ export class OverlayWindow {
   private resolveReady!: () => void
   /** The pill has buttons right now (a retryable error), so the window must take clicks. */
   private interactive = false
+  private loads = 0
+  /** Called after the overlay page reloads (it was recovered), so the mic and theme can be resent. */
+  onReloaded: (() => void) | null = null
 
   constructor() {
     this.ready = new Promise((r) => (this.resolveReady = r))
@@ -102,9 +105,22 @@ export class OverlayWindow {
     win.setMenuBarVisibility(false)
     guardWebContents(win.webContents)
     win.webContents.on('did-finish-load', () => {
+      this.loads += 1
       this.resolveReady()
       this.push()
+      if (this.loads > 1) {
+        log.info(`overlay page reloaded (load ${this.loads})`)
+        this.onReloaded?.()
+      }
     })
+    // The pill's renderer also owns the microphone: if it dies, bring it back rather than leave
+    // a window that is "shown" but draws nothing.
+    win.webContents.on('render-process-gone', (_e, details) => {
+      log.error(`overlay renderer gone (${details.reason}, exit ${details.exitCode}); reloading`)
+      if (!win.isDestroyed()) win.webContents.reload()
+    })
+    win.webContents.on('unresponsive', () => log.warn('overlay renderer unresponsive'))
+    win.webContents.on('responsive', () => log.info('overlay renderer responsive again'))
     win.webContents.on('console-message', (event) => {
       if (event.level === 'error' || event.level === 'warning')
         log.warn(`[overlay renderer] ${event.message} (${event.sourceId}:${event.lineNumber})`)
@@ -305,9 +321,60 @@ export class OverlayWindow {
     }, SLIDE_FRAME_MS)
   }
 
+  /**
+   * Make sure the pill is where it belongs and actually drawn. After sleep, a display change or a
+   * GPU process restart, Windows can keep a transparent window "visible" with nothing composed in
+   * it; showing it again and invalidating the page makes Chromium paint a fresh frame.
+   */
+  refresh(reason: string): void {
+    const win = this.win
+    if (!win || win.isDestroyed()) {
+      log.warn(`overlay refresh (${reason}): no window`)
+      return
+    }
+    const before = win.getBounds()
+    const wasVisible = win.isVisible()
+    this.stopSlide()
+    this.reposition()
+    const shouldShow = this.tuck || this.showWhenIdle || this.state.phase !== 'idle'
+    if (shouldShow) {
+      if (wasVisible) win.hide()
+      win.showInactive()
+      win.setAlwaysOnTop(true, 'screen-saver')
+    }
+    win.webContents.invalidate()
+    this.push()
+    const after = win.getBounds()
+    log.info(
+      `overlay refresh (${reason}): visible ${wasVisible}->${win.isVisible()}, ` +
+        `bounds ${fmt(before)}->${fmt(after)}, onScreen ${onAnyDisplay(after)}, phase ${this.state.phase}`
+    )
+  }
+
+  /** A dictation is starting: if the window somehow is not up and on a screen, recover it now. */
+  ensureShown(): void {
+    const win = this.win
+    if (!win || win.isDestroyed()) return
+    if (win.isVisible() && (this.tuck || onAnyDisplay(win.getBounds()))) return
+    this.refresh('not shown at dictation start')
+  }
+
   destroy(): void {
     this.stopSlide()
     this.win?.destroy()
     this.win = null
   }
+}
+
+function fmt(b: Electron.Rectangle): string {
+  return `${b.x},${b.y} ${b.width}x${b.height}`
+}
+
+/** Whether any part of the rectangle is on a connected display. */
+function onAnyDisplay(b: Electron.Rectangle): boolean {
+  return screen.getAllDisplays().some(({ bounds: d }) => {
+    return (
+      b.x < d.x + d.width && b.x + b.width > d.x && b.y < d.y + d.height && b.y + b.height > d.y
+    )
+  })
 }

@@ -65,6 +65,16 @@ describe('basicCleanup', () => {
 })
 
 describe('finish', () => {
+  it('numbers points counted out loud, except in code and a terminal', () => {
+    const said = 'First, send the contract. Second, sign it. Third, file it.'
+    const opts = { dictionary: [], trailingSpace: false }
+    const f = finish(said, { ...opts, category: 'browser' })
+    expect(f.text).toBe('1. Send the contract.\n2. Sign it.\n3. File it.')
+    expect(f.stages).toContain('list')
+    expect(finish(said, { ...opts, category: 'code' }).text).toBe(said)
+    expect(finish(said, { ...opts, category: 'terminal' }).text).not.toContain('\n')
+  })
+
   const base = { category: 'chat' as const, dictionary: [], trailingSpace: true }
   it('re-asserts dictionary spellings, adds the trailing space and never re-cases (mid-sentence continuations)', () => {
     const f = finish('talk to convex about it, and to konvicks.', {

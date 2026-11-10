@@ -4,6 +4,7 @@ import {
   itemText,
   layoutText,
   numberCuedLines,
+  numberCuedSentences,
   parseLayout,
   splitUnits
 } from '../src/layout'
@@ -121,5 +122,43 @@ describe('numberCuedLines', () => {
       'First, a b. Second, c d.'
     ])
       expect(numberCuedLines(t)).toBe(t)
+  })
+})
+
+describe('numberCuedSentences', () => {
+  it('turns points counted out in one paragraph into a numbered list', () => {
+    expect(
+      numberCuedSentences(
+        'Three things for the launch. First, send the contract. Second, sign it. Third, file it.'
+      )
+    ).toBe('Three things for the launch.\n\n1. Send the contract.\n2. Sign it.\n3. File it.')
+    expect(numberCuedSentences('First, book the room. Second, invite the team.')).toBe(
+      '1. Book the room.\n2. Invite the team.'
+    )
+    expect(
+      numberCuedSentences('Number one we install it. Number two we run it. And finally, we ship.')
+    ).toBe('1. We install it.\n2. We run it.\n3. We ship.')
+  })
+
+  it('keeps a point that runs over sentences together, and what follows the list apart', () => {
+    expect(
+      numberCuedSentences(
+        'First, call Dana. She has the numbers. Second, update the deck. Use the new logo. Thanks for the help. See you Monday.'
+      )
+    ).toBe(
+      '1. Call Dana. She has the numbers.\n2. Update the deck. Use the new logo.\n\nThanks for the help. See you Monday.'
+    )
+  })
+
+  it('leaves prose, lists that exist already, and counts that are out of order', () => {
+    for (const t of [
+      'First we tried the old build. Second attempt worked.',
+      'First, a b. Third, c d.',
+      'Second, a b. First, c d.',
+      'First, send it. Then we wait.',
+      '1. First, send it.\n2. Second, sign it.',
+      'First, a b. One. Two. Three. Four. Five. Second, c d.'
+    ])
+      expect(numberCuedSentences(t)).toBe(t)
   })
 })

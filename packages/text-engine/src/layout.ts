@@ -215,6 +215,63 @@ export function numberCuedLines(text: string): string {
   return lines.join('\n')
 }
 
+/** A cue said the way a counted point is: "First, ...", "Number two: ...", "And finally, ...". */
+const CUE_THEN_STOP = new RegExp(
+  `^(?:and\\s+|also\\s+)?(?:(?:${ORDINALS.join('|')})(?:ly)?(?:\\s+of\\s+all)?|number\\s+(?:${NUMBERS.join('|')}|\\d{1,2})|finally|lastly)[,:;]`,
+  'iu'
+)
+const SENTENCE_GAP = /(?<=[.!?…]["')\]]*)\s+(?=\S)/u
+/** A point may run over a few sentences; more than this before the next cue and it is prose. */
+const MAX_ITEM_SENTENCES = 4
+
+/**
+ * Points the speaker counted out in running text ("First, send the contract. Second, sign it.
+ * Third, file it.") become a numbered list, with no model involved: the formatting model is asked
+ * for this too, but it may be off, unreachable, or leave the paragraph as it heard it. Only an
+ * unmistakable count is touched: cues that open a sentence and count 1, 2, 3 in order (a "finally"
+ * may close them), and either three or more of them, or each followed by a comma or colon. No
+ * word changes but the cue, which the number replaces. Lines that are already a list are left.
+ */
+export function numberCuedSentences(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => (LIST_LINE.test(line) || !line.trim() ? line : countedLine(line)))
+    .join('\n')
+}
+
+function countedLine(line: string): string {
+  const sentences = line.trim().split(SENTENCE_GAP)
+  for (let i = 0; i < sentences.length - 1; i++) {
+    if (cuePosition(sentences[i]) !== 1) continue
+    const starts = [i]
+    for (let j = i + 1; j < sentences.length; j++) {
+      if (j - starts[starts.length - 1] > MAX_ITEM_SENTENCES) break
+      const p = cuePosition(sentences[j])
+      if (p === starts.length + 1) starts.push(j)
+      else if (p === 'last' && starts.length >= 2) {
+        starts.push(j)
+        break
+      }
+    }
+    if (starts.length < 2) continue
+    if (starts.length < 3 && !starts.every((k) => CUE_THEN_STOP.test(sentences[k]))) continue
+    // The last point is as long as the longest before it; what follows is the next paragraph.
+    let longest = 1
+    for (let k = 1; k < starts.length; k++) longest = Math.max(longest, starts[k] - starts[k - 1])
+    const end = Math.min(sentences.length, starts[starts.length - 1] + longest)
+    const items = starts.map((from, k) => {
+      const to = k + 1 < starts.length ? starts[k + 1] : end
+      return `${k + 1}. ${itemText(sentences.slice(from, to).join(' '))}`
+    })
+    const before = sentences.slice(0, i).join(' ')
+    const after = sentences.slice(end).join(' ')
+    return [before, items.join('\n'), after && numberCuedSentences(after)]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+  return line
+}
+
 /** The sentences laid out by the plan. Existing line breaks and list lines are kept. */
 export function applyLayout(units: readonly LayoutUnit[], plan: LayoutPlan): string {
   const paragraphStarts = new Set(plan.paragraphs)

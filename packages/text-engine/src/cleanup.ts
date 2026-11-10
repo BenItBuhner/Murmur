@@ -19,7 +19,7 @@ import {
 import { collapseLoops } from './hallucination'
 import { COMMON_WORDS } from './common-words'
 import { repairCase } from './verify'
-import { joinRunningSentences } from './layout'
+import { joinRunningSentences, numberCuedSentences } from './layout'
 import { joinPauseStops } from './pause-stops'
 import type { AppCategory, Casing, DictionaryTerm } from './types'
 
@@ -126,6 +126,12 @@ export function finish(text: string, opts: FinishOptions): Finished {
       .replace(/\.+$/, '')
     if (one !== out) stages.push('terminal')
     out = one
+  }
+  if (opts.category !== 'terminal' && opts.category !== 'code') {
+    // Points counted out loud are a numbered list, whether or not a model formatted the text.
+    const listed = numberCuedSentences(out)
+    if (listed !== out) stages.push('list')
+    out = listed
   }
   const cased = applyCasing(
     out,

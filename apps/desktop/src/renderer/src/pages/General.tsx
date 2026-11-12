@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { FolderOpen, Loader2, Power, RotateCcw, Type } from 'lucide-react'
 import { toast } from 'sonner'
-import type { InjectionMethod } from '@shared/settings'
+import { EPHEMERIS_DEFAULT_URL, type EphemerisMode, type InjectionMethod } from '@shared/settings'
 import { Button } from '@renderer/components/ui/button'
 import { Input, Textarea } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
@@ -16,6 +16,8 @@ import {
 } from '@renderer/components/ui/dialog'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { UpdatesSection } from '@renderer/components/Updates'
+import { HotkeyRecorder } from '@renderer/components/HotkeyRecorder'
+import { platformFor } from '@renderer/components/KeyCaps'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { describeInstallKind } from '@shared/updates'
 
@@ -143,6 +145,8 @@ export function GeneralPage(): React.JSX.Element {
         </SettingRow>
       </Section>
 
+      <EphemerisSection />
+
       <UpdatesSection />
 
       <Section title="About">
@@ -209,5 +213,81 @@ export function GeneralPage(): React.JSX.Element {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/** Optional hand-off of dictations to Ephemeris, a local app on this machine. Off by default. */
+function EphemerisSection(): React.JSX.Element {
+  const { settings, patch, info } = useSettings()
+  const e = settings.ephemeris
+  return (
+    <Section
+      title="Send to Ephemeris"
+      description="Also send dictations to Ephemeris, a local app that collects notes, tasks and meetings."
+    >
+      <SettingRow title="Enabled" description="Nothing leaves this computer unless this is on.">
+        <Switch
+          checked={e.enabled}
+          onCheckedChange={(v) => void patch({ ephemeris: { enabled: v } })}
+        />
+      </SettingRow>
+      {e.enabled && (
+        <>
+          <SettingRow
+            title="What to send"
+            description={
+              e.mode === 'all'
+                ? 'Every dictation is sent, and still typed at the cursor as usual.'
+                : 'Only dictations started with the note shortcut are sent; they are not typed.'
+            }
+          >
+            <Segmented<EphemerisMode>
+              value={e.mode}
+              onChange={(v) => void patch({ ephemeris: { mode: v } })}
+              options={[
+                { value: 'all', label: 'Everything' },
+                { value: 'notes-hotkey', label: 'Notes only' }
+              ]}
+            />
+          </SettingRow>
+          {e.mode === 'notes-hotkey' && (
+            <SettingRow
+              title="Note shortcut"
+              description="Hold to dictate a note to Ephemeris, or tap to keep talking hands-free."
+            >
+              <HotkeyRecorder
+                value={e.noteHotkey}
+                onChange={(keys) => void patch({ ephemeris: { noteHotkey: keys } })}
+                platform={platformFor(info?.platform)}
+                sideSensitive={settings.hotkeys.sideSensitive}
+                allowClear
+              />
+            </SettingRow>
+          )}
+          <SettingRow title="Address" description="Where Ephemeris is listening." vertical>
+            <Input
+              value={e.url}
+              onChange={(ev) => void patch({ ephemeris: { url: ev.target.value.trim() } })}
+              placeholder={EPHEMERIS_DEFAULT_URL}
+              className="font-mono text-note"
+              spellCheck={false}
+            />
+          </SettingRow>
+          <SettingRow
+            title="Token"
+            description="Optional. Sent as a bearer token if Ephemeris asks for one."
+            vertical
+          >
+            <Input
+              type="password"
+              value={e.token}
+              onChange={(ev) => void patch({ ephemeris: { token: ev.target.value.trim() } })}
+              className="font-mono text-note"
+              spellCheck={false}
+            />
+          </SettingRow>
+        </>
+      )}
+    </Section>
   )
 }

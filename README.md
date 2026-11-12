@@ -156,6 +156,23 @@ without a `SHA256SUMS.txt` are shown but never installed unattended.
   OS accent colour (Windows, macOS, GNOME 47+, KDE), a preset, or any hex — and optionally Material
   You style tinted surfaces. The whole window and the dictation pill follow, live.
 
+### Send to Ephemeris (optional)
+
+Murmur can hand finished dictations to Ephemeris, a local app that gathers notes, tasks and
+meetings. It is off by default; turn it on under **General → Send to Ephemeris**.
+
+- **Everything** — every dictation is still typed at the cursor and is also sent to Ephemeris in
+  the background. Insertion never waits on it.
+- **Notes only** — record a separate **Note shortcut** (hold to talk, tap for hands-free).
+  Dictations started with it go to Ephemeris *instead of* being typed; if Ephemeris cannot be
+  reached the text is copied to the clipboard so nothing is lost.
+
+Murmur posts `{ text, kind: "note", source: "murmur", app, startedAt, endedAt }` to
+`<address>/api/signals/transcript` (default `http://127.0.0.1:4317`), with
+`Authorization: Bearer <token>` when a token is set. Requests give up after 3 s and a failure
+never affects the dictation. Command-mode edits are never sent. The settings are device-local
+and never synced.
+
 ### Quick start
 
 ```bash

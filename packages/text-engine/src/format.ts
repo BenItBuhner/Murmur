@@ -212,7 +212,8 @@ export async function formatTranscript(
         ? ({ ok: false, reason: 'too-long' } as const)
         : verifyOutput(prepared.text, text, {
             language: input.context.language,
-            keepVerbatim: input.context.keepVerbatim
+            keepVerbatim: input.context.keepVerbatim,
+            precedingText: input.context.precedingText
           })
     if (verdict.ok) {
       const cased = repairCase(prepared.text, text, input.context)

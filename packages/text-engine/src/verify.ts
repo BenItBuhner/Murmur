@@ -82,6 +82,8 @@ export type VerifyReason =
   | 'repeated'
   | 'ending-lost'
   | 'dropped'
+  | 'added'
+  | 'copied-context'
 
 export interface Verdict {
   ok: boolean
@@ -102,6 +104,8 @@ export interface VerifyOptions {
   language?: string
   /** Phrases that must survive verbatim (snippet triggers); checked case-insensitively. */
   keepVerbatim?: readonly string[]
+  /** The text already before the cursor: the answer must not copy it in again. */
+  precedingText?: string
 }
 
 /** Content words: letters only, three or more, not part of a number. */
@@ -151,6 +155,14 @@ export function verifyOutput(transcript: string, text: string, opts: VerifyOptio
   // A run of what was said missing from the middle: the ratio above lets a model drop most of a
   // long piece, and the shared-words check only looks at words the answer has.
   if (droppedRun(raw, text) >= DROPPED_RUN_WORDS) return { ok: false, reason: 'dropped' }
+
+  // Words the speaker never said: an invented title, a "Placeholder Summary [...]" line, a note.
+  if (addedRun(raw, text) >= ADDED_RUN_WORDS) return { ok: false, reason: 'added' }
+
+  // Text copied from before the cursor (a heading the user typed, an earlier piece) is already on
+  // the page; typing it again duplicates it.
+  if (opts.precedingText && copiedContext(raw, text, opts.precedingText).length)
+    return { ok: false, reason: 'copied-context' }
 
   // The end of what was said must still be at the end (a model that stops early, or drops the
   // last clause, otherwise passes every check above).
@@ -214,6 +226,51 @@ export function droppedRun(transcript: string, text: string): number {
     else longest = Math.max(longest, ++run)
   }
   return longest
+}
+
+// ---- added text ----------------------------------------------------------------------------
+
+/** Content words in a row the answer may add that the speaker never said. */
+export const ADDED_RUN_WORDS = 5
+/** Words a formatter rightly adds: articles, connectives, copulas from grammar fixes. */
+const ADDABLE = new Set(
+  'the and that this then also are was were has have had for with from into its it\'s been being not but because which who will would can could should'.split(
+    ' '
+  )
+)
+
+/**
+ * The longest run of the answer's content words (in order) that the transcript has none of: the
+ * mirror of droppedRun. Words match on their first 4 letters, so spelling, tense and mis-hearing
+ * fixes still count as said. A model that invents a title, a summary or a placeholder shows up here.
+ */
+export function addedRun(transcript: string, text: string): number {
+  const key = (w: string): string => w.slice(0, 4)
+  const words = (s: string): string[] =>
+    (s.toLowerCase().replace(/[’]/g, "'").match(/\p{L}+(?:'\p{L}+)?/gu) ?? []).filter(
+      (w) => w.length >= 3 && !isNumberWord(w)
+    )
+  const have = new Set(words(transcript).map(key))
+  let run = 0
+  let longest = 0
+  for (const w of words(text)) {
+    if (have.has(key(w)) || ADDABLE.has(w)) run = 0
+    else longest = Math.max(longest, ++run)
+  }
+  return longest
+}
+
+/**
+ * Four-word runs of the text before the cursor that the answer has and the transcript does not:
+ * the model copied the context (a heading, the previous piece) into its answer.
+ */
+export function copiedContext(transcript: string, text: string, preceding: string, n = 4): string[] {
+  const before = runCounts(runWords(preceding), n)
+  const said = runCounts(runWords(transcript), n)
+  const out: string[] = []
+  for (const k of runCounts(runWords(text), n).keys())
+    if (before.has(k) && !said.has(k)) out.push(k)
+  return out
 }
 
 // ---- repetition and layout ------------------------------------------------------------------

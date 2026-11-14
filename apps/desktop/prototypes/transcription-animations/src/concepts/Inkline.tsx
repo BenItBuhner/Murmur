@@ -30,7 +30,10 @@ export function Inkline({ t }: { t: number }): React.JSX.Element {
   return (
     <Pill size={size}>
       {phase === 'listening' && (
-        <div className="absolute inset-0 flex items-center" style={{ paddingLeft: PAD, opacity: easeOut(since / 300) }}>
+        <div
+          className="absolute inset-0 flex items-center"
+          style={{ paddingLeft: PAD, opacity: easeOut(since / 300) }}
+        >
           {/* Voice dot: the only meter, breathing with the level */}
           <span
             className="block shrink-0 rounded-full"
@@ -44,7 +47,10 @@ export function Inkline({ t }: { t: number }): React.JSX.Element {
           />
           <div
             className="relative ml-3.5 flex h-6 items-center justify-end overflow-hidden whitespace-nowrap"
-            style={{ width: inner, WebkitMaskImage: 'linear-gradient(90deg, transparent, black 40px)' }}
+            style={{
+              width: inner,
+              WebkitMaskImage: 'linear-gradient(90deg, transparent, black 40px)'
+            }}
           >
             {shown.map((w) => {
               const age = t - (w.start + 140)
@@ -68,7 +74,10 @@ export function Inkline({ t }: { t: number }): React.JSX.Element {
       )}
       {phase === 'processing' && <Rewrite since={since} width={size[0]} />}
       {phase === 'success' && (
-        <div className="absolute inset-0 flex items-center justify-center gap-2" style={{ opacity: easeOut(since / 260) }}>
+        <div
+          className="absolute inset-0 flex items-center justify-center gap-2"
+          style={{ opacity: easeOut(since / 260) }}
+        >
           <Check p={prog(t, PROCESS_END + 120, 320)} />
           <span>Inserted</span>
           <span className="text-white/50">{WORDS.length} words</span>
@@ -81,11 +90,16 @@ export function Inkline({ t }: { t: number }): React.JSX.Element {
 /** The raw tail rewritten into the clean tail behind a sweeping light. */
 function Rewrite({ since, width }: { since: number; width: number }): React.JSX.Element {
   const tail = CLEAN.slice(-62)
-  const raw = WORDS.map((w) => w.raw).join(' ').slice(-62)
+  const raw = WORDS.map((w) => w.raw)
+    .join(' ')
+    .slice(-62)
   const sweep = clamp(since / 900)
   const pos = -20 + sweep * 140
   return (
-    <div className="absolute inset-0 flex items-center justify-end overflow-hidden px-[18px]" style={{ width }}>
+    <div
+      className="absolute inset-0 flex items-center justify-end overflow-hidden px-[18px]"
+      style={{ width }}
+    >
       <div className="relative whitespace-nowrap leading-6">
         <span style={{ opacity: 0, userSelect: 'none' }}>{tail}</span>
         {/* raw text, wiped away left-to-right */}
@@ -96,7 +110,10 @@ function Rewrite({ since, width }: { since: number; width: number }): React.JSX.
           {raw}
         </span>
         {/* clean text, revealed behind the light */}
-        <span className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - clamp(pos, 0, 100)}% 0 0)` }}>
+        <span
+          className="absolute inset-0"
+          style={{ clipPath: `inset(0 ${100 - clamp(pos, 0, 100)}% 0 0)` }}
+        >
           {tail}
         </span>
         <span

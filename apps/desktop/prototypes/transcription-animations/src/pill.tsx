@@ -14,7 +14,12 @@ const BOUNDS: [Phase, number][] = [
 export function phaseInfo(t: number): { phase: Phase; prev: Phase; since: number; at: number } {
   let k = 0
   for (let i = 0; i < BOUNDS.length; i++) if (t >= BOUNDS[i][1]) k = i
-  return { phase: phaseAt(t), prev: BOUNDS[Math.max(0, k - 1)][0], since: t - BOUNDS[k][1], at: BOUNDS[k][1] }
+  return {
+    phase: phaseAt(t),
+    prev: BOUNDS[Math.max(0, k - 1)][0],
+    since: t - BOUNDS[k][1],
+    at: BOUNDS[k][1]
+  }
 }
 
 export type Size = [number, number]
@@ -69,7 +74,15 @@ export function Pill({
 }
 
 /** The real pill's tick, drawn in by progress p. */
-export function Check({ p, color = 'oklch(0.84 0.12 155)', size = 16 }: { p: number; color?: string; size?: number }): React.JSX.Element {
+export function Check({
+  p,
+  color = 'oklch(0.84 0.12 155)',
+  size = 16
+}: {
+  p: number
+  color?: string
+  size?: number
+}): React.JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
       <path

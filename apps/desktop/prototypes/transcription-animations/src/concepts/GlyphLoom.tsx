@@ -13,15 +13,26 @@ const HEAD = 7
 export function GlyphLoom({ t }: { t: number }): React.JSX.Element {
   const heard = wordsAt(t)
   const { phase, since } = phaseInfo(t)
-  const size = morphSize(t, (p): Size => (p === 'idle' ? IDLE : p === 'success' ? [140, 44] : [480, 44]))
+  const size = morphSize(t, (p): Size =>
+    p === 'idle' ? IDLE : p === 'success' ? [140, 44] : [480, 44]
+  )
   const lvl = levelAt(t)
 
   const shown = heard.slice(-6)
   return (
     <Pill size={size}>
       {(phase === 'listening' || phase === 'processing') && (
-        <div className="absolute inset-0 flex items-center justify-end gap-3 px-[18px]" style={{ opacity: phase === 'listening' ? easeOut(since / 260) : 1 - prog(t, PROCESS_END - 220, 220) }}>
-          <div className="flex h-6 flex-1 items-center justify-end overflow-hidden whitespace-nowrap font-mono text-[13px] tracking-tight" style={{ WebkitMaskImage: 'linear-gradient(90deg, transparent, black 56px)' }}>
+        <div
+          className="absolute inset-0 flex items-center justify-end gap-3 px-[18px]"
+          style={{
+            opacity:
+              phase === 'listening' ? easeOut(since / 260) : 1 - prog(t, PROCESS_END - 220, 220)
+          }}
+        >
+          <div
+            className="flex h-6 flex-1 items-center justify-end overflow-hidden whitespace-nowrap font-mono text-[13px] tracking-tight"
+            style={{ WebkitMaskImage: 'linear-gradient(90deg, transparent, black 56px)' }}
+          >
             {(phase === 'processing' ? WORDS.slice(-6) : shown).map((w) => (
               <span key={w.i} className="ml-[7px] inline-flex">
                 {[...(phase === 'processing' ? w.text : w.raw)].map((ch, k) => {
@@ -31,7 +42,8 @@ export function GlyphLoom({ t }: { t: number }): React.JSX.Element {
                   const flipAt = LISTEN_END + 80 + (w.i - 23) * 70 + k * 14
                   const f = phase === 'processing' ? prog(t, flipAt, 260) : 1
                   const showClean = phase !== 'processing' || f > 0.5
-                  const letter = phase === 'processing' ? (showClean ? w.text[k] ?? '' : w.raw[k] ?? '') : ch
+                  const letter =
+                    phase === 'processing' ? (showClean ? (w.text[k] ?? '') : (w.raw[k] ?? '')) : ch
                   return (
                     <span
                       key={k}
@@ -74,7 +86,10 @@ export function GlyphLoom({ t }: { t: number }): React.JSX.Element {
         </div>
       )}
       {phase === 'success' && (
-        <div className="absolute inset-0 flex items-center justify-center gap-2" style={{ opacity: easeOut(since / 260) }}>
+        <div
+          className="absolute inset-0 flex items-center justify-center gap-2"
+          style={{ opacity: easeOut(since / 260) }}
+        >
           <Check p={prog(t, PROCESS_END + 120, 320)} />
           <span>Inserted</span>
         </div>

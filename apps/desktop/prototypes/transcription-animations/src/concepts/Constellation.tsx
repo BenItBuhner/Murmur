@@ -1,7 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { clamp, easeInOut, easeOut, prog } from '../clock'
 import { IDLE, morphSize, phaseInfo, Pill, type Size } from '../pill'
-import { levelAt, LISTEN_END, LISTEN_START, PROCESS_END, SUCCESS_END, WORDS, wordsAt } from '../script'
+import {
+  levelAt,
+  LISTEN_END,
+  LISTEN_START,
+  PROCESS_END,
+  SUCCESS_END,
+  WORDS,
+  wordsAt
+} from '../script'
 
 const W = 420
 const H = 44
@@ -56,7 +64,9 @@ function checkPoint(i: number, n: number): [number, number] {
 export function Constellation({ t }: { t: number }): React.JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null)
   const { phase, since } = phaseInfo(t)
-  const size = morphSize(t, (p): Size => (p === 'idle' ? IDLE : p === 'success' ? [136, 44] : [W + 36, H]))
+  const size = morphSize(t, (p): Size =>
+    p === 'idle' ? IDLE : p === 'success' ? [136, 44] : [W + 36, H]
+  )
 
   useEffect(() => {
     const cv = ref.current
@@ -136,10 +146,18 @@ export function Constellation({ t }: { t: number }): React.JSX.Element {
       <canvas
         ref={ref}
         className="absolute left-1/2 top-1/2"
-        style={{ width: W, height: H, transform: 'translate(-50%,-50%)', opacity: phase === 'idle' ? 0 : easeOut((t - LISTEN_START) / 300) }}
+        style={{
+          width: W,
+          height: H,
+          transform: 'translate(-50%,-50%)',
+          opacity: phase === 'idle' ? 0 : easeOut((t - LISTEN_START) / 300)
+        }}
       />
       {phase === 'success' && (
-        <span className="absolute inset-y-0 right-4 flex items-center" style={{ opacity: easeOut((since - 250) / 300) }}>
+        <span
+          className="absolute inset-y-0 right-4 flex items-center"
+          style={{ opacity: easeOut((since - 250) / 300) }}
+        >
           Inserted
         </span>
       )}

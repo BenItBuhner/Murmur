@@ -19,7 +19,8 @@ export const CONCEPTS = {
 
 function App(): React.JSX.Element {
   const t = useClock()
-  const name = (new URLSearchParams(location.search).get('c') ?? 'baseline') as keyof typeof CONCEPTS
+  const name = (new URLSearchParams(location.search).get('c') ??
+    'baseline') as keyof typeof CONCEPTS
   const C = CONCEPTS[name] ?? Baseline
   // The overlay window is anchored to the bottom; give every concept the same stage.
   return (

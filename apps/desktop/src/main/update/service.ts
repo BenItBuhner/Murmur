@@ -1,5 +1,13 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync
+} from 'node:fs'
 import { join } from 'node:path'
 import type { Settings } from '@shared/settings'
 import type { InstallKind, UpdateStatus } from '@shared/updates'
@@ -28,7 +36,14 @@ import { releasesUrl, type UpdateSource } from './source'
 interface UpdaterState {
   lastCheckedAt: number | null
   /** Written right before an installer runs; the next start uses it to confirm the update. */
-  pending: { version: string; from: string; showWindow: boolean } | null
+  pending: {
+    version: string
+    from: string
+    showWindow: boolean
+    /** When the installer was launched, and the file it runs from (Windows race guard). */
+    startedAt?: number
+    installer?: string
+  } | null
 }
 
 function parseState(raw: unknown): UpdaterState {
@@ -38,7 +53,13 @@ function parseState(raw: unknown): UpdaterState {
     lastCheckedAt: typeof obj.lastCheckedAt === 'number' ? obj.lastCheckedAt : null,
     pending:
       pending && typeof pending.version === 'string' && typeof pending.from === 'string'
-        ? { version: pending.version, from: pending.from, showWindow: !!pending.showWindow }
+        ? {
+            version: pending.version,
+            from: pending.from,
+            showWindow: !!pending.showWindow,
+            ...(typeof pending.startedAt === 'number' ? { startedAt: pending.startedAt } : {}),
+            ...(typeof pending.installer === 'string' ? { installer: pending.installer } : {})
+          }
         : null
   }
 }
@@ -69,12 +90,55 @@ export interface UpdateServiceDeps {
   autoInstallDelayMs?: number
   /** Pauses before the second and third attempt at downloading SHA256SUMS.txt. */
   checksumRetryDelaysMs?: number[]
+  now?: () => number
 }
 
 export const DEFAULT_CHECK_INTERVAL_MS = 60 * 60 * 1000
 export const DEFAULT_INITIAL_DELAY_MS = 20_000
 export const DEFAULT_AUTO_INSTALL_DELAY_MS = 4_000
 export const DEFAULT_CHECKSUM_RETRY_DELAYS_MS = [1_000, 3_000]
+/** How long after launching an installer a start of the old version may still be mid-install. */
+export const INSTALL_IN_PROGRESS_WINDOW_MS = 3 * 60 * 1000
+
+/**
+ * Windows maps a running .exe without write sharing, so opening it for writing fails with EBUSY
+ * while it runs. Anything else (opened fine, gone, no permission) means it is not running.
+ */
+export function isExecutableRunning(path: string): boolean {
+  try {
+    closeSync(openSync(path, 'r+'))
+    return false
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EBUSY'
+  }
+}
+
+/**
+ * Windows: was this (old) version started while the silent installer that replaces it is still
+ * running? It would fight the installer for the install folder and get killed by it, and it would
+ * mark the update as failed so the new version starts hidden. The caller exits instead; the
+ * installer starts the new version itself. Checked before anything else is opened.
+ */
+export function updateInstallInProgress(opts: {
+  stateFile: string
+  platform: NodeJS.Platform
+  currentVersion: string
+  now?: number
+  isRunning?: (path: string) => boolean
+}): string | null {
+  if (opts.platform !== 'win32') return null
+  let pending: UpdaterState['pending']
+  try {
+    pending = parseState(JSON.parse(readFileSync(opts.stateFile, 'utf8'))).pending
+  } catch {
+    return null
+  }
+  if (!pending || pending.version === opts.currentVersion) return null
+  if (typeof pending.startedAt !== 'number' || !pending.installer) return null
+  const age = (opts.now ?? Date.now()) - pending.startedAt
+  if (age < 0 || age > INSTALL_IN_PROGRESS_WINDOW_MS) return null
+  return (opts.isRunning ?? isExecutableRunning)(pending.installer) ? pending.version : null
+}
 
 /**
  * Keeps this install current from the repository's GitHub Releases.
@@ -97,6 +161,7 @@ export class UpdateService extends EventEmitter {
   private readonly restoreWindow: boolean
   /** This process was started by an update; confirm "up to date" soon instead of waiting a cycle. */
   private readonly justUpdated: boolean
+  private disposed = false
   /** Whether the asset selected for the current release can be applied on this install kind. */
   private installable = false
   private checkTimer: NodeJS.Timeout | null = null
@@ -157,6 +222,7 @@ export class UpdateService extends EventEmitter {
   }
 
   dispose(): void {
+    this.disposed = true
     this.deps.settings.off('change', this.onSettingsChange)
     this.clearTimers()
     this.abort?.abort()
@@ -165,6 +231,7 @@ export class UpdateService extends EventEmitter {
 
   /** The dictation controller reports every return to idle so a deferred install can proceed. */
   notifyIdle(): void {
+    if (this.disposed) return
     if (this.status.waitingForIdle && !this.autoTimer) this.armAutoInstall()
   }
 
@@ -474,7 +541,9 @@ export class UpdateService extends EventEmitter {
       pending: {
         version: release.version,
         from: this.deps.currentVersion,
-        showWindow: this.deps.isMainWindowVisible()
+        showWindow: this.deps.isMainWindowVisible(),
+        startedAt: this.now(),
+        installer: downloadedPath
       }
     })
     this.state.flush()
@@ -574,6 +643,10 @@ export class UpdateService extends EventEmitter {
   private discardDownload(): void {
     const path = this.status.downloadedPath
     if (path) rmSync(path, { force: true })
+  }
+
+  private now(): number {
+    return this.deps.now ? this.deps.now() : Date.now()
   }
 
   private cleanDownloadDir(): void {

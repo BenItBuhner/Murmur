@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseSettings, type Settings } from '../src/shared/settings'
 import type { InstallKind, UpdateStatus } from '../src/shared/updates'
 import type { GithubRelease } from '../src/core/update/releases'
-import { UpdateService, type UpdateServiceDeps } from '../src/main/update/service'
+import {
+  UpdateService,
+  updateInstallInProgress,
+  type UpdateServiceDeps
+} from '../src/main/update/service'
 import { ChecksumMismatchError, downloadFile } from '../src/main/update/download'
 import type { SettingsStore } from '../src/main/store/settings'
 
@@ -303,7 +307,13 @@ describe('UpdateService', () => {
     expect(seen).toEqual(['checking', 'available', 'downloading', 'ready', 'installing'])
 
     const persisted = JSON.parse(readFileSync(join(dir, 'updater.json'), 'utf8'))
-    expect(persisted.pending).toEqual({ version: '0.2.0', from: '0.1.0', showWindow: false })
+    expect(persisted.pending).toEqual({
+      version: '0.2.0',
+      from: '0.1.0',
+      showWindow: false,
+      startedAt: expect.any(Number),
+      installer: ready.downloadedPath
+    })
 
     // The relaunched app (now 0.2.0) sees the pending record, reports it once and clears it.
     const next = make({ currentVersion: '0.2.0' })
@@ -313,6 +323,67 @@ describe('UpdateService', () => {
     next.ackUpdated()
     expect(next.getStatus().updatedFrom).toBeNull()
     expect(JSON.parse(readFileSync(join(dir, 'updater.json'), 'utf8')).pending).toBeNull()
+  })
+
+  describe('old version started while the Windows installer is running', () => {
+    const T0 = 1_800_000_000_000
+    const stateFile = (): string => join(dir, 'updater.json')
+    function seed(pending: Record<string, unknown> | null): void {
+      writeFileSync(stateFile(), JSON.stringify({ lastCheckedAt: null, pending }))
+    }
+    const check = (
+      opts: { running?: boolean; now?: number; platform?: NodeJS.Platform } = {}
+    ): string | null =>
+      updateInstallInProgress({
+        stateFile: stateFile(),
+        platform: opts.platform ?? 'win32',
+        currentVersion: '0.1.0',
+        now: opts.now ?? T0 + 15_000,
+        isRunning: () => opts.running ?? true
+      })
+    const record = { version: '0.2.0', from: '0.1.0', showWindow: true, startedAt: T0 }
+
+    it('reports the version being installed while its installer runs', () => {
+      seed({ ...record, installer: 'C:/x/Murmur-0.2.0-x64-setup.exe' })
+      expect(check()).toBe('0.2.0')
+      expect(check({ running: false })).toBeNull()
+    })
+
+    it('ignores stale, undated, finished and non-Windows records', () => {
+      seed({ ...record, installer: 'C:/x/setup.exe' })
+      expect(check({ now: T0 + 4 * 60_000 })).toBeNull()
+      expect(check({ platform: 'linux' })).toBeNull()
+      seed({ version: '0.2.0', from: '0.1.0', showWindow: false })
+      expect(check()).toBeNull()
+      seed({ ...record, version: '0.1.0', installer: 'C:/x/setup.exe' })
+      expect(check()).toBeNull()
+      seed(null)
+      expect(check()).toBeNull()
+      rmSync(stateFile())
+      expect(check()).toBeNull()
+    })
+
+    it('records the installer path and launch time when installing', async () => {
+      settings.patch({ updates: { autoInstall: false } })
+      const service = make({ now: () => T0 })
+      await service.check({ manual: true })
+      const ready = await service.download()
+      await service.install()
+      const pending = JSON.parse(readFileSync(stateFile(), 'utf8')).pending
+      expect(pending).toMatchObject({ startedAt: T0, installer: ready.downloadedPath })
+    })
+
+    it('does not re-arm an automatic install after dispose', async () => {
+      idle = false
+      const service = make()
+      await service.check({ manual: false })
+      await vi.waitFor(() => expect(service.getStatus().waitingForIdle).toBe(true))
+      service.dispose()
+      idle = true
+      service.notifyIdle()
+      await sleep(40)
+      expect(applied).toEqual([])
+    })
   })
 
   it('downloads and installs on its own once dictation is idle when autoInstall is on', async () => {

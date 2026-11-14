@@ -37,7 +37,7 @@ import { AppTray } from './tray'
 import { SystemAccent } from './theme/system-accent'
 import { detectInstallKind } from './update/install-kind'
 import { applyUpdate, UPDATED_FLAG } from './update/installers'
-import { UpdateService } from './update/service'
+import { UpdateService, updateInstallInProgress } from './update/service'
 import { buildTimeUpdateRepo, resolveUpdateSource } from './update/source'
 import {
   createMainWindow,
@@ -116,6 +116,20 @@ async function main(): Promise<void> {
     `Murmur ${app.getVersion()} starting (electron ${process.versions.electron}, ${process.platform}/${process.arch})`
   )
   log.info(`logs: ${logPath}`)
+  const installing = app.isPackaged
+    ? updateInstallInProgress({
+        stateFile: join(userData, 'updater.json'),
+        platform: process.platform,
+        currentVersion: app.getVersion()
+      })
+    : null
+  if (installing) {
+    // Started (by hand, or by Windows) while the installer for the update replaces this version:
+    // step aside before opening anything. The installer starts the new version itself.
+    log.warn(`the installer for ${installing} is still running; exiting so it can finish`)
+    app.exit(0)
+    return
+  }
   for (const warning of cloud.warnings) log.warn(warning)
   log.info(
     cloudConfig.accountMode === 'off'
@@ -187,6 +201,10 @@ async function main(): Promise<void> {
       }),
     isIdle: () => {
       const phase = overlay.getState().phase
+      // An open settings window means the user is mid-task (signing in, say): an automatic
+      // restart there looks like a crash. Hiding or closing it re-arms the install.
+      const win = getMainWindow()
+      if (win && win.isVisible() && !win.isMinimized()) return false
       return phase !== 'listening' && phase !== 'processing'
     },
     isMainWindowVisible: () => getMainWindow()?.isVisible() ?? false,
@@ -203,6 +221,12 @@ async function main(): Promise<void> {
   log.info(
     `updates: ${installKind} install, following ${updateSource.source.repo} (${updateSource.source.apiBase})`
   )
+  // A deferred automatic update waits for the settings window to go away.
+  const rearmUpdateOnHide = (window: BrowserWindow): void => {
+    window.on('hide', () => updates.notifyIdle())
+    window.on('minimize', () => updates.notifyIdle())
+    window.on('closed', () => updates.notifyIdle())
+  }
 
   const overlay = new OverlayWindow()
   // A dev build may dictate from a clip on disk instead of the microphone (silent end-to-end runs
@@ -330,7 +354,7 @@ async function main(): Promise<void> {
     updates.shouldShowWindowAfterUpdate ||
       !(hidden || (s0.general.startMinimized && s0.onboardingComplete))
   )
-  createMainWindow(defaultChrome(resolvedTheme(s0)))
+  rearmUpdateOnHide(createMainWindow(defaultChrome(resolvedTheme(s0))))
 
   tray = new AppTray({
     toggleDictation: () => controller.toggle(),
@@ -409,7 +433,8 @@ async function main(): Promise<void> {
   })
   app.on('open-url', () => showMainWindow())
   app.on('activate', () => {
-    if (!getMainWindow()) createMainWindow(defaultChrome(resolvedTheme(settings.get())))
+    if (!getMainWindow())
+      rearmUpdateOnHide(createMainWindow(defaultChrome(resolvedTheme(settings.get()))))
     showMainWindow()
   })
   // The account snapshot is fetched on demand now (bootstrap.get), so the window gaining focus

@@ -9,7 +9,7 @@ const LEGAL = [
   { href: '/terms', label: 'Terms' }
 ] as const
 
-/** The footer is the page's rail: one tonal step below the canvas, no rule between them. */
+/** The footer sits on the night ground, matching the header and the closing band. */
 export function SiteFooter() {
   const source = [
     { href: repoUrl(), label: 'Source on GitHub' },
@@ -18,12 +18,12 @@ export function SiteFooter() {
     { href: `${repoUrl()}/issues`, label: 'Report a problem' }
   ]
   return (
-    <footer className="mt-auto bg-sidebar py-16">
+    <footer className="night-section mt-auto border-t border-night-line py-16">
       <Container>
         <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4">
           <div className="max-w-xs">
-            <Wordmark />
-            <p className="mt-4 text-body text-muted-foreground">{SITE_TAGLINE}</p>
+            <Wordmark id="murmur-mark-foot" />
+            <p className="mt-4 text-note text-night-muted">{SITE_TAGLINE}</p>
           </div>
           <FooterColumn title="Product">
             {productLinks().map((item) => (
@@ -53,7 +53,7 @@ export function SiteFooter() {
             ))}
           </FooterColumn>
         </div>
-        <div className="mt-section flex flex-wrap items-center justify-between gap-3 text-meta text-muted-foreground">
+        <div className="mt-14 flex flex-wrap items-center justify-between gap-3 border-t border-night-line pt-6 text-meta text-night-muted">
           <span>MIT licensed. Windows, Linux and Android; macOS experimental.</span>
           <span>Recordings never leave your device.</span>
         </div>
@@ -66,7 +66,7 @@ function FooterColumn({ title, children }: { title: string; children: ReactNode 
   return (
     <div>
       <div className="eyebrow">{title}</div>
-      <ul className="mt-4 space-y-2.5 text-body [&_.footer-link]:text-foreground/80 [&_.footer-link]:transition-colors [&_.footer-link:hover]:text-foreground">
+      <ul className="mt-4 space-y-2.5 text-note [&_.footer-link]:text-night-foreground/80 [&_.footer-link]:transition-colors [&_.footer-link:hover]:text-white">
         {children}
       </ul>
     </div>

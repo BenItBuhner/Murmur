@@ -17,6 +17,8 @@
     'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
   --font-serif:
     var(--font-instrument-serif), 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  /* The site's display face: Inter Tight, tight and heavy-ish, for every headline and numeral. */
+  --font-display: var(--font-inter-tight), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
   /*
@@ -44,7 +46,9 @@
    * a sheet over everything. Light casts soft warm shadows; dark lifts by tone and keeps a thin
    * light catch on top. The dictation pill keeps its own values, as in the apps.
    */
-  --elevation-raised: 0 1px 2px oklch(0.2 0.02 60 / 0.06), 0 2px 8px -2px oklch(0.2 0.02 60 / 0.05);
+  --elevation-raised:
+    0 0 0 1px oklch(0.2 0.03 285 / 0.07), 0 1px 2px oklch(0.2 0.03 285 / 0.05),
+    0 8px 24px -12px oklch(0.2 0.03 285 / 0.12);
   --elevation-floating:
     0 1px 3px oklch(0.2 0.02 60 / 0.06), 0 8px 24px -6px oklch(0.2 0.02 60 / 0.16);
   --elevation-overlay:
@@ -52,35 +56,51 @@
   --elevation-pill: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 
   /* Surface roles: rail (sidebar) < canvas (background) < raised (card) < floating (popover). */
-  --background: oklch(0.97 0.003 85);
-  --foreground: oklch(0.2 0.01 60);
+  --background: oklch(0.985 0.002 290);
+  --foreground: oklch(0.19 0.02 285);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.01 60);
+  --card-foreground: oklch(0.19 0.02 285);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.01 60);
-  --primary: oklch(0.22 0.01 60);
+  --popover-foreground: oklch(0.19 0.02 285);
+  --primary: oklch(0.2 0.025 285);
   --primary-foreground: oklch(0.985 0.002 90);
-  --secondary: oklch(0.945 0.004 80);
-  --secondary-foreground: oklch(0.25 0.01 60);
+  --secondary: oklch(0.955 0.006 290);
+  --secondary-foreground: oklch(0.24 0.02 285);
   /* The well: fields and inset panels sunk into a card or the canvas. */
-  --muted: oklch(0.945 0.004 80);
-  --muted-foreground: oklch(0.5 0.01 60);
+  --muted: oklch(0.962 0.005 290);
+  --muted-foreground: oklch(0.47 0.02 285);
   /* Hover fills. */
-  --accent: oklch(0.925 0.005 80);
-  --accent-foreground: oklch(0.22 0.01 60);
+  --accent: oklch(0.935 0.008 290);
+  --accent-foreground: oklch(0.2 0.025 285);
   --destructive: oklch(0.6 0.2 25);
   --destructive-foreground: oklch(0.985 0 0);
   /* Tracks only (meters); never drawn as an edge. */
-  --border: oklch(0.9 0.005 80);
-  --input: oklch(0.9 0.005 80);
+  --border: oklch(0.915 0.008 290);
+  --input: oklch(0.9 0.008 290);
   --ring: oklch(0.55 0.02 60);
   --record: oklch(0.68 0.21 35);
   --success: oklch(0.65 0.16 150);
   --warning: oklch(0.75 0.16 75);
   --info: oklch(0.62 0.16 250);
-  --sidebar: oklch(0.95 0.003 85);
+  --sidebar: oklch(0.965 0.004 290);
   --overlay: oklch(0.18 0 0);
   --overlay-foreground: oklch(1 0 0);
+
+  /*
+   * Aurora: the website's brand layer (site only; the apps keep the neutral palette). A voice
+   * glow from violet to the record coral, used for the hero, the brand button and one italic word
+   * per headline. Text never sits on the gradient except white on brand-ink.
+   */
+  --brand-violet: oklch(0.56 0.2 295);
+  --brand-coral: oklch(0.68 0.19 35);
+  --brand-ink: oklch(0.36 0.15 290);
+  --brand-glow: oklch(0.62 0.2 300 / 0.3);
+  --eyebrow: var(--brand-ink);
+  --night: oklch(0.145 0.02 285);
+  --night-2: oklch(0.185 0.024 285);
+  --night-line: oklch(1 0 0 / 0.09);
+  --night-foreground: oklch(0.96 0.01 290);
+  --night-muted: oklch(0.74 0.025 285);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -113,6 +133,10 @@
     --warning: oklch(0.8 0.15 75);
     --info: oklch(0.7 0.14 250);
     --sidebar: oklch(0.125 0.004 60);
+    --brand-violet: oklch(0.7 0.17 295);
+    --brand-ink: oklch(0.5 0.17 290);
+    --brand-glow: oklch(0.62 0.2 300 / 0.3);
+    --eyebrow: var(--brand-violet);
   }
 }
 
@@ -120,6 +144,7 @@
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
   --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
 
   /* The radius scale (rounded-xs … rounded-2xl). Larger Tailwind steps are not part of the system. */
   --radius-xs: var(--radius-xs);
@@ -165,27 +190,30 @@
   --shadow-pill: var(--elevation-pill);
 
   /*
-   * Type scale. Sans: caption 11, meta 12, note 13, body 14, lead 15. Serif display (with
-   * .serif-display): heading 24, numeral 32, title 36, display 56.
+   * Type scale. The site reads larger than the apps: a page is read at arm's length, an app panel
+   * is glanced at. Sans: caption 12, meta 13, note 14.5, body 16, lead 18. Serif display (with
+   * .display-type): heading 27, numeral 34, title 44, display 60, hero 80.
    */
-  --text-caption: 11px;
+  --text-caption: 12px;
   --text-caption--line-height: 1.3;
-  --text-meta: 12px;
-  --text-meta--line-height: 1.35;
-  --text-note: 13px;
-  --text-note--line-height: 1.4;
-  --text-body: 14px;
-  --text-body--line-height: 1.5;
-  --text-lead: 15px;
-  --text-lead--line-height: 1.55;
-  --text-heading: 24px;
+  --text-meta: 13px;
+  --text-meta--line-height: 1.4;
+  --text-note: 14.5px;
+  --text-note--line-height: 1.5;
+  --text-body: 16px;
+  --text-body--line-height: 1.6;
+  --text-lead: 18px;
+  --text-lead--line-height: 1.6;
+  --text-heading: 27px;
   --text-heading--line-height: 1.1;
-  --text-numeral: 32px;
+  --text-numeral: 34px;
   --text-numeral--line-height: 1;
-  --text-title: 36px;
-  --text-title--line-height: 1.05;
-  --text-display: 56px;
+  --text-title: 44px;
+  --text-title--line-height: 1.04;
+  --text-display: 60px;
   --text-display--line-height: 1;
+  --text-hero: 80px;
+  --text-hero--line-height: 0.98;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -213,10 +241,39 @@
   --color-sidebar: var(--sidebar);
   --color-overlay: var(--overlay);
   --color-overlay-foreground: var(--overlay-foreground);
+  --color-brand-violet: var(--brand-violet);
+  --color-brand-coral: var(--brand-coral);
+  --color-brand-ink: var(--brand-ink);
+  --color-night: var(--night);
+  --color-night-foreground: var(--night-foreground);
+  --color-night-muted: var(--night-muted);
+  --color-night-2: var(--night-2);
+  --color-night-line: var(--night-line);
 
   --animate-rise-in: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
   --animate-pill-bar: pill-bar 1.15s ease-in-out infinite;
   --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
+  --animate-aurora: aurora 14s ease-in-out infinite alternate;
+}
+
+@keyframes aurora {
+  0% {
+    transform: translate3d(-4%, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, -3%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(-1%, 3%, 0) scale(0.98);
+  }
+}
+@keyframes wave-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }
 
 @keyframes rise-in {
@@ -254,19 +311,205 @@
 @utility eyebrow {
   font-size: var(--text-caption);
   line-height: 1;
-  font-weight: 500;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--muted-foreground);
+  color: var(--eyebrow);
 }
 
-/* Editorial serif for headlines and large numerals. */
-@utility serif-display {
+/* Display type for headlines and large numerals: Inter Tight, semibold, tracked in. */
+@utility display-type {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+/* The one serif moment per headline: an Instrument Serif italic word, usually on the voice gradient. */
+@utility accent-serif {
   font-family: var(--font-serif);
+  font-style: italic;
   font-weight: 400;
-  letter-spacing: -0.015em;
-  line-height: 1.05;
-  font-feature-settings: normal;
+  letter-spacing: -0.01em;
+}
+
+/* One word of a headline carries the voice: violet into coral. */
+@utility brand-text {
+  background-image: linear-gradient(100deg, var(--brand-violet) 10%, var(--brand-coral) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  padding-right: 0.06em;
+}
+
+/*
+ * The voice glow behind the hero's demo: two soft blobs that drift slowly. Purely decorative,
+ * aria-hidden at the call site, and still under reduced motion.
+ */
+@utility aurora {
+  position: absolute;
+  inset: -12% -8%;
+  z-index: -1;
+  pointer-events: none;
+  filter: blur(48px);
+  background:
+    radial-gradient(40% 45% at 30% 40%, var(--brand-glow), transparent 70%),
+    radial-gradient(35% 40% at 70% 60%, oklch(0.68 0.19 35 / 0.2), transparent 70%);
+  animation: var(--animate-aurora);
+}
+
+/* A spoken line drawn across a band: two copies of the same wave scroll so it never ends. */
+@utility voice-wave {
+  position: absolute;
+  inset-inline: 0;
+  height: 120px;
+  pointer-events: none;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent);
+  & > svg {
+    width: 200%;
+    height: 100%;
+    animation: wave-drift 18s linear infinite;
+  }
+}
+
+/* The hero's light: a violet bloom over the stage with a coral ember, fixed to the band. */
+@utility hero-glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 45% at 50% 62%, oklch(0.55 0.22 295 / 0.42), transparent 70%),
+    radial-gradient(30% 25% at 62% 70%, oklch(0.68 0.19 35 / 0.28), transparent 70%),
+    radial-gradient(80% 50% at 50% -10%, oklch(0.5 0.15 290 / 0.25), transparent 70%);
+}
+/* A faint dot grid that fades out toward the edges: depth without decoration. */
+@utility hero-grid {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(oklch(1 0 0 / 0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(70% 60% at 50% 30%, #000, transparent 75%);
+  mask-image: radial-gradient(70% 60% at 50% 30%, #000, transparent 75%);
+}
+/* The product window on the stage: a white sheet with a glass rim, cut off by the band's edge. */
+@utility stage-frame {
+  overflow: hidden;
+  border-radius: 18px;
+  background: white;
+  box-shadow:
+    0 0 0 1px oklch(1 0 0 / 0.14),
+    0 0 0 8px oklch(1 0 0 / 0.04),
+    0 40px 120px -30px oklch(0.4 0.2 295 / 0.65),
+    0 30px 60px -30px oklch(0 0 0 / 0.6);
+}
+/* Floating notes beside the window: night glass. */
+@utility stage-card {
+  border-radius: 16px;
+  background: oklch(0.2 0.03 285 / 0.82);
+  backdrop-filter: blur(16px);
+  box-shadow:
+    0 0 0 1px oklch(1 0 0 / 0.1),
+    0 24px 48px -20px oklch(0 0 0 / 0.7);
+}
+/* Words the engine removed: struck through in the record coral. */
+@utility spoken-cut {
+  color: inherit;
+  text-decoration-line: line-through;
+  text-decoration-color: oklch(0.7 0.19 35);
+  text-decoration-thickness: 1.5px;
+}
+/* A typed line appears left to right, as if Murmur were typing it. */
+@utility typed-line {
+  animation: type-in 900ms steps(28, end) both;
+}
+@keyframes type-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+/* The closing band's light, rising from below. */
+@utility cta-glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(55% 60% at 50% 115%, oklch(0.55 0.22 295 / 0.55), transparent 70%),
+    radial-gradient(30% 35% at 70% 105%, oklch(0.68 0.19 35 / 0.35), transparent 70%);
+}
+@utility engine-glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(45% 40% at 85% 15%, oklch(0.55 0.2 295 / 0.22), transparent 70%);
+}
+/* A key cap, large: the shortcut in the first step. */
+@utility keycap {
+  display: inline-flex;
+  min-width: 3.25rem;
+  height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 0 0.85rem;
+  background: var(--card);
+  font-size: var(--text-note);
+  font-weight: 600;
+  color: var(--foreground);
+  box-shadow:
+    0 0 0 1px oklch(0.2 0.03 285 / 0.1),
+    0 2px 0 oklch(0.2 0.03 285 / 0.12),
+    0 6px 14px -6px oklch(0.2 0.03 285 / 0.25);
+}
+/* The tinted panel at the top of a step card. */
+@utility step-visual {
+  background:
+    radial-gradient(80% 90% at 50% 0%, oklch(0.56 0.2 295 / 0.08), transparent 70%), var(--muted);
+}
+/* The featured plan: a hairline of the voice gradient around the card. */
+@utility plan-featured {
+  background: linear-gradient(
+    140deg,
+    var(--brand-coral),
+    var(--brand-violet) 45%,
+    oklch(0.45 0.2 280)
+  );
+  box-shadow: 0 30px 60px -30px oklch(0.5 0.2 295 / 0.45);
+}
+
+/* A section on the night ground, in either colour scheme. */
+@utility night-section {
+  background-color: var(--night);
+  color: var(--night-foreground);
+  --eyebrow: oklch(0.78 0.12 295);
+  --muted-foreground: var(--night-muted);
+  --foreground: var(--night-foreground);
+}
+/* A card on the night ground. */
+@utility night-card {
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, oklch(1 0 0 / 0.055), oklch(1 0 0 / 0.025));
+  box-shadow: inset 0 0 0 1px var(--night-line);
+}
+
+/* The night band: the closing call to action, dark in both colour schemes. */
+@utility night-band {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--night);
+  color: var(--night-foreground);
+  box-shadow: var(--elevation-overlay);
 }
 
 /*
@@ -348,6 +591,9 @@
       scroll-behavior: auto;
     }
     .stagger > *,
+    .typed-line,
+    .aurora,
+    .voice-wave > svg,
     .animate-rise-in,
     .animate-pill-bar,
     .animate-pulse-soft {

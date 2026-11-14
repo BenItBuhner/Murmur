@@ -11,7 +11,7 @@ export function AccountUnavailable({
   return (
     <div className="grid items-start gap-card lg:grid-cols-split">
       <Surface>
-        <h2 className="serif-display text-heading">Accounts are not switched on here yet</h2>
+        <h2 className="display-type text-heading">Accounts are not switched on here yet</h2>
         <p className="mt-3 text-lead text-muted-foreground">
           This copy of the site is not connected to a Murmur instance, so there is nothing to sign
           in to. The apps work without an account: connect a speech model of your own under Models

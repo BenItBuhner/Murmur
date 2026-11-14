@@ -83,13 +83,13 @@ function PlanCard({ tier, billing }: { tier: Tier; billing: Billing }) {
   return (
     <Surface role={featured ? 'raised' : 'well'} className="flex flex-col">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="serif-display text-heading">{tier.name}</h2>
+        <h2 className="display-type text-heading">{tier.name}</h2>
         {tier.id === 'free' && <Chip tone="card">{PRICING.trialDays}-day Pro trial</Chip>}
       </div>
       <p className="mt-1.5 min-h-10 text-body text-muted-foreground">{tier.summary}</p>
 
       <div className="mt-6 flex items-baseline gap-2">
-        <span className="serif-display text-numeral tabular-nums">
+        <span className="display-type text-numeral tabular-nums">
           {tier.id === 'pro' ? formatPrice(proPerMonth(billing)) : '$0'}
         </span>
         <span className="text-body text-muted-foreground">

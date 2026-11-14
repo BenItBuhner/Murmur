@@ -11,7 +11,9 @@ export default defineConfig([
     '.wrangler/**',
     'out/**',
     'build/**',
-    'next-env.d.ts'
+    'next-env.d.ts',
+    // A generated copy of packages/text-engine (scripts/sync-engine.mjs), linted there.
+    'src/lib/engine/**'
   ]),
   {
     files: ['**/*.{ts,tsx}'],

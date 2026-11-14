@@ -33,3 +33,25 @@ export function accountsSetup(): AccountsSetup {
   if (!convexUrl) missing.push('NEXT_PUBLIC_CONVEX_URL')
   return missing.length ? { configured: false, missing } : { configured: true }
 }
+
+/**
+ * Origin of the managed-model gateway, as the apps pick it (desktop shared/inference.ts
+ * `managedOrigin`): the inference Worker when the build knows it (`NEXT_PUBLIC_MURMUR_INFERENCE_URL`,
+ * from the same repository variable the apps are built with), otherwise the Convex deployment's
+ * HTTP actions, `<name>.convex.site` for `<name>.convex.cloud`.
+ */
+export function gatewayOrigin(
+  inferenceUrl = process.env.NEXT_PUBLIC_MURMUR_INFERENCE_URL,
+  convex = convexUrl
+): string {
+  const worker = (inferenceUrl ?? '').trim().replace(/\/+$/, '')
+  if (worker) return worker
+  try {
+    const url = new URL(convex)
+    if (!/\.convex\.cloud$/i.test(url.hostname)) return ''
+    url.hostname = url.hostname.replace(/\.convex\.cloud$/i, '.convex.site')
+    return url.origin
+  } catch {
+    return ''
+  }
+}

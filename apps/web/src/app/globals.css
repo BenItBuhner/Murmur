@@ -355,3 +355,29 @@
     }
   }
 }
+
+/* Web dictation (/dictate): in the installed app and the small window, only the tool shows. */
+@media (display-mode: standalone) {
+  body:has([data-dictate]) > header,
+  body:has([data-dictate]) > footer,
+  body:has([data-dictate]) .dictate-header {
+    display: none;
+  }
+  body:has([data-dictate]) .dictate-section {
+    padding-block: 1rem;
+  }
+  body:has([data-dictate]) .dictate-body {
+    margin-top: 0;
+  }
+}
+html.dictate-compact body > header,
+html.dictate-compact body > footer,
+html.dictate-compact .dictate-header {
+  display: none;
+}
+html.dictate-compact .dictate-section {
+  padding-block: 0.75rem;
+}
+html.dictate-compact .dictate-body {
+  margin-top: 0;
+}

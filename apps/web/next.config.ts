@@ -31,6 +31,13 @@ const nextConfig: NextConfig = {
         headers: [
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=()' }
         ]
+      },
+      {
+        // Web dictation records too.
+        source: '/dictate',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=()' }
+        ]
       }
     ]
   }

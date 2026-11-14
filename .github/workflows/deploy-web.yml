@@ -39,6 +39,9 @@ env:
   NEXT_PUBLIC_SITE_URL: ${{ vars.MURMUR_SITE_URL }}
   NEXT_PUBLIC_CONVEX_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CONVEX_URL || '' }}
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.CLERK_PUBLISHABLE_KEY || '' }}
+  # The inference Worker the apps are built with; /dictate's gateway route forwards there (unset:
+  # the Convex deployment's HTTP actions, as in the apps).
+  NEXT_PUBLIC_MURMUR_INFERENCE_URL: ${{ vars.MURMUR_CLOUD_RELEASE == 'true' && vars.MURMUR_INFERENCE_URL || '' }}
   NEXT_PUBLIC_MURMUR_BILLING_ENABLED: ${{ vars.MURMUR_BILLING_ENABLED }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

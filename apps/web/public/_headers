@@ -11,3 +11,7 @@
 # Next names these files by content hash, so they never change once published.
 /_next/static/*
   Cache-Control: public, max-age=31536000, immutable
+
+# The dictation service worker must never be cached, so new versions install.
+/dictate-sw.js
+  Cache-Control: no-cache

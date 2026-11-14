@@ -136,6 +136,16 @@ describe('a whole dictation', () => {
     })
     expect(r.text.toLowerCase()).toContain('hello world')
   })
+  it('keeps the transcript when /format rejects the session', async () => {
+    const fetch = async (url: string) =>
+      url.endsWith('/format') ? json(401, {}) : json(200, { text: 'hello world' })
+    const r = await dictate(wav, SETTINGS, {
+      gatewayUrl: '/gw/v1',
+      token: async () => 't',
+      fetch: fetch as never
+    })
+    expect(r.text.toLowerCase()).toContain('hello world')
+  })
   it('does not call /format for Light formatting', async () => {
     const fetch = vi.fn(async () => json(200, { text: 'hello world' }))
     const s = {

@@ -43,6 +43,8 @@ export class Recorder {
       }
     })
     this.ctx = new AudioContext()
+    // Created after the permission prompt, outside the gesture: Safari starts it suspended.
+    await this.ctx.resume().catch(() => undefined)
     const source = this.ctx.createMediaStreamSource(this.stream)
     this.node = this.ctx.createScriptProcessor(4096, 1, 1)
     this.chunks = []

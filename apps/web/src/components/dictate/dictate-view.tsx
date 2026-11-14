@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Surface } from '@/components/ui/surface'
 import { api } from '@/lib/backend-api'
-import { dictate, GATEWAY_BASE, GatewayError } from '@/lib/dictate/pipeline'
+import { dictate, GATEWAY_BASE } from '@/lib/dictate/pipeline'
 import { Recorder } from '@/lib/dictate/recorder'
 import { DEFAULT_SETTINGS, settingsFromAccount } from '@/lib/dictate/settings'
 import { Trigger } from '@/lib/dictate/trigger'
@@ -108,13 +108,17 @@ function Dictation({
   const dictionary = useQuery(api.dictionary.list, {})
   const snippets = useQuery(api.snippets.list, {})
   const preferences = useQuery(api.preferences.get, {})
+  // Dictation waits for the account's settings, so no clip runs without its dictionary.
+  const ready = dictionary !== undefined && snippets !== undefined && preferences !== undefined
   const settings = useMemo(
-    () =>
-      dictionary === undefined || snippets === undefined || preferences === undefined
-        ? DEFAULT_SETTINGS
-        : settingsFromAccount(dictionary, snippets, preferences),
-    [dictionary, snippets, preferences]
+    () => (ready ? settingsFromAccount(dictionary, snippets, preferences) : DEFAULT_SETTINGS),
+    [ready, dictionary, snippets, preferences]
   )
+  const readyRef = useRef(ready)
+  useEffect(() => {
+    readyRef.current = ready
+  }, [ready])
+  const micError = useRef(false)
 
   const [phase, setPhaseState] = useState<Phase>('idle')
   const phaseRef = useRef<Phase>('idle')
@@ -133,23 +137,32 @@ function Dictation({
     settingsRef.current = settings
   }, [settings])
 
-  const save = (value: string) => {
-    setText(value)
+  // The transcript survives a reload of this tab (and is handed to the small window it opens).
+  useEffect(() => {
     try {
-      sessionStorage.setItem(TEXT_KEY, value)
+      sessionStorage.setItem(TEXT_KEY, text)
     } catch {
       /* storage blocked */
     }
-  }
+  }, [text])
+  const save = setText
+
+  // Signing out (or the session ending) mid-dictation must not leave the microphone on.
+  useEffect(() => () => void recorder.stop(), [recorder])
 
   const begin = useCallback(
     async (next: 'hold' | 'handsfree') => {
       const current = phaseRef.current
-      if (current === 'working') return
+      if (current === 'working' || !readyRef.current) return
       if (current !== 'idle') {
-        setPhase(next)
+        // Space on a held chord turns it hands-free; a hold never turns hands-free back.
+        if (next === 'handsfree') {
+          setPhase('handsfree')
+          setStatus({ text: 'Listening hands-free… press again to stop', tone: 'rec' })
+        }
         return
       }
+      micError.current = false
       setPhase(next)
       setStatus({
         text:
@@ -161,6 +174,7 @@ function Dictation({
       try {
         await recorder.start()
       } catch (err) {
+        micError.current = true
         setPhase('idle')
         const denied = (err as DOMException)?.name === 'NotAllowedError'
         setStatus({
@@ -180,7 +194,8 @@ function Dictation({
       const clip = await recorder.stop()
       if (!clip) {
         setPhase('idle')
-        setStatus({ text: 'Too short. Hold the key while you speak.' })
+        // A blocked microphone has already said so; keep that message.
+        if (!micError.current) setStatus({ text: 'Too short. Hold the key while you speak.' })
         return
       }
       const result = await dictate(clip.wav, settingsRef.current, {
@@ -192,23 +207,12 @@ function Dictation({
         setStatus({ text: 'No speech heard. Try again a little closer to the microphone.' })
         return
       }
-      setText((prev) => {
-        const next = appendDictation(prev, result.text)
-        try {
-          sessionStorage.setItem(TEXT_KEY, next)
-        } catch {
-          /* storage blocked */
-        }
-        return next
-      })
+      setText((prev) => appendDictation(prev, result.text))
       setStatus({ text: `Done in ${(result.ms / 1000).toFixed(1)} s. Ready for the next one.` })
     } catch (err) {
       setPhase('idle')
       setStatus({
-        text:
-          err instanceof GatewayError || err instanceof Error
-            ? err.message
-            : 'Transcription failed',
+        text: err instanceof Error ? err.message : 'Transcription failed',
         tone: 'error'
       })
     }
@@ -252,12 +256,17 @@ function Dictation({
 
   const copy = async () => {
     if (!text) return
+    let ok = true
     try {
       await navigator.clipboard.writeText(text)
     } catch {
       const ta = document.getElementById('dictate-text') as HTMLTextAreaElement | null
       ta?.select()
-      document.execCommand('copy')
+      ok = !!ta && document.execCommand('copy')
+    }
+    if (!ok) {
+      setStatus({ text: "Couldn't copy here; select the text and copy it yourself", tone: 'error' })
+      return
     }
     setCopied(true)
     setTimeout(() => setCopied(false), 1600)
@@ -363,12 +372,15 @@ function Dictation({
               : 'text-muted-foreground'
         }`}
       >
-        {status.text || (
-          <>
-            Hold <Key>Ctrl</Key> + <Key>{mod}</Key> or <Key>Space</Key> to talk · <Key>Ctrl</Key> +{' '}
-            <Key>{mod}</Key> + <Key>Space</Key> hands-free
-          </>
-        )}
+        {status.text ||
+          (!ready ? (
+            'Loading your dictionary and settings…'
+          ) : (
+            <>
+              Hold <Key>Ctrl</Key> + <Key>{mod}</Key> or <Key>Space</Key> to talk · <Key>Ctrl</Key>{' '}
+              + <Key>{mod}</Key> + <Key>Space</Key> hands-free
+            </>
+          ))}
       </p>
 
       <ul className="flex flex-wrap justify-center gap-1.5" aria-label="Your settings">

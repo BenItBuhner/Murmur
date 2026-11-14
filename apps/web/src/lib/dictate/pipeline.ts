@@ -67,6 +67,8 @@ async function authed(
     if (!token) throw new GatewayError('Sign in to transcribe', 401, 'unauthorized')
     const res = await doFetch(`${deps.gatewayUrl}${path}`, init(token))
     if (res.status === 401 && !force) continue
+    if (res.status === 401)
+      throw new GatewayError('Your session expired; sign in again', 401, 'unauthorized')
     if (!res.ok) throw await gatewayError(res)
     return res
   }
@@ -133,9 +135,8 @@ export async function format(
     const json = (await res.json()) as Partial<FormatResult>
     if (typeof json.text !== 'string' || !json.status) return null
     return json as FormatResult
-  } catch (err) {
+  } catch {
     // Formatting never loses a dictation: the rule-based result stands in, as on desktop.
-    if (err instanceof GatewayError && err.status === 401) throw err
     return formatTranscript({ transcript, mode: 'light', context }, null)
   }
 }

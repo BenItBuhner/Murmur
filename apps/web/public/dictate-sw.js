@@ -4,6 +4,15 @@
 const VERSION = 'v1'
 const CACHE = `murmur-dictate-${VERSION}`
 
+// Build files are content-hashed, so each deploy adds new ones; keep only the newest.
+const MAX_ENTRIES = 80
+async function put(req, res) {
+  const cache = await caches.open(CACHE)
+  await cache.put(req, res)
+  const keys = await cache.keys()
+  for (const old of keys.slice(0, Math.max(0, keys.length - MAX_ENTRIES))) await cache.delete(old)
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
@@ -50,10 +59,7 @@ self.addEventListener('fetch', (event) => {
         (hit) =>
           hit ||
           fetch(req).then((res) => {
-            if (res.ok) {
-              const copy = res.clone()
-              caches.open(CACHE).then((c) => c.put(req, copy))
-            }
+            if (res.ok) put(req, res.clone())
             return res
           })
       )

@@ -7,6 +7,9 @@ import { MoodAurora } from './concepts/MoodAurora'
 import { GlyphLoom } from './concepts/GlyphLoom'
 import { Constellation } from './concepts/Constellation'
 import { ContextChips } from './concepts/ContextChips'
+import { Silk } from './directions/Silk'
+import { MurmurPlus } from './directions/MurmurPlus'
+import { Caption } from './directions/Caption'
 
 export const CONCEPTS = {
   baseline: Baseline,
@@ -14,7 +17,10 @@ export const CONCEPTS = {
   aurora: MoodAurora,
   loom: GlyphLoom,
   constellation: Constellation,
-  chips: ContextChips
+  chips: ContextChips,
+  silk: Silk,
+  murmur: MurmurPlus,
+  caption: Caption
 } as const
 
 function App(): React.JSX.Element {
@@ -22,9 +28,13 @@ function App(): React.JSX.Element {
   const name = (new URLSearchParams(location.search).get('c') ??
     'baseline') as keyof typeof CONCEPTS
   const C = CONCEPTS[name] ?? Baseline
+  const alpha = new URLSearchParams(location.search).has('alpha')
   // The overlay window is anchored to the bottom; give every concept the same stage.
   return (
-    <div className="dark relative h-full w-full" style={{ background: '#0b0b0c' }}>
+    <div
+      className="dark relative h-full w-full"
+      style={{ background: alpha ? 'transparent' : '#0b0b0c' }}
+    >
       <div className="absolute inset-x-0 bottom-6 top-0">
         <C t={t} />
       </div>
@@ -35,5 +45,7 @@ function App(): React.JSX.Element {
 // ?zoom=1.6 scales the stage for recording (video capture is always 1x).
 const zoom = new URLSearchParams(location.search).get('zoom')
 if (zoom) document.documentElement.style.zoom = zoom
+if (new URLSearchParams(location.search).has('alpha'))
+  document.documentElement.style.setProperty('--page-bg', 'transparent')
 
 createRoot(document.getElementById('root')!).render(<App />)

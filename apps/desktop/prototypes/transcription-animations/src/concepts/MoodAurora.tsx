@@ -38,8 +38,9 @@ export function MoodAurora({ t }: { t: number }): React.JSX.Element {
   const { phase, since } = phaseInfo(t)
   const lvl = levelAt(t)
   const col = toneColor(t)
-  const size = morphSize(t, (p): Size =>
-    p === 'idle' ? IDLE : p === 'success' ? [176, 44] : [470, 52]
+  const size = morphSize(
+    t,
+    (p): Size => (p === 'idle' ? IDLE : p === 'success' ? [176, 44] : [470, 52])
   )
   const last = heard.length ? heard[heard.length - 1].i : -1
   const tone = toneAt(t)

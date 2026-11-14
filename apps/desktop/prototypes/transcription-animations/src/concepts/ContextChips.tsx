@@ -26,8 +26,9 @@ const KIND: Record<Entity['kind'], { icon: string; rgb: string }> = {
 export function ContextChips({ t }: { t: number }): React.JSX.Element {
   const heard = wordsAt(t)
   const { phase, since } = phaseInfo(t)
-  const size = morphSize(t, (p): Size =>
-    p === 'idle' ? IDLE : p === 'success' ? [300, 44] : [440, 44]
+  const size = morphSize(
+    t,
+    (p): Size => (p === 'idle' ? IDLE : p === 'success' ? [300, 44] : [440, 44])
   )
   const shown = heard.slice(-8)
   const entityWords = new Set(ENTITIES.map((e) => e.word))

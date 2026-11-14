@@ -5,17 +5,28 @@ declare global {
   interface Window {
     /** Wall-clock ms (Date.now basis) at which t = 0; the recorder trims video to it. */
     __takeStart?: number
+    /** Frame mode (?frame): set t and resolve once it has painted. */
+    __setT?: (t: number) => Promise<void>
   }
 }
 
 const params = new URLSearchParams(location.search)
 const RECORDING = params.has('rec')
+const FRAME = params.has('frame')
 const LEAD_IN = 500
 
 /** Milliseconds into the take. Loops for viewing; plays once (and holds) when recording. */
 export function useClock(): number {
   const [t, setT] = useState(0)
   useEffect(() => {
+    if (FRAME) {
+      window.__setT = (v) =>
+        new Promise((done) => {
+          setT(v)
+          requestAnimationFrame(() => requestAnimationFrame(() => done()))
+        })
+      return
+    }
     const start = performance.now() + LEAD_IN
     window.__takeStart = Date.now() + LEAD_IN
     let raf = 0

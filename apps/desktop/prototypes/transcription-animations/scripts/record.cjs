@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- plain Node recorder script */
 // Records every concept (and the real pill) playing the shared script once, in real time, then
-// trims each video so t = 0 lands on frame 0. Usage: node record.cjs <outdir>
+// trims each video so t = 0 lands on frame 0. Usage: node record.cjs <outdir> [concepts,comma,separated]
 const { chromium } = require('playwright')
 const { execFileSync } = require('child_process')
 const fs = require('fs')
 const out = process.argv[2]
-const names = ['baseline', 'inkline', 'aurora', 'loom', 'constellation', 'chips']
-const W = 960
-const H = 300
-const DURATION = 12000
+const names = (process.argv[3] || 'baseline').split(',')
+const W = 1280
+const H = 260
+const DURATION = 15900
 ;(async () => {
   const b = await chromium.launch({ args: ['--force-device-scale-factor=1'] })
   for (const n of names) {
@@ -20,7 +20,7 @@ const DURATION = 12000
     })
     const videoStart = Date.now()
     const p = await ctx.newPage()
-    await p.goto(`http://localhost:5199/?rec&zoom=1.5&c=${n}`)
+    await p.goto(`http://localhost:5199/?rec&zoom=2.6&c=${n}`)
     await p.waitForFunction(() => window.__takeStart)
     const start = await p.evaluate(() => window.__takeStart)
     await p.waitForTimeout(start + DURATION + 300 - Date.now())

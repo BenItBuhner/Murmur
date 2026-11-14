@@ -13,8 +13,9 @@ const HEAD = 7
 export function GlyphLoom({ t }: { t: number }): React.JSX.Element {
   const heard = wordsAt(t)
   const { phase, since } = phaseInfo(t)
-  const size = morphSize(t, (p): Size =>
-    p === 'idle' ? IDLE : p === 'success' ? [140, 44] : [480, 44]
+  const size = morphSize(
+    t,
+    (p): Size => (p === 'idle' ? IDLE : p === 'success' ? [140, 44] : [480, 44])
   )
   const lvl = levelAt(t)
 

@@ -64,8 +64,9 @@ function checkPoint(i: number, n: number): [number, number] {
 export function Constellation({ t }: { t: number }): React.JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null)
   const { phase, since } = phaseInfo(t)
-  const size = morphSize(t, (p): Size =>
-    p === 'idle' ? IDLE : p === 'success' ? [136, 44] : [W + 36, H]
+  const size = morphSize(
+    t,
+    (p): Size => (p === 'idle' ? IDLE : p === 'success' ? [136, 44] : [W + 36, H])
   )
 
   useEffect(() => {

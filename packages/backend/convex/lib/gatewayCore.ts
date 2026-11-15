@@ -1085,3 +1085,36 @@ export function finishOnServer(
   })
   return { text: done.text, stages: done.stages, snippetsExpanded: done.snippetsExpanded }
 }
+
+/** The longest text `/v1/finish` takes. */
+export const FINISH_MAX_CHARS = 60_000
+
+/**
+ * `POST /v1/finish` — `{ text, context, finish }` -> `{ text, stages, snippetsExpanded }`. The last
+ * step of a dictation on the server: the formatted (and laid-out) text with the dictionary's
+ * spellings, the profile's casing, snippets and the trailing space applied. No model, nothing
+ * billed; signed-in accounts only. Ephemeris clients call it so no feature runs on the device.
+ */
+export async function handleFinish(
+  _hooks: GatewayHooks,
+  identity: GatewayIdentity | null,
+  request: Request
+): Promise<Response> {
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  let input: Record<string, unknown>
+  try {
+    input = (await request.json()) as Record<string, unknown>
+  } catch {
+    return gatewayError(400, 'bad_request', 'Body must be JSON')
+  }
+  if (!input || typeof input.text !== 'string') return gatewayError(400, 'bad_request', '"text" must be a string')
+  if (input.text.length > FINISH_MAX_CHARS)
+    return gatewayError(400, 'bad_request', `"text" is longer than ${FINISH_MAX_CHARS} characters`)
+  const parsed = parseFormatRequest({ transcript: '', context: input.context })
+  if (!parsed.ok) return gatewayError(400, 'bad_request', parsed.message)
+  const req = parseFinishRequest(input.finish ?? {})!
+  return new Response(JSON.stringify(finishOnServer(input.text, parsed.request.context, req)), {
+    status: 200,
+    headers: JSON_HEADERS
+  })
+}

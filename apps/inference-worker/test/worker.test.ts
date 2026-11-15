@@ -219,6 +219,16 @@ describe('one-call release and prewarm', () => {
     expect(body.finished?.stages).toContain('snippets')
   })
 
+  it('finishes a text on its own at /v1/finish, and only for a signed-in caller', async () => {
+    const auth = `Bearer ${await token({})}`
+    const body = JSON.stringify({ text: 'Say hi to the team world', context: { category: 'chat' }, finish: { trailingSpace: false, snippets: [{ trigger: 'world', content: 'everyone' }] } })
+    const res = await handle(new Request('https://w.test/v1/finish', { method: 'POST', headers: { authorization: auth, 'content-type': 'application/json' }, body }), env, ctx, fetcher)
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { text: string }).text).toBe('Say hi to the team everyone')
+    const anon = await handle(new Request('https://w.test/v1/finish', { method: 'POST', body }), env, ctx, fetcher)
+    expect(anon.status).toBe(401)
+  })
+
   it('answers no finished text to a client that does not ask (Murmur)', async () => {
     const auth = `Bearer ${await token({})}`
     const res = await handle(await releaseRequest(auth, { format: JSON.stringify({ context: {} }) }), env, ctx, fetcher)

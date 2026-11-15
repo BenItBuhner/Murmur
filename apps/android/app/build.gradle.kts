@@ -106,7 +106,7 @@ android {
         buildConfigField("String", "CONVEX_SITE_URL", "\"${envOrProp("MURMUR_CONVEX_SITE_URL")}\"")
         // Origin of the inference Worker (apps/inference-worker). When set, managed models are served
         // there and dictation audio never goes through Convex; empty keeps the Convex gateway.
-        buildConfigField("String", "INFERENCE_URL", "\"${envOrProp("MURMUR_INFERENCE_URL")}\"")
+        buildConfigField("String", "INFERENCE_URL", "\"${cloudDefault("MURMUR_INFERENCE_URL", "https://murmur-inference.benprobennett.workers.dev")}\"")
         buildConfigField(
             "String", "CLERK_PUBLISHABLE_KEY",
             "\"${cloudDefault("MURMUR_CLERK_PUBLISHABLE_KEY", "pk_live_Y2xlcmsubXVybXVyLnRlY2hsaXRub3cuY29tJA")}\""

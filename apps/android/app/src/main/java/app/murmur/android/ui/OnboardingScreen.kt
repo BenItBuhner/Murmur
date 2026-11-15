@@ -65,7 +65,9 @@ fun OnboardingScreen(
             add(Step.WELCOME)
             if (signedIn && !accountOnboarded) add(Step.PERSONALIZE)
             add(Step.PERMISSIONS)
-            add(Step.PROVIDER)
+            // Ephemeris: a signed-in account dictates on Murmur's hosted models with nothing to set up;
+            // your own provider stays an advanced option under Speech model, out of the first run.
+            if (!(app.murmur.android.Brand.isEphemeris && signedIn)) add(Step.PROVIDER)
         }
     }
     var index by rememberSaveable { mutableIntStateOf(0) }

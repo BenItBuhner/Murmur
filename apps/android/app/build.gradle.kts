@@ -21,6 +21,20 @@ fun envOrProp(name: String): String =
 // the repo root, which keeps it in sync with the desktop app and the README download links.
 val murmurVersion = "0.6.40"
 
+// ---- Brand -------------------------------------------------------------------------------------
+// The same app ships as Murmur (the default) or, with -Pbrand=ephemeris (or MURMUR_BRAND=ephemeris),
+// as Ephemeris: its own package so both fit on one phone, its own name, icon and colours
+// (src/ephemeris/res, laid over the direct flavor), the Ember Dots listening pill, and context capture
+// that syncs to the Ephemeris tables in Murmur's Convex deployment. Sign-in is the Murmur account.
+// A property rather than a flavor dimension keeps every Murmur task name (assembleDirectRelease, ...)
+// as it is. Ephemeris is built direct only: `./gradlew -Pbrand=ephemeris assembleDirectRelease`.
+val brand = envOrProp("brand").ifBlank { envOrProp("MURMUR_BRAND") }.ifBlank { "murmur" }.lowercase()
+require(brand == "murmur" || brand == "ephemeris") { "brand must be murmur or ephemeris, got \"$brand\"" }
+val ephemeris = brand == "ephemeris"
+// Murmur's production cloud, public values only (the web app ships the same ones); the environment wins.
+fun cloudDefault(name: String, ephemerisValue: String): String =
+    envOrProp(name).ifBlank { if (ephemeris) ephemerisValue else "" }
+
 // Android needs a monotonically increasing integer versionCode. Derive it from the semver so nothing
 // has to be bumped by hand: 1.2.3 -> 1_020_399, 1.2.3-beta.4 -> 1_020_304. Pre-releases sort below
 // the final release they precede; minor and patch must stay below 100.
@@ -70,7 +84,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "app.murmur.android"
+        applicationId = if (ephemeris) "app.ephemeris.android" else "app.murmur.android"
         minSdk = 26
         targetSdk = 35
         versionCode = versionCodeFor(murmurVersion)
@@ -84,7 +98,8 @@ android {
         // Murmur cloud (accounts + sync). Same variables as the desktop build: leave them empty for
         // a local-only build, set both for a build against a Murmur instance. Accounts are required
         // by default when both are set; MURMUR_ACCOUNT_MODE=optional allows skipping.
-        buildConfigField("String", "CONVEX_URL", "\"${envOrProp("MURMUR_CONVEX_URL")}\"")
+        buildConfigField("String", "CONVEX_URL", "\"${cloudDefault("MURMUR_CONVEX_URL", "https://hardy-fish-542.convex.cloud")}\"")
+        buildConfigField("String", "BRAND", "\"$brand\"")
         // HTTP actions URL of the deployment (the ".convex.site" one), home of the managed-model
         // gateway. Derived from CONVEX_URL for Convex Cloud and the local backend; set it only for
         // a self-hosted deployment on another host.
@@ -93,7 +108,8 @@ android {
         // there and dictation audio never goes through Convex; empty keeps the Convex gateway.
         buildConfigField("String", "INFERENCE_URL", "\"${envOrProp("MURMUR_INFERENCE_URL")}\"")
         buildConfigField(
-            "String", "CLERK_PUBLISHABLE_KEY", "\"${envOrProp("MURMUR_CLERK_PUBLISHABLE_KEY")}\""
+            "String", "CLERK_PUBLISHABLE_KEY",
+            "\"${cloudDefault("MURMUR_CLERK_PUBLISHABLE_KEY", "pk_live_Y2xlcmsubXVybXVyLnRlY2hsaXRub3cuY29tJA")}\""
         )
         buildConfigField("String", "ACCOUNT_MODE", "\"${envOrProp("MURMUR_ACCOUNT_MODE")}\"")
     }
@@ -101,6 +117,7 @@ android {
     // The text engine's everyday-word list (what a correction to an ordinary word is checked against
     // before Murmur offers it for the dictionary) ships from its one copy in packages/text-engine.
     sourceSets["main"].assets.srcDir("../../../packages/text-engine/lexicon")
+    if (ephemeris) sourceSets.configureEach { if (name == "direct") res.srcDir("src/ephemeris/res") }
 
     // ---- Distribution flavors -------------------------------------------------------------------
     // One codebase, two ways to ship it. Only the update layer and the manifest differ:

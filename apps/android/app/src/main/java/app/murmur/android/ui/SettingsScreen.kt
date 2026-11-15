@@ -30,7 +30,7 @@ import app.murmur.android.ui.theme.Murmur
 fun SettingsScreen(entries: List<SettingsEntry>, nav: TopNav, onOpen: (Route) -> Unit) {
     Screen(
         title = "Settings",
-        description = "How Murmur listens and types, and how the app itself behaves.",
+        description = "How ${app.murmur.android.Brand.name} listens and types, and how the app itself behaves.",
         nav = nav
     ) {
         val groups = entries.fold(mutableListOf<MutableList<SettingsEntry>>()) { acc, entry ->

@@ -118,7 +118,9 @@ object UpdateSelection {
     }
 
     /** `Murmur-<version>-android.apk`, as uploaded by the Android job of release.yml. */
-    fun apkAssetName(tag: String): String = "Murmur-${normalizeVersion(tag)}-android.apk"
+    /** The Ephemeris build only takes an `Ephemeris-...` asset, so it never offers to install Murmur over itself. */
+    fun apkAssetName(tag: String, brand: String = app.murmur.android.BuildConfig.BRAND): String =
+        "${if (brand == "ephemeris") "Ephemeris" else "Murmur"}-${normalizeVersion(tag)}-android.apk"
 
     fun normalizeVersion(tag: String): String = tag.trim().removePrefix("v")
 

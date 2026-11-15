@@ -25,7 +25,9 @@ export const SYNCED_TABLES = [
   'signals',
   'links',
   'meeting_notes',
-  'prefs'
+  'prefs',
+  /** What a phone saw: screen text, notifications, the app in front (Murmur/Ephemeris Android). */
+  'context'
 ] as const
 export type SyncedTable = (typeof SYNCED_TABLES)[number]
 

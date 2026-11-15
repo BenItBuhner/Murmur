@@ -253,9 +253,9 @@ data class MurmurSettings(
      */
     val overlayLayout: OverlayLayout = OverlayLayout.DEFAULT,
     /** Light, dark or follow the system. */
-    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val themeMode: ThemeMode = if (app.murmur.android.Brand.isEphemeris) ThemeMode.DARK else ThemeMode.SYSTEM,
     /** Material You: take the palette from the wallpaper (Android 12+). Ignored on older devices. */
-    val dynamicColor: Boolean = true,
+    val dynamicColor: Boolean = !app.murmur.android.Brand.isEphemeris,
     /** Seed for Murmur's own palette when wallpaper colours are off or unavailable. */
     val accent: AccentPreset = AccentPreset.CORAL,
     /**

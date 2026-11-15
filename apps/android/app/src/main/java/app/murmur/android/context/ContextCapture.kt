@@ -193,6 +193,21 @@ object ContextCapture {
         _count.value = keep.size
     }
 
+    /** The oldest [limit] records waiting, each with its stored line, for the Ephemeris cloud. */
+    @Synchronized
+    fun peek(context: Context, limit: Int): List<Pair<ContextRecord, String>> =
+        runCatching { file(context).readLines().filter { it.isNotBlank() }.take(limit).map { json.decodeFromString<ContextRecord>(it) to it } }
+            .getOrDefault(emptyList())
+
+    /** Removes the oldest [n] records once the server took them. */
+    @Synchronized
+    fun drop(context: Context, n: Int) {
+        val f = file(context)
+        val rest = f.readLines().filter { it.isNotBlank() }.drop(n)
+        f.writeText(rest.joinToString("") { "$it\n" })
+        _count.value = rest.size
+    }
+
     /** Sends everything waiting to Ephemeris and clears it on success. Blocking; call off the main thread. */
     fun upload(context: Context): Result<Int> = runCatching {
         val base = endpoint.ifBlank { error("Set your Ephemeris address first.") }

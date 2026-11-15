@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Ephemeris build's names (see the brand note in app/build.gradle.kts). -->
+<resources>
+    <string name="app_name">Ephemeris</string>
+    <string name="accessibility_service_label">Ephemeris dictation and context</string>
+    <string name="context_notifications_label">Ephemeris context capture</string>
+</resources>

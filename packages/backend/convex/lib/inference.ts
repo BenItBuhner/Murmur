@@ -961,3 +961,49 @@ export function parseFormatRequest(
     }
   }
 }
+
+// ---- finishing on the server (Ephemeris clients) ------------------------------------------------
+
+/** The most snippets a request may carry. */
+export const MAX_SNIPPETS = 500
+
+/**
+ * What a client asks the server to finish the formatted text with: the parts the text engine's
+ * `finish` applies after the model (dictionary spellings, casing, snippets, the trailing space).
+ * Ephemeris clients send it so every feature runs on the server; without it nothing changes.
+ *
+ *   finish: { trailingSpace?, casing?, snippets?: [{ trigger, content }], utcOffsetMinutes?, clipboard? }
+ */
+export interface FinishRequest {
+  trailingSpace: boolean
+  casing?: 'standard' | 'lowercase'
+  snippets: { trigger: string; content: string }[]
+  /** The phone's offset from UTC, so {date} and {time} snippets read the user's wall clock. */
+  utcOffsetMinutes: number
+  clipboard?: string
+}
+
+export function parseFinishRequest(input: unknown): FinishRequest | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const f = input as Record<string, unknown>
+  const snippets: FinishRequest['snippets'] = []
+  if (Array.isArray(f.snippets)) {
+    for (const item of f.snippets.slice(0, MAX_SNIPPETS)) {
+      if (!item || typeof item !== 'object') continue
+      const s = item as Record<string, unknown>
+      const trigger = str(s.trigger, 200)
+      const content = typeof s.content === 'string' ? s.content.slice(0, 20_000) : ''
+      if (trigger && content) snippets.push({ trigger, content })
+    }
+  }
+  const offset = typeof f.utcOffsetMinutes === 'number' && Number.isFinite(f.utcOffsetMinutes)
+    ? Math.max(-14 * 60, Math.min(14 * 60, Math.round(f.utcOffsetMinutes)))
+    : 0
+  return {
+    trailingSpace: f.trailingSpace !== false,
+    casing: f.casing === 'lowercase' ? 'lowercase' : f.casing === 'standard' ? 'standard' : undefined,
+    snippets,
+    utcOffsetMinutes: offset,
+    clipboard: typeof f.clipboard === 'string' ? f.clipboard.slice(0, 20_000) : undefined
+  }
+}

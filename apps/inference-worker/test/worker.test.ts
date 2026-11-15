@@ -210,6 +210,21 @@ describe('one-call release and prewarm', () => {
     expect(calls.some((c) => c.url.includes('llm.example.test'))).toBe(false)
   })
 
+  it('finishes the text on the server when an Ephemeris client asks', async () => {
+    const auth = `Bearer ${await token({})}`
+    const format = { context: { category: 'chat' }, finish: { trailingSpace: true, snippets: [{ trigger: 'world', content: 'everyone' }] } }
+    const res = await handle(await releaseRequest(auth, { format: JSON.stringify(format) }), env, ctx, fetcher)
+    const body = (await res.json()) as { finished?: { text: string; stages: string[] } }
+    expect(body.finished?.text.toLowerCase()).toBe('hello there everyone ')
+    expect(body.finished?.stages).toContain('snippets')
+  })
+
+  it('answers no finished text to a client that does not ask (Murmur)', async () => {
+    const auth = `Bearer ${await token({})}`
+    const res = await handle(await releaseRequest(auth, { format: JSON.stringify({ context: {} }) }), env, ctx, fetcher)
+    expect('finished' in ((await res.json()) as object)).toBe(false)
+  })
+
   it('joins onto a prefix and answers without format when none is asked', async () => {
     const auth = `Bearer ${await token({})}`
     const res = await handle(await releaseRequest(auth, { prefix: 'And I said' }), env, ctx, fetcher)

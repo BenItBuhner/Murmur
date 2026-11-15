@@ -4,6 +4,7 @@ import {
   handleFinish,
   handleFormat,
   handleLayout,
+  handleMessages,
   handleModels,
   handleTranscriptions,
   type Gate,
@@ -125,6 +126,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     if (path === '/v1/chat/completions') return await handleChatCompletions(hooks, identity, request)
     if (path === '/v1/format') return await handleFormat(hooks, identity, request)
     if (path === '/v1/layout') return await handleLayout(hooks, identity, request)
+    if (path === '/v1/messages') return await handleMessages(hooks, identity, request, fetcher)
     if (path === '/v1/dictate/release') return await handleDictateRelease(hooks, identity, request)
     if (path === '/v1/finish') return await handleFinish(hooks, identity, request)
     return gatewayError(404, 'bad_request', 'Not found')

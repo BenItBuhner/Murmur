@@ -251,3 +251,64 @@ describe('one-call release and prewarm', () => {
     expect(calls.filter((c) => c.url.endsWith('/worker/grant'))).toHaveLength(1)
   })
 })
+
+describe('Ephemeris agent messages', () => {
+  const agentEnv: Env = { ...env, EPHEMERIS_ANTHROPIC_API_KEY: 'sk-ant-test' }
+  const anthropic = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    if (String(input) === 'https://api.anthropic.com/v1/messages') {
+      calls.push({ url: String(input), init })
+      return json({
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'tu_1', name: 'file_note', input: { text: 'hi' } }],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 30, output_tokens: 12 }
+      })
+    }
+    return fetcher(input, init)
+  })
+  const body = {
+    model: 'claude-sonnet-5-5',
+    max_tokens: 999_999,
+    messages: [{ role: 'user', content: 'note hi' }],
+    tools: [{ name: 'file_note', description: 'File a note', input_schema: { type: 'object' } }],
+    tool_choice: { type: 'auto' },
+    sneaky: 'dropped'
+  }
+  const req = (auth: string, b: unknown = body): Request =>
+    new Request('https://w.test/v1/messages', { method: 'POST', headers: { authorization: auth }, body: JSON.stringify(b) })
+
+  it('needs a session and a configured key', async () => {
+    expect((await handle(req(''), agentEnv, ctx, anthropic as typeof fetch)).status).toBe(401)
+    const auth = `Bearer ${await token({})}`
+    const off = await handle(req(auth), env, ctx, anthropic as typeof fetch)
+    expect(off.status).toBe(503)
+    expect(calls.some((c) => c.url.includes('anthropic'))).toBe(false)
+  })
+
+  it('passes tools through with the server key, caps max_tokens and records usage', async () => {
+    const auth = `Bearer ${await token({})}`
+    const res = await handle(req(auth), agentEnv, ctx, anthropic as typeof fetch)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'file_note' }] })
+    const up = calls.find((c) => c.url.includes('anthropic'))!
+    const headers = up.init?.headers as Record<string, string>
+    expect(headers['x-api-key']).toBe('sk-ant-test')
+    expect(headers.authorization).toBeUndefined()
+    const sent = JSON.parse(String(up.init?.body)) as Record<string, unknown>
+    expect(sent.tools).toEqual(body.tools)
+    expect(sent.tool_choice).toEqual(body.tool_choice)
+    expect(sent.max_tokens).toBe(16_384)
+    expect(sent.sneaky).toBeUndefined()
+    expect(pendingUsage()).toBe(1)
+  })
+
+  it('applies the account allowance before calling Anthropic', async () => {
+    grant = { ok: false, denied: 'private_testing' }
+    const auth = `Bearer ${await token({})}`
+    const res = await handle(req(auth), agentEnv, ctx, anthropic as typeof fetch)
+    expect(res.status).toBe(429)
+    expect(calls.some((c) => c.url.includes('anthropic'))).toBe(false)
+  })
+})

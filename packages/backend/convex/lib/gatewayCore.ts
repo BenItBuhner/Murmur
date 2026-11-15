@@ -1,11 +1,12 @@
 import { formatTranscript } from '../../../text-engine/src/format'
+import { finish } from '../../../text-engine/src/cleanup'
 import { dropSilentSegments } from '../../../text-engine/src/hallucination'
 import { stripPromptEcho } from '../../../text-engine/src/prompt-echo'
 import { sttLanguageField } from '../../../text-engine/src/languages'
 import { joinSeam } from '../../../text-engine/src/seam'
 import { layoutText, wantsLayout, type LayoutResult } from '../../../text-engine/src/layout'
 import { countWords } from '../../../text-engine/src/text'
-import type { AppCategory, ChatMessage, ChatOptions, ChatResult, Layout } from '../../../text-engine/src/types'
+import type { AppCategory, ChatMessage, ChatOptions, ChatResult, FormatContext, Layout } from '../../../text-engine/src/types'
 import {
   MAX_COMPLETION_TOKENS,
   MURMUR_MODELS,
@@ -47,7 +48,9 @@ import {
   LLM_SPEED_HEADER,
   parseTier,
   TIER_HEADER,
-  type Tier
+  type Tier,
+  parseFinishRequest,
+  type FinishRequest
 } from './inference'
 import type { Meter, Refusal } from './entitlements'
 import type { AccessState, Plan } from './plans'
@@ -631,6 +634,7 @@ export async function handleFormat(
   })
   if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
 
+  const finishReq = parseFinishRequest((input as Record<string, unknown>).finish)
   // Identical requests from one user already in flight share one answer, so a client that
   // re-sends cannot multiply the provider calls.
   const tier = parseTier(request.headers.get(TIER_HEADER))
@@ -640,7 +644,10 @@ export async function handleFormat(
     formatOnce(hooks, upstream, gate, identity, parsed.request, tier, speed)
   )
   if (shared) console.log('[gateway] format deduped (identical request in flight)')
-  return new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
+  const answer = finishReq
+    ? { ...(body as Record<string, unknown>), finished: finishOnServer((body as { text?: string }).text ?? '', parsed.request.context, finishReq) }
+    : body
+  return new Response(JSON.stringify(answer), { status: 200, headers: JSON_HEADERS })
 }
 
 const LAYOUT_CATEGORIES: readonly AppCategory[] = ['chat', 'email', 'document', 'code', 'terminal', 'browser', 'notes', 'unknown']
@@ -1001,12 +1008,22 @@ export async function handleDictateRelease(
   const formatRaw = fields.format?.[0]
   let format: unknown = null
   let rules = false
+  let finished: unknown = null
   if (formatRaw && transcript) {
     let fmt: Record<string, unknown>
     try {
       fmt = JSON.parse(formatRaw) as Record<string, unknown>
     } catch {
       return gatewayError(400, 'bad_request', '"format" must be JSON')
+    }
+    // Ephemeris clients ask for the finished text too (fmt.finish): dictionary, casing, snippets
+    // and the trailing space applied here, so the phone only inserts what comes back.
+    const finishReq = parseFinishRequest(fmt.finish)
+    const fmtCtx = parseFormatRequest({ ...fmt, transcript })
+    const finishFormat = (): void => {
+      const text = (format as { text?: unknown } | null)?.text
+      if (finishReq && fmtCtx.ok && typeof text === 'string')
+        finished = finishOnServer(text, fmtCtx.request.context, finishReq)
     }
     const body = { ...fmt, transcript }
     if (raw && countWords(raw) <= SHORT_TAIL_WORDS) {
@@ -1029,6 +1046,7 @@ export async function handleDictateRelease(
       )
       format = res.ok ? await res.json() : null
     }
+    finishFormat()
   }
   const totalMs = Date.now() - started
   console.log(
@@ -1042,5 +1060,61 @@ export async function handleDictateRelease(
   }
   // Where the release's time went, for the client's per-dictation diagnostics.
   const timing = { sttMs, formatMs: totalMs - sttMs, totalMs, stt: sttTrace }
-  return new Response(JSON.stringify({ stt, transcript, format, rules, timing }), { status: 200, headers })
+  return new Response(JSON.stringify({ stt, transcript, format, rules, timing, ...(finished ? { finished } : {}) }), { status: 200, headers })
+}
+
+/**
+ * The text engine's `finish` on the server: what goes in the field, with the dictionary's
+ * spellings, the profile's casing, snippets expanded (on the user's wall clock) and the trailing
+ * space. `{ text, stages, snippetsExpanded }`.
+ */
+export function finishOnServer(
+  text: string,
+  context: FormatContext,
+  req: FinishRequest,
+  nowMs: number = Date.now()
+): { text: string; stages: string[]; snippetsExpanded: string[] } {
+  const done = finish(text, {
+    category: context.category,
+    dictionary: context.dictionary ?? [],
+    trailingSpace: req.trailingSpace,
+    snippets: req.snippets,
+    snippetContext: { now: new Date(nowMs + req.utcOffsetMinutes * 60_000), clipboard: req.clipboard },
+    casing: req.casing,
+    precedingText: context.precedingText
+  })
+  return { text: done.text, stages: done.stages, snippetsExpanded: done.snippetsExpanded }
+}
+
+/** The longest text `/v1/finish` takes. */
+export const FINISH_MAX_CHARS = 60_000
+
+/**
+ * `POST /v1/finish` — `{ text, context, finish }` -> `{ text, stages, snippetsExpanded }`. The last
+ * step of a dictation on the server: the formatted (and laid-out) text with the dictionary's
+ * spellings, the profile's casing, snippets and the trailing space applied. No model, nothing
+ * billed; signed-in accounts only. Ephemeris clients call it so no feature runs on the device.
+ */
+export async function handleFinish(
+  _hooks: GatewayHooks,
+  identity: GatewayIdentity | null,
+  request: Request
+): Promise<Response> {
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Murmur models')
+  let input: Record<string, unknown>
+  try {
+    input = (await request.json()) as Record<string, unknown>
+  } catch {
+    return gatewayError(400, 'bad_request', 'Body must be JSON')
+  }
+  if (!input || typeof input.text !== 'string') return gatewayError(400, 'bad_request', '"text" must be a string')
+  if (input.text.length > FINISH_MAX_CHARS)
+    return gatewayError(400, 'bad_request', `"text" is longer than ${FINISH_MAX_CHARS} characters`)
+  const parsed = parseFormatRequest({ transcript: '', context: input.context })
+  if (!parsed.ok) return gatewayError(400, 'bad_request', parsed.message)
+  const req = parseFinishRequest(input.finish ?? {})!
+  return new Response(JSON.stringify(finishOnServer(input.text, parsed.request.context, req)), {
+    status: 200,
+    headers: JSON_HEADERS
+  })
 }

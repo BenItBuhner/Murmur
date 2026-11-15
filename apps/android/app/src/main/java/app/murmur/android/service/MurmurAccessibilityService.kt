@@ -252,6 +252,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        app.murmur.android.context.ContextCapture.init(this)
         DictationController.sink = this
         // The keyboard's window arriving or leaving is reported the moment it happens; a notification
         // timeout would hold that report back, and the pill with it. Taps on the keyboard's own hide
@@ -391,6 +392,7 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val start = SystemClock.uptimeMillis()
         handleEvent(event, start)
+        app.murmur.android.context.ContextCapture.onWindowEvent(this, event)
         val took = SystemClock.uptimeMillis() - start
         if (took >= SLOW_EVENT_MS) trace("  that event held the main thread ${took}ms")
     }

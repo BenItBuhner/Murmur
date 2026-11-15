@@ -1,0 +1,55 @@
+name: Clerk app origins
+
+# Manual only. "inspect" prints the production Clerk instance's allowed origins and redirect URLs
+# (no secrets). "add" appends one app origin and its redirect URLs, keeping everything already there.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: inspect or add
+        required: true
+        default: inspect
+      origin:
+        description: Origin to allow, e.g. ephemeris://app
+        required: false
+      redirects:
+        description: Space-separated redirect URLs to add
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  clerk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      MODE: ${{ inputs.mode }}
+      ORIGIN: ${{ inputs.origin }}
+      REDIRECTS: ${{ inputs.redirects }}
+    steps:
+      - name: Run
+        shell: bash
+        run: |
+          set -euo pipefail
+          api() { curl -fsS -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' "$@"; }
+          inst=$(api https://api.clerk.com/v1/instance)
+          echo "instance allowed_origins: $(echo "$inst" | jq -c '.allowed_origins')"
+          echo "redirect_urls: $(api 'https://api.clerk.com/v1/redirect_urls' | jq -c '[.[].url]')"
+          if [ "$MODE" = add ]; then
+            if [ -n "$ORIGIN" ]; then
+              cur=$(echo "$inst" | jq -c '.allowed_origins // []')
+              if [ "$cur" = null ] || [ "$(echo "$inst" | jq 'has("allowed_origins")')" != true ]; then
+                echo "::error::instance did not report allowed_origins; refusing to overwrite"; exit 1
+              fi
+              new=$(echo "$cur" | jq -c --arg o "$ORIGIN" 'if index($o) then . else . + [$o] end')
+              api -X PATCH https://api.clerk.com/v1/instance -d "{\"allowed_origins\": $new}" -o /dev/null
+            fi
+            have=$(api 'https://api.clerk.com/v1/redirect_urls' | jq -r '.[].url')
+            for u in $REDIRECTS; do
+              if ! grep -qxF "$u" <<<"$have"; then api -X POST https://api.clerk.com/v1/redirect_urls -d "{\"url\": \"$u\"}" -o /dev/null; fi
+            done
+            echo "after: allowed_origins $(api https://api.clerk.com/v1/instance | jq -c '.allowed_origins')"
+            echo "after: redirect_urls $(api 'https://api.clerk.com/v1/redirect_urls' | jq -c '[.[].url]')"
+          fi

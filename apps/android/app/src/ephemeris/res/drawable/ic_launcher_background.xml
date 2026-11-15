@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Warm near-black, the Ephemeris paper. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:type="radial" android:gradientRadius="80dp" android:centerX="0.5" android:centerY="0.42"
+        android:startColor="#FF3A1A10" android:endColor="#FF120E0C" />
+</shape>

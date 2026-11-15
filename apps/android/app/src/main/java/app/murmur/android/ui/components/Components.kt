@@ -206,7 +206,7 @@ fun Dot(color: Color, modifier: Modifier = Modifier, size: Dp = 7.dp, pulsing: B
 /** The name, set in the display serif. Murmur has no mark yet; the word is the mark. */
 @Composable
 fun Wordmark(modifier: Modifier = Modifier) {
-    Text("Murmur", style = Murmur.type.headline, color = Murmur.colors.ink, modifier = modifier)
+    Text(app.murmur.android.Brand.name, style = Murmur.type.headline, color = Murmur.colors.ink, modifier = modifier)
 }
 
 /** Tracked uppercase label that introduces a group of rows. */

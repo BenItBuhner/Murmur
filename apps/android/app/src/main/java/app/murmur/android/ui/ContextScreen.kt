@@ -47,7 +47,7 @@ fun ContextScreen(nav: TopNav) {
         ?.contains(ComponentName(context, ContextNotificationListener::class.java).flattenToString()) == true
     Screen(
         title = "Context for Ephemeris",
-        description = "Murmur can keep what was on your screen and in your notifications, as text, so Ephemeris can find it next to what you said. It never records the screen, so Android shows no recording icon. Password managers, banking and the lock screen are skipped.",
+        description = "${app.murmur.android.Brand.name} can keep what was on your screen and in your notifications, as text, so Ephemeris can find it next to what you said. It never records the screen, so Android shows no recording icon. Password managers, banking and the lock screen are skipped.",
         nav = nav
     ) {
         ListCard {
@@ -59,7 +59,7 @@ fun ContextScreen(nav: TopNav) {
             )
         }
         Spacer(Modifier.height(12.dp))
-        if (!a11y) Notice("Turn on Murmur's accessibility service to read the screen.", NoticeTone.ERROR)
+        if (!a11y) Notice("Turn on ${app.murmur.android.Brand.name}'s accessibility service to read the screen.", NoticeTone.ERROR)
         else Notice("Screen reading is on.", NoticeTone.SUCCESS)
         Spacer(Modifier.height(8.dp))
         if (!listening) {
@@ -69,7 +69,21 @@ fun ContextScreen(nav: TopNav) {
             })
         } else Notice("Notifications are kept.", NoticeTone.SUCCESS)
         Spacer(Modifier.height(16.dp))
-        Column {
+        if (app.murmur.android.Brand.isEphemeris) {
+            // The Ephemeris build sends to the account's Ephemeris workspace by itself, every few minutes.
+            val last by app.murmur.android.cloud.EphemerisCloud.last.collectAsState()
+            Notice("Context goes to your Ephemeris account every few minutes while you're signed in.")
+            Spacer(Modifier.height(8.dp))
+            SecondaryButton("Send now", loading = sending, onClick = {
+                sending = true
+                scope.launch {
+                    val r = app.murmur.android.cloud.EphemerisCloud.sync(context)
+                    notice = r.fold({ "Sent $it records." to NoticeTone.SUCCESS }, { (it.message ?: "Could not send.") to NoticeTone.ERROR })
+                    sending = false
+                }
+            })
+            (notice ?: last?.let { it to NoticeTone.NEUTRAL })?.let { (t, tone) -> Spacer(Modifier.height(8.dp)); Notice(t, tone) }
+        } else Column {
             OutlinedTextField(
                 value = endpoint,
                 onValueChange = { endpoint = it; ContextCapture.endpoint = it },

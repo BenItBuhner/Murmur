@@ -109,6 +109,7 @@ fun HomeScreen(
         Modifier
             .fillMaxSize()
             .background(c.paper)
+            .then(if (app.murmur.android.Brand.isEphemeris) Modifier.emberGlow() else Modifier)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .navigationBarsPadding()
@@ -133,11 +134,15 @@ fun HomeScreen(
                     Column {
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            "$greeting${firstName?.let { ", $it" } ?: ""}.",
+                            "$greeting${firstName?.let { ", $it" } ?: ""}${if (app.murmur.android.Brand.isEphemeris) "!" else "."}",
                             style = Murmur.type.displayMedium,
                             color = c.ink
                         )
                         Spacer(Modifier.height(10.dp))
+                        if (app.murmur.android.Brand.isEphemeris) {
+                            EphemerisSummary(onOpenContext = { onOpen(Route.CONTEXT) })
+                            Spacer(Modifier.height(10.dp))
+                        }
                         Text(
                             "${howTo.replaceFirstChar { it.uppercase() }}, speak, and finished text lands where your cursor is.",
                             style = Murmur.type.body,
@@ -193,6 +198,10 @@ fun HomeScreen(
                 Reveal(1) {
                     Column {
                         Spacer(Modifier.height(12.dp))
+                        if (app.murmur.android.Brand.isEphemeris) {
+                            DottedHeading("Today")
+                            Spacer(Modifier.height(14.dp))
+                        }
                         StatsGrid(stats)
                     }
                 }
@@ -252,7 +261,7 @@ fun HomeScreen(
                 }
 
                 Spacer(Modifier.height(44.dp))
-                Text("Murmur ${BuildConfig.VERSION_NAME}", style = Murmur.type.labelSmall, color = c.inkMuted)
+                Text("${app.murmur.android.Brand.name} ${BuildConfig.VERSION_NAME}", style = Murmur.type.labelSmall, color = c.inkMuted)
                 Spacer(Modifier.height(28.dp))
             }
         }

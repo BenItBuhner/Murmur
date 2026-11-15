@@ -12,6 +12,7 @@ import app.murmur.android.history.HistoryEvent
 import app.murmur.android.history.HistoryOrigin
 import app.murmur.android.history.HistoryStore
 import app.murmur.android.settings.AppRule
+import app.murmur.android.Brand
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.MurmurSettings
@@ -190,8 +191,12 @@ class CloudSync internal constructor(
         { previous, next, origin -> onSettingsChange(previous, next, origin) }
     private val historyListener: (HistoryEvent) -> Unit = { event -> onHistoryEvent(event) }
 
+    /** The Convex client once signed in, for the Ephemeris tables (see EphemerisCloud); null otherwise. */
+    internal val ephemerisClient: ConvexClientWithAuth<ClerkCredentials>? get() = client?.takeIf { authenticated }
+
     fun start() {
         val convex = client ?: return
+        if (Brand.isEphemeris) scope.launch { EphemerisCloud.run(app) }
         settings.addListener(settingsListener)
         history.addListener(historyListener)
         scope.launch {

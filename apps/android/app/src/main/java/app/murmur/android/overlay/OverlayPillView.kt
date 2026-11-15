@@ -631,6 +631,7 @@ class OverlayPillView(context: Context) : View(context) {
             val badge = listeningBadge(mode, lockedSession)
             var w = dp(16f) + dp(10f) + dp(12f) + barsWidth() + dp(12f) + textPaint.measureText("0:00") + dp(16f)
             if (badge != null) w += dp(10f) + badgeWidth(badge, mode)
+            if (app.murmur.android.Brand.isEphemeris && !command) w = dp(200f) // the Ember Dots capsule
             if (p.touchControls) w += 2 * dp(34f)
             return Look(Kind.LISTENING, min(w, maxW), dp(TALL_DP), bg, mode = mode, locked = lockedSession, desktop = true)
         }
@@ -1089,6 +1090,11 @@ class OverlayPillView(context: Context) : View(context) {
         canvas.drawLine(cancelCx - xr, cy - xr, cancelCx + xr, cy + xr, strokePaint)
         canvas.drawLine(cancelCx - xr, cy + xr, cancelCx + xr, cy - xr, strokePaint)
 
+        if (app.murmur.android.Brand.isEphemeris) {
+            drawEmber(canvas, box.left + dp(44f), box.right - dp(44f), cy, box.height - dp(8f), now)
+            drawConfirm(canvas, box, cy, btnR)
+            return
+        }
         val dotCx = box.left + dp(52f)
         val pulse = 1f + 0.18f * sin(2.0 * PI * (now % 1200L) / 1200.0).toFloat()
         paint.color = RECORD
@@ -1122,6 +1128,10 @@ class OverlayPillView(context: Context) : View(context) {
         canvas.drawText(elapsedText(), barsRight + dp(8f), cy + textPaint.textSize / 2.8f, textPaint)
         textPaint.color = palette.ink
 
+        drawConfirm(canvas, box, cy, btnR)
+    }
+
+    private fun drawConfirm(canvas: Canvas, box: Box, cy: Float, btnR: Float) {
         val confirmCx = box.right - dp(24f)
         confirmBox = Box.centered(confirmCx, cy, btnR * 2, btnR * 2)
         paint.color = palette.accent
@@ -1131,6 +1141,33 @@ class OverlayPillView(context: Context) : View(context) {
         canvas.drawLine(confirmCx - dp(4.6f), cy + dp(0.5f), confirmCx - dp(1f), cy + dp(4f), strokePaint)
         canvas.drawLine(confirmCx - dp(1f), cy + dp(4f), confirmCx + dp(5f), cy - dp(3.5f), strokePaint)
     }
+
+    // ---- Ember Dots (the Ephemeris build's listening pill, see EmberDots.kt) ----------------------
+    private val ember = EmberDots.Engine()
+    private var emberCells: List<EmberDots.Cell> = emptyList()
+    private var emberCellsKey = 0L
+    private var emberLastFrame = 0L
+
+    /** The dot field in a capsule from [left] to [right], [h] tall, centred on [cy]. */
+    private fun drawEmber(canvas: Canvas, left: Float, right: Float, cy: Float, h: Float, now: Long) {
+        val wDp = (right - left) / density
+        val hDp = h / density
+        val key = (wDp.toInt().toLong() shl 20) or hDp.toInt().toLong()
+        if (key != emberCellsKey) { emberCells = EmberDots.cells(wDp, hDp); emberCellsKey = key }
+        // A new dictation (or a long gap) wakes the field from the centre again.
+        if (now - emberLastFrame > 500L) ember.reset()
+        emberLastFrame = now
+        ember.step(now / 1000.0, latestLevel.toDouble(), state is DictationState.Listening)
+        canvas.save()
+        scratchRect.set(left, cy - h / 2f, right, cy + h / 2f)
+        emberClip.reset()
+        emberClip.addRoundRect(scratchRect, h / 2f, h / 2f, android.graphics.Path.Direction.CW)
+        canvas.clipPath(emberClip)
+        EmberDots.draw(canvas, paint, emberCells, ember, (left + right) / 2f, cy, density)
+        canvas.restore()
+        paint.alpha = 255
+    }
+    private val emberClip = android.graphics.Path()
 
     /**
      * The desktop pill while listening: the pulsing dot, the waveform, the elapsed time and, on a
@@ -1160,6 +1197,23 @@ class OverlayPillView(context: Context) : View(context) {
             x += dp(34f)
         }
 
+        if (app.murmur.android.Brand.isEphemeris && !command) {
+            val right = if (controls) box.right - dp(34f) - dp(12f) else box.right - dp(4f)
+            val left = if (controls) x else box.left + dp(4f)
+            drawEmber(canvas, left, right, cy, box.height - dp(4f), now)
+            if (controls) {
+                val r = dp(14f)
+                val cx = box.right - dp(16f) - r + dp(4f)
+                confirmBox = Box.centered(cx, cy, r * 2, r * 2)
+                paint.color = palette.accent
+                canvas.drawCircle(cx, cy, r - dp(2f), paint)
+                strokePaint.color = palette.onAccent
+                strokePaint.strokeWidth = dp(2.2f)
+                canvas.drawLine(cx - dp(4.6f), cy + dp(0.5f), cx - dp(1f), cy + dp(4f), strokePaint)
+                canvas.drawLine(cx - dp(1f), cy + dp(4f), cx + dp(5f), cy - dp(3.5f), strokePaint)
+            }
+            return
+        }
         val dotCx = x + dp(5f)
         val pulse = 1f + 0.18f * sin(2.0 * PI * (now % 1200L) / 1200.0).toFloat()
         paint.color = if (command) fg else RECORD

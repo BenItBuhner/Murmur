@@ -1,3 +1,4 @@
+import { addEphemerisRoutes } from './ephemeris/routes'
 import { httpRouter } from 'convex/server'
 import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
@@ -121,5 +122,7 @@ http.route({
     return new Response(null, { status: 200 })
   })
 })
+
+addEphemerisRoutes(http)
 
 export default http

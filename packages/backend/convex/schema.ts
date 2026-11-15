@@ -1,4 +1,5 @@
 import { defineSchema, defineTable } from 'convex/server'
+import { ephemerisTables } from './ephemeris/tables'
 import { v } from 'convex/values'
 import { planStateValidator } from './lib/plans'
 import {
@@ -19,6 +20,8 @@ import {
  * managed-model credentials live in deployment environment variables, never in the database.
  */
 export default defineSchema({
+  // Ephemeris (same Clerk accounts, own prefixed tables; see convex/ephemeris).
+  ...ephemerisTables,
   users: defineTable({
     /** Clerk user id (`sub` claim of the session JWT). */
     clerkId: v.string(),
@@ -32,7 +35,7 @@ export default defineSchema({
     plan: v.optional(planStateValidator),
     /** End of the 14-day Pro trial, epoch ms. A scheduled `entitlements.endTrial` flips the state. */
     trialEndsAt: v.optional(v.number()),
-    /** Stripe customer (`cus_…`) once the account has been through Checkout. */
+    /** Stripe customer (`cus_â€¦`) once the account has been through Checkout. */
     stripeCustomerId: v.optional(v.string()),
     /** Latest Stripe subscription snapshot; written only by the Stripe webhook. */
     subscription: v.optional(subscriptionValidator),

@@ -55,6 +55,7 @@ import app.murmur.android.ui.HistoryScreen
 import app.murmur.android.ui.HomeScreen
 import app.murmur.android.ui.KeyboardScreen
 import app.murmur.android.ui.PhoneMicScreen
+import app.murmur.android.ui.ContextScreen
 import app.murmur.android.ui.LanguageScreen
 import app.murmur.android.ui.OnboardingScreen
 import app.murmur.android.ui.PermissionsScreen
@@ -322,6 +323,7 @@ private fun Main(
             Route.UPDATES -> UpdatesScreen(store, settings, nav)
             Route.TRY_IT -> TryItScreen(store, settings, nav)
             Route.PHONE_MIC -> PhoneMicScreen(config, cloud, signedIn, nav)
+            Route.CONTEXT -> ContextScreen(nav)
             Route.ACCOUNT -> AccountScreen(
                 config, cloud, store, nav,
                 onSignIn = { store.update { it.copy(accountSkipped = false) } }

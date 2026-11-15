@@ -60,6 +60,7 @@ fun settingsEntries(
     updateReady: Boolean,
     tryIt: String? = "Dictate into a test pad",
     phoneMic: String? = "Be the microphone for your computer",
+    contextCapture: String? = "Screen text and notifications for Ephemeris",
     /** Phone microphone needs an account; builds without one leave it out. */
     showPhoneMic: Boolean = true
 ): List<SettingsEntry> = listOfNotNull(
@@ -68,6 +69,7 @@ fun settingsEntries(
     SettingsEntry(Route.BUTTON, "Dictation button", Glyph.BUTTON, button),
     SettingsEntry(Route.KEYBOARD, "Keyboard", Glyph.KEYBOARD, keyboard),
     if (showPhoneMic) SettingsEntry(Route.PHONE_MIC, "Phone microphone", Glyph.PHONE_MIC, phoneMic) else null,
+    SettingsEntry(Route.CONTEXT, "Context capture", Glyph.SEARCH, contextCapture),
     SettingsEntry(Route.APPEARANCE, "Appearance", Glyph.APPEARANCE, appearance, group = "App"),
     SettingsEntry(Route.PERMISSIONS, "Permissions", Glyph.PERMISSIONS, permissions, attention = !permissionsGranted),
     SettingsEntry(Route.UPDATES, "Updates", Glyph.UPDATES, updates, attention = updateReady),

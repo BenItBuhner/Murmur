@@ -25,4 +25,5 @@
     <string name="entry_need_mic">Murmur needs the microphone — allow it in Permissions</string>
     <string name="entry_need_accessibility">Turn on Murmur\'s accessibility service first</string>
     <string name="entry_external_off">Murmur only lets its own shortcuts start dictation (see Dictation button)</string>
+    <string name="context_notifications_label">Murmur context capture</string>
 </resources>

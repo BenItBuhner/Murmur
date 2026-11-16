@@ -13,7 +13,7 @@ on:
         description: Comma-separated arm prefixes (empty = all)
         default: ''
   push:
-    branches: ['eval/**', 'claude/project-thread-lutgq5']
+    branches: ['eval/**']
     paths: ['apps/inference-worker/eval/**', 'packages/backend/convex/lib/**', 'packages/text-engine/src/**', 'apps/inference-worker/wrangler.jsonc', '.github/workflows/stt-eval.yml']
 
 concurrency:

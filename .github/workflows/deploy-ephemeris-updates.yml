@@ -1,9 +1,9 @@
 name: Deploy Ephemeris update feed
 
 # The Ephemeris desktop app's private update feed (apps/ephemeris-updates): a Worker on the Workers
-# Free plan with an R2 bucket on the free tier. Uses the same Cloudflare secrets as the other Workers.
-# The first run creates the bucket and two random keys, kept in the (private) bucket at
-# config/keys.json and set as the Worker's secrets on every deploy:
+# Free plan with a Workers KV namespace on the free tier (R2 is not enabled on the account). Uses the
+# same Cloudflare secrets as the other Workers. The first run provisions the namespace and two random
+# keys, kept in it at config:keys (never served by the Worker) and set as its secrets on every deploy:
 #   FEED_KEY     the path segment every request must start with
 #   PUBLISH_KEY  bearer token for uploads
 # The publishing machine gets them without anyone copying secrets around: it runs this workflow by
@@ -57,21 +57,26 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
       - run: npx vitest run
-      - name: Create the R2 bucket if needed
-        run: |
-          if npx wrangler r2 bucket list | grep -q 'ephemeris-updates'; then
-            echo "bucket exists"
-          else
-            npx wrangler r2 bucket create ephemeris-updates
-          fi
-      # First deploy before the secrets: `secret put` needs the Worker to exist.
+      # The first deploy provisions the KV namespace; `secret put` also needs the Worker to exist.
       - name: Deploy
         run: npx wrangler deploy --config wrangler.jsonc
+      - name: Find the KV namespace
+        run: |
+          # Provisioned by the first deploy as ephemeris-updates-feed (<worker>-<binding>).
+          id=$(npx wrangler kv namespace list | node -e "const l=JSON.parse(require('fs').readFileSync(0));const n=l.find(x=>x.title.startsWith('ephemeris-updates'));if(!n)process.exit(1);console.log(n.id)")
+          echo "Namespace $id"
+          echo "NS=$id" >> "$GITHUB_ENV"
       - name: Load or create the feed keys
         run: |
-          if ! npx wrangler r2 object get ephemeris-updates/config/keys.json --file "$RUNNER_TEMP/keys.json" --remote; then
+          npx wrangler kv key get config:keys --namespace-id "$NS" --remote --text > "$RUNNER_TEMP/keys.json" 2>/dev/null || true
+          if ! node -e "const k=require(process.argv[1]);if(!(k.FEED_KEY&&k.PUBLISH_KEY))process.exit(1)" "$RUNNER_TEMP/keys.json" 2>/dev/null; then
+            # Only when the namespace has none: a failed read must never replace live keys.
+            if npx wrangler kv key list --namespace-id "$NS" --remote --prefix config: | grep -q 'config:keys'; then
+              echo "::error::config:keys exists but could not be read"
+              exit 1
+            fi
             node -e "const c=require('crypto');const k=()=>c.randomBytes(32).toString('base64url');require('fs').writeFileSync(process.argv[1],JSON.stringify({FEED_KEY:k(),PUBLISH_KEY:k()}))" "$RUNNER_TEMP/keys.json"
-            npx wrangler r2 object put ephemeris-updates/config/keys.json --file "$RUNNER_TEMP/keys.json" --content-type application/json --remote
+            npx wrangler kv key put config:keys --path "$RUNNER_TEMP/keys.json" --namespace-id "$NS" --remote
             echo "created new feed keys"
           fi
           node -e "const k=require(process.argv[1]);for(const v of Object.values(k))console.log('::add-mask::'+v)" "$RUNNER_TEMP/keys.json"

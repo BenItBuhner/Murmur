@@ -1,0 +1,14 @@
+// Ephemeris's private update feed: a GitHub-compatible releases endpoint for the desktop updater,
+// whose own repository is private (the anonymous GitHub API cannot read its releases). Workers
+// Free plan + R2 free tier. Only a build baked with the feed's key can read it; see README.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ephemeris-updates",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "minify": true,
+  "r2_buckets": [{ "binding": "FEED", "bucket_name": "ephemeris-updates" }]
+  // Secrets FEED_KEY (the path segment every request starts with) and PUBLISH_KEY (bearer token for
+  // uploads), set by .github/workflows/deploy-ephemeris-updates.yml from the repository secrets.
+}

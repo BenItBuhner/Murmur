@@ -1,0 +1,106 @@
+name: Deploy Ephemeris update feed
+
+# The Ephemeris desktop app's private update feed (apps/ephemeris-updates): a Worker on the Workers
+# Free plan with an R2 bucket on the free tier. Uses the same Cloudflare secrets as the other Workers.
+# The first run creates the bucket and two random keys, kept in the (private) bucket at
+# config/keys.json and set as the Worker's secrets on every deploy:
+#   FEED_KEY     the path segment every request must start with
+#   PUBLISH_KEY  bearer token for uploads
+# The publishing machine gets them without anyone copying secrets around: it runs this workflow by
+# hand with `recipient_key`, an RSA public key (PEM) whose private half never leaves it, and
+# downloads the `feed-keys` artifact, the keys encrypted to that key (RSA-OAEP, SHA-256).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ephemeris-updates/**'
+      - '.github/workflows/deploy-ephemeris-updates.yml'
+  workflow_dispatch:
+    inputs:
+      recipient_key:
+        description: RSA public key (PEM) to encrypt the feed keys to, for the publishing machine
+        required: false
+        default: ''
+
+concurrency:
+  group: deploy-ephemeris-updates
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/ephemeris-updates
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/ephemeris-updates/package-lock.json
+      - name: Check the secrets exist
+        run: |
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Add the $name repository secret (see the comment at the top of this workflow)."
+              exit 1
+            fi
+          done
+      - run: npm ci
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npx vitest run
+      - name: Create the R2 bucket if needed
+        run: |
+          if npx wrangler r2 bucket list | grep -q 'ephemeris-updates'; then
+            echo "bucket exists"
+          else
+            npx wrangler r2 bucket create ephemeris-updates
+          fi
+      # First deploy before the secrets: `secret put` needs the Worker to exist.
+      - name: Deploy
+        run: npx wrangler deploy --config wrangler.jsonc
+      - name: Load or create the feed keys
+        run: |
+          if ! npx wrangler r2 object get ephemeris-updates/config/keys.json --file "$RUNNER_TEMP/keys.json" --remote; then
+            node -e "const c=require('crypto');const k=()=>c.randomBytes(32).toString('base64url');require('fs').writeFileSync(process.argv[1],JSON.stringify({FEED_KEY:k(),PUBLISH_KEY:k()}))" "$RUNNER_TEMP/keys.json"
+            npx wrangler r2 object put ephemeris-updates/config/keys.json --file "$RUNNER_TEMP/keys.json" --content-type application/json --remote
+            echo "created new feed keys"
+          fi
+          node -e "const k=require(process.argv[1]);for(const v of Object.values(k))console.log('::add-mask::'+v)" "$RUNNER_TEMP/keys.json"
+      - name: Set the Worker secrets
+        run: |
+          node -e "process.stdout.write(require(process.argv[1]).FEED_KEY)" "$RUNNER_TEMP/keys.json" | npx wrangler secret put FEED_KEY --config wrangler.jsonc
+          node -e "process.stdout.write(require(process.argv[1]).PUBLISH_KEY)" "$RUNNER_TEMP/keys.json" | npx wrangler secret put PUBLISH_KEY --config wrangler.jsonc
+      - name: Encrypt the keys for the publishing machine
+        if: ${{ inputs.recipient_key != '' }}
+        env:
+          RECIPIENT_KEY: ${{ inputs.recipient_key }}
+        run: |
+          node -e "
+            const c = require('crypto'), fs = require('fs')
+            const keys = fs.readFileSync(process.argv[1])
+            const enc = c.publicEncrypt({ key: process.env.RECIPIENT_KEY, oaepHash: 'sha256' }, keys)
+            fs.writeFileSync(process.argv[2], enc.toString('base64'))
+          " "$RUNNER_TEMP/keys.json" "$RUNNER_TEMP/feed-keys.b64"
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.recipient_key != '' }}
+        with:
+          name: feed-keys
+          path: ${{ runner.temp }}/feed-keys.b64
+          retention-days: 1
+      - name: Feed address
+        run: |
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | node -pe "JSON.parse(require('fs').readFileSync(0)).result.subdomain")
+          echo "Feed: https://ephemeris-updates.$sub.workers.dev/<FEED_KEY>" | tee -a "$GITHUB_STEP_SUMMARY"
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://ephemeris-updates.$sub.workers.dev/repos/BenItBuhner/Ephemeris/releases")
+          echo "Without the key: HTTP $code (expected 404)"
+          [ "$code" = "404" ]

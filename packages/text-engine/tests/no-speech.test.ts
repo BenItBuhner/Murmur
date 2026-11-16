@@ -62,3 +62,10 @@ describe('no-speech answers', () => {
     expect(dropNoSpeechAnswer({ text: 'Music playing.' }, wav(syllables(2)), 2, undefined)?.reason).toBe('caption')
   })
 })
+
+describe('short clips', () => {
+  it('keeps a one-word answer to a short unbroken sound (a spoken "you", "okay")', () => {
+    const tone = Int16Array.from({ length: 16000 }, (_, i) => Math.round(8000 * Math.sin((2 * Math.PI * 140 * i) / 16000)))
+    expect(dropNoSpeechAnswer({ text: 'You.' }, wav(tone), 1, undefined)).toBeNull()
+  })
+})

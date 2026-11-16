@@ -182,7 +182,8 @@ export function dropNoSpeechAnswer(
     clipSec !== null &&
     !!segs?.some((s) => typeof s.end === 'number' && s.end > clipSec + 1.5)
   let quiet = false
-  if (!overrun) {
+  // Under 1.5 s a single spoken word can be one unbroken syllable with no gap to measure against.
+  if (!overrun && (clipSec === null || clipSec >= 1.5)) {
     const pcm = wavPcm16(audio)
     quiet = pcm !== null && !hasSpeechDynamics(pcm.samples, pcm.rate)
   }

@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const dir = resolve(process.argv[2] ?? '/tmp/stt-eval')
-const n = Number(process.argv[3] ?? 8)
+const n = Number(process.argv[3] ?? 3)
 const base = 'https://infer.techlitnow.com/v1'
 const sttKey = process.env.MURMUR_INFERENCE_STT_KEY ?? ''
 const llmKey = process.env.MURMUR_INFERENCE_LLM_KEY ?? ''
@@ -26,11 +26,11 @@ function trim(wav: Uint8Array, sec: number): Uint8Array {
   return out
 }
 
-async function timed(f: () => Promise<Response>): Promise<{ ms: number; headers: Headers; ok: boolean }> {
+async function timed(f: () => Promise<Response>): Promise<{ ms: number; headers: Headers; ok: boolean; body: string; status: number }> {
   const t = performance.now()
   const r = await f()
-  await r.text()
-  return { ms: performance.now() - t, headers: r.headers, ok: r.ok }
+  const body = await r.text()
+  return { ms: performance.now() - t, headers: r.headers, ok: r.ok, body, status: r.status }
 }
 
 const lines: string[] = ['## Latency probe', '']
@@ -53,7 +53,7 @@ for (const model of ['murmur-fast-transcribe', 'transcribe-1', 'murmur-bg-transc
       f.append('temperature', '0')
       f.append('response_format', model === 'murmur-bg-transcribe' ? 'json' : 'verbose_json')
       const r = await timed(() => fetch(`${base}/audio/transcriptions`, { method: 'POST', headers: { authorization: `Bearer ${sttKey}` }, body: f }))
-      if (!r.ok) fails++
+      if (!r.ok) { if (!fails) lines.push(`  - ${model} error: HTTP ${r.status} after ${Math.round(r.ms)} ms: ${r.body.slice(0, 300)}`); fails++ }
       else ms.push(r.ms)
       if (!printedHeaders) {
         printedHeaders = true

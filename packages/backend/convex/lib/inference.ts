@@ -426,6 +426,8 @@ export type GatewayErrorCode =
   | 'upstream_busy'
   /** The provider behind the instance is down, unreachable or not answering in time (503). */
   | 'provider_unavailable'
+  /** Quick Correct: the model answered the text instead of correcting it, so nothing is pasted (422). */
+  | 'correction_rejected'
 
 /** OpenAI-style error body; the apps read `error.message` and `error.code`. */
 export function gatewayError(

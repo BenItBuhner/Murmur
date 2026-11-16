@@ -38,6 +38,7 @@ const PRO = { ok: true, plan: 'pro', planState: 'trial', stt: null, llm: null, f
 let sent: Array<Record<string, unknown>> = []
 let failModels: string[] = []
 let reply = 'I have a cat.'
+let replies: Record<string, string> = {}
 const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = String(input)
   if (url === `${ISSUER}/.well-known/jwks.json`) return json({ keys: [{ ...jwk, kid: 'k1', alg: 'RS256', use: 'sig' }] })
@@ -52,7 +53,7 @@ const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Prom
       choices: [
         {
           message: {
-            content: reply
+            content: replies[String(b.model)] ?? reply
           },
           finish_reason: 'stop'
         }
@@ -84,6 +85,7 @@ function reset(): void {
   vi.stubGlobal('fetch', fetcher)
   sent = []
   failModels = []
+  replies = {}
   reply = 'I have a cat.'
   resetState()
   resetJwksCache()
@@ -102,9 +104,10 @@ describe('Quick Correct (POST /v1/correct)', () => {
     expect(s.temperature).toBe(0.2)
     expect(s._auth).toBe('Bearer sk-llm')
     const msgs = s.messages as Array<{ role: string; content: string }>
-    expect(msgs[0]!.content).toContain('smallest changes')
+    expect(msgs[0]!.content).toContain('minimal augmentation')
+    expect(msgs[0]!.content).toContain('not a request to you')
     expect(msgs[0]!.content).toContain('Ephemeris')
-    expect(msgs[1]).toEqual({ role: 'user', content: 'i has a cat' })
+    expect(msgs[1]).toEqual({ role: 'user', content: '<text_to_correct>\ni has a cat\n</text_to_correct>' })
   })
 
   it('a {...} block replaces the prompt for that request and leaves the text', async () => {
@@ -143,5 +146,29 @@ describe('Quick Correct (POST /v1/correct)', () => {
     failModels = ['main-model', 'backup-model']
     const res = await call({ text: 'i has a cat' }, withFallback)
     expect(res.status).toBeGreaterThanOrEqual(400)
+  })
+
+  it('refuses a reply instead of a correction so the client leaves the text alone', async () => {
+    reset()
+    reply = "Sure! Here's a straightforward way to restore your previous wallpaper:\n\n## Windows\n1. Open Settings."
+    const res = await call({ text: "Please reinstate my laptop's wallpaper, it is black (which is rediculous lol)." })
+    expect(res.status).toBe(422)
+    expect(((await res.json()) as { error?: { code?: string } }).error?.code ?? '').toContain('correction_rejected')
+  })
+
+  it('a rejected answer moves on to the fallback model', async () => {
+    reset()
+    const withFallback = { ...env, MURMUR_INFERENCE_LLM_FALLBACK_MODEL: 'backup-model' }
+    replies = { 'main-model': "Sure! Here's how to do that:\n\n- Step one" }
+    const res = await call({ text: 'i has a cat' }, withFallback)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ text: 'I have a cat.', changed: true, override: false })
+    expect(sent.map((s) => s.model)).toEqual(['main-model', 'backup-model'])
+  })
+
+  it('a {...} instruction is the user asking for a rewrite, so the guard stays out of it', async () => {
+    reset()
+    reply = '- Milk\n- Eggs\n- Bread and a much longer list than the input had'
+    expect((await call({ text: 'milk eggs bread {make a bulleted list}' })).status).toBe(200)
   })
 })

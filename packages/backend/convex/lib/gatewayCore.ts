@@ -1,4 +1,4 @@
-import { CORRECT_MAX_CHARS, cleanCorrection, correctionMessages, parseOverride } from './quickCorrect'
+import { CORRECT_MAX_CHARS, cleanCorrection, correctionMessages, guardCorrection, parseOverride } from './quickCorrect'
 import { messageAsEventStream, toAnthropicMessage, toChatRequest } from './agentTranslate'
 import { formatTranscript } from '../../../text-engine/src/format'
 import { finish } from '../../../text-engine/src/cleanup'
@@ -780,6 +780,7 @@ export async function handleCorrect(
   const messages = correctionMessages(parsed, dictionary)
   const maxTokens = Math.min(MAX_COMPLETION_TOKENS, Math.ceil(parsed.text.length / 2) + 256)
   let failure: UpstreamFailure | null = null
+  let rejected: string | null = null
   const started = Date.now()
   for (const m of models) {
     const res = await upstreamChat(upstream, m, messages, { temperature: 0.2, maxTokens }, budgetMs)
@@ -792,8 +793,21 @@ export async function handleCorrect(
     const text = cleanCorrection(res.result.text, input.text)
     console.log(`[gateway] correct plan=${gate.plan} chars=${parsed.text.length} override=${parsed.override !== null} ms=${Date.now() - started}`)
     if (!text) return gatewayError(502, 'upstream_error', 'The model returned nothing; your text was left as it was')
+    // A plain correction (no {...} instruction) must still be the user's text. When the model
+    // answered it instead (a reply, markdown, steps, much longer), try the next model, then refuse
+    // so the client leaves the selection untouched.
+    if (!parsed.override) {
+      const verdict = guardCorrection(parsed.text, text)
+      if (!verdict.ok) {
+        rejected = verdict.reason
+        console.log(`[gateway] correct rejected model=${m} reason=${verdict.reason}`)
+        continue
+      }
+    }
     return answer(text)
   }
+  if (rejected)
+    return gatewayError(422, 'correction_rejected', 'The correction did not look like your text, so it was left as it was')
   return providerFailure(hooks, 'llm', failure!, Date.now() - started)
 }
 

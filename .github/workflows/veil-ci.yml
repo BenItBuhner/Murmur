@@ -5,8 +5,6 @@
 name: veil-pool-ci
 on:
   workflow_dispatch:
-  push:
-    branches: [veil-ci-smoke]
 jobs:
   smoke:
     runs-on: [self-hosted, veil-pool]

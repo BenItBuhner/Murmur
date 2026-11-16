@@ -45,7 +45,7 @@ async function summaries(ctx: QueryCtx, user: Doc<'ephemerisUsers'>, now: number
 
 async function pendingInvites(ctx: QueryCtx, email: string, now: number) {
   const invites = await ctx.db.query('ephemerisInvites').withIndex('by_email', (q) => q.eq('email', email)).collect()
-  const out = []
+  const out: { token: string; workspace: string; role: (typeof invites)[number]['role']; from: string }[] = []
   for (const i of invites) {
     if (i.expiresAt < now) continue
     const ws = await ctx.db.get('ephemerisWorkspaces', i.workspaceId)

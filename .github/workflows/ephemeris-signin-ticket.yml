@@ -30,6 +30,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Check the key first, so a bad input never mints a ticket.
+          echo "$PUB" | base64 -d > pub.pem && openssl pkey -pubin -in pub.pem -noout || { echo "::error::public_key is not a base64 PEM public key"; exit 1; }
           api() { curl -fsS -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' "$@"; }
           ids=""
           for off in 0 500 1000 1500; do
@@ -40,7 +42,6 @@ jobs:
           echo "user: ${ids:0:12}..."
           ticket=$(api -X POST https://api.clerk.com/v1/sign_in_tokens -d "{\"user_id\":\"$ids\",\"expires_in_seconds\":600}" | jq -r .token)
           echo "::add-mask::$ticket"
-          echo "$PUB" | base64 -d > pub.pem
           head -c 32 /dev/urandom | base64 -w0 > k.txt
           printf %s "$ticket" | openssl enc -aes-256-cbc -pbkdf2 -pass file:k.txt -a -A > t.enc
           openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -in k.txt | base64 -w0 > k.enc

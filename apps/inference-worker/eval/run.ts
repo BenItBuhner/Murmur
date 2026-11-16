@@ -76,7 +76,7 @@ function form(wav: Uint8Array, fields: Record<string, string | string[]>): FormD
 }
 
 /** The desktop/Android release request, through the Worker's handler. */
-async function gateway(wav: Uint8Array, prompt: string | undefined, tier = 'release') {
+async function gateway(wav: Uint8Array, prompt: string | undefined, tier = 'release', over: Record<string, string> = {}) {
   const started = performance.now()
   const req = new Request('https://eval.local/v1/audio/transcriptions', {
     method: 'POST',
@@ -90,7 +90,7 @@ async function gateway(wav: Uint8Array, prompt: string | undefined, tier = 'rele
       ...(prompt ? { prompt } : {})
     })
   })
-  const res = await handleTranscriptions(hooks, identity, req)
+  const res = await handleTranscriptions(Object.keys(over).length ? { ...hooks, env: { ...env, ...over } } : hooks, identity, req)
   const body = await res.text()
   const ms = performance.now() - started
   if (!res.ok) throw new Error(`gateway ${res.status}: ${body.slice(0, 200)}`)
@@ -126,6 +126,7 @@ async function direct(wav: Uint8Array, model: string, prompt: string | undefined
 const CARRY = 'and that is what I wanted to say about it'
 const arms: Arm[] = [
   { name: 'gateway', run: (w) => gateway(w, STT_BASE_PROMPT) },
+  { name: 'gateway-race', run: (w) => gateway(w, STT_BASE_PROMPT, 'release', { MURMUR_INFERENCE_HEDGE_MS: '1' }) },
   { name: 'gateway-noprompt', run: (w) => gateway(w, undefined) },
   { name: 'gateway-carry', run: (w) => gateway(w, `${STT_BASE_PROMPT} ${CARRY}`) },
   { name: 'gateway-bg', run: (w) => gateway(w, STT_BASE_PROMPT, 'background') },

@@ -126,6 +126,12 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     if (path === '/v1/chat/completions') return await handleChatCompletions(hooks, identity, request)
     if (path === '/v1/format') return await handleFormat(hooks, identity, request)
     if (path === '/v1/layout') return await handleLayout(hooks, identity, request)
+    if (path === '/v1/messages/count_tokens') {
+      // An estimate (about four characters a token): the agent only uses it to budget its context.
+      if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use the Ephemeris agent')
+      const text = await request.text()
+      return new Response(JSON.stringify({ input_tokens: Math.ceil(text.length / 4) }), { headers: { 'content-type': 'application/json' } })
+    }
     if (path === '/v1/messages') return await handleMessages(hooks, identity, request, fetcher)
     if (path === '/v1/dictate/release') return await handleDictateRelease(hooks, identity, request)
     if (path === '/v1/finish') return await handleFinish(hooks, identity, request)

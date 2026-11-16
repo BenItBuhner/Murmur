@@ -282,7 +282,7 @@ describe('Ephemeris agent messages', () => {
   it('needs a session and a configured key', async () => {
     expect((await handle(req(''), agentEnv, ctx, anthropic as typeof fetch)).status).toBe(401)
     const auth = `Bearer ${await token({})}`
-    const off = await handle(req(auth), env, ctx, anthropic as typeof fetch)
+    const off = await handle(req(auth), { ...env, MURMUR_INFERENCE_LLM_URL: "" }, ctx, anthropic as typeof fetch)
     expect(off.status).toBe(503)
     expect(calls.some((c) => c.url.includes('anthropic'))).toBe(false)
   })

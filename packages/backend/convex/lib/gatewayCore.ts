@@ -1,3 +1,4 @@
+import { messageAsEventStream, toAnthropicMessage, toChatRequest } from './agentTranslate'
 import { formatTranscript } from '../../../text-engine/src/format'
 import { finish } from '../../../text-engine/src/cleanup'
 import { dropSilentSegments } from '../../../text-engine/src/hallucination'
@@ -1159,7 +1160,8 @@ export async function handleMessages(
 ): Promise<Response> {
   if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use the Ephemeris agent')
   const key = (hooks.env.EPHEMERIS_ANTHROPIC_API_KEY ?? '').trim()
-  if (!key) return gatewayError(503, 'not_configured', 'This instance does not offer the Ephemeris agent model')
+  const llm = readUpstreams(hooks.env).llm
+  if (!key && !llm) return gatewayError(503, 'not_configured', 'This instance does not offer the Ephemeris agent model')
   let input: Record<string, unknown>
   try {
     input = (await request.json()) as Record<string, unknown>
@@ -1173,12 +1175,93 @@ export async function handleMessages(
 
   const gate = await hooks.authorize({ identity, kind: 'llm' })
   if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
+  const requestedMax = typeof input.max_tokens === 'number' ? input.max_tokens : 4096
+  const maxTokens = Math.max(1, Math.min(AGENT_MAX_TOKENS, Math.floor(requestedMax)))
+  if (key) return anthropicMessages(hooks, gate, identity, request, input, key, maxTokens, fetcher)
+  return llmMessages(hooks, gate, identity, llm!, input, maxTokens, fetcher)
+}
 
+/** The name clients see for the agent model, whatever runs behind it. */
+export const EPHEMERIS_AGENT_ALIAS = 'ephemeris'
+
+/**
+ * The agent on the managed formatting provider (the default): the Messages request becomes a chat
+ * completion with tools, sent with the provider key the gateway already holds, and the answer comes
+ * back as a Messages answer. The server picks the model (EPHEMERIS_AGENT_LLM_MODEL, else the
+ * provider's own) and falls back to the hedge and fallback models when one fails.
+ */
+async function llmMessages(
+  hooks: GatewayHooks,
+  gate: Allowed,
+  identity: GatewayIdentity,
+  upstream: Upstream,
+  input: Record<string, unknown>,
+  maxTokens: number,
+  fetcher: typeof fetch
+): Promise<Response> {
+  const chat = toChatRequest(input)
+  chat.max_tokens = Math.min(maxTokens, MAX_COMPLETION_TOKENS)
+  const first = (hooks.env.EPHEMERIS_AGENT_LLM_MODEL ?? '').trim() || upstream.model
+  const models = [...new Set([first, upstream.hedgeModel, upstream.fallbackModel].filter((m): m is string => !!m))]
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (upstream.apiKey) headers.authorization = `Bearer ${upstream.apiKey}`
+  let lastStatus = 0
+  for (const model of models) {
+    const started = Date.now()
+    let res: Response
+    try {
+      res = await fetcher(`${upstream.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...chat, model }),
+        signal: AbortSignal.timeout(90_000)
+      })
+    } catch (err) {
+      console.warn(`[gateway] agent ${model} failed: ${err instanceof Error ? err.message : err}`)
+      continue
+    }
+    if (!res.ok) {
+      lastStatus = res.status
+      console.warn(`[gateway] agent ${model} answered ${res.status} in ${Date.now() - started} ms`)
+      await res.body?.cancel()
+      continue
+    }
+    let json: Record<string, unknown>
+    try {
+      json = (await res.json()) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const message = toAnthropicMessage(json, EPHEMERIS_AGENT_ALIAS)
+    const usage = message.usage as { input_tokens: number; output_tokens: number }
+    await hooks.record({ userId: gate.userId, identity, kind: 'llm', tokens: usage.input_tokens + usage.output_tokens || 1 })
+    console.log(`[gateway] agent model=${model} upstreamMs=${Date.now() - started}`)
+    if (input.stream === true)
+      return new Response(messageAsEventStream(message), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }
+      })
+    return new Response(JSON.stringify(message), { status: 200, headers: JSON_HEADERS })
+  }
+  console.error(`[gateway] agent: every model failed (last status ${lastStatus})`)
+  return gatewayError(503, 'provider_unavailable', 'The agent model is briefly unavailable; try again shortly')
+}
+
+/** With EPHEMERIS_ANTHROPIC_API_KEY set: straight to Anthropic, streaming piped through. */
+async function anthropicMessages(
+  hooks: GatewayHooks,
+  gate: Allowed,
+  identity: GatewayIdentity,
+  request: Request,
+  input: Record<string, unknown>,
+  key: string,
+  maxTokens: number,
+  fetcher: typeof fetch
+): Promise<Response> {
   // The server picks the model; whatever the client names is ignored.
   const outbound: Record<string, unknown> = { model: agentModel(hooks.env) }
   for (const k of MESSAGES_PASSTHROUGH) if (input[k] !== undefined) outbound[k] = input[k]
-  const requestedMax = typeof input.max_tokens === 'number' ? input.max_tokens : 4096
-  outbound.max_tokens = Math.max(1, Math.min(AGENT_MAX_TOKENS, Math.floor(requestedMax)))
+  outbound.max_tokens = maxTokens
   const body = JSON.stringify(outbound)
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -1200,7 +1283,6 @@ export async function handleMessages(
     'cache-control': 'no-store'
   }
   if (outbound.stream === true && res.ok && res.body) {
-    // Usage arrives inside the stream; bill an estimate from the request so streaming stays a pipe.
     await hooks.record({ userId: gate.userId, identity, kind: 'llm', tokens: Math.ceil(body.length / 4) })
     return new Response(res.body, { status: res.status, headers: passHeaders })
   }

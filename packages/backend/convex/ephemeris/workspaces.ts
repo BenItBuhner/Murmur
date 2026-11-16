@@ -61,7 +61,14 @@ export const members = query({
     const { workspace, member: me } = await requireMember(ctx, workspaceId)
     const now = Date.now()
     const rows = await ctx.db.query('ephemerisMembers').withIndex('by_workspace', (q) => q.eq('workspaceId', workspaceId)).collect()
-    const people = []
+    const people: {
+      userId: (typeof rows)[number]['userId']
+      name: string
+      email: string
+      role: (typeof rows)[number]['role']
+      joinedAt: number
+      you: boolean
+    }[] = []
     for (const m of rows) {
       const u = await ctx.db.get('ephemerisUsers', m.userId)
       if (u) people.push({ userId: u._id, name: u.name, email: u.email, role: m.role, joinedAt: m.joinedAt, you: m.userId === me.userId })
@@ -259,7 +266,7 @@ export const auditLog = query({
       .withIndex('by_workspace_at', (q) => q.eq('workspaceId', workspaceId))
       .order('desc')
       .take(Math.min(500, Math.max(1, limit ?? 100)))
-    const out = []
+    const out: { action: string; detail: string; at: number; actor: string }[] = []
     for (const r of rows) {
       const actor = r.actorId ? await ctx.db.get('ephemerisUsers', r.actorId) : null
       out.push({ action: r.action, detail: r.detail, at: r.at, actor: actor?.name ?? 'Ephemeris' })

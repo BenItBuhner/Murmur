@@ -27,7 +27,9 @@ export const SYNCED_TABLES = [
   'meeting_notes',
   'prefs',
   /** What a phone saw: screen text, notifications, the app in front (Murmur/Ephemeris Android). */
-  'context'
+  'context',
+  /** Chats with the Ephemeris agent: title, run status and transcript (the model history stays on the device). */
+  'conversations'
 ] as const
 export type SyncedTable = (typeof SYNCED_TABLES)[number]
 

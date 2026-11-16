@@ -1,0 +1,19 @@
+{
+  "name": "@murmur/ephemeris-updates",
+  "version": "0.1.0",
+  "description": "Ephemeris desktop update feed: a private, GitHub-Releases-shaped feed on Workers Free + R2.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0",
+    "wrangler": "^4.149.0"
+  }
+}

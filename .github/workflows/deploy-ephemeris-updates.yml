@@ -1,0 +1,71 @@
+name: Deploy Ephemeris update feed
+
+# The Ephemeris desktop app's private update feed (apps/ephemeris-updates): a Worker on the Workers
+# Free plan with an R2 bucket on the free tier. Uses the same Cloudflare secrets as the other
+# Workers, plus two the publishing machine sets with `gh secret set`:
+#   EPHEMERIS_FEED_KEY          the path segment every request must start with (>= 24 chars)
+#   EPHEMERIS_FEED_PUBLISH_KEY  bearer token for uploads (>= 24 chars)
+# The bucket is created on the first run if it does not exist yet.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ephemeris-updates/**'
+      - '.github/workflows/deploy-ephemeris-updates.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ephemeris-updates
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/ephemeris-updates
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/ephemeris-updates/package-lock.json
+      - name: Check the secrets exist
+        env:
+          EPHEMERIS_FEED_KEY: ${{ secrets.EPHEMERIS_FEED_KEY }}
+          EPHEMERIS_FEED_PUBLISH_KEY: ${{ secrets.EPHEMERIS_FEED_PUBLISH_KEY }}
+        run: |
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID EPHEMERIS_FEED_KEY EPHEMERIS_FEED_PUBLISH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Add the $name repository secret (see the comment at the top of this workflow)."
+              exit 1
+            fi
+          done
+      - run: npm ci
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npx vitest run
+      - name: Create the R2 bucket if needed
+        run: |
+          if npx wrangler r2 bucket list | grep -q 'ephemeris-updates'; then
+            echo "bucket exists"
+          else
+            npx wrangler r2 bucket create ephemeris-updates
+          fi
+      # First deploy before the secrets: `secret put` needs the Worker to exist.
+      - name: Deploy
+        run: npx wrangler deploy --config wrangler.jsonc
+      - name: Set the Worker secrets
+        env:
+          EPHEMERIS_FEED_KEY: ${{ secrets.EPHEMERIS_FEED_KEY }}
+          EPHEMERIS_FEED_PUBLISH_KEY: ${{ secrets.EPHEMERIS_FEED_PUBLISH_KEY }}
+        run: |
+          printf '%s' "$EPHEMERIS_FEED_KEY" | npx wrangler secret put FEED_KEY --config wrangler.jsonc
+          printf '%s' "$EPHEMERIS_FEED_PUBLISH_KEY" | npx wrangler secret put PUBLISH_KEY --config wrangler.jsonc

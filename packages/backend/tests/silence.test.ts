@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { dropSilentSegments, isSilenceHallucination } from '../../text-engine/src/hallucination'
-import { STT_ENV, ada, jsonResponse, makeWav, setup, sttRequest, stubEnv, stubFetch } from './helpers'
+import { STT_ENV, ada, jsonResponse, makeSpokenWav, makeWav, setup, sttRequest, stubEnv, stubFetch } from './helpers'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -59,8 +59,19 @@ describe('/v1/audio/transcriptions and silence', () => {
       jsonResponse({ text: ' Thank you.', duration: 2, segments: [{ text: ' Thank you.', no_speech_prob: 0.01 }] })
     )
     const t = setup()
-    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(2)))
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeSpokenWav(2)))
     expect(await res.json()).toEqual({ text: ' Thank you.', duration: 2 })
+  })
+
+  it('drops "Thank you." the model said to a silent clip, whatever its no_speech_prob', async () => {
+    stubEnv(STT_ENV)
+    // Nov 16 2026, production models on 3 s of silence: no_speech_prob 0, one segment to 29.98 s.
+    stubFetch(() =>
+      jsonResponse({ text: ' Thank you.', duration: 2, segments: [{ text: ' Thank you.', no_speech_prob: 0, end: 29.98 }] })
+    )
+    const t = setup()
+    const res = await t.withIdentity(ada).fetch('/v1/audio/transcriptions', await sttRequest(makeWav(2)))
+    expect(await res.json()).toEqual({ text: '', duration: 2 })
   })
 
   it('asks again in plain JSON when the provider has no verbose answers', async () => {

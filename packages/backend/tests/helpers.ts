@@ -147,3 +147,14 @@ export const chatAnswer = (content: string, finish = 'stop', tokens = 40): Respo
     choices: [{ message: { role: 'assistant', content }, finish_reason: finish }],
     usage: { prompt_tokens: tokens - 5, completion_tokens: 5, total_tokens: tokens }
   })
+
+/** makeWav with syllable-like bursts of a 140 Hz tone in it: loudness that moves like speech. */
+export function makeSpokenWav(seconds: number, sampleRate = 16_000): Uint8Array {
+  const out = makeWav(seconds, sampleRate)
+  const view = new DataView(out.buffer)
+  for (let i = 0; i < Math.round(seconds * sampleRate); i++) {
+    const t = i / sampleRate
+    if (t % 0.3 < 0.18) view.setInt16(44 + i * 2, Math.round(8000 * Math.sin(2 * Math.PI * 140 * t)), true)
+  }
+  return out
+}

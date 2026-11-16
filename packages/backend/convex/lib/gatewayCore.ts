@@ -4,6 +4,7 @@ import { formatTranscript } from '../../../text-engine/src/format'
 import { finish } from '../../../text-engine/src/cleanup'
 import { dropSilentSegments } from '../../../text-engine/src/hallucination'
 import { stripPromptEcho } from '../../../text-engine/src/prompt-echo'
+import { dropNoSpeechAnswer } from '../../../text-engine/src/no-speech'
 import { sttLanguageField } from '../../../text-engine/src/languages'
 import { joinSeam } from '../../../text-engine/src/seam'
 import { layoutText, wantsLayout, type LayoutResult } from '../../../text-engine/src/layout'
@@ -446,6 +447,7 @@ export async function handleTranscriptions(
   const measured = measuredSeconds(file.data)
   let silenced = 0
   let echoed = false
+  let noSpeechReason: string | null = null
   if (json && (upstreamFormat === 'verbose_json' || upstreamFormat === 'json')) {
     const clipSec = measured ?? (typeof json.duration === 'number' ? json.duration : seconds)
     let dropped = dropSilentSegments(json, clipSec)
@@ -459,6 +461,14 @@ export async function handleTranscriptions(
       echoed = true
       json = { ...json, ...echo }
       dropped ??= { text: echo.text, segments: undefined }
+    }
+    // Words said over non-speech: "Thank you." to silence, "Gracias." to hiss, "Music playing.",
+    // the prompt read back or a loop over room noise (see text-engine/src/no-speech.ts).
+    const noSpeech = dropNoSpeechAnswer(json, file.data, clipSec, fields.prompt?.[0])
+    if (noSpeech) {
+      noSpeechReason = noSpeech.reason
+      json = { ...json, text: noSpeech.text, ...(noSpeech.segments ? { segments: noSpeech.segments } : {}) }
+      dropped ??= { text: noSpeech.text, segments: undefined }
     }
     // The client asked for JSON: the plain answer, as before.
     const verbose = Array.isArray(json.segments)
@@ -487,7 +497,7 @@ export async function handleTranscriptions(
     ...(attempt.attempts > 1 ? { attempts: attempt.attempts } : {})
   }
   console.log(
-    `[gateway] stt plan=${gate.plan} tier=${tier} speed=${speedNote} model=${trace.role} seconds=${billed.toFixed(1)} words=${words}${silenced ? ` silenced=${silenced}` : ''}${echoed ? ' prompt_echo=dropped' : ''} upstreamMs=${trace.ms}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}${first.hedged ? ` hedged=${first.failover ? 'failover' : 'slow'}` : ''}`
+    `[gateway] stt plan=${gate.plan} tier=${tier} speed=${speedNote} model=${trace.role} seconds=${billed.toFixed(1)} words=${words}${silenced ? ` silenced=${silenced}` : ''}${echoed ? ' prompt_echo=dropped' : ''}${noSpeechReason ? ` no_speech=${noSpeechReason}` : ''} upstreamMs=${trace.ms}${attempt.attempts > 1 ? ` attempts=${attempt.attempts}` : ''}${first.hedged ? ` hedged=${first.failover ? 'failover' : 'slow'}` : ''}`
   )
   const responseHeaders: Record<string, string> = {
     'content-type': upstreamType,

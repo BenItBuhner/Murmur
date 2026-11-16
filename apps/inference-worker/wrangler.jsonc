@@ -39,7 +39,9 @@
     "MURMUR_INFERENCE_LLM_FALLBACK_MODEL": "gemini-3.6-flash",
     "MURMUR_INFERENCE_LLM_RELEASE_FAST": "on",
     // Where limit errors link to; same value as MURMUR_SITE_URL in the Convex deployment.
-    "MURMUR_SITE_URL": "https://murmur.techlitnow.com"
+    "MURMUR_SITE_URL": "https://murmur.techlitnow.com",
+    // The Ephemeris agent (/v1/messages): the server picks this model, whatever the client names.
+    "EPHEMERIS_AGENT_MODEL": "claude-sonnet-5-5"
   }
   // Secrets, applied by the deploy workflow from the repository's Actions secrets (the same
   // values the Convex deployment carries): MURMUR_WORKER_SECRET, MURMUR_INFERENCE_STT_KEY,

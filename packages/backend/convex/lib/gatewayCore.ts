@@ -1123,7 +1123,6 @@ export async function handleFinish(
 
 /** The fields of an Anthropic Messages request that go to Anthropic as sent. */
 const MESSAGES_PASSTHROUGH = [
-  'model',
   'messages',
   'system',
   'tools',
@@ -1135,6 +1134,13 @@ const MESSAGES_PASSTHROUGH = [
   'thinking',
   'stream'
 ] as const
+
+/** The model behind the Ephemeris agent: EPHEMERIS_AGENT_MODEL, else this default. */
+export const DEFAULT_AGENT_MODEL = 'claude-sonnet-5-5'
+
+export function agentModel(env: Record<string, string | undefined>): string {
+  return (env.EPHEMERIS_AGENT_MODEL ?? '').trim() || DEFAULT_AGENT_MODEL
+}
 
 /** The largest `max_tokens` an agent turn may ask for. */
 export const AGENT_MAX_TOKENS = 16_384
@@ -1162,14 +1168,14 @@ export async function handleMessages(
   }
   if (!input || typeof input !== 'object' || Array.isArray(input))
     return gatewayError(400, 'bad_request', 'Body must be a JSON object')
-  if (typeof input.model !== 'string' || !input.model) return gatewayError(400, 'bad_request', '"model" is required')
   if (!Array.isArray(input.messages) || input.messages.length === 0)
     return gatewayError(400, 'bad_request', '"messages" must be a non-empty array')
 
   const gate = await hooks.authorize({ identity, kind: 'llm' })
   if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
 
-  const outbound: Record<string, unknown> = {}
+  // The server picks the model; whatever the client names is ignored.
+  const outbound: Record<string, unknown> = { model: agentModel(hooks.env) }
   for (const k of MESSAGES_PASSTHROUGH) if (input[k] !== undefined) outbound[k] = input[k]
   const requestedMax = typeof input.max_tokens === 'number' ? input.max_tokens : 4096
   outbound.max_tokens = Math.max(1, Math.min(AGENT_MAX_TOKENS, Math.floor(requestedMax)))

@@ -1118,3 +1118,96 @@ export async function handleFinish(
     headers: JSON_HEADERS
   })
 }
+
+// ---- Ephemeris agent: Anthropic Messages, tools passed through ---------------------------------
+
+/** The fields of an Anthropic Messages request that go to Anthropic as sent. */
+const MESSAGES_PASSTHROUGH = [
+  'model',
+  'messages',
+  'system',
+  'tools',
+  'tool_choice',
+  'temperature',
+  'top_p',
+  'top_k',
+  'stop_sequences',
+  'thinking',
+  'stream'
+] as const
+
+/** The largest `max_tokens` an agent turn may ask for. */
+export const AGENT_MAX_TOKENS = 16_384
+
+/**
+ * `POST /v1/messages` — the Ephemeris agent's model calls, in Anthropic Messages format, with tools.
+ * The client signs in with its Clerk session (no Anthropic key on the device); the request goes to
+ * Anthropic with the instance's EPHEMERIS_ANTHROPIC_API_KEY, under the account's formatting
+ * allowance. Streaming answers are piped through as they arrive.
+ */
+export async function handleMessages(
+  hooks: GatewayHooks,
+  identity: GatewayIdentity | null,
+  request: Request,
+  fetcher: typeof fetch = (input, init) => fetch(input, init)
+): Promise<Response> {
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use the Ephemeris agent')
+  const key = (hooks.env.EPHEMERIS_ANTHROPIC_API_KEY ?? '').trim()
+  if (!key) return gatewayError(503, 'not_configured', 'This instance does not offer the Ephemeris agent model')
+  let input: Record<string, unknown>
+  try {
+    input = (await request.json()) as Record<string, unknown>
+  } catch {
+    return gatewayError(400, 'bad_request', 'Body must be JSON')
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    return gatewayError(400, 'bad_request', 'Body must be a JSON object')
+  if (typeof input.model !== 'string' || !input.model) return gatewayError(400, 'bad_request', '"model" is required')
+  if (!Array.isArray(input.messages) || input.messages.length === 0)
+    return gatewayError(400, 'bad_request', '"messages" must be a non-empty array')
+
+  const gate = await hooks.authorize({ identity, kind: 'llm' })
+  if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
+
+  const outbound: Record<string, unknown> = {}
+  for (const k of MESSAGES_PASSTHROUGH) if (input[k] !== undefined) outbound[k] = input[k]
+  const requestedMax = typeof input.max_tokens === 'number' ? input.max_tokens : 4096
+  outbound.max_tokens = Math.max(1, Math.min(AGENT_MAX_TOKENS, Math.floor(requestedMax)))
+  const body = JSON.stringify(outbound)
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'x-api-key': key,
+    'anthropic-version': request.headers.get('anthropic-version') ?? '2023-06-01'
+  }
+  const beta = request.headers.get('anthropic-beta')
+  if (beta) headers['anthropic-beta'] = beta
+  const base = (hooks.env.EPHEMERIS_ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com').replace(/\/+$/, '')
+  let res: Response
+  try {
+    res = await fetcher(`${base}/v1/messages`, { method: 'POST', headers, body })
+  } catch (err) {
+    console.error(`[gateway] messages upstream failed: ${err instanceof Error ? err.message : err}`)
+    return gatewayError(503, 'provider_unavailable', 'The agent model is briefly unavailable; try again shortly')
+  }
+  const passHeaders: Record<string, string> = {
+    'content-type': res.headers.get('content-type') ?? 'application/json',
+    'cache-control': 'no-store'
+  }
+  if (outbound.stream === true && res.ok && res.body) {
+    // Usage arrives inside the stream; bill an estimate from the request so streaming stays a pipe.
+    await hooks.record({ userId: gate.userId, identity, kind: 'llm', tokens: Math.ceil(body.length / 4) })
+    return new Response(res.body, { status: res.status, headers: passHeaders })
+  }
+  const text = await res.text()
+  if (res.ok) {
+    let tokens = Math.ceil((body.length + text.length) / 4)
+    try {
+      const usage = (JSON.parse(text) as { usage?: { input_tokens?: number; output_tokens?: number } }).usage
+      if (usage) tokens = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)
+    } catch {
+      // keep the estimate
+    }
+    await hooks.record({ userId: gate.userId, identity, kind: 'llm', tokens })
+  }
+  return new Response(text, { status: res.status, headers: passHeaders })
+}

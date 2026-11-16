@@ -3,6 +3,7 @@ import {
   handleDictateRelease,
   handleFinish,
   handleFormat,
+  handleCorrect,
   handleLayout,
   handleMessages,
   handleModels,
@@ -126,6 +127,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     if (path === '/v1/chat/completions') return await handleChatCompletions(hooks, identity, request)
     if (path === '/v1/format') return await handleFormat(hooks, identity, request)
     if (path === '/v1/layout') return await handleLayout(hooks, identity, request)
+    if (path === '/v1/correct') return await handleCorrect(hooks, identity, request)
     if (path === '/v1/messages/count_tokens') {
       // An estimate (about four characters a token): the agent only uses it to budget its context.
       if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use the Ephemeris agent')

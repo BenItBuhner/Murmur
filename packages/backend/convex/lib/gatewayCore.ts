@@ -1,3 +1,4 @@
+import { CORRECT_MAX_CHARS, cleanCorrection, correctionMessages, parseOverride } from './quickCorrect'
 import { messageAsEventStream, toAnthropicMessage, toChatRequest } from './agentTranslate'
 import { formatTranscript } from '../../../text-engine/src/format'
 import { finish } from '../../../text-engine/src/cleanup'
@@ -736,6 +737,64 @@ export async function handleLayout(
     `[gateway] layout plan=${gate.plan} outcome=${laid.outcome}${laid.detail ? ` detail=${laid.detail.slice(0, 80)}` : ''} tokens=${tokens} ms=${laid.llmMs}`
   )
   return answer(laid)
+}
+
+/**
+ * `POST /v1/correct` (Ephemeris Quick Correct): `{ text, dictionary? }` in, `{ text, changed,
+ * override }` out. The prompt and model are the server's; a `{...}` block in the text replaces the
+ * prompt for that request. Not degradable: a correction the model did not make is an error, so the
+ * client leaves the user's text alone.
+ */
+export async function handleCorrect(
+  hooks: GatewayHooks,
+  identity: GatewayIdentity | null,
+  request: Request
+): Promise<Response> {
+  if (!identity) return gatewayError(401, 'unauthorized', 'Sign in to use Quick Correct')
+  const upstream = readUpstreams(hooks.env).llm
+  if (!upstream) return gatewayError(503, 'not_configured', 'This instance does not offer Quick Correct')
+  let input: { text?: unknown; dictionary?: unknown }
+  try {
+    input = (await request.json()) as typeof input
+  } catch {
+    return gatewayError(400, 'bad_request', 'Body must be JSON')
+  }
+  if (!input || typeof input.text !== 'string') return gatewayError(400, 'bad_request', '"text" must be a string')
+  if (!input.text.trim()) return gatewayError(400, 'bad_request', '"text" is empty')
+  if (input.text.length > CORRECT_MAX_CHARS)
+    return gatewayError(400, 'bad_request', `"text" is longer than ${CORRECT_MAX_CHARS} characters`)
+  const dictionary = Array.isArray(input.dictionary) ? input.dictionary.filter((t): t is string => typeof t === 'string') : []
+  const parsed = parseOverride(input.text)
+  const answer = (text: string): Response =>
+    new Response(JSON.stringify({ text, changed: text !== input.text, override: parsed.override !== null }), {
+      status: 200,
+      headers: JSON_HEADERS
+    })
+  if (!parsed.text.trim()) return answer(input.text)
+
+  const gate = await hooks.authorize({ identity, kind: 'llm' })
+  if (!gate.ok) return gateRefusal(hooks, gate, 'llm')
+  const { model } = chooseLlmModel(upstream, gate.plan, 'release', 'normal')
+  const models = [...new Set([model, upstream.fallbackModel].filter((m): m is string => !!m))]
+  const budgetMs = readUpstreamBudgets(hooks.env).formatMs
+  const messages = correctionMessages(parsed, dictionary)
+  const maxTokens = Math.min(MAX_COMPLETION_TOKENS, Math.ceil(parsed.text.length / 2) + 256)
+  let failure: UpstreamFailure | null = null
+  const started = Date.now()
+  for (const m of models) {
+    const res = await upstreamChat(upstream, m, messages, { temperature: 0.2, maxTokens }, budgetMs)
+    if (!res.ok) {
+      failure = res.failure
+      continue
+    }
+    await hooks.record({ userId: gate.userId, identity, kind: 'llm', tokens: res.tokens || 1 })
+    await providerAnswered(hooks, 'llm', gate)
+    const text = cleanCorrection(res.result.text, input.text)
+    console.log(`[gateway] correct plan=${gate.plan} chars=${parsed.text.length} override=${parsed.override !== null} ms=${Date.now() - started}`)
+    if (!text) return gatewayError(502, 'upstream_error', 'The model returned nothing; your text was left as it was')
+    return answer(text)
+  }
+  return providerFailure(hooks, 'llm', failure!, Date.now() - started)
 }
 
 async function formatOnce(

@@ -269,7 +269,7 @@ describe('Ephemeris agent messages', () => {
     return fetcher(input, init)
   })
   const body = {
-    model: 'claude-sonnet-5-5',
+    model: 'some-client-model',
     max_tokens: 999_999,
     messages: [{ role: 'user', content: 'note hi' }],
     tools: [{ name: 'file_note', description: 'File a note', input_schema: { type: 'object' } }],
@@ -301,6 +301,7 @@ describe('Ephemeris agent messages', () => {
     expect(sent.tool_choice).toEqual(body.tool_choice)
     expect(sent.max_tokens).toBe(16_384)
     expect(sent.sneaky).toBeUndefined()
+    expect(sent.model).toBe("claude-sonnet-5-5") // the server picks; the client asked for another
     expect(pendingUsage()).toBe(1)
   })
 

@@ -1,0 +1,49 @@
+name: Ephemeris sign-in ticket
+
+# Manual only. Mints ONE single-use Clerk sign-in token (10-minute expiry) for an existing user, for
+# cloud test runs of the Ephemeris apps on that account (approved by the account owner). It changes
+# nothing on the account. The ticket is never logged in the clear: it is encrypted to the RSA public
+# key given as input, and only the ciphertext is printed.
+on:
+  workflow_dispatch:
+    inputs:
+      user_prefix:
+        description: Start of the Clerk user id (must match exactly one user)
+        required: true
+      public_key:
+        description: Base64 of a PEM RSA public key to encrypt the ticket to
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  ticket:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      PREFIX: ${{ inputs.user_prefix }}
+      PUB: ${{ inputs.public_key }}
+    steps:
+      - name: Mint and encrypt
+        shell: bash
+        run: |
+          set -euo pipefail
+          api() { curl -fsS -H "Authorization: Bearer $CLERK_SECRET_KEY" -H 'Content-Type: application/json' "$@"; }
+          ids=""
+          for off in 0 500 1000 1500; do
+            ids+=$(api "https://api.clerk.com/v1/users?limit=500&offset=$off" | jq -r --arg p "$PREFIX" '.[] | select(.id | startswith($p)) | .id')$'\n'
+          done
+          ids=$(echo "$ids" | sed '/^$/d' | sort -u)
+          [ -n "$ids" ] && [ "$(echo "$ids" | wc -l)" = 1 ] || { echo "::error::prefix must match exactly one user"; exit 1; }
+          echo "user: ${ids:0:12}..."
+          ticket=$(api -X POST https://api.clerk.com/v1/sign_in_tokens -d "{\"user_id\":\"$ids\",\"expires_in_seconds\":600}" | jq -r .token)
+          echo "::add-mask::$ticket"
+          echo "$PUB" | base64 -d > pub.pem
+          head -c 32 /dev/urandom | base64 -w0 > k.txt
+          printf %s "$ticket" | openssl enc -aes-256-cbc -pbkdf2 -pass file:k.txt -a -A > t.enc
+          openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -in k.txt | base64 -w0 > k.enc
+          echo "KEY $(cat k.enc)"
+          echo "TICKET $(cat t.enc)"
+          rm -f k.txt

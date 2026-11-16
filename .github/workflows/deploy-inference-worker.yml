@@ -15,6 +15,8 @@ name: Deploy inference worker
 #                            env var (a random string of at least 32 characters)
 #   MURMUR_INFERENCE_STT_KEY  the speech provider's key; the same value as in Convex
 #   MURMUR_INFERENCE_LLM_KEY  the formatting provider's key; the same value as in Convex
+#   EPHEMERIS_ANTHROPIC_API_KEY  optional: the Anthropic key behind the Ephemeris agent route
+#                            (/v1/messages); without it that route answers 503 not_configured
 # The rest of the Worker's configuration (Clerk issuer, the Convex site origin, the provider URLs
 # and models) is public and lives in apps/inference-worker/wrangler.jsonc.
 on:
@@ -76,9 +78,13 @@ jobs:
           MURMUR_WORKER_SECRET: ${{ secrets.MURMUR_WORKER_SECRET }}
           MURMUR_INFERENCE_STT_KEY: ${{ secrets.MURMUR_INFERENCE_STT_KEY }}
           MURMUR_INFERENCE_LLM_KEY: ${{ secrets.MURMUR_INFERENCE_LLM_KEY }}
+          EPHEMERIS_ANTHROPIC_API_KEY: ${{ secrets.EPHEMERIS_ANTHROPIC_API_KEY }}
         run: |
           printf '%s' "$MURMUR_WORKER_SECRET" | npx wrangler secret put MURMUR_WORKER_SECRET --config wrangler.jsonc
           printf '%s' "$MURMUR_INFERENCE_STT_KEY" | npx wrangler secret put MURMUR_INFERENCE_STT_KEY --config wrangler.jsonc
           printf '%s' "$MURMUR_INFERENCE_LLM_KEY" | npx wrangler secret put MURMUR_INFERENCE_LLM_KEY --config wrangler.jsonc
+          if [ -n "$EPHEMERIS_ANTHROPIC_API_KEY" ]; then
+            printf '%s' "$EPHEMERIS_ANTHROPIC_API_KEY" | npx wrangler secret put EPHEMERIS_ANTHROPIC_API_KEY --config wrangler.jsonc
+          fi
       - name: Deploy
         run: npx wrangler deploy --config wrangler.jsonc

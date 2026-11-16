@@ -14,7 +14,7 @@ on:
         default: ''
   push:
     branches: ['eval/**']
-    paths: ['apps/inference-worker/eval/**', 'packages/backend/convex/lib/**', 'packages/text-engine/src/**', 'apps/inference-worker/wrangler.jsonc', '.github/workflows/stt-eval.yml']
+    paths: ['apps/inference-worker/eval/**', '.github/workflows/**', 'packages/backend/convex/lib/**', 'packages/text-engine/src/**', 'apps/inference-worker/wrangler.jsonc', '.github/workflows/stt-eval.yml']
 
 concurrency:
   group: stt-eval-${{ github.ref }}
@@ -40,7 +40,15 @@ jobs:
         working-directory: packages/backend
       - run: npm ci
         working-directory: apps/inference-worker
+      - name: Latency probe
+        if: startsWith(github.ref_name, 'eval/latency')
+        working-directory: apps/inference-worker
+        env:
+          MURMUR_INFERENCE_STT_KEY: ${{ secrets.MURMUR_INFERENCE_STT_KEY }}
+          MURMUR_INFERENCE_LLM_KEY: ${{ secrets.MURMUR_INFERENCE_LLM_KEY }}
+        run: npx -y tsx@4.19.2 eval/probe.ts /tmp/stt-eval 8
       - name: Eval
+        if: ${{ !startsWith(github.ref_name, 'eval/latency') }}
         working-directory: apps/inference-worker
         env:
           MURMUR_INFERENCE_STT_KEY: ${{ secrets.MURMUR_INFERENCE_STT_KEY }}

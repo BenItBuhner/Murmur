@@ -16,9 +16,10 @@ with `VITE_EPHEMERIS_UPDATE_API_BASE=https://<worker>/<FEED_KEY>` read this feed
 
 `.github/workflows/deploy-ephemeris-updates.yml` deploys on push to main or by hand
 (`gh workflow run deploy-ephemeris-updates.yml -R BenItBuhner/Murmur`), creating the bucket on the
-first run. It needs the `EPHEMERIS_FEED_KEY` and `EPHEMERIS_FEED_PUBLISH_KEY` repository secrets,
-which the publishing machine generates and sets with `gh secret set`, keeping a copy in its own
-untracked `.env`.
+first run, and generates the two keys once (kept in the private bucket at `config/keys.json`). To hand
+them to a publishing machine, run it with `-f recipient_key="$(cat pub.pem)"` (an RSA public key whose
+private half stays on that machine), download the `feed-keys` artifact and decrypt it there
+(RSA-OAEP, SHA-256).
 
 ## Publish a build
 

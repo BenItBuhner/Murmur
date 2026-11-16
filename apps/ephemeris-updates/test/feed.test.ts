@@ -72,6 +72,8 @@ describe('Ephemeris update feed', () => {
     ).toBe(404)
     expect((await req('PUT', `/${KEY}/manifest`, '[]', 'wrong'.repeat(8))).status).toBe(404)
     expect((await req('PUT', `/${KEY}/manifest`, '[]', '')).status).toBe(404)
+    expect((await req('GET', `/${KEY}/dl/config/keys.json`, undefined, '')).status).toBe(404)
+    expect((await req('POST', `/${KEY}/upload/config/keys.json?start`)).status).toBe(404)
     expect(
       (await req('GET', `/${KEY}/repos/BenItBuhner/Ephemeris/releases`, undefined, '')).status
     ).toBe(200)

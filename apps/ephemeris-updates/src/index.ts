@@ -40,6 +40,8 @@ function sameKey(a: string, b: string): boolean {
 }
 
 const SAFE = /^[A-Za-z0-9._-]+$/
+/** Release folders only: never config/ (the keys) or anything else in the bucket. */
+const TAG = /^v\d+\.\d+\.\d+[A-Za-z0-9.-]*$/
 
 export async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
@@ -84,7 +86,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     return Response.json(releases, { headers: { 'Cache-Control': 'no-store' } })
   }
 
-  if (rest.length === 3 && rest[0] === 'dl' && SAFE.test(rest[1]) && SAFE.test(rest[2])) {
+  if (rest.length === 3 && rest[0] === 'dl' && TAG.test(rest[1]) && SAFE.test(rest[2])) {
     const obj = await env.FEED.get(`${rest[1]}/${rest[2]}`)
     if (!obj) return notFound()
     return new Response(request.method === 'HEAD' ? null : obj.body, {
@@ -108,7 +110,7 @@ async function publish(request: Request, env: Env, url: URL, rest: string[]): Pr
     })
     return Response.json({ ok: true, releases: manifest.length })
   }
-  if (rest.length !== 3 || rest[0] !== 'upload' || !SAFE.test(rest[1]) || !SAFE.test(rest[2])) {
+  if (rest.length !== 3 || rest[0] !== 'upload' || !TAG.test(rest[1]) || !SAFE.test(rest[2])) {
     return notFound()
   }
   const objectKey = `${rest[1]}/${rest[2]}`

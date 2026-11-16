@@ -65,7 +65,7 @@ const hooks: GatewayHooks = {
 
 interface Arm {
   name: string
-  run(wav: Uint8Array, clip: Clip): Promise<{ text: string; ms: number; role?: string; hedged?: boolean }>
+  run(wav: Uint8Array, clip: Clip): Promise<{ text: string; ms: number; role?: string; hedged?: boolean; segs?: unknown }>
 }
 
 function form(wav: Uint8Array, fields: Record<string, string | string[]>): FormData {
@@ -95,7 +95,9 @@ async function gateway(wav: Uint8Array, prompt: string | undefined, tier = 'rele
   const ms = performance.now() - started
   if (!res.ok) throw new Error(`gateway ${res.status}: ${body.slice(0, 200)}`)
   const trace = JSON.parse(res.headers.get('x-murmur-trace') ?? '{}') as { role?: string; hedged?: boolean }
-  return { text: (JSON.parse(body) as { text?: string }).text ?? '', ms, role: trace.role, hedged: trace.hedged }
+  const json = JSON.parse(body) as { text?: string; segments?: Array<Record<string, unknown>> }
+  const segs = json.segments?.map((g) => ({ text: g.text, nsp: g.no_speech_prob, lp: g.avg_logprob, cr: g.compression_ratio, s: g.start, e: g.end }))
+  return { text: json.text ?? '', ms, role: trace.role, hedged: trace.hedged, segs }
 }
 
 /** One upstream model on its own, the way the gateway asks it (no hedge, no clean-up). */
@@ -116,12 +118,15 @@ async function direct(wav: Uint8Array, model: string, prompt: string | undefined
   const body = await res.text()
   const ms = performance.now() - started
   if (!res.ok) throw new Error(`${model} ${res.status}: ${body.slice(0, 200)}`)
-  return { text: (JSON.parse(body) as { text?: string }).text ?? '', ms, role: model }
+  const json = JSON.parse(body) as { text?: string; segments?: Array<Record<string, unknown>> }
+  const segs = json.segments?.map((g) => ({ text: g.text, nsp: g.no_speech_prob, lp: g.avg_logprob, cr: g.compression_ratio, s: g.start, e: g.end }))
+  return { text: json.text ?? '', ms, role: model, segs }
 }
 
 const CARRY = 'and that is what I wanted to say about it'
 const arms: Arm[] = [
   { name: 'gateway', run: (w) => gateway(w, STT_BASE_PROMPT) },
+  { name: 'gateway-noprompt', run: (w) => gateway(w, undefined) },
   { name: 'gateway-carry', run: (w) => gateway(w, `${STT_BASE_PROMPT} ${CARRY}`) },
   { name: 'gateway-bg', run: (w) => gateway(w, STT_BASE_PROMPT, 'background') },
   { name: `fast:${env.MURMUR_INFERENCE_STT_FAST_MODEL}`, run: (w) => direct(w, env.MURMUR_INFERENCE_STT_FAST_MODEL!, STT_BASE_PROMPT, false) },
@@ -155,6 +160,7 @@ interface Row {
   hedged?: boolean
   score?: Alignment
   formatted?: { text: string; ms: number; outcome?: string; score: Alignment }
+  segs?: unknown
 }
 
 async function pool<T>(items: T[], n: number, fn: (t: T) => Promise<void>) {
@@ -237,6 +243,13 @@ lines.push('', '### Hedge winners (gateway release)', '')
 const roles = new Map<string, number>()
 for (const r of rows.filter((r) => r.arm === 'gateway' && r.role)) roles.set(`${r.role}${r.hedged ? ' (hedged)' : ''}`, (roles.get(`${r.role}${r.hedged ? ' (hedged)' : ''}`) ?? 0) + 1)
 lines.push([...roles].map(([k, n]) => `${k}: ${n}`).join(', '))
+lines.push('', '### Segment stats on no-speech clips (verbose arms, run 0)', '')
+for (const r of rows.filter((r) => r.kind === 'no-speech' && r.run === 0 && r.segs)) lines.push(`- ${r.arm} ${r.clip}: ${JSON.stringify(r.segs)}`)
+lines.push('', '### Where cleanup changed the words (run 0)', '')
+for (const r of rows.filter((r) => r.arm === 'gateway' && r.run === 0 && r.formatted && r.formatted.score.errors !== r.score!.errors)) {
+  const c = clips.find((c) => c.id === r.clip)!
+  lines.push(`- ${r.clip} (${r.formatted!.outcome}): ref “${c.ref}”`, `  - stt “${r.text}”`, `  - cleanup “${r.formatted!.text}” (inserted: ${r.formatted!.score.inserted.join(' ')})`)
+}
 const errors = rows.filter((r) => r.error).slice(0, 10)
 if (errors.length) lines.push('', '### Errors (first 10)', '', ...errors.map((r) => `- ${r.arm} ${r.clip}: ${r.error}`))
 const report = lines.join('\n')

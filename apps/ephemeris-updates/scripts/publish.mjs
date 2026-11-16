@@ -2,13 +2,13 @@
 // Publish a desktop build to the Ephemeris update feed:
 //   EPHEMERIS_UPDATE_API_BASE=https://<worker>/<FEED_KEY> EPHEMERIS_FEED_PUBLISH_KEY=... \
 //     node scripts/publish.mjs <version> <file> [<file>...] [--notes "text"]
-// Uploads each file under v<version>/ in parts, then adds (or replaces) the release in releases.json.
+// Uploads each file under v<version>/ in 24 MiB chunks, then adds (or replaces) the release in releases.json.
 // Needs Node 18+ and nothing else (no wrangler, no Cloudflare login).
 import { createHash } from 'node:crypto'
 import { openSync, readSync, closeSync, statSync, createReadStream } from 'node:fs'
 import { basename } from 'node:path'
 
-const PART = 50 * 1024 * 1024
+const PART = 24 * 1024 * 1024 // the Worker's MAX_CHUNK (KV caps a value at 25 MiB)
 const args = process.argv.slice(2)
 const notesAt = args.indexOf('--notes')
 const notes = notesAt >= 0 ? args.splice(notesAt, 2)[1] : ''
@@ -53,29 +53,19 @@ for (const file of files) {
   const digest = await sha256(file)
   const path = `upload/${encodeURIComponent(tag)}/${encodeURIComponent(name)}`
   console.log(`uploading ${name} (${size} bytes, sha256 ${digest})`)
-  const { uploadId } = await call('POST', `${path}?start`)
-  const parts = []
   const fd = openSync(file, 'r')
+  let parts = 0
   try {
-    for (let offset = 0, n = 1; offset < size; offset += PART, n++) {
+    for (let offset = 0; offset < size; offset += PART, parts++) {
       const buf = Buffer.alloc(Math.min(PART, size - offset))
       readSync(fd, buf, 0, buf.length, offset)
-      parts.push(
-        await call('PUT', `${path}?uploadId=${encodeURIComponent(uploadId)}&part=${n}`, buf)
-      )
-      console.log(`  part ${n}: ${Math.min(offset + PART, size)} / ${size}`)
+      await call('PUT', `${path}?part=${parts}`, buf)
+      console.log(`  part ${parts}: ${Math.min(offset + PART, size)} / ${size}`)
     }
   } finally {
     closeSync(fd)
   }
-  await call(
-    'POST',
-    `${path}?uploadId=${encodeURIComponent(uploadId)}&complete`,
-    JSON.stringify(parts),
-    {
-      'Content-Type': 'application/json'
-    }
-  )
+  await call('POST', `${path}?complete&parts=${parts}`)
   assets.push({ name, size, sha256: digest })
 }
 

@@ -1,23 +1,24 @@
 /**
- * Ephemeris update feed. Serves, under /<FEED_KEY>/:
+ * Ephemeris update feed (Workers Free + Workers KV). Serves, under /<FEED_KEY>/:
  *   GET repos/<owner>/<name>/releases  the GitHub Releases API shape the desktop updater reads,
- *                                      built from releases.json in the bucket
- *   GET dl/<tag>/<file>                a release asset, streamed from the bucket
+ *                                      built from the `releases` manifest
+ *   GET dl/<tag>/<file>                a release asset, streamed from its KV chunks
  * and, with `Authorization: Bearer <PUBLISH_KEY>` as well, the publishing side (scripts/publish.mjs):
- *   POST upload/<tag>/<file>?start                    begin a multipart upload -> { uploadId }
- *   PUT  upload/<tag>/<file>?uploadId=..&part=<n>     one part (under the 100 MB request limit)
- *   POST upload/<tag>/<file>?uploadId=..&complete     body: [{ partNumber, etag }]
- *   PUT  manifest                                     body: releases.json
+ *   PUT  upload/<tag>/<file>?part=<n>          one chunk, n from 0 (at most 24 MiB: KV's 25 MiB cap)
+ *   POST upload/<tag>/<file>?complete&parts=<k> seal the file once its k chunks are in
+ *   PUT  manifest                               body: the releases list
  * Anything else, and any request without the key, is a 404 (the feed does not admit it exists).
+ * KV keys: `releases`, `meta:<tag>/<file>`, `chunk:<tag>/<file>:<n>`; `config:*` (the deploy's own
+ * copy of the keys) is never read or written here.
  */
 
 export interface Env {
-  FEED: R2Bucket
+  FEED: KVNamespace
   FEED_KEY: string
   PUBLISH_KEY: string
 }
 
-/** One entry of releases.json, as scripts/publish.mjs writes it. */
+/** One entry of the manifest, as scripts/publish.mjs writes it. */
 interface ManifestRelease {
   tag_name: string
   name?: string
@@ -27,6 +28,13 @@ interface ManifestRelease {
   html_url?: string
   assets: { name: string; size: number; sha256: string }[]
 }
+
+interface AssetMeta {
+  parts: number
+  size: number
+}
+
+export const MAX_CHUNK = 24 * 1024 * 1024
 
 const notFound = (): Response => new Response('Not found', { status: 404 })
 
@@ -39,11 +47,14 @@ function sameKey(a: string, b: string): boolean {
   return diff === 0
 }
 
-const SAFE = /^[A-Za-z0-9._-]+$/
-/** Release folders only: never config/ (the keys) or anything else in the bucket. */
+const FILE = /^[A-Za-z0-9._-]+$/
 const TAG = /^v\d+\.\d+\.\d+[A-Za-z0-9.-]*$/
 
-export async function handle(request: Request, env: Env): Promise<Response> {
+export async function handle(
+  request: Request,
+  env: Env,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>
+): Promise<Response> {
   const url = new URL(request.url)
   const [key, ...rest] = url.pathname.split('/').filter(Boolean)
   if (!env.FEED_KEY || env.FEED_KEY.length < 24 || !key || !sameKey(key, env.FEED_KEY)) {
@@ -65,8 +76,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') return notFound()
 
   if (rest.length === 4 && rest[0] === 'repos' && rest[3] === 'releases') {
-    const obj = await env.FEED.get('releases.json')
-    const manifest = obj ? ((await obj.json()) as ManifestRelease[]) : []
+    const manifest = (await env.FEED.get<ManifestRelease[]>('releases', 'json')) ?? []
     const releases = manifest.map((r, i) => ({
       id: i + 1,
       tag_name: r.tag_name,
@@ -86,17 +96,32 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     return Response.json(releases, { headers: { 'Cache-Control': 'no-store' } })
   }
 
-  if (rest.length === 3 && rest[0] === 'dl' && TAG.test(rest[1]) && SAFE.test(rest[2])) {
-    const obj = await env.FEED.get(`${rest[1]}/${rest[2]}`)
-    if (!obj) return notFound()
-    return new Response(request.method === 'HEAD' ? null : obj.body, {
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': String(obj.size),
-        'Content-Disposition': `attachment; filename="${rest[2]}"`,
-        'Cache-Control': 'private, no-store'
+  if (rest.length === 3 && rest[0] === 'dl' && TAG.test(rest[1]) && FILE.test(rest[2])) {
+    const id = `${rest[1]}/${rest[2]}`
+    const meta = await env.FEED.get<AssetMeta>(`meta:${id}`, 'json')
+    if (!meta) return notFound()
+    const headers = {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(meta.size),
+      'Content-Disposition': `attachment; filename="${rest[2]}"`,
+      'Cache-Control': 'private, no-store'
+    }
+    if (request.method === 'HEAD') return new Response(null, { headers })
+    // FixedLengthStream lets the runtime send Content-Length; plain streams elsewhere (tests).
+    const { readable, writable } =
+      typeof FixedLengthStream === 'function'
+        ? new FixedLengthStream(meta.size)
+        : new TransformStream<Uint8Array, Uint8Array>()
+    const pump = async (): Promise<void> => {
+      for (let n = 0; n < meta.parts; n++) {
+        const chunk = await env.FEED.get(`chunk:${id}:${n}`, 'stream')
+        if (!chunk) throw new Error(`missing chunk ${n} of ${id}`)
+        await chunk.pipeTo(writable, { preventClose: n < meta.parts - 1 })
       }
-    })
+    }
+    const pumping = pump().catch((err) => writable.abort(err))
+    ctx?.waitUntil(pumping)
+    return new Response(readable, { headers })
   }
   return notFound()
 }
@@ -105,33 +130,41 @@ async function publish(request: Request, env: Env, url: URL, rest: string[]): Pr
   if (request.method === 'PUT' && rest.length === 1 && rest[0] === 'manifest') {
     const manifest = (await request.json()) as ManifestRelease[]
     if (!Array.isArray(manifest)) return new Response('manifest must be an array', { status: 400 })
-    await env.FEED.put('releases.json', JSON.stringify(manifest), {
-      httpMetadata: { contentType: 'application/json' }
-    })
+    await env.FEED.put('releases', JSON.stringify(manifest))
     return Response.json({ ok: true, releases: manifest.length })
   }
-  if (rest.length !== 3 || rest[0] !== 'upload' || !TAG.test(rest[1]) || !SAFE.test(rest[2])) {
+  if (rest.length !== 3 || rest[0] !== 'upload' || !TAG.test(rest[1]) || !FILE.test(rest[2])) {
     return notFound()
   }
-  const objectKey = `${rest[1]}/${rest[2]}`
+  const id = `${rest[1]}/${rest[2]}`
   const q = url.searchParams
-  if (request.method === 'POST' && q.has('start')) {
-    const upload = await env.FEED.createMultipartUpload(objectKey)
-    return Response.json({ uploadId: upload.uploadId })
-  }
-  const uploadId = q.get('uploadId')
-  if (!uploadId) return new Response('uploadId required', { status: 400 })
-  const upload = env.FEED.resumeMultipartUpload(objectKey, uploadId)
-  if (request.method === 'PUT' && q.has('part') && request.body) {
-    const part = await upload.uploadPart(Number(q.get('part')), request.body)
-    return Response.json(part)
+  if (request.method === 'PUT' && q.has('part')) {
+    const n = Number(q.get('part'))
+    if (!Number.isInteger(n) || n < 0 || n > 64) return new Response('bad part', { status: 400 })
+    const body = await request.arrayBuffer()
+    if (body.byteLength === 0 || body.byteLength > MAX_CHUNK) {
+      return new Response(`a part is 1 byte to ${MAX_CHUNK} bytes`, { status: 413 })
+    }
+    await env.FEED.put(`chunk:${id}:${n}`, body)
+    return Response.json({ part: n, size: body.byteLength })
   }
   if (request.method === 'POST' && q.has('complete')) {
-    const parts = (await request.json()) as R2UploadedPart[]
-    const obj = await upload.complete(parts)
-    return Response.json({ key: obj.key, size: obj.size })
+    const parts = Number(q.get('parts'))
+    if (!Number.isInteger(parts) || parts < 1 || parts > 65) {
+      return new Response('bad parts', { status: 400 })
+    }
+    let size = 0
+    for (let n = 0; n < parts; n++) {
+      const chunk = await env.FEED.get(`chunk:${id}:${n}`, 'arrayBuffer')
+      if (!chunk) return new Response(`part ${n} is missing`, { status: 409 })
+      size += chunk.byteLength
+    }
+    await env.FEED.put(`meta:${id}`, JSON.stringify({ parts, size } satisfies AssetMeta))
+    return Response.json({ id, parts, size })
   }
   return new Response('bad request', { status: 400 })
 }
 
-export default { fetch: handle } satisfies ExportedHandler<Env>
+export default {
+  fetch: (request, env, ctx) => handle(request, env, ctx)
+} satisfies ExportedHandler<Env>

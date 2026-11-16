@@ -1,0 +1,14 @@
+# Veil Pool CI smoke workflow (ephemeral JIT self-hosted runner on pooled compute).
+# NOTE: when a pull_request trigger is added later, a PUBLIC repo must exclude fork PRs
+# (e.g. job-level `if: github.event.pull_request.head.repo.full_name == github.repository`)
+# so untrusted fork code never runs on self-hosted veil-pool runners.
+name: veil-pool-ci
+on:
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: [self-hosted, veil-pool]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: uname -a && echo "veil-pool CI OK on $GITHUB_REPOSITORY @ $GITHUB_SHA"

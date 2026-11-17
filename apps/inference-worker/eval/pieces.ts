@@ -28,7 +28,13 @@ const hooks = {
 } as unknown as GatewayHooks
 const PIECE_NOTE = 'This transcript is one part of a longer dictation and may stop mid-sentence; if it does, leave the end unpunctuated.'
 
-async function stt(wav: Uint8Array, prompt: string, tier: string) {
+let failures = 0
+async function stt(wav: Uint8Array, prompt: string, tier: string): Promise<string> {
+  for (let i = 0; ; i++) {
+    try { return await sttOnce(wav, prompt, tier) } catch (e) { failures++; if (i >= 3) throw e; await new Promise((r) => setTimeout(r, 2000 * (i + 1))) }
+  }
+}
+async function sttOnce(wav: Uint8Array, prompt: string, tier: string) {
   const f = new FormData()
   f.append('file', new Blob([wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
   const fields: Record<string, string> = { model: 'murmur-transcribe', response_format: 'verbose_json', temperature: '0', speed: 'normal', prompt }
@@ -82,7 +88,7 @@ await Promise.all(groups.map(async (g, gi) => {
     if (a.deletions > 2) worst.push(`- group ${gi} run ${r}: ${a.deletions} words lost (dedupe ${joinedRaw.deduped})\n  - ref: ${ref}\n  - raw pieces: ${rawT.map((t) => `«${t}»`).join(' ')}\n  - formatted: ${fm.map((f) => `«${f.text}» (${f.outcome})`).join(' ')}\n  - final: ${final}`)
   }
 }))
-let md = `## Streamed pieces (${groups.length} dictations of 3 pieces, ${runs} runs)\n\n| stage | WER | deleted / 100 ref |\n|---|---|---|\n`
+let md = `## Streamed pieces (${groups.length} dictations of 3 pieces, ${runs} runs, ${failures} speech calls failed and were retried)\n\n| stage | WER | deleted / 100 ref |\n|---|---|---|\n`
 for (const s of stages) md += `| ${s} | ${((100 * tot[s].e) / tot[s].n).toFixed(1)}% | ${((100 * tot[s].d) / tot[s].n).toFixed(2)} |\n`
 md += `\n### Dictations that lost words\n\n${worst.join('\n') || 'none'}\n`
 console.log(md)

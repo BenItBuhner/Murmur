@@ -95,7 +95,8 @@ await Promise.all(groups.map(async (g, gi) => {
     // The same audio as one clip.
     const whole = wavOf(wavs.map((w) => wavPcm16(w)!.samples))
     const w = await stt(whole, STT_BASE_PROMPT, 'release')
-    add('whole raw', ref, w)
+    const wa = add('whole raw', ref, w)
+    if (wa.deletions > 2) worst.push(`- group ${gi} run ${r} WHOLE: ${wa.deletions} words lost (${(whole.length / 32000).toFixed(1)} s)\n  - ref: ${ref}\n  - got: ${w}`)
     add('whole formatted', ref, (await fmt(w, undefined, true)).text)
     if (a.deletions > 2) worst.push(`- group ${gi} run ${r}: ${a.deletions} words lost (dedupe ${joinedRaw.deduped})\n  - ref: ${ref}\n  - raw pieces: ${rawT.map((t) => `«${t}»`).join(' ')}\n  - formatted: ${fm.map((f) => `«${f.text}» (${f.outcome})`).join(' ')}\n  - final: ${final}`)
   }

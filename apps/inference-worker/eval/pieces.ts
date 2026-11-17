@@ -10,7 +10,22 @@ import { join, resolve } from 'node:path'
 import { handleFormat, handleTranscriptions, type GatewayHooks } from '../../../packages/backend/convex/lib/gatewayCore'
 import { STT_BASE_PROMPT } from '../../../packages/text-engine/src/dictionary'
 import { joinPieces, rawSeamContinues, seamContext, stripEcho } from '../../../packages/text-engine/src/seam'
+import { wavPcm16 } from '../../../packages/text-engine/src/no-speech'
 import { align } from './score'
+
+/** One 16 kHz mono 16-bit WAV of the clips in a row (their own headers vary: ffmpeg adds LIST). */
+function wavOf(parts: Int16Array[]): Uint8Array {
+  const n = parts.reduce((s, p) => s + p.length, 0)
+  const out = new Uint8Array(44 + n * 2)
+  const v = new DataView(out.buffer)
+  const tag = (o: number, t: string) => { for (let i = 0; i < 4; i++) out[o + i] = t.charCodeAt(i) }
+  tag(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); tag(8, 'WAVE'); tag(12, 'fmt ')
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 16000, true)
+  v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); tag(36, 'data'); v.setUint32(40, n * 2, true)
+  let o = 44
+  for (const p of parts) for (const x of p) { v.setInt16(o, x, true); o += 2 }
+  return out
+}
 
 const dir = resolve(process.argv[2] ?? '/tmp/stt-eval')
 const runs = Number(process.argv[3] ?? 2)
@@ -78,10 +93,7 @@ await Promise.all(groups.map(async (g, gi) => {
     const final = joinPieces(stripped, cont).text
     const a = add('formatted + stripEcho joined', ref, final)
     // The same audio as one clip.
-    const pcm = wavs.map((w) => w.subarray(44))
-    const len = pcm.reduce((s, p) => s + p.length, 0)
-    const whole = new Uint8Array(44 + len); whole.set(wavs[0].subarray(0, 44)); let o = 44; for (const p of pcm) { whole.set(p, o); o += p.length }
-    const dv = new DataView(whole.buffer); dv.setUint32(4, 36 + len, true); dv.setUint32(40, len, true)
+    const whole = wavOf(wavs.map((w) => wavPcm16(w)!.samples))
     const w = await stt(whole, STT_BASE_PROMPT, 'release')
     add('whole raw', ref, w)
     add('whole formatted', ref, (await fmt(w, undefined, true)).text)

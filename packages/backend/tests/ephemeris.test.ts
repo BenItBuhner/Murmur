@@ -237,6 +237,47 @@ describe('sync', () => {
     expect(edit.accepted).toBe(1)
   })
 
+  it('accepts a conversations row and returns it, then a delete', async () => {
+    const { ana, personal } = await setup()
+    // Same shape the desktop sync sends: the SQLite row, JSON-encoded. The transcript is text.
+    const row = {
+      id: 'cv_e2e_conversations',
+      title: 'Sync check',
+      status: 'idle',
+      origin: 'chat',
+      transcript: JSON.stringify([{ kind: 'user', text: 'hello', at: '2026-11-16T00:00:00.000Z' }]),
+      created_at: '2026-11-16T00:00:00.000Z',
+      updated_at: '2026-11-16T00:00:01.000Z'
+    }
+    const pushed = await ana.mutation(api.ephemeris.sync.push, {
+      workspaceId: personal,
+      deviceId: 'desktop',
+      changes: [change(row.id, 1_700_000_000_000, row, 'conversations')]
+    })
+    expect(pushed).toMatchObject({ accepted: 1, stale: [], refused: [] })
+
+    const pulled = await ana.query(api.ephemeris.sync.pull, { workspaceId: personal, after: 0 })
+    expect(pulled.changes).toEqual([
+      expect.objectContaining({
+        table: 'conversations',
+        recordId: row.id,
+        deviceId: 'desktop',
+        version: 1_700_000_000_000,
+        data: JSON.stringify(row)
+      })
+    ])
+
+    const deleted = await ana.mutation(api.ephemeris.sync.push, {
+      workspaceId: personal,
+      deviceId: 'desktop',
+      changes: [change(row.id, 1_700_000_000_001, null, 'conversations')]
+    })
+    expect(deleted).toMatchObject({ accepted: 1, refused: [] })
+    const after = await ana.query(api.ephemeris.sync.pull, { workspaceId: personal, after: pulled.cursor })
+    expect(after.changes).toEqual([expect.objectContaining({ table: 'conversations', recordId: row.id, data: null })])
+    expect(await ana.query(api.ephemeris.sync.status, { workspaceId: personal })).toMatchObject({ records: 0 })
+  })
+
   it('shares a team workspace between its members', async () => {
     const { t, ana } = await setup()
     const team = await ana.mutation(api.ephemeris.workspaces.createTeam, { name: 'Acme' })

@@ -6,7 +6,7 @@ import { dropSilentSegments } from '../../../text-engine/src/hallucination'
 import { stripPromptEcho } from '../../../text-engine/src/prompt-echo'
 import { dropNoSpeechAnswer } from '../../../text-engine/src/no-speech'
 import { sttLanguageField } from '../../../text-engine/src/languages'
-import { joinSeam } from '../../../text-engine/src/seam'
+import { joinPieces, joinSeam, stripEcho } from '../../../text-engine/src/seam'
 import { layoutText, wantsLayout, type LayoutResult } from '../../../text-engine/src/layout'
 import { countWords } from '../../../text-engine/src/text'
 import type { AppCategory, ChatMessage, ChatOptions, ChatResult, FormatContext, Layout } from '../../../text-engine/src/types'
@@ -1043,6 +1043,11 @@ export const SHORT_TAIL_WORDS = 6
  *   prefix   text the tail continues (the already-formatted last sentence of the tail speculation);
  *            the transcript is seam-joined onto it before formatting
  *   format   JSON: the `/v1/format` request without `transcript` (its `context`); absent: no formatting
+ *   join     JSON `{ parts, continues, strip? }`: the pieces formatted while recording. With a
+ *            `format.finish`, the formatted tail (its copy of `strip` removed) is joined after them
+ *            as joinPieces(parts + tail, continues) and the whole text finished: `whole` in the
+ *            answer, so a streamed dictation needs no separate `/v1/finish` trip. The client uses
+ *            it only when `whole.joined` is the text it would have finished itself.
  *
  * Answers `{ stt, transcript, format, rules }`: the speech answer as `/v1/audio/transcriptions`
  * gives it, the text that was formatted, the `/v1/format` answer (null without `format`), and
@@ -1093,6 +1098,7 @@ export async function handleDictateRelease(
   let format: unknown = null
   let rules = false
   let finished: unknown = null
+  let whole: unknown = null
   if (formatRaw && transcript) {
     let fmt: Record<string, unknown>
     try {
@@ -1131,6 +1137,7 @@ export async function handleDictateRelease(
       format = res.ok ? await res.json() : null
     }
     finishFormat()
+    whole = finishWhole(fields.join?.[0], format, finishReq, fmtCtx.ok ? fmtCtx.request.context : null)
   }
   const totalMs = Date.now() - started
   console.log(
@@ -1144,7 +1151,33 @@ export async function handleDictateRelease(
   }
   // Where the release's time went, for the client's per-dictation diagnostics.
   const timing = { sttMs, formatMs: totalMs - sttMs, totalMs, stt: sttTrace }
-  return new Response(JSON.stringify({ stt, transcript, format, rules, timing, ...(finished ? { finished } : {}) }), { status: 200, headers })
+  return new Response(JSON.stringify({ stt, transcript, format, rules, timing, ...(finished ? { finished } : {}), ...(whole ? { whole } : {}) }), { status: 200, headers })
+}
+
+/**
+ * The whole streamed dictation finished in the release call (see `join` on handleDictateRelease):
+ * null when the client sent no join, asked for no finish, or the tail has no formatted text.
+ */
+export function finishWhole(
+  joinRaw: string | undefined,
+  format: unknown,
+  finishReq: FinishRequest | null,
+  context: FormatContext | null
+): ({ joined: string } & ReturnType<typeof finishOnServer>) | null {
+  if (!joinRaw || !finishReq || !context) return null
+  const tail = (format as { text?: unknown } | null)?.text
+  if (typeof tail !== 'string') return null
+  let join: { parts?: unknown; continues?: unknown; strip?: unknown }
+  try {
+    join = JSON.parse(joinRaw) as typeof join
+  } catch {
+    return null
+  }
+  if (!Array.isArray(join.parts) || !join.parts.every((p) => typeof p === 'string')) return null
+  const continues = Array.isArray(join.continues) ? join.continues.map((c) => c === true) : []
+  const last = typeof join.strip === 'string' && join.strip ? stripEcho(tail, join.strip) : tail
+  const joined = joinPieces([...(join.parts as string[]), last], continues).text
+  return { joined, ...finishOnServer(joined, context, finishReq) }
 }
 
 /**

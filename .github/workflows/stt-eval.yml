@@ -12,6 +12,9 @@ on:
       arms:
         description: Comma-separated arm prefixes (empty = all)
         default: ''
+      script:
+        description: Eval script (run = clips, pieces = streamed long dictations)
+        default: 'run'
   push:
     branches: ['eval/**']
     paths: ['apps/inference-worker/eval/**', 'packages/backend/convex/lib/**', 'packages/text-engine/src/**', 'apps/inference-worker/wrangler.jsonc', '.github/workflows/stt-eval.yml']
@@ -46,7 +49,7 @@ jobs:
           MURMUR_INFERENCE_STT_KEY: ${{ secrets.MURMUR_INFERENCE_STT_KEY }}
           MURMUR_INFERENCE_LLM_KEY: ${{ secrets.MURMUR_INFERENCE_LLM_KEY }}
           STT_EVAL_ARMS: ${{ inputs.arms }}
-        run: npx -y tsx@4.19.2 eval/run.ts /tmp/stt-eval ${{ inputs.runs || '5' }} ${{ github.sha }} 2>&1 | grep -v '^\[gateway\]'
+        run: npx -y tsx@4.19.2 eval/${{ inputs.script || 'run' }}.ts /tmp/stt-eval ${{ inputs.runs || '5' }} ${{ github.sha }} 2>&1 | grep -v '^\[gateway\]'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

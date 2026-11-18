@@ -219,6 +219,28 @@ describe('one-call release and prewarm', () => {
     expect(body.finished?.stages).toContain('snippets')
   })
 
+  it('joins the pieces formatted while recording and finishes the whole dictation in the release', async () => {
+    const auth = `Bearer ${await token({})}`
+    const format = { context: { category: 'chat' }, finish: { trailingSpace: true, snippets: [{ trigger: 'world', content: 'everyone' }] } }
+    const join = { parts: ['I wanted to say', 'and then'], continues: [true, true] }
+    const res = await handle(await releaseRequest(auth, { format: JSON.stringify(format), join: JSON.stringify(join) }), env, ctx, fetcher)
+    const body = (await res.json()) as { format: { text: string }; whole?: { joined: string; text: string } }
+    expect(body.whole?.joined.toLowerCase()).toContain('i wanted to say')
+    expect(body.whole?.joined.toLowerCase()).toContain('hello there world')
+    expect(body.whole?.text.toLowerCase()).toContain('hello there everyone')
+    expect(body.whole?.text.endsWith(' ')).toBe(true)
+  })
+
+  it('answers without a whole text when no join is sent or it is malformed', async () => {
+    const auth = `Bearer ${await token({})}`
+    const format = { context: {}, finish: { trailingSpace: false } }
+    const extras: Record<string, string>[] = [{}, { join: 'not json' }, { join: JSON.stringify({ parts: [1] }) }]
+    for (const extra of extras) {
+      const res = await handle(await releaseRequest(auth, { format: JSON.stringify(format), ...extra }), env, ctx, fetcher)
+      expect(((await res.json()) as { whole?: unknown }).whole).toBeUndefined()
+    }
+  })
+
   it('finishes a text on its own at /v1/finish, and only for a signed-in caller', async () => {
     const auth = `Bearer ${await token({})}`
     const body = JSON.stringify({ text: 'Say hi to the team world', context: { category: 'chat' }, finish: { trailingSpace: false, snippets: [{ trigger: 'world', content: 'everyone' }] } })

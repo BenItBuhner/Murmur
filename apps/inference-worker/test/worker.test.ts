@@ -234,7 +234,8 @@ describe('one-call release and prewarm', () => {
   it('answers without a whole text when no join is sent or it is malformed', async () => {
     const auth = `Bearer ${await token({})}`
     const format = { context: {}, finish: { trailingSpace: false } }
-    for (const extra of [{}, { join: 'not json' }, { join: JSON.stringify({ parts: [1] }) }]) {
+    const extras: Record<string, string>[] = [{}, { join: 'not json' }, { join: JSON.stringify({ parts: [1] }) }]
+    for (const extra of extras) {
       const res = await handle(await releaseRequest(auth, { format: JSON.stringify(format), ...extra }), env, ctx, fetcher)
       expect(((await res.json()) as { whole?: unknown }).whole).toBeUndefined()
     }

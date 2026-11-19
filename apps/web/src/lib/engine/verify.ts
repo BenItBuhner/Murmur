@@ -205,7 +205,8 @@ const DROPPABLE = new Set(
   )
 )
 /** The speaker took something back: the model is right to drop what came before. */
-const TAKEN_BACK = /\b(?:scratch that|never ?mind|forget that|delete that|i meant|no wait|wait no|or rather|make that|correction|start over)\b/i
+const TAKEN_BACK =
+  /\b(?:scratch that|never ?mind|forget that|delete that|i meant|no wait|wait no|or rather|make that|correction|start over)\b/i
 
 /**
  * The longest run of the transcript's content words (in order) that the answer has none of.
@@ -216,9 +217,12 @@ export function droppedRun(transcript: string, text: string): number {
   if (TAKEN_BACK.test(transcript)) return 0
   const key = (w: string): string => w.slice(0, 4)
   const words = (s: string): string[] =>
-    (s.toLowerCase().replace(/[’]/g, "'").match(/\p{L}+(?:'\p{L}+)?/gu) ?? []).filter(
-      (w) => w.length >= 3 && !DROPPABLE.has(w) && !isNumberWord(w)
-    )
+    (
+      s
+        .toLowerCase()
+        .replace(/[’]/g, "'")
+        .match(/\p{L}+(?:'\p{L}+)?/gu) ?? []
+    ).filter((w) => w.length >= 3 && !DROPPABLE.has(w) && !isNumberWord(w))
   const have = new Set(words(text).map(key))
   let run = 0
   let longest = 0
@@ -235,7 +239,7 @@ export function droppedRun(transcript: string, text: string): number {
 export const ADDED_RUN_WORDS = 5
 /** Words a formatter rightly adds: articles, connectives, copulas from grammar fixes. */
 const ADDABLE = new Set(
-  'the and that this then also are was were has have had for with from into its it\'s been being not but because which who will would can could should'.split(
+  "the and that this then also are was were has have had for with from into its it's been being not but because which who will would can could should".split(
     ' '
   )
 )
@@ -248,9 +252,12 @@ const ADDABLE = new Set(
 export function addedRun(transcript: string, text: string): number {
   const key = (w: string): string => w.slice(0, 4)
   const words = (s: string): string[] =>
-    (s.toLowerCase().replace(/[’]/g, "'").match(/\p{L}+(?:'\p{L}+)?/gu) ?? []).filter(
-      (w) => w.length >= 3 && !isNumberWord(w)
-    )
+    (
+      s
+        .toLowerCase()
+        .replace(/[’]/g, "'")
+        .match(/\p{L}+(?:'\p{L}+)?/gu) ?? []
+    ).filter((w) => w.length >= 3 && !isNumberWord(w))
   const have = new Set(words(transcript).map(key))
   let run = 0
   let longest = 0
@@ -265,13 +272,43 @@ export function addedRun(transcript: string, text: string): number {
  * Four-word runs of the text before the cursor that the answer has and the transcript does not:
  * the model copied the context (a heading, the previous piece) into its answer.
  */
-export function copiedContext(transcript: string, text: string, preceding: string, n = 4): string[] {
+export function copiedContext(
+  transcript: string,
+  text: string,
+  preceding: string,
+  n = 4
+): string[] {
   const before = runCounts(runWords(preceding), n)
   const said = runCounts(runWords(transcript), n)
   const out: string[] = []
   for (const k of runCounts(runWords(text), n).keys())
     if (before.has(k) && !said.has(k)) out.push(k)
   return out
+}
+
+/**
+ * The answer with the sentences it copied from before the cursor taken out: a sentence goes when
+ * most of its words sit in runs the preceding text has and the transcript does not. The rest of
+ * the cleanup is kept (it used to be thrown away whole, costing a second round trip).
+ */
+export function stripCopiedContext(
+  transcript: string,
+  text: string,
+  preceding: string,
+  n = 4
+): string {
+  const copied = new Set(copiedContext(transcript, text, preceding, n))
+  if (!copied.size) return text
+  const sentences = text.match(/[^.!?\n]+(?:[.!?]+["')\]]*|$)\s*|\n+/g) ?? [text]
+  const kept = sentences.filter((sentence) => {
+    const w = runWords(sentence)
+    if (w.length === 0) return true
+    const covered = new Array<boolean>(w.length).fill(false)
+    for (let i = 0; i + n <= w.length; i++)
+      if (copied.has(w.slice(i, i + n).join(' '))) for (let j = i; j < i + n; j++) covered[j] = true
+    return covered.filter(Boolean).length / w.length < 0.6
+  })
+  return kept.join('').trim()
 }
 
 // ---- repetition and layout ------------------------------------------------------------------
@@ -350,7 +387,8 @@ export function repairOutput(
 }
 
 /** The pronoun "i" alone or in a contraction, but not "i.e." or part of a longer word. */
-const LOWER_I = /(?<![\p{L}\p{N}'’._@/\\-])i(?=(?:['’](?:m|ll|ve|d))?(?![\p{L}\p{N}'’_@/\\-])(?!\.\p{L}))/gu
+const LOWER_I =
+  /(?<![\p{L}\p{N}'’._@/\\-])i(?=(?:['’](?:m|ll|ve|d))?(?![\p{L}\p{N}'’_@/\\-])(?!\.\p{L}))/gu
 const SENTENCE_LOWER = /([.!?]["')\]]*\s+)(\p{Ll}[\p{L}\p{N}'’-]*)/gu
 
 /**
@@ -374,14 +412,20 @@ export function repairCase(
   if (countWords(before) >= 3 && !/\p{Lu}/u.test(before)) return text
   let out = text
   if (!new RegExp(LOWER_I.source, 'u').test(transcript)) out = out.replace(LOWER_I, 'I')
-  out = out.replace(SENTENCE_LOWER, (m: string, sep: string, word: string, offset: number, whole: string) => {
-    if (/\p{Lu}/u.test(word)) return m
-    const before = whole.slice(0, offset + 1)
-    if (sep.startsWith('.') && (ABBREVIATION.test(before) || /\.\.$/u.test(before) || /\.\p{L}+\.$/u.test(before)))
-      return m
-    if (transcript.includes(`${sep.trim()} ${word}`)) return m
-    return sep + word.charAt(0).toUpperCase() + word.slice(1)
-  })
+  out = out.replace(
+    SENTENCE_LOWER,
+    (m: string, sep: string, word: string, offset: number, whole: string) => {
+      if (/\p{Lu}/u.test(word)) return m
+      const before = whole.slice(0, offset + 1)
+      if (
+        sep.startsWith('.') &&
+        (ABBREVIATION.test(before) || /\.\.$/u.test(before) || /\.\p{L}+\.$/u.test(before))
+      )
+        return m
+      if (transcript.includes(`${sep.trim()} ${word}`)) return m
+      return sep + word.charAt(0).toUpperCase() + word.slice(1)
+    }
+  )
   return out
 }
 

@@ -5,7 +5,13 @@ import { addsParagraphs, resolveLayout } from './profiles'
 import { buildFormatMessages, maxTokensFor } from './prompt'
 import { countWords, isMeaningful } from './text'
 import type { ChatResult, Complete, FormatContext, FormatResult, FormattingMode } from './types'
-import { cleanModelOutput, verifyOutput, repairCase, repairOutput } from './verify'
+import {
+  cleanModelOutput,
+  verifyOutput,
+  repairCase,
+  repairOutput,
+  stripCopiedContext
+} from './verify'
 
 export interface FormatInput {
   /** The transcript as the speech model returned it. */
@@ -167,7 +173,10 @@ export async function formatTranscript(
     return fallback('skipped', `shorter than ${minWords} words`)
   // A short transcript the speech model already punctuated, with nothing in it the model would
   // change, is finished by the rules alone: the same text, no round trip, no tokens.
-  if (alreadyClean(prepared, input.context, { maxWords: input.cleanMaxWords ?? CLEAN_MAX_WORDS }).clean)
+  if (
+    alreadyClean(prepared, input.context, { maxWords: input.cleanMaxWords ?? CLEAN_MAX_WORDS })
+      .clean
+  )
     return fallback('skipped-clean', 'already clean')
 
   const chunkAbove = input.chunkAboveWords ?? CHUNK_ABOVE_WORDS
@@ -204,9 +213,11 @@ export async function formatTranscript(
         firstReason
       )
     }
-    const text = repairOutput(prepared.text, cleanModelOutput(res.text, prepared.text), {
+    const repaired = repairOutput(prepared.text, cleanModelOutput(res.text, prepared.text), {
       paragraphs
     })
+    const preceding = input.context.precedingText
+    const text = preceding ? stripCopiedContext(prepared.text, repaired, preceding) : repaired
     lastModelText = text
     const verdict =
       res.finishReason === 'length'
@@ -224,7 +235,11 @@ export async function formatTranscript(
         modelText: text,
         llmMs: now() - started,
         status: { outcome: 'used', attempts, retriedAfter: firstReason },
-        stages: [...prepared.stages, attempt > 0 ? 'llm-strict' : 'llm', ...(cased !== text ? ['case'] : [])]
+        stages: [
+          ...prepared.stages,
+          attempt > 0 ? 'llm-strict' : 'llm',
+          ...(cased !== text ? ['case'] : [])
+        ]
       }
     }
     const detail =

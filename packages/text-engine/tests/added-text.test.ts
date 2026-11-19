@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addedRun, copiedContext, verifyOutput } from '../src/verify'
+import { addedRun, copiedContext, stripCopiedContext, verifyOutput } from '../src/verify'
 
 // Nov 12 2026: a long dictation into a chat box that already held "## Aggregating All Demo
 // Videos/Concepts We Have Made For Our Projects". The model invented a placeholder line and copied
@@ -37,5 +37,23 @@ describe('text the speaker never said', () => {
     const said = 'we want to aggregate all demo videos for our projects this week'
     const out = 'We want to aggregate all demo videos for our projects this week.'
     expect(verifyOutput(said, out, { precedingText: 'Aggregate all demo videos for our projects' }).ok).toBe(true)
+  })
+})
+
+describe('stripCopiedContext', () => {
+  const preceding = 'Quarterly planning notes for the design team.'
+  const transcript = 'we should ship the new onboarding flow next week'
+  it('drops a sentence copied from before the cursor and keeps the rest', () => {
+    const out = stripCopiedContext(
+      transcript,
+      'Quarterly planning notes for the design team. We should ship the new onboarding flow next week.',
+      preceding
+    )
+    expect(out).toBe('We should ship the new onboarding flow next week.')
+    expect(verifyOutput(transcript, out, { precedingText: preceding }).ok).toBe(true)
+  })
+  it('leaves an answer that copied nothing alone', () => {
+    const t = 'We should ship the new onboarding flow next week.'
+    expect(stripCopiedContext(transcript, t, preceding)).toBe(t)
   })
 })

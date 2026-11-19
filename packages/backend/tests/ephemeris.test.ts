@@ -278,6 +278,33 @@ describe('sync', () => {
     expect(await ana.query(api.ephemeris.sync.status, { workspaceId: personal })).toMatchObject({ records: 0 })
   })
 
+  it('accepts a projects row alongside a mission that points at it', async () => {
+    const { ana, personal } = await setup()
+    const project = {
+      id: 'pj_e2e',
+      title: 'Ephemeris',
+      kind: 'work',
+      priority: 1,
+      status: 'active',
+      context: 'Speed and polish matter most.',
+      keywords: '["ephemeris"]',
+      created_at: '2026-11-19T00:00:00.000Z',
+      updated_at: '2026-11-19T00:00:00.000Z'
+    }
+    const mission = { id: 'm_e2e', project_id: project.id, title: 'Ship desktop 0.2' }
+    const pushed = await ana.mutation(api.ephemeris.sync.push, {
+      workspaceId: personal,
+      deviceId: 'desktop',
+      changes: [
+        change(project.id, 1_700_000_000_000, project, 'projects'),
+        change(mission.id, 1_700_000_000_000, mission, 'missions')
+      ]
+    })
+    expect(pushed).toMatchObject({ accepted: 2, stale: [], refused: [] })
+    const pulled = await ana.query(api.ephemeris.sync.pull, { workspaceId: personal, after: 0 })
+    expect(pulled.changes.map((c: { table: string }) => c.table).sort()).toEqual(['missions', 'projects'])
+  })
+
   it('shares a team workspace between its members', async () => {
     const { t, ana } = await setup()
     const team = await ana.mutation(api.ephemeris.workspaces.createTeam, { name: 'Acme' })

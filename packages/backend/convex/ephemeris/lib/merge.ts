@@ -16,6 +16,8 @@ export function wins(incoming: Stamp, current: Stamp | null): boolean {
 
 /** Tables a device may sync, and nothing else: keeps a client bug from filling a workspace with junk. */
 export const SYNCED_TABLES = [
+  /** Projects that missions live under: kind, priority and the person's context. Synced before missions. */
+  'projects',
   'missions',
   'phases',
   'steps',

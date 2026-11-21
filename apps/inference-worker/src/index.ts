@@ -23,6 +23,7 @@ import {
   type ConvexLink,
   USAGE_FLUSH_MS
 } from './state'
+import { handleTimelineAudio, handleTimelineObject, handleTimelineRefine, sweepTimelineObjects, type TimelineBucket } from './timeline'
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -47,7 +48,8 @@ export interface Env {
   CLERK_JWT_ISSUER_DOMAIN: string
   CONVEX_SITE_URL: string
   MURMUR_WORKER_SECRET: string
-  [key: string]: string | undefined
+  TIMELINE?: TimelineBucket
+  [key: string]: string | TimelineBucket | undefined
 }
 
 interface Ctx {
@@ -56,7 +58,7 @@ interface Ctx {
 
 function hooksFor(env: Env, link: ConvexLink, ctx: Ctx): GatewayHooks {
   return {
-    env,
+    env: env as GatewayHooks['env'],
     access: async (identity) => {
       const grant = await grantFor(link, identity)
       return grant.ok ? grant.planState : 'testing'
@@ -108,6 +110,17 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     ctx.waitUntil(warm(request, env, fetcher))
     return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } })
   }
+  if (path === '/v1/timeline/object' && request.method === 'GET') {
+    if (!env.CLERK_JWT_ISSUER_DOMAIN) return gatewayError(503, 'not_configured', 'This Murmur inference gateway is not configured')
+    let who: Awaited<ReturnType<typeof verifyClerkToken>>
+    try {
+      who = await verifyClerkToken(request.headers.get('authorization'), env.CLERK_JWT_ISSUER_DOMAIN, fetcher)
+    } catch (err) {
+      console.error(`[worker] cannot verify sessions: ${err instanceof Error ? err.message : err}`)
+      return gatewayError(503, 'provider_unavailable', 'Murmur cannot check your session right now; try again shortly')
+    }
+    return await handleTimelineObject(request, env.TIMELINE, who)
+  }
   if (!env.CLERK_JWT_ISSUER_DOMAIN || !env.CONVEX_SITE_URL || !env.MURMUR_WORKER_SECRET)
     return gatewayError(503, 'not_configured', 'This Murmur inference gateway is not configured')
 
@@ -137,6 +150,8 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     if (path === '/v1/messages') return await handleMessages(hooks, identity, request, fetcher)
     if (path === '/v1/dictate/release') return await handleDictateRelease(hooks, identity, request)
     if (path === '/v1/finish') return await handleFinish(hooks, identity, request)
+    if (path === '/v1/timeline/audio') return await handleTimelineAudio(request, env.TIMELINE, link, hooks, identity)
+    if (path === '/v1/timeline/refine') return await handleTimelineRefine(request, env.TIMELINE, link, hooks, identity)
     return gatewayError(404, 'bad_request', 'Not found')
   } catch (err) {
     // grantFor failing means Convex is unreachable: refuse rather than serve without an allowance.
@@ -146,7 +161,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
 }
 
 async function warm(request: Request, env: Env, fetcher: typeof fetch): Promise<void> {
-  const base = (env.MURMUR_INFERENCE_STT_URL ?? '').replace(/\/+$/, '')
+  const base = String(env.MURMUR_INFERENCE_STT_URL ?? '').replace(/\/+$/, '')
   const jobs: Promise<unknown>[] = []
   if (base) jobs.push(fetcher(`${base}/models`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.body?.cancel()))
   const auth = request.headers.get('authorization')
@@ -161,6 +176,13 @@ async function warm(request: Request, env: Env, fetcher: typeof fetch): Promise<
   await Promise.allSettled(jobs)
 }
 
+export async function scheduled(_event: unknown, env: Env, ctx: Ctx): Promise<void> {
+  if (!env.TIMELINE || !env.CONVEX_SITE_URL || !env.MURMUR_WORKER_SECRET) return
+  const link: ConvexLink = { siteUrl: env.CONVEX_SITE_URL, secret: env.MURMUR_WORKER_SECRET, fetcher: boundFetch }
+  ctx.waitUntil(sweepTimelineObjects(env.TIMELINE, link))
+}
+
 export default {
-  fetch: (request: Request, env: Env, ctx: Ctx) => handle(request, env, ctx)
+  fetch: (request: Request, env: Env, ctx: Ctx) => handle(request, env, ctx),
+  scheduled
 }

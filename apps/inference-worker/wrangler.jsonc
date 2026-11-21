@@ -1,5 +1,8 @@
-// Murmur's managed inference gateway (see src/index.ts). Fits the Workers Free plan: no bindings,
-// no Durable Objects, no KV. Deployed from main by .github/workflows/deploy-inference-worker.yml;
+// Murmur's managed inference gateway (see src/index.ts). Fits the Workers Free plan: one private
+// R2 bucket for timeline audio (no public access, no Durable Objects, no KV). Deployed from main
+// by .github/workflows/deploy-inference-worker.yml. Creating the bucket requires R2 to be enabled
+// on the account; until that dashboard step is done, a deploy that binds TIMELINE fails and the
+// previous Worker version stays.
 // the public values live here, the secrets (MURMUR_WORKER_SECRET, MURMUR_INFERENCE_STT_KEY,
 // MURMUR_INFERENCE_LLM_KEY) are applied from the repository's Actions secrets by that workflow.
 {
@@ -10,6 +13,10 @@
   "workers_dev": true,
   "minify": true,
   "observability": { "enabled": true },
+  // Private bucket. Objects are read only by this Worker after a Clerk check. No r2.dev domain.
+  "r2_buckets": [{ "binding": "TIMELINE", "bucket_name": "murmur-timeline" }],
+  // Deletes the R2 object for each timeline row Convex has aged out (seven days).
+  "triggers": { "crons": ["17 5 * * *"] },
   "vars": {
     // Same value as CLERK_JWT_ISSUER_DOMAIN in the Convex deployment hardy-fish-542.
     "CLERK_JWT_ISSUER_DOMAIN": "https://clerk.murmur.techlitnow.com",

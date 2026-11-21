@@ -1,6 +1,7 @@
 import { addEphemerisRoutes } from './ephemeris/routes'
 import { httpRouter } from 'convex/server'
 import { internal } from './_generated/api'
+import type { Id } from './_generated/dataModel'
 import { httpAction } from './_generated/server'
 import { stripeWebhook } from './billing'
 import { chatCompletions, format, layout, models, timelineAudio, timelineRefine, transcriptions } from './gateway'
@@ -47,6 +48,80 @@ http.route({
       emailVerified: typeof body.emailVerified === 'boolean' ? body.emailVerified : undefined
     })
     return new Response(JSON.stringify(grant), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
+
+http.route({
+  path: '/worker/timeline',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = workerAuthorized(request, process.env.MURMUR_WORKER_SECRET)
+    if (denied) return denied
+    const body = (await request.json().catch(() => null)) as {
+      clerkId?: string
+      objectKey?: string
+      chunk?: {
+        device: string
+        startedAt: string
+        endedAt: string
+        text: string
+        engine: string
+        rmsDb: number
+        speechRatio: number
+        speakers: number
+        score: number
+        tags: string[]
+      }
+    } | null
+    if (!body?.clerkId || !body.chunk) return new Response('clerkId and chunk are required', { status: 400 })
+    const result = await ctx.runMutation(internal.timeline.store, {
+      clerkId: body.clerkId,
+      chunk: body.chunk,
+      objectKey: body.objectKey
+    })
+    return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
+
+http.route({
+  path: '/worker/timeline/lookup',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = workerAuthorized(request, process.env.MURMUR_WORKER_SECRET)
+    if (denied) return denied
+    const body = (await request.json().catch(() => null)) as { clerkId?: string; device?: string; startedAt?: string } | null
+    if (!body?.clerkId || !body.device || !body.startedAt)
+      return new Response('clerkId, device and startedAt are required', { status: 400 })
+    const row = await ctx.runQuery(internal.timeline.forRefine, {
+      clerkId: body.clerkId,
+      device: body.device,
+      startedAt: body.startedAt
+    })
+    return new Response(JSON.stringify(row), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
+
+http.route({
+  path: '/worker/timeline/refined',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = workerAuthorized(request, process.env.MURMUR_WORKER_SECRET)
+    if (denied) return denied
+    const body = (await request.json().catch(() => null)) as { id?: Id<'timelineChunks'>; text?: string } | null
+    if (!body?.id || typeof body.text !== 'string') return new Response('id and text are required', { status: 400 })
+    await ctx.runMutation(internal.timeline.saveRefined, { id: body.id, text: body.text })
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
+
+http.route({
+  path: '/worker/timeline/sweep',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = workerAuthorized(request, process.env.MURMUR_WORKER_SECRET)
+    if (denied) return denied
+    const result = await ctx.runMutation(internal.timeline.sweepExpired, {})
+    return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
   })
 })
 

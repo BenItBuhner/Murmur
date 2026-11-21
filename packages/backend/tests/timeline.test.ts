@@ -31,9 +31,9 @@ describe('/v1/timeline/audio', () => {
 
   it('skips silence without transcribing or storing anything', async () => {
     const t = convexTest(schema, modules).withIdentity({ subject: 'user_ana', email: 'ana@acme.com' })
-    const res = await t.fetch(piece, { method: 'POST', body: silentWav(2) })
-    expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ skipped: true })
+    const res = await t.fetch(piece, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: silentWav(2) })
+    expect(res.status).toBe(410)
+    expect(await res.json()).toMatchObject({ error: { code: 'bad_request' } })
     const rows = await t.run((ctx) => ctx.db.query('timelineChunks').collect())
     expect(rows).toHaveLength(0)
   })
@@ -58,9 +58,9 @@ describe('/v1/timeline/audio', () => {
       })
       return stored
     })
-    expect(await t.mutation(internal.timeline.sweepExpired, {})).toEqual({ removed: 0, more: false })
+    expect(await t.mutation(internal.timeline.sweepExpired, {})).toEqual({ removed: 0, more: false, objectKeys: [] })
     const expired = await t.mutation(internal.timeline.sweepExpired, { now: Date.now() + 8 * 86_400_000 })
-    expect(expired).toEqual({ removed: 1, more: false })
+    expect(expired).toEqual({ removed: 1, more: false, objectKeys: [] })
     const left = await t.run(async (ctx) => ({
       rows: (await ctx.db.query('timelineChunks').collect()).length,
       audio: await ctx.storage.get(audio)

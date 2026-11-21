@@ -9,8 +9,8 @@ import {
   type Gate,
   type GatewayHooks
 } from './lib/gatewayCore'
-import { MURMUR_MODELS, gatewayError, identityOf, type GatewayIdentity } from './lib/inference'
-import { audioStats, readWav, scorePiece } from './lib/timelineAudio'
+import { gatewayError, identityOf, type GatewayIdentity } from './lib/inference'
+import { scorePiece } from './lib/timelineAudio'
 import type { Id } from './_generated/dataModel'
 
 /**
@@ -95,44 +95,31 @@ export const timelineAudio = httpAction(async (ctx, request) => {
   const endedAt = url.searchParams.get('endedAt') ?? ''
   if (!device || !startedAt || !endedAt)
     return gatewayError(400, 'bad_request', 'device, startedAt and endedAt are required')
-  const bytes = new Uint8Array(await request.arrayBuffer())
-  const wav = readWav(bytes)
-  if (!wav) return gatewayError(400, 'bad_request', 'Send the piece as a 16-bit PCM WAV')
-  const stats = audioStats(wav.pcm, wav.rate)
-  const seconds = wav.pcm.length / wav.rate
   const json = (body: unknown): Response =>
     new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
-  if (stats.speechRatio < 0.02) return json({ skipped: true, ...stats })
-  const sttUrl = new URL(request.url)
-  sttUrl.search = new URLSearchParams({ model: MURMUR_MODELS.stt }).toString()
-  const res = await handleTranscriptions(
-    convexHooks(ctx),
-    identity,
-    new Request(sttUrl, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: bytes })
-  )
-  if (!res.ok) return res
-  const text = String(((await res.json()) as { text?: string }).text ?? '').trim()
-  const { score, tags } = scorePiece({ text, seconds, ...stats })
-  if (text) {
-    // The audio is kept (a week) so a careful transcript can be made later without the device.
-    const audio = await ctx.storage.store(new Blob([bytes], { type: 'audio/wav' }))
+  // Words a device already drafted. Text only: no wav is read and nothing is written to file storage.
+  if (/^application\/json/i.test(request.headers.get('content-type') ?? '')) {
+    const body = (await request.json().catch(() => null)) as { text?: unknown; rmsDb?: unknown; speechRatio?: unknown } | null
+    const num = (value: unknown, fallback: number): number =>
+      typeof value === 'number' && Number.isFinite(value) ? value : fallback
+    const stats = { rmsDb: num(body?.rmsDb, -60), speechRatio: num(body?.speechRatio, 0) }
+    const text = (typeof body?.text === 'string' ? body.text : '').trim().slice(0, 4000)
+    if (!text) return json({ skipped: true, ...stats })
+    const seconds = Math.max(1, (Date.parse(endedAt) - Date.parse(startedAt)) / 1000 || 1)
+    const { score, tags } = scorePiece({ text, seconds, ...stats })
     await ctx.runMutation(internal.timeline.store, {
       clerkId: identity.subject,
-      chunk: {
-        device,
-        startedAt,
-        endedAt,
-        text,
-        engine: 'server',
-        ...stats,
-        speakers: 0,
-        score,
-        tags
-      },
-      audio
+      chunk: { device, startedAt, endedAt, text, engine: 'local', ...stats, speakers: 0, score, tags }
     })
+    return json({ skipped: false, text, score, tags, ...stats })
   }
-  return json({ skipped: false, text, score, tags, ...stats })
+  // Audio bytes used to land in Convex file storage and leave through file egress. They now go to
+  // the inference Worker, which writes R2. This route does not read the body.
+  return gatewayError(
+    410,
+    'bad_request',
+    'Send timeline audio to the inference worker POST /v1/timeline/audio. Convex no longer stores the wav.'
+  )
 })
 
 /**
@@ -155,24 +142,10 @@ export const timelineRefine = httpAction(async (ctx, request) => {
     new Response(JSON.stringify(b), { headers: { 'content-type': 'application/json' } })
   if (!row) return gatewayError(404, 'bad_request', 'No such piece, or it is past the keep window')
   if (row.refinedText != null) return json({ text: row.refinedText, cached: true })
-  const blob = row.audio ? await ctx.storage.get(row.audio) : null
-  if (!blob) return gatewayError(410, 'bad_request', 'This piece has no audio kept')
-  const url = new URL(request.url)
-  url.search = new URLSearchParams({
-    model: MURMUR_MODELS.stt,
-    ...(row.before ? { prompt: row.before.slice(-800) } : {})
-  }).toString()
-  const res = await handleTranscriptions(
-    convexHooks(ctx),
-    identity,
-    new Request(url, {
-      method: 'POST',
-      headers: { 'content-type': 'audio/wav' },
-      body: await blob.arrayBuffer()
-    })
+  // Reading the wav here was file egress. The inference Worker refines from R2.
+  return gatewayError(
+    410,
+    'bad_request',
+    'Ask the inference worker POST /v1/timeline/refine. Convex does not read timeline audio.'
   )
-  if (!res.ok) return res
-  const text = String(((await res.json()) as { text?: string }).text ?? '').trim()
-  await ctx.runMutation(internal.timeline.saveRefined, { id: row.id, text })
-  return json({ text, cached: false })
 })

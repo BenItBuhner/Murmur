@@ -38,9 +38,9 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  *   POST /v1/layout
  *
  * The bearer token is the same Clerk session JWT the apps already send, verified here against
- * Clerk's JWKS. Convex is asked for an account's allowance at most once every two minutes per
- * isolate (/worker/grant) and hears about usage in batches (/worker/usage); the audio and the
- * provider round trips never touch Convex.
+ * Clerk's JWKS. Convex is asked for an account's allowance at most once every five minutes per
+ * colo (/worker/grant, kept in the isolate and in the Cache API) and hears about usage in batches
+ * (/worker/usage); the audio and the provider round trips never touch Convex.
  */
 
 export interface Env {

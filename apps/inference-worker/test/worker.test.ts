@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handle, type Env } from '../src/index'
 import { resetJwksCache, verifyClerkToken } from '../src/clerk'
-import { GRANT_TTL_MS, pendingUsage, queueUsage, resetState } from '../src/state'
+import { GRANT_TTL_MS, grantFor, pendingUsage, queueUsage, resetState, setGrantCache, type Grant } from '../src/state'
 
 const ISSUER = 'https://clerk.example.test'
 const SITE = 'https://convex.example.test'
@@ -97,6 +97,7 @@ beforeEach(() => {
   waits = []
   grant = PRO
   resetState()
+  setGrantCache(null)
   resetJwksCache()
   vi.stubGlobal('fetch', fetcher)
 })
@@ -146,6 +147,7 @@ describe('gateway routes', () => {
     }
     expect(calls.filter((c) => c.url.endsWith('/worker/grant'))).toHaveLength(1)
     expect(calls.filter((c) => c.url.endsWith('/worker/usage'))).toHaveLength(0)
+    expect(GRANT_TTL_MS).toBe(5 * 60_000)
     expect(pendingUsage()).toBe(3)
     const upstream = calls.find((c) => c.url.includes('stt.example.test'))!
     expect((upstream.init?.headers as Record<string, string>).authorization).toBe('Bearer sk-stt')
@@ -166,6 +168,25 @@ describe('gateway routes', () => {
     const denied = await handle(await sttRequest(auth), env, ctx, fetcher)
     expect(denied.status).toBe(429)
     expect(((await denied.json()) as { error: { code: string } }).error.code).toBe('private_testing')
+  })
+
+  it('reuses a grant another isolate cached, without calling Convex again', async () => {
+    const store = new Map<string, { at: number; grant: Grant }>()
+    setGrantCache({
+      async get(subject) {
+        return store.get(subject) ?? null
+      },
+      async set(subject, entry) {
+        store.set(subject, entry)
+      }
+    })
+    const link = { siteUrl: SITE, secret: SECRET, fetcher }
+    const identity = { subject: 'user_ada', email: 'ada@example.com' }
+    await grantFor(link, identity)
+    resetState()
+    await grantFor(link, identity)
+    expect(calls.filter((c) => c.url.endsWith('/worker/grant'))).toHaveLength(1)
+    setGrantCache(null)
   })
 
   it('answers 503 when Convex cannot be reached for the grant', async () => {

@@ -25,8 +25,10 @@ data class EphemerisPushDto(val accepted: Double = 0.0, val refused: List<Epheme
 /**
  * The phone's side of the Ephemeris cloud: the context it captured (screen text, notifications, the app
  * in front) goes to the signed-in account's personal Ephemeris workspace, in the Ephemeris tables of
- * Murmur's Convex deployment (convex/ephemeris, table "context"). The Murmur account signs in; nothing
- * of Murmur's own data is read or written here. Records leave the phone only once the server took them.
+ * Murmur's Convex deployment (convex/ephemeris, table "context"). Text only. Timeline audio is not
+ * uploaded here and must not be posted to Convex; the inference Worker stores those wavs in R2.
+ * The Murmur account signs in; nothing of Murmur's own data is read or written here. Records leave
+ * the phone only once the server took them.
  */
 object EphemerisCloud {
     private const val TAG = "EphemerisCloud"

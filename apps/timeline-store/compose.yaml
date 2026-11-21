@@ -1,0 +1,16 @@
+services:
+  timeline-store:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8788:8788"
+    environment:
+      TIMELINE_STORE_SECRET: ${TIMELINE_STORE_SECRET}
+      TIMELINE_DIR: /data/timeline
+      TIMELINE_MAX_BYTES: ${TIMELINE_MAX_BYTES:-21474836480}
+      PORT: "8788"
+    volumes:
+      - timeline-audio:/data/timeline
+
+volumes:
+  timeline-audio:

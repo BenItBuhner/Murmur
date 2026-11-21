@@ -271,8 +271,13 @@ export default defineSchema({
     /** Server-side value score (0..1) and why: speech, idea. */
     score: v.optional(v.number()),
     tags: v.optional(v.array(v.string())),
-    /** The piece's audio, kept a week so a careful transcript can be made on request. */
+    /**
+     * Legacy Convex file. New audio is not stored here: the bytes live in R2 and `objectKey`
+     * names them. Still set on rows copied by the migration until that copy is verified and deleted.
+     */
     audio: v.optional(v.id('_storage')),
+    /** R2 object key for the wav. Convex stores the key, never the bytes. */
+    objectKey: v.optional(v.string()),
     /** The desktop took the text into its timeline (the row stays for careful transcripts). */
     taken: v.optional(v.boolean()),
     /** The careful transcript, made once on request (/v1/timeline/refine). */
@@ -281,4 +286,5 @@ export default defineSchema({
     .index('by_user', ['userId'])
     .index('by_user_taken', ['userId', 'taken'])
     .index('by_user_device_start', ['userId', 'device', 'startedAt'])
+    .index('by_audio', ['audio'])
 })

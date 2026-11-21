@@ -874,13 +874,16 @@ export class DictationController extends EventEmitter {
       await job.stored
       const error = friendlyError(err)
       const limit = planLimitOf(err)
-      const service = serviceNoticeOf(err)
+      // A Convex outage is not a speech outage. The words stay on this device and sync later.
+      const convexOnly = /convex|worker\/grant/i.test(error)
+      const service = convexOnly ? undefined : serviceNoticeOf(err)
       log.warn(
         `session ${job.id.slice(0, 8)} failed${limit ? ` on plan limit ${limit.limit}` : ''}${service ? ` (Murmur ${service.service} service unavailable: ${service.reason})` : ''}: ${error}`
       )
       this.recordFailure(job, raw, app, timings, resolved, error)
-      this.showError(error, job.recording ? job.id : undefined, limit, service)
-      return { ok: false, error, recorded: true }
+      const shown = convexOnly ? 'Kept on this device. It will sync when the account service is back.' : error
+      this.showError(shown, job.recording ? job.id : undefined, limit, service)
+      return { ok: false, error: shown, recorded: true }
     }
 
     // 1. VAD

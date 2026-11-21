@@ -31,6 +31,8 @@ data class EphemerisPushDto(val accepted: Double = 0.0, val refused: List<Epheme
 object EphemerisCloud {
     private const val TAG = "EphemerisCloud"
     private const val EVERY_MS = 10 * 60_000L
+    /** A plan that is full stays full. Retrying the same batch every ten minutes is how a phone fills Convex. */
+    private const val LIMIT_BACKOFF_MS = 6 * 60 * 60_000L
     private const val BATCH = 100
     const val TABLE = "context"
 
@@ -39,12 +41,18 @@ object EphemerisCloud {
     /** What the last send did, for the Context screen. */
     val last: StateFlow<String?> = _last
 
-    /** Every few minutes while the app runs: send what is waiting. */
+    /** Every few minutes while the app runs: send what is waiting. A full plan waits hours, not minutes. */
     suspend fun run(context: Context) {
         delay(30_000L)
         while (true) {
-            if (ContextCapture.enabled.value) sync(context).onFailure { Log.i(TAG, "context not sent: ${it.message}") }
-            delay(EVERY_MS)
+            var wait = EVERY_MS
+            if (ContextCapture.enabled.value) {
+                sync(context).onFailure { err ->
+                    Log.i(TAG, "context not sent: ${err.message}")
+                    if (err.message.orEmpty().contains("limit", ignoreCase = true)) wait = LIMIT_BACKOFF_MS
+                }
+            }
+            delay(wait)
         }
     }
 

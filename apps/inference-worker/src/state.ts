@@ -26,7 +26,13 @@ export type Grant =
     }
   | { ok: false; denied: 'private_testing' }
 
-export const GRANT_TTL_MS = 120_000
+/**
+ * How long a grant is fresh. Five minutes, not two: a dictation's pieces and the formatting that
+ * follows them share one allowance check, and a limit the account crosses in that window is a few
+ * requests, not a reason to call Convex once per piece. Cloudflare starts a new isolate often
+ * enough that a per-isolate map alone followed the Worker request rate (Nov 19: 19,668 requests).
+ */
+export const GRANT_TTL_MS = 5 * 60_000
 /**
  * Convex gets this long to answer /worker/grant. Oct 15 2026: a grant fetch with no deadline stalled
  * every request of one user in an isolate (they share the in-flight promise) until the phone gave
@@ -56,6 +62,67 @@ export interface ConvexLink {
 
 const grants = new Map<string, { at: number; grant: Grant }>()
 const inflight = new Map<string, Promise<Grant>>()
+
+/** A grant another isolate in this colo already paid Convex for. */
+export interface GrantCache {
+  get(subject: string): Promise<{ at: number; grant: Grant } | null>
+  set(subject: string, entry: { at: number; grant: Grant }): Promise<void>
+}
+
+/**
+ * Cloudflare's Cache API, shared by the isolates of one colo. Tests inject their own; the Worker
+ * uses `caches.default`. Absent outside workerd (unit tests, node), and a cache miss is not fatal.
+ */
+let grantCache: GrantCache | null | undefined
+
+export function setGrantCache(cache: GrantCache | null): void {
+  grantCache = cache
+}
+
+function cacheRequest(subject: string): Request {
+  return new Request(`https://murmur-grant-cache.internal/v1/${encodeURIComponent(subject)}`)
+}
+
+function defaultGrantCache(): GrantCache | null {
+  const cache = (globalThis as { caches?: { default?: Cache } }).caches?.default
+  if (!cache) return null
+  return {
+    async get(subject) {
+      const res = await cache.match(cacheRequest(subject))
+      if (!res) return null
+      return (await res.json()) as { at: number; grant: Grant }
+    },
+    async set(subject, entry) {
+      await cache.put(
+        cacheRequest(subject),
+        new Response(JSON.stringify(entry), {
+          headers: { 'cache-control': `public, max-age=${Math.ceil(GRANT_TTL_MS / 1000)}` }
+        })
+      )
+    }
+  }
+}
+
+async function sharedGrant(subject: string): Promise<{ at: number; grant: Grant } | null> {
+  const cache = grantCache === undefined ? defaultGrantCache() : grantCache
+  if (!cache) return null
+  try {
+    return await cache.get(subject)
+  } catch (err) {
+    console.warn(`[worker] grant cache read failed: ${err instanceof Error ? err.message : err}`)
+    return null
+  }
+}
+
+async function rememberGrant(subject: string, entry: { at: number; grant: Grant }): Promise<void> {
+  const cache = grantCache === undefined ? defaultGrantCache() : grantCache
+  if (!cache) return
+  try {
+    await cache.set(subject, entry)
+  } catch (err) {
+    console.warn(`[worker] grant cache write failed: ${err instanceof Error ? err.message : err}`)
+  }
+}
 const breakers: Record<InferenceKind, BreakerState> = {
   stt: { failures: 0, openUntil: null },
   llm: { failures: 0, openUntil: null }
@@ -83,13 +150,18 @@ async function post(link: ConvexLink, path: string, body: unknown, timeoutMs = 1
   })
 }
 
-/** The account's allowance: cached for GRANT_TTL_MS, one Convex call per account per window. */
+/** The account's allowance: fresh for GRANT_TTL_MS, one Convex call per account per window per colo. */
 export async function grantFor(link: ConvexLink, identity: GatewayIdentity, now = Date.now()): Promise<Grant> {
   const cached = grants.get(identity.subject)
   if (cached && now - cached.at < GRANT_TTL_MS) return cached.grant
   const pending = inflight.get(identity.subject)
   if (pending) return await pending
   const request = (async () => {
+    const shared = await sharedGrant(identity.subject)
+    if (shared && now - shared.at < GRANT_TTL_MS) {
+      grants.set(identity.subject, shared)
+      return shared.grant
+    }
     try {
       const res = await post(
         link,
@@ -99,13 +171,17 @@ export async function grantFor(link: ConvexLink, identity: GatewayIdentity, now 
       )
       if (!res.ok) throw new Error(`Convex /worker/grant answered HTTP ${res.status}`)
       const grant = (await res.json()) as Grant
-      grants.set(identity.subject, { at: now, grant })
+      const entry = { at: now, grant }
+      grants.set(identity.subject, entry)
+      await rememberGrant(identity.subject, entry)
       return grant
     } catch (err) {
       // Convex slow or down: the last allowance it gave (if recent enough and not a denial) stands.
-      if (cached && cached.grant.ok && now - cached.at < GRANT_STALE_MS) {
+      const stale = cached ?? shared
+      if (stale && stale.grant.ok && now - stale.at < GRANT_STALE_MS) {
         console.warn(`[worker] grant refresh failed, using the cached grant: ${err instanceof Error ? err.message : err}`)
-        return cached.grant
+        grants.set(identity.subject, stale)
+        return stale.grant
       }
       throw err
     }

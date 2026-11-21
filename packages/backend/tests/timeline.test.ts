@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from 'convex-test'
 import { describe, expect, it } from 'vitest'
+import { internal } from '../convex/_generated/api'
 import schema from '../convex/schema'
 
 const modules = import.meta.glob('../convex/**/*.ts')
@@ -35,6 +36,37 @@ describe('/v1/timeline/audio', () => {
     expect(await res.json()).toMatchObject({ skipped: true })
     const rows = await t.run((ctx) => ctx.db.query('timelineChunks').collect())
     expect(rows).toHaveLength(0)
+  })
+
+  it('deletes week-old audio even when no desktop has taken it', async () => {
+    const t = convexTest(schema, modules)
+    const audio = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert('users', { clerkId: 'user_ana', createdAt: 1, updatedAt: 1 })
+      const stored = await ctx.storage.store(new Blob([Uint8Array.from([1, 2, 3])], { type: 'audio/wav' }))
+      await ctx.db.insert('timelineChunks', {
+        userId,
+        device: 'd1',
+        startedAt: '2026-11-01T00:00:00Z',
+        endedAt: '2026-11-01T00:00:02Z',
+        text: 'hello',
+        engine: 'server',
+        rmsDb: -20,
+        speechRatio: 0.5,
+        speakers: 0,
+        audio: stored,
+        taken: false
+      })
+      return stored
+    })
+    expect(await t.mutation(internal.timeline.sweepExpired, {})).toEqual({ removed: 0, more: false })
+    const expired = await t.mutation(internal.timeline.sweepExpired, { now: Date.now() + 8 * 86_400_000 })
+    expect(expired).toEqual({ removed: 1, more: false })
+    const left = await t.run(async (ctx) => ({
+      rows: (await ctx.db.query('timelineChunks').collect()).length,
+      audio: await ctx.storage.get(audio)
+    }))
+    expect(left.rows).toBe(0)
+    expect(left.audio).toBeNull()
   })
 
   it('wants the piece described', async () => {

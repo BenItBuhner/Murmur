@@ -1,4 +1,5 @@
 import { v } from 'convex/values'
+import { internal } from './_generated/api'
 import type { Doc, Id } from './_generated/dataModel'
 import { internalMutation, internalQuery, type MutationCtx } from './_generated/server'
 import { authedMutation, authedQuery } from './lib/functions'
@@ -108,6 +109,31 @@ export const store = internalMutation({
       await ctx.db.patch('timelineChunks', existing._id, row)
     } else await ctx.db.insert('timelineChunks', row)
     return null
+  }
+})
+
+const SWEEP_BATCH = 50
+
+/**
+ * Deletes chunks, and their audio, once they are past [KEEP_MS]. `ack` used to be the only sweep,
+ * so a desktop that never picked the timeline up left the wavs in file storage forever. One batch
+ * per run; a backlog schedules the next batch. The text is the same week-long cache as the audio.
+ */
+export const sweepExpired = internalMutation({
+  args: { now: v.optional(v.number()) },
+  returns: v.object({ removed: v.number(), more: v.boolean() }),
+  handler: async (ctx, args) => {
+    const cutoff = (args.now ?? Date.now()) - KEEP_MS
+    const rows = await ctx.db.query('timelineChunks').order('asc').take(SWEEP_BATCH)
+    let removed = 0
+    for (const row of rows) {
+      if (row._creationTime >= cutoff) return { removed, more: false }
+      await drop(ctx, row)
+      removed++
+    }
+    const more = rows.length === SWEEP_BATCH
+    if (more) await ctx.scheduler.runAfter(0, internal.timeline.sweepExpired, {})
+    return { removed, more }
   }
 })
 

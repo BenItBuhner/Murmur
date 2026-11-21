@@ -135,6 +135,7 @@ let oldestUsageAt = 0
 export function resetState(): void {
   grants.clear()
   inflight.clear()
+  bypassUsers.clear()
   breakers.stt = { failures: 0, openUntil: null }
   breakers.llm = { failures: 0, openUntil: null }
   usage = []
@@ -151,10 +152,50 @@ async function post(link: ConvexLink, path: string, body: unknown, timeoutMs = 1
   })
 }
 
+/** Allowance used only when Convex cannot answer and the Clerk user is on the bypass allowlist. */
+export const BYPASS_GRANT: Grant = {
+  ok: true,
+  plan: 'pro',
+  planState: 'pro',
+  stt: null,
+  llm: null,
+  format: { refusal: null, paused: null }
+}
+
+const bypassUsers = new Set<string>()
+
+export function isBypass(subject: string): boolean {
+  return bypassUsers.has(subject)
+}
+
+export interface GrantBypass {
+  allowed(identity: GatewayIdentity): boolean
+  limit(subject: string): Promise<boolean>
+}
+
+let replayUsage: (() => Promise<void>) | null = null
+let spillUsage: ((records: UsageRecord[]) => Promise<void>) | null = null
+
+/** Where bypass-mode usage waits until Convex accepts /worker/usage again. */
+export function setUsageRecovery(replay: (() => Promise<void>) | null, spill: ((records: UsageRecord[]) => Promise<void>) | null): void {
+  replayUsage = replay
+  spillUsage = spill
+}
+
 /** The account's allowance: fresh for GRANT_TTL_MS, one Convex call per account per window per colo. */
-export async function grantFor(link: ConvexLink, identity: GatewayIdentity, now = Date.now()): Promise<Grant> {
+export async function grantFor(
+  link: ConvexLink,
+  identity: GatewayIdentity,
+  now = Date.now(),
+  bypass?: GrantBypass
+): Promise<Grant> {
   const cached = grants.get(identity.subject)
-  if (cached && now - cached.at < GRANT_TTL_MS) return cached.grant
+  if (cached && now - cached.at < GRANT_TTL_MS) {
+    if (bypass && bypassUsers.has(identity.subject) && !(await bypass.limit(identity.subject))) {
+      throw new Error('bypass rate limit')
+    }
+    return cached.grant
+  }
   const pending = inflight.get(identity.subject)
   if (pending) return await pending
   const request = (async () => {
@@ -174,7 +215,12 @@ export async function grantFor(link: ConvexLink, identity: GatewayIdentity, now 
       const grant = (await res.json()) as Grant
       const entry = { at: now, grant }
       grants.set(identity.subject, entry)
+      bypassUsers.delete(identity.subject)
       await rememberGrant(identity.subject, entry)
+      const replay = replayUsage
+      if (replay) {
+        replay().catch((err) => console.warn(`[worker] usage replay failed: ${err instanceof Error ? err.message : err}`))
+      }
       return grant
     } catch (err) {
       // Convex slow or down: the last allowance it gave (if recent enough and not a denial) stands.
@@ -183,6 +229,14 @@ export async function grantFor(link: ConvexLink, identity: GatewayIdentity, now 
         console.warn(`[worker] grant refresh failed, using the cached grant: ${err instanceof Error ? err.message : err}`)
         grants.set(identity.subject, stale)
         return stale.grant
+      }
+      if (bypass?.allowed(identity)) {
+        if (!(await bypass.limit(identity.subject))) throw err
+        bypassUsers.add(identity.subject)
+        console.warn(`[worker] Convex grant failed; serving the allowlisted session without Convex: ${err instanceof Error ? err.message : err}`)
+        const grant = BYPASS_GRANT
+        grants.set(identity.subject, { at: now, grant })
+        return grant
       }
       throw err
     }
@@ -239,6 +293,12 @@ export async function flushUsage(link: ConvexLink): Promise<void> {
   } catch (err) {
     console.warn(`[worker] usage report failed (${batch.length} records kept): ${err instanceof Error ? err.message : err}`)
     usage = [...batch, ...usage].slice(0, 2000)
+    const spill = spillUsage
+    if (spill) {
+      spill(batch).catch((spillErr) =>
+        console.warn(`[worker] usage spill failed: ${spillErr instanceof Error ? spillErr.message : spillErr}`)
+      )
+    }
     if (!oldestUsageAt) oldestUsageAt = Date.now()
   }
 }

@@ -1,7 +1,7 @@
 import { handleTranscriptions, type GatewayHooks } from '../../../packages/backend/convex/lib/gatewayCore'
 import { gatewayError, MURMUR_MODELS, type GatewayIdentity } from '../../../packages/backend/convex/lib/inference'
 import { audioStats, readWav, scorePiece } from '../../../packages/backend/convex/lib/timelineAudio'
-import type { ConvexLink } from './state'
+import { isBypass, type ConvexLink } from './state'
 
 /** A wav this large is not an all-day piece. */
 const MAX_WAV_BYTES = 12_000_000
@@ -123,7 +123,8 @@ export async function handleTimelineAudio(
   if (!text) return json({ skipped: true, ...stats, score, tags, audioStored: false })
   const key = timelineObjectKey(identity.subject, device, startedAt)
   let audioStored = false
-  if (store) {
+  // Convex down: transcribe and return the text. Do not keep the wav.
+  if (store && !isBypass(identity.subject)) {
     try {
       const put = await storeFetch(store, 'PUT', key, bytes, link.fetcher)
       audioStored = put.ok

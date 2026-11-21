@@ -117,6 +117,66 @@ describe('Clerk token verification', () => {
     expect(await verifyClerkToken(`Bearer ${forged}`, ISSUER, fetcher)).toBeNull()
     expect(await verifyClerkToken(null, ISSUER, fetcher)).toBeNull()
     expect(await verifyClerkToken('Bearer not.a.jwt', ISSUER, fetcher)).toBeNull()
+    expect(await verifyClerkToken(`Bearer ${await token({ azp: '' })}`, ISSUER, fetcher)).toBeNull()
+    expect((await verifyClerkToken(`Bearer ${await token({ azp: 'https://desktop' })}`, ISSUER, fetcher))?.subject).toBe('user_ada')
+  })
+})
+
+describe('Convex bypass', () => {
+  function down(): typeof fetch {
+    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === `${SITE}/worker/grant`) return new Response('down', { status: 500 })
+      return fetcher(input, init)
+    }) as typeof fetch
+  }
+
+  it('refuses transcription when Convex is down and the user is not allowlisted', async () => {
+    const fetchDown = down()
+    vi.stubGlobal('fetch', fetchDown)
+    const res = await handle(await sttRequest(`Bearer ${await token({})}`), env, ctx, fetchDown)
+    expect(res.status).toBe(503)
+  })
+
+  it('transcribes an allowlisted user from the Clerk token when Convex returns 500', async () => {
+    const fetchDown = down()
+    vi.stubGlobal('fetch', fetchDown)
+    const res = await handle(
+      await sttRequest(`Bearer ${await token({})}`),
+      { ...env, BYPASS_ALLOWED_USERS: 'someone_else, user_ada' },
+      ctx,
+      fetchDown
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ text: 'hello there world' })
+    expect(calls.some((c) => c.url.includes('stt.example.test'))).toBe(true)
+  })
+
+  it('stops an allowlisted user who is over the bypass rate limit', async () => {
+    const fetchDown = down()
+    vi.stubGlobal('fetch', fetchDown)
+    const limited: Env = {
+      ...env,
+      BYPASS_ALLOWED_USERS: 'user_ada',
+      BYPASS_RATE_LIMIT: { limit: async () => ({ success: false }) }
+    }
+    const res = await handle(await sttRequest(`Bearer ${await token({})}`), limited, ctx, fetchDown)
+    expect(res.status).toBe(503)
+    expect(calls.some((c) => c.url.includes('stt.example.test'))).toBe(false)
+  })
+
+  it('counts a later request in the same grant window against the bypass rate limit', async () => {
+    const fetchDown = down()
+    vi.stubGlobal('fetch', fetchDown)
+    let hits = 0
+    const limited: Env = {
+      ...env,
+      BYPASS_ALLOWED_USERS: 'user_ada',
+      BYPASS_RATE_LIMIT: { limit: async () => ({ success: ++hits < 2 }) }
+    }
+    const auth = `Bearer ${await token({})}`
+    expect((await handle(await sttRequest(auth), limited, ctx, fetchDown)).status).toBe(200)
+    expect((await handle(await sttRequest(auth), limited, ctx, fetchDown)).status).toBe(503)
+    expect(hits).toBe(2)
   })
 })
 

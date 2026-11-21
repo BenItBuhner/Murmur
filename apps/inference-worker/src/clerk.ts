@@ -103,6 +103,8 @@ export async function verifyClerkToken(
   const aud = claims.aud
   if (!(aud === AUDIENCE || (Array.isArray(aud) && aud.includes(AUDIENCE)))) return null
   if (typeof claims.exp !== 'number' || claims.exp + CLOCK_SKEW_SEC < nowSec) return null
+  // `azp` is the authorized party when the template includes it. A present but empty value is rejected.
+  if ('azp' in claims && (typeof claims.azp !== 'string' || claims.azp.length === 0)) return null
   if (typeof claims.nbf === 'number' && claims.nbf - CLOCK_SKEW_SEC > nowSec) return null
   if (typeof claims.sub !== 'string' || !claims.sub) return null
   const key = await keyFor(issuer, header.kid, fetcher)

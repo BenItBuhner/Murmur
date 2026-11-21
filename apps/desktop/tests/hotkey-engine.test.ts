@@ -199,3 +199,37 @@ describe('chord validation and labels', () => {
     expect(electronAccelerator([Key.F9])).toBe('F9')
   })
 })
+
+describe('HotkeyEngine: Ephemeris note chord', () => {
+  const note = [Key.Ctrl, Key.Alt]
+
+  it('is inactive by default', () => {
+    const e = make()
+    e.keyDown(Key.Ctrl, 0)
+    expect(e.keyDown(Key.Alt, 1)).toEqual([])
+  })
+
+  it('holds like push-to-talk and marks the session for Ephemeris', () => {
+    const e = make({ ephemerisNote: note })
+    e.keyDown(Key.Ctrl, 0)
+    expect(e.keyDown(Key.Alt, 1)).toEqual([{ type: 'start', mode: 'hold', target: 'ephemeris' }])
+    expect(e.keyUp(Key.Alt, 1200)).toEqual([{ type: 'stop' }])
+  })
+
+  it('a quick tap locks it hands-free, the next press stops it', () => {
+    const e = make({ ephemerisNote: note, handsFreeTrigger: 'double-tap' })
+    e.keyDown(Key.Ctrl, 0)
+    e.keyDown(Key.Alt, 1)
+    expect(e.keyUp(Key.Alt, 100)).toEqual([{ type: 'lock' }])
+    e.keyUp(Key.Ctrl, 110)
+    e.keyDown(Key.Ctrl, 5000)
+    expect(e.keyDown(Key.Alt, 5001)).toEqual([{ type: 'stop' }])
+  })
+
+  it('a quick tap stops it when the hands-free trigger is off', () => {
+    const e = make({ ephemerisNote: note, handsFreeTrigger: 'off' })
+    e.keyDown(Key.Ctrl, 0)
+    e.keyDown(Key.Alt, 1)
+    expect(e.keyUp(Key.Alt, 100)).toEqual([{ type: 'stop' }])
+  })
+})

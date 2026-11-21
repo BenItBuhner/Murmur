@@ -155,7 +155,7 @@ function present(status: UpdateStatus, api: ReturnType<typeof useUpdates>): Pres
         return {
           title: withPre(`Murmur ${release.version} is ready to install`),
           description: status.waitingForIdle
-            ? 'Installing automatically as soon as you finish dictating.'
+            ? 'Installs automatically once this window is closed and you are not dictating, or restart now.'
             : 'Murmur restarts to finish the update; it takes a few seconds.',
           actions: (
             <>
@@ -348,7 +348,7 @@ function UpdateCard({
     if (status.canInstall) {
       title = `Murmur ${release.version} is ready to install`
       detail = status.waitingForIdle
-        ? 'It installs automatically once you finish dictating.'
+        ? 'It installs automatically once this window is closed and you are not dictating.'
         : 'Murmur restarts to finish the update.'
       action = (
         <Button onClick={() => void api.install()}>

@@ -83,6 +83,21 @@ export class Recorder extends EventEmitter {
     void this.overlay.whenReady().then(() => this.overlay.send(IPC.audioConfigure, cfg))
   }
 
+  /**
+   * The overlay renderer (which owns the microphone) died. Captures in flight get no more audio:
+   * keep what arrived, end them now instead of waiting out the stop grace, and report the mic as
+   * not ready until the reloaded page says otherwise.
+   */
+  rendererLost(): void {
+    if (this.captures.size > 0)
+      log.warn(
+        `microphone lost mid-dictation; keeping the audio of ${this.captures.size} capture(s)`
+      )
+    for (const cap of this.captures.values()) cap.stopped?.()
+    this.status = { ready: false, warm: false }
+    this.emit('status', this.status)
+  }
+
   /** Re-send configuration after the overlay renderer (re)loads. */
   resend(): void {
     if (this.config) this.overlay.send(IPC.audioConfigure, this.config)

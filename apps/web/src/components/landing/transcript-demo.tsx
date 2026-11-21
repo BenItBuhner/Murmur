@@ -41,24 +41,19 @@ export function TranscriptDemo() {
         <div className="px-4 pb-1">
           <div className="eyebrow mb-2">What landed where your cursor was</div>
           {TYPED.map((line) => (
-            <p key={line} className="serif-display text-heading">
+            <p key={line} className="display-type text-heading">
               {line}
             </p>
           ))}
         </div>
         <dl className="mt-card grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-3">
           {CHECKS.map((check) => (
-            <div key={check.label} className="flex items-start gap-2.5">
-              <span
-                className="mt-1.5 inline-flex size-2 shrink-0 rounded-full bg-success"
-                aria-hidden
-              />
-              <div>
-                <dt className="text-caption font-medium tracking-[0.08em] text-muted-foreground uppercase">
-                  {check.label}
-                </dt>
-                <dd className="mt-0.5 text-note text-foreground/85">{check.value}</dd>
-              </div>
+            <div key={check.label}>
+              <dt className="flex items-center gap-2.5 text-caption font-medium tracking-[0.08em] text-muted-foreground uppercase">
+                <span className="inline-flex size-2 shrink-0 rounded-full bg-success" aria-hidden />
+                {check.label}
+              </dt>
+              <dd className="mt-0.5 pl-[18px] text-note text-foreground/85">{check.value}</dd>
             </div>
           ))}
         </dl>

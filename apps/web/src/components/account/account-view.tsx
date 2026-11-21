@@ -72,7 +72,7 @@ function SignedOut() {
   return (
     <div className="grid items-center gap-8 lg:grid-cols-split lg:gap-x-12">
       <div>
-        <h2 className="serif-display text-heading">Sign in to Murmur</h2>
+        <h2 className="display-type text-heading">Sign in to Murmur</h2>
         <p className="mt-3 text-lead text-muted-foreground">
           The same account the desktop and Android apps use. Your dictionary, snippets, style and
           stats follow it to every device; the model you dictate with and any keys of your own stay
@@ -260,12 +260,12 @@ function StatsCard({ stats, className }: { stats: StatsDto | null; className?: s
   return (
     <Surface className={className}>
       <div className="eyebrow">Across your devices</div>
-      <h2 className="serif-display mt-2 text-heading">Stats</h2>
+      <h2 className="display-type mt-2 text-heading">Stats</h2>
       <dl className="mt-card grid grid-cols-2 gap-2">
         {items.map((item) => (
           <div key={item.label} className="well rounded-md px-4 py-3.5">
             <dt className="text-meta text-muted-foreground">{item.label}</dt>
-            <dd className="serif-display mt-1 text-numeral tabular-nums">{item.value}</dd>
+            <dd className="display-type mt-1 text-numeral tabular-nums">{item.value}</dd>
           </div>
         ))}
       </dl>
@@ -302,7 +302,7 @@ function DevicesCard({
     <Surface padding="card-tight" className={className}>
       <div className="px-3 pt-3 pb-4">
         <div className="eyebrow">Devices</div>
-        <h2 className="serif-display mt-2 text-heading">Every install on this account</h2>
+        <h2 className="display-type mt-2 text-heading">Every install on this account</h2>
         <p className="mt-2 text-body text-muted-foreground">
           Removing a device is done from the app’s Account page; sign out on the device itself to
           end its session.

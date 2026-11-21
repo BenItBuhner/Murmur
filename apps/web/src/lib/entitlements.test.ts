@@ -185,7 +185,9 @@ describe('meters', () => {
     expect(exhaustedNotice(status({ meters: FREE_METERS }), NOW)).toBeNull()
     expect(
       exhaustedNotice(status({ meters: [meter('wordsPerWeek', 500, 500, WEDNESDAY)] }), NOW)
-    ).toBe("This week's free words are used up (500 words a week on the free plan); more Wed 16 Sep.")
+    ).toBe(
+      "This week's free words are used up (500 words a week on the free plan); more Wed 16 Sep."
+    )
     expect(
       exhaustedNotice(status({ meters: [meter('sttSecondsPerWeek', 420, 420, TOMORROW)] }), NOW)
     ).toBe(
@@ -207,7 +209,10 @@ describe('meters', () => {
     // Without a way to buy Pro the free tier's sentence stops at its own provider.
     expect(
       exhaustedNotice(
-        status({ billingEnabled: false, meters: [meter('sttSecondsPerMonth', 7200, 7200, OCTOBER)] }),
+        status({
+          billingEnabled: false,
+          meters: [meter('sttSecondsPerMonth', 7200, 7200, OCTOBER)]
+        }),
         NOW,
         false
       )
@@ -215,7 +220,10 @@ describe('meters', () => {
       "Transcription is paused until 1 Oct: this month's 120 min of Murmur transcription are used up; dictations are refused until then. Connect your own provider under Models to keep dictating."
     )
     expect(
-      exhaustedNotice(pro({ meters: [meter('sttSecondsPerMonth', 216_000, 216_000, OCTOBER)] }), NOW)
+      exhaustedNotice(
+        pro({ meters: [meter('sttSecondsPerMonth', 216_000, 216_000, OCTOBER)] }),
+        NOW
+      )
     ).toBe(
       "Transcription is paused until 1 Oct: this month's 60 h of Murmur transcription are used up (fair use); dictations are refused until then. Connect your own provider under Models to keep dictating."
     )

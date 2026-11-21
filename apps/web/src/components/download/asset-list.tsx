@@ -54,7 +54,7 @@ export function AssetList({
     <Surface padding="card-tight" id={platform} className="scroll-mt-24">
       <div className="px-3 pt-3 pb-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-          <h2 className="serif-display text-heading">{PLATFORM_LABELS[platform]}</h2>
+          <h2 className="display-type text-heading">{PLATFORM_LABELS[platform]}</h2>
           {platform === 'macos' && <Chip>experimental</Chip>}
         </div>
         <p className="mt-2 text-body text-muted-foreground">{NOTES[platform]}</p>

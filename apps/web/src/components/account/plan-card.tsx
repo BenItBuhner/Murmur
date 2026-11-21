@@ -73,7 +73,7 @@ export function PlanCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="eyebrow">{head.eyebrow}</div>
-          <h2 className="serif-display mt-2 text-heading">{head.title}</h2>
+          <h2 className="display-type mt-2 text-heading">{head.title}</h2>
         </div>
         {status && labelled && (
           <Chip

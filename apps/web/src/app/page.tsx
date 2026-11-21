@@ -1,3 +1,4 @@
+import { Destinations } from '@/components/landing/destinations'
 import { Engine } from '@/components/landing/engine'
 import { FinalCta } from '@/components/landing/final-cta'
 import { Hero } from '@/components/landing/hero'
@@ -17,6 +18,7 @@ export default async function HomePage() {
     <>
       <Hero manifest={manifest} />
       <HowItWorks />
+      <Destinations />
       <Engine />
       <Models />
       <Platforms manifest={manifest} />

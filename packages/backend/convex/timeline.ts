@@ -186,6 +186,7 @@ export const forRefine = internalQuery({
       id: row._id as Id<'timelineChunks'>,
       audio: row.audio ?? null,
       objectKey: row.objectKey ?? null,
+      text: row.text,
       refinedText: row.refinedText ?? null,
       before: before ? (before.refinedText ?? before.text) : ''
     }

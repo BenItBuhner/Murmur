@@ -23,7 +23,7 @@ import {
   type ConvexLink,
   USAGE_FLUSH_MS
 } from './state'
-import { handleTimelineAudio, handleTimelineObject, handleTimelineRefine, sweepTimelineObjects, type TimelineBucket } from './timeline'
+import { handleTimelineAudio, handleTimelineObject, handleTimelineRefine, sweepTimelineObjects, type TimelineStore } from './timeline'
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -48,17 +48,26 @@ export interface Env {
   CLERK_JWT_ISSUER_DOMAIN: string
   CONVEX_SITE_URL: string
   MURMUR_WORKER_SECRET: string
-  TIMELINE?: TimelineBucket
-  [key: string]: string | TimelineBucket | undefined
+  /** Home-lab timeline store. Both unset means audio is not kept; transcripts still save. */
+  TIMELINE_STORE_URL?: string
+  TIMELINE_STORE_SECRET?: string
+  [key: string]: string | undefined
 }
 
 interface Ctx {
   waitUntil(promise: Promise<unknown>): void
 }
 
+function timelineStore(env: Env): TimelineStore | null {
+  const url = (env.TIMELINE_STORE_URL ?? '').trim()
+  const secret = env.TIMELINE_STORE_SECRET ?? ''
+  if (!url || secret.length < 32) return null
+  return { url, secret }
+}
+
 function hooksFor(env: Env, link: ConvexLink, ctx: Ctx): GatewayHooks {
   return {
-    env: env as GatewayHooks['env'],
+    env,
     access: async (identity) => {
       const grant = await grantFor(link, identity)
       return grant.ok ? grant.planState : 'testing'
@@ -119,7 +128,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
       console.error(`[worker] cannot verify sessions: ${err instanceof Error ? err.message : err}`)
       return gatewayError(503, 'provider_unavailable', 'Murmur cannot check your session right now; try again shortly')
     }
-    return await handleTimelineObject(request, env.TIMELINE, who)
+    return await handleTimelineObject(request, timelineStore(env), who, fetcher)
   }
   if (!env.CLERK_JWT_ISSUER_DOMAIN || !env.CONVEX_SITE_URL || !env.MURMUR_WORKER_SECRET)
     return gatewayError(503, 'not_configured', 'This Murmur inference gateway is not configured')
@@ -150,8 +159,8 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
     if (path === '/v1/messages') return await handleMessages(hooks, identity, request, fetcher)
     if (path === '/v1/dictate/release') return await handleDictateRelease(hooks, identity, request)
     if (path === '/v1/finish') return await handleFinish(hooks, identity, request)
-    if (path === '/v1/timeline/audio') return await handleTimelineAudio(request, env.TIMELINE, link, hooks, identity)
-    if (path === '/v1/timeline/refine') return await handleTimelineRefine(request, env.TIMELINE, link, hooks, identity)
+    if (path === '/v1/timeline/audio') return await handleTimelineAudio(request, timelineStore(env), link, hooks, identity)
+    if (path === '/v1/timeline/refine') return await handleTimelineRefine(request, timelineStore(env), link, hooks, identity)
     return gatewayError(404, 'bad_request', 'Not found')
   } catch (err) {
     // grantFor failing means Convex is unreachable: refuse rather than serve without an allowance.
@@ -161,7 +170,7 @@ export async function handle(request: Request, env: Env, ctx: Ctx, fetcher: type
 }
 
 async function warm(request: Request, env: Env, fetcher: typeof fetch): Promise<void> {
-  const base = String(env.MURMUR_INFERENCE_STT_URL ?? '').replace(/\/+$/, '')
+  const base = (env.MURMUR_INFERENCE_STT_URL ?? '').replace(/\/+$/, '')
   const jobs: Promise<unknown>[] = []
   if (base) jobs.push(fetcher(`${base}/models`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.body?.cancel()))
   const auth = request.headers.get('authorization')
@@ -177,9 +186,10 @@ async function warm(request: Request, env: Env, fetcher: typeof fetch): Promise<
 }
 
 export async function scheduled(_event: unknown, env: Env, ctx: Ctx): Promise<void> {
-  if (!env.TIMELINE || !env.CONVEX_SITE_URL || !env.MURMUR_WORKER_SECRET) return
+  const store = timelineStore(env)
+  if (!store || !env.CONVEX_SITE_URL || !env.MURMUR_WORKER_SECRET) return
   const link: ConvexLink = { siteUrl: env.CONVEX_SITE_URL, secret: env.MURMUR_WORKER_SECRET, fetcher: boundFetch }
-  ctx.waitUntil(sweepTimelineObjects(env.TIMELINE, link))
+  ctx.waitUntil(sweepTimelineObjects(store, link))
 }
 
 export default {

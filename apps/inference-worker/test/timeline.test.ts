@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   handleTimelineAudio,
   handleTimelineObject,
+  signStoreRequest,
   timelineKeyOwnedBy,
   timelineObjectKey,
-  type TimelineBucket
+  type TimelineStore
 } from '../src/timeline'
 
 function wav(seconds: number): Uint8Array {
@@ -29,28 +30,8 @@ function wav(seconds: number): Uint8Array {
   return out
 }
 
-function bucket(): TimelineBucket & { keys: string[] } {
-  const objects = new Map<string, Uint8Array>()
-  return {
-    keys: [] as string[],
-    async put(key, value) {
-      this.keys.push(key)
-      objects.set(key, value instanceof Uint8Array ? value : new Uint8Array(value))
-    },
-    async get(key) {
-      const body = objects.get(key)
-      if (!body) return null
-      const copy = new Uint8Array(body.byteLength)
-      copy.set(body)
-      return { size: copy.byteLength, arrayBuffer: async () => copy.buffer as ArrayBuffer }
-    },
-    async delete(key) {
-      objects.delete(key)
-    }
-  }
-}
-
 const identity = { subject: 'user_ada', email: 'ada@example.com' }
+const store: TimelineStore = { url: 'https://timeline.example.test', secret: 's'.repeat(40) }
 
 describe('timeline object keys', () => {
   it('keeps an account from reading another account object', () => {
@@ -62,37 +43,50 @@ describe('timeline object keys', () => {
 })
 
 describe('timeline audio on the worker', () => {
-  it('does not store silence', async () => {
-    const box = bucket()
+  it('does not call the store for silence, and still answers 200 when the store is down', async () => {
     const calls: string[] = []
-    const res = await handleTimelineAudio(
+    const link = {
+      siteUrl: 'https://convex.test',
+      secret: 's'.repeat(40),
+      fetcher: async (input: RequestInfo | URL) => {
+        calls.push(String(input))
+        if (String(input).includes('timeline.example.test')) throw new Error('down')
+        return new Response('{}')
+      }
+    }
+    const hooks = { env: {}, access: async () => 'pro', authorize: async () => ({ ok: true }), record: async () => undefined, providerFailed: async () => ({ failures: 0, openForSec: null }), providerRecovered: async () => undefined } as never
+    const silent = await handleTimelineAudio(
       new Request('https://w.test/v1/timeline/audio?device=phone&startedAt=2026-11-20T00:00:00Z&endedAt=2026-11-20T00:00:02Z', {
         method: 'POST',
         headers: { 'content-type': 'audio/wav' },
         body: new Blob([wav(1).buffer as ArrayBuffer])
       }),
-      box,
-      { siteUrl: 'https://convex.test', secret: 's'.repeat(40), fetcher: async (input) => (calls.push(String(input)), new Response('{}')) },
-      { env: {}, access: async () => 'pro', authorize: async () => ({ ok: true, userId: 'user_ada', plan: 'pro', planState: 'pro', paused: null, provider: { failures: 0, openForSec: null } }), record: async () => undefined, providerFailed: async () => ({ failures: 0, openForSec: null }), providerRecovered: async () => undefined } as never,
+      store,
+      link,
+      hooks,
       identity
     )
-    expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ skipped: true })
-    expect(box.keys).toEqual([])
+    expect(silent.status).toBe(200)
+    expect(await silent.json()).toMatchObject({ skipped: true, audioStored: false })
     expect(calls).toEqual([])
   })
 
-  it('serves a piece only to the account that owns the key', async () => {
-    const box = bucket()
+  it('signs a store request the home lab can check', async () => {
+    const body = new Uint8Array([1, 2, 3])
+    const signed = await signStoreRequest(store.secret, 'PUT', '/objects/timeline/a/b.wav', body, 1_700_000_000_000)
+    expect(signed.ts).toBe('1700000000000')
+    expect(signed.signature).toMatch(/^[0-9a-f]{64}$/)
+    expect(signed.sha256).toHaveLength(64)
+  })
+
+  it('refuses another account the object', async () => {
     const key = timelineObjectKey('user_ada', 'phone', 't')
-    await box.put(key, wav(1))
-    const owned = await handleTimelineObject(new Request(`https://w.test/v1/timeline/object?key=${encodeURIComponent(key)}`), box, identity)
-    expect(owned.status).toBe(200)
-    expect(owned.headers.get('content-type')).toBe('audio/wav')
+    const fetcher = async () => new Response(wav(1).buffer as ArrayBuffer)
     const other = await handleTimelineObject(
       new Request(`https://w.test/v1/timeline/object?key=${encodeURIComponent(key)}`),
-      box,
-      { subject: 'user_bob' }
+      store,
+      { subject: 'user_bob' },
+      fetcher
     )
     expect(other.status).toBe(403)
   })

@@ -42,7 +42,8 @@ export const GRANT_TIMEOUT_MS = 3_000
 /** A grant this old may still be used when Convex is slow or unreachable. */
 export const GRANT_STALE_MS = 30 * 60_000
 /** How long the first record of a batch waits for company (inside `waitUntil`'s 30 s). */
-export const USAGE_FLUSH_MS = 20_000
+/** One flush per quiet minute, or sooner once this many records are waiting. */
+export const USAGE_FLUSH_MS = 60_000
 export const USAGE_FLUSH_COUNT = 25
 
 export interface UsageRecord {
